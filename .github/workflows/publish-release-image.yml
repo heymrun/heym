@@ -1,0 +1,83 @@
+name: Publish Release Image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/heym
+          tags: |
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=Heym
+            org.opencontainers.image.description=Heym release image with frontend and backend in a single container
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.source=https://github.com/heymrun/heym
+            org.opencontainers.image.url=https://heym.run
+            org.opencontainers.image.documentation=https://github.com/heymrun/heym/tree/main/docker
+            org.opencontainers.image.vendor=Heym
+            org.opencontainers.image.licenses=Commons Clause + MIT
+            org.label-schema.name=Heym
+            org.label-schema.description=Heym release image with frontend and backend in a single container
+            org.label-schema.vendor=Heym
+            org.label-schema.url=https://heym.run
+            org.label-schema.vcs-url=https://github.com/heymrun/heym
+            org.label-schema.version=${{ steps.version.outputs.value }}
+            org.label-schema.usage=https://github.com/heymrun/heym/tree/main/docker
+            org.label-schema.schema-version=1.0
+
+      - name: Build and push release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/release.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
+            VITE_HEYM_WEB_URL=${{ vars.HEYM_WEB_URL || 'https://heym.run' }}
+            OCI_SOURCE=https://github.com/heymrun/heym
+            OCI_URL=https://heym.run
+            OCI_DOCUMENTATION_URL=https://github.com/heymrun/heym/tree/main/docker
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,mode=max,scope=release

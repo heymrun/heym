@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: heym-postgres
+    environment:
+      TZ: ${TIMEZONE:-Europe/Berlin}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-heym}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-6543}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    networks:
+      - heym_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: heym-backend
+    shm_size: "2gb"
+    environment:
+      TZ: ${TIMEZONE:-Europe/Berlin}
+      TIMEZONE: ${TIMEZONE:-Europe/Berlin}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-heym}
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4017}
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      ALLOW_REGISTER: ${ALLOW_REGISTER:-false}
+      OAUTH_ISSUER: ${OAUTH_ISSUER}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/files:/app/data/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    networks:
+      - heym_network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_HEYM_WEB_URL: ${VITE_HEYM_WEB_URL:-https://heym.run}
+    container_name: heym-frontend
+    environment:
+      TZ: ${TIMEZONE:-Europe/Berlin}
+      VITE_API_TARGET: http://backend:10105
+    ports:
+      - "${FRONTEND_PORT:-4017}:4017"
+    depends_on:
+      - backend
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    networks:
+      - heym_network
+
+networks:
+  heym_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.35.0.0/16

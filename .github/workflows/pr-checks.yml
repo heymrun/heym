@@ -1,0 +1,62 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches:
+      - "**"
+
+concurrency:
+  group: pr-checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: bun run lint
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: bun run typecheck
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install backend and tools
+        working-directory: backend
+        run: uv sync
+
+      - name: Ruff format (check)
+        working-directory: backend
+        run: uv run ruff format --check .
+
+      - name: Ruff lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Backend unit tests
+        run: sh ./run_tests.sh
