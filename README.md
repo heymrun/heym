@@ -167,9 +167,18 @@ cd heym
 cp .env.example .env
 ./run.sh
 
-# OR
-
+# OR — with .env file
+git clone https://github.com/heymrun/heym.git
+cd heym
+cp .env.example .env
 docker run --env-file .env -p 4017:4017 ghcr.io/heymrun/heym:latest
+
+# OR — minimal, no .env file
+docker run \
+  -e ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
+  -e SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
+  -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:6543/heym \
+  -p 4017:4017 ghcr.io/heymrun/heym:latest
 ```
 
 Open the editor in your browser at port `4017` in either setup.
@@ -429,8 +438,16 @@ heym/
 **Prerequisites:** [Bun](https://bun.sh/) ≥ 1.0 · [Python](https://python.org/) ≥ 3.11 · [UV](https://github.com/astral-sh/uv) · [Docker](https://docker.com/)
 
 ```bash
-# Start database
-docker-compose up -d
+# Start all services (recommended)
+./run.sh
+./run.sh --no-debug    # INFO logging instead of DEBUG
+```
+
+Or start each service manually:
+
+```bash
+# Start database only
+docker-compose up -d postgres
 
 # Backend
 cd backend && uv sync && uv run alembic upgrade head
@@ -440,7 +457,12 @@ uv run uvicorn app.main:app --reload --port 10105
 cd frontend && bun install && bun run dev
 ```
 
-**Code quality:**
+**Validation (lint + typecheck + tests):**
+```bash
+./check.sh    # Run all checks — required before pushing
+```
+
+Or run individually:
 ```bash
 cd frontend && bun run lint && bun run typecheck
 cd backend  && uv run ruff check . && uv run ruff format .
