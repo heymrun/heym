@@ -1,0 +1,145 @@
+version: 2
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    schedule:
+      interval: "daily"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(backend)"
+      include: "scope"
+    groups:
+      python-ai-sdks:
+        patterns:
+          - "openai"
+          - "mcp"
+          - "tiktoken"
+          - "qdrant-client"
+        update-types:
+          - "minor"
+          - "patch"
+      python-web-stack:
+        patterns:
+          - "fastapi"
+          - "uvicorn*"
+          - "pydantic*"
+          - "sqlalchemy*"
+          - "asyncpg"
+          - "httpx"
+        update-types:
+          - "minor"
+          - "patch"
+      python-dev-tools:
+        patterns:
+          - "pytest"
+          - "ruff"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "bun"
+    directory: "/frontend"
+    schedule:
+      interval: "daily"
+      time: "04:15"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(frontend)"
+      include: "scope"
+    groups:
+      frontend-vue-stack:
+        patterns:
+          - "vue"
+          - "vue-router"
+          - "pinia"
+          - "@vue*"
+          - "@vue-flow*"
+          - "radix-vue"
+        update-types:
+          - "minor"
+          - "patch"
+      frontend-build-tools:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "typescript"
+          - "vue-tsc"
+          - "eslint*"
+          - "@vue/eslint-config-typescript"
+          - "@rushstack/eslint-patch"
+        update-types:
+          - "minor"
+          - "patch"
+      frontend-security-sensitive:
+        patterns:
+          - "axios"
+          - "dompurify"
+          - "jszip"
+          - "marked"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:30"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(docker-backend)"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:45"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(docker-frontend)"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:55"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(docker-release)"
+      include: "scope"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(compose)"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:15"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+      include: "scope"
