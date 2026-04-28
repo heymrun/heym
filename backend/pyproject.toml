@@ -5,12 +5,12 @@ description = "AI Workflow Automation Platform Backend"
 license = { text = "Commons Clause + MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.109.0",
+    "fastapi>=0.136.1",
     "uvicorn[standard]>=0.46.0",
     "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
     "pydantic[email]>=2.5.0",
-    "pydantic-settings>=2.1.0",
+    "pydantic-settings>=2.14.0",
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",
     "alembic>=1.13.0",
