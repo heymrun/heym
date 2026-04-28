@@ -119,6 +119,10 @@ updates:
     commit-message:
       prefix: "deps(compose)"
       include: "scope"
+    ignore:
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
