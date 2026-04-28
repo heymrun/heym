@@ -37,7 +37,7 @@ jobs:
           state="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')"
 
           is_dependabot=false
-          if [ "$author" = "dependabot[bot]" ] || [ "$author" = "dependabot" ]; then
+          if [ "$author" = "dependabot[bot]" ] || [ "$author" = "dependabot" ] || [ "$author" = "app/dependabot" ]; then
             is_dependabot=true
           fi
 
