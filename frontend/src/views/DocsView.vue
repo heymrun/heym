@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useMediaQuery } from "@vueuse/core";
-import { Github, History, Menu, Wand2 } from "lucide-vue-next";
+import { History, Menu, Wand2 } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
 import type { WorkflowListItem } from "@/types/workflow";
 
 import DocsChatDialog from "@/components/Docs/DocsChatDialog.vue";
 import DocContent from "@/components/Docs/DocContent.vue";
+import GitHubStarButton from "@/components/Docs/GitHubStarButton.vue";
 import DocsMobileDrawer from "@/components/Docs/DocsMobileDrawer.vue";
 import DocsSidebar from "@/components/Docs/DocsSidebar.vue";
 import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.vue";
@@ -146,16 +147,7 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent): void
             <Wand2 class="h-4 w-4 shrink-0" />
             <span class="hidden sm:inline text-xs font-medium">Chat with Docs</span>
           </button>
-          <a
-            href="https://github.com/heymrun/heym"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="View Heym on GitHub"
-            title="View on GitHub"
-            class="inline-flex items-center justify-center h-11 w-11 min-h-[44px] min-w-[44px] md:h-9 md:w-9 rounded-xl text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-250 active:scale-[0.97]"
-          >
-            <Github class="w-4 h-4" />
-          </a>
+          <GitHubStarButton />
           <Button
             v-if="authStore.user"
             variant="ghost"
