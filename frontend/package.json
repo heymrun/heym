@@ -24,7 +24,7 @@
     "jsonrepair": "^3.13.2",
     "jszip": "^3.10.1",
     "lucide-vue-next": "^0.312.0",
-    "marked": "^17.0.1",
+    "marked": "^18.0.2",
     "mobile-drag-drop": "^3.0.0-rc.0",
     "pinia": "^2.1.7",
     "radix-vue": "^1.9.0",
