@@ -6,7 +6,7 @@ license = { text = "Commons Clause + MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
+    "uvicorn[standard]>=0.46.0",
     "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
     "pydantic[email]>=2.5.0",
