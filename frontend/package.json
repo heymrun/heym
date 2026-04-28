@@ -15,7 +15,7 @@
     "@vue-flow/controls": "^1.1.2",
     "@vue-flow/core": "^1.41.3",
     "@vue-flow/minimap": "^1.5.2",
-    "@vueuse/core": "^10.7.2",
+    "@vueuse/core": "^14.2.1",
     "apexcharts": "^3.44.0",
     "axios": "^1.6.5",
     "class-variance-authority": "^0.7.0",
