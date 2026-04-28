@@ -19,7 +19,7 @@ ENV VITE_HEYM_WEB_URL=${VITE_HEYM_WEB_URL}
 RUN bun run build
 
 
-FROM python:3.11-slim AS backend-builder
+FROM python:3.14-slim AS backend-builder
 
 WORKDIR /app
 
@@ -41,7 +41,7 @@ COPY VERSION /app/VERSION
 COPY frontend/src/docs/content /app/docs
 
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
