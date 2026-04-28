@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18
+    image: postgres:16
     container_name: heym-postgres
     environment:
       TZ: ${TIMEZONE:-Europe/Berlin}

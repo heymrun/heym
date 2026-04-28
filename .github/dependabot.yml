@@ -7,21 +7,20 @@ updates:
       interval: "daily"
       time: "04:00"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(backend)"
       include: "scope"
     groups:
       python-ai-sdks:
+        applies-to: "security-updates"
         patterns:
           - "openai"
           - "mcp"
           - "tiktoken"
           - "qdrant-client"
-        update-types:
-          - "minor"
-          - "patch"
       python-web-stack:
+        applies-to: "security-updates"
         patterns:
           - "fastapi"
           - "uvicorn*"
@@ -29,16 +28,11 @@ updates:
           - "sqlalchemy*"
           - "asyncpg"
           - "httpx"
-        update-types:
-          - "minor"
-          - "patch"
       python-dev-tools:
+        applies-to: "security-updates"
         patterns:
           - "pytest"
           - "ruff"
-        update-types:
-          - "minor"
-          - "patch"
 
   - package-ecosystem: "bun"
     directory: "/frontend"
@@ -46,12 +40,13 @@ updates:
       interval: "daily"
       time: "04:15"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(frontend)"
       include: "scope"
     groups:
       frontend-vue-stack:
+        applies-to: "security-updates"
         patterns:
           - "vue"
           - "vue-router"
@@ -59,10 +54,8 @@ updates:
           - "@vue*"
           - "@vue-flow*"
           - "radix-vue"
-        update-types:
-          - "minor"
-          - "patch"
       frontend-build-tools:
+        applies-to: "security-updates"
         patterns:
           - "vite"
           - "@vitejs/*"
@@ -71,18 +64,13 @@ updates:
           - "eslint*"
           - "@vue/eslint-config-typescript"
           - "@rushstack/eslint-patch"
-        update-types:
-          - "minor"
-          - "patch"
       frontend-security-sensitive:
+        applies-to: "security-updates"
         patterns:
           - "axios"
           - "dompurify"
           - "jszip"
           - "marked"
-        update-types:
-          - "minor"
-          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/backend"
@@ -91,7 +79,7 @@ updates:
       day: "monday"
       time: "04:30"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(docker-backend)"
       include: "scope"
@@ -103,7 +91,7 @@ updates:
       day: "monday"
       time: "04:45"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(docker-frontend)"
       include: "scope"
@@ -115,7 +103,7 @@ updates:
       day: "monday"
       time: "04:55"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(docker-release)"
       include: "scope"
@@ -127,10 +115,14 @@ updates:
       day: "monday"
       time: "05:00"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(compose)"
       include: "scope"
+    ignore:
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -139,7 +131,7 @@ updates:
       day: "monday"
       time: "05:15"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(actions)"
       include: "scope"
