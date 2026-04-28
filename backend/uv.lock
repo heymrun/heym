@@ -732,7 +732,7 @@ requires-dist = [
     { name = "qdrant-client", specifier = ">=1.7.0" },
     { name = "redis", specifier = ">=7.4.0" },
     { name = "reportlab", specifier = ">=4.0.0" },
-    { name = "simpleeval", specifier = ">=1.0.5" },
+    { name = "simpleeval", specifier = ">=1.0.7" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.25" },
     { name = "tiktoken", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.46.0" },
@@ -2378,11 +2378,11 @@ wheels = [
 
 [[package]]
 name = "simpleeval"
-version = "1.0.5"
+version = "1.0.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/ea/42430694f12bfb20ac00f1c4ae0e489ef23b302ea6abe6266934bb749bf6/simpleeval-1.0.5.tar.gz", hash = "sha256:b6b7933fffe13a345ada9917f8579c72e7b8afcfb7f7759b18fdd068aaa60486", size = 40853, upload-time = "2026-03-13T09:22:49.449Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/9d/e7c9309940794dd3073cba2e5101df5874d84243595ce63b1e1c8f9b9c76/simpleeval-1.0.7.tar.gz", hash = "sha256:1e10e5f9fec597814444e20c0892ed15162fa214c8a88f434b5b077cf2fef85b", size = 30250, upload-time = "2026-03-16T10:53:03.464Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/9c/43d7a2845fdf72f21572a0d7c33076cb69c2c73db9a297a5bfc6b87ebb54/simpleeval-1.0.5-py3-none-any.whl", hash = "sha256:c0de42a9f7849b7bc8c51338295341126f103a2a86beceffebafd9388e3cdfce", size = 18608, upload-time = "2026-03-13T09:22:47.875Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/2f/f32aa85591882378bb43caa09363f3ed97df399369a5144c7f19f2275bc0/simpleeval-1.0.7-py3-none-any.whl", hash = "sha256:97ac271bfd8f2af9e7b9a36ceea67617f26fa873f9d5ae1922f64d4c1442534b", size = 18792, upload-time = "2026-03-16T10:53:02.103Z" },
 ]
 
 [[package]]
