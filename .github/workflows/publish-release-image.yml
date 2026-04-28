@@ -63,7 +63,7 @@ jobs:
             org.label-schema.schema-version=1.0
 
       - name: Build and push release image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/release.Dockerfile
