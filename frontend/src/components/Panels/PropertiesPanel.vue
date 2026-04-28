@@ -9174,22 +9174,18 @@ onUnmounted(() => {
                 <Select
                   :model-value="selectedNode.data.dataTableId || ''"
                   :options="dataTableOptions"
-                  :class="selectedNode.data.dataTableId ? 'pr-16 md:pr-[4.5rem]' : undefined"
+                  :select-class="selectedNode.data.dataTableId ? 'pr-16' : undefined"
                   @update:model-value="handleDataTableIdChangedForSelect"
                 />
-                <div
+                <button
                   v-if="selectedNode.data.dataTableId"
-                  class="pointer-events-none absolute inset-y-0 right-8 z-10 flex items-center"
+                  type="button"
+                  class="absolute inset-y-0 right-9 z-10 flex items-center justify-center w-7 opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-muted-foreground hover:text-foreground"
+                  title="Open in new tab"
+                  @click.stop="openDataTableInNewTab(selectedNode.data.dataTableId || '')"
                 >
-                  <button
-                    type="button"
-                    class="pointer-events-auto p-1.5 h-7 w-7 rounded hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0"
-                    title="Open in new tab"
-                    @click.stop="openDataTableInNewTab(selectedNode.data.dataTableId || '')"
-                  >
-                    <ExternalLink :size="14" />
-                  </button>
-                </div>
+                  <ExternalLink :size="14" />
+                </button>
               </div>
               <p
                 v-if="!selectedNode.data.dataTableId"
