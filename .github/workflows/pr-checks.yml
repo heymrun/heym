@@ -36,6 +36,10 @@ jobs:
         working-directory: frontend
         run: bun run typecheck
 
+      - name: Frontend build
+        working-directory: frontend
+        run: bun run build
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
