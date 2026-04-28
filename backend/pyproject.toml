@@ -33,7 +33,7 @@ dependencies = [
     "mcp>=1.27.0",
     "playwright>=1.40.0",
     "jsonschema>=4.20.0",
-    "websockets>=15.0.1",
+    "websockets>=16.0",
 ]
 
 [build-system]
