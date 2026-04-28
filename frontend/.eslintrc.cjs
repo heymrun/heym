@@ -3,12 +3,16 @@ require("@rushstack/eslint-patch/modern-module-resolution");
 
 module.exports = {
   root: true,
+  env: {
+    browser: true,
+  },
   ignorePatterns: ["dist/**"],
   extends: [
-    "plugin:vue/vue3-recommended",
+    "plugin:vue/recommended",
     "eslint:recommended",
     "@vue/eslint-config-typescript",
   ],
+  parser: "vue-eslint-parser",
   parserOptions: {
     ecmaVersion: "latest",
   },
