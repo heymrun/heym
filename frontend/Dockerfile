@@ -2,7 +2,7 @@ FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
-COPY frontend/package.json frontend/bun.lockb* ./
+COPY frontend/package.json frontend/bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY VERSION /app/VERSION
 
