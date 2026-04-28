@@ -17,6 +17,7 @@ interface Props {
   clearable?: boolean;
   clearAriaLabel?: string;
   class?: string;
+  selectClass?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -26,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
   clearable: false,
   clearAriaLabel: "Clear selection",
   class: undefined,
+  selectClass: undefined,
 });
 
 const emit = defineEmits<{
@@ -45,7 +47,8 @@ const classes = computed(() =>
     "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-muted/50",
     "appearance-none transition-all duration-200",
     "cursor-pointer hover:border-border/80",
-    "shadow-sm"
+    "shadow-sm",
+    props.selectClass,
   )
 );
 
