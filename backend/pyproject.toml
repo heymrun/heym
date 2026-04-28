@@ -6,7 +6,7 @@ license = { text = "Commons Clause + MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
+    "uvicorn[standard]>=0.46.0",
     "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
     "pydantic[email]>=2.5.0",
@@ -14,14 +14,14 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",
     "alembic>=1.13.0",
-    "python-multipart>=0.0.26",
+    "python-multipart>=0.0.27",
     "httpx>=0.26.0",
     "simpleeval>=1.0.5",
-    "croniter>=2.0.0",
+    "croniter>=6.2.2",
     "cryptography>=46.0.7",
     "openai>=1.0.0",
     "psycopg2-binary>=2.9.0",
-    "redis>=5.0.0",
+    "redis>=7.4.0",
     "qdrant-client>=1.7.0",
     "pypdf>=6.10.2",
     "reportlab>=4.0.0",
@@ -63,5 +63,5 @@ filterwarnings = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
-    "ruff>=0.15.6",
+    "ruff>=0.15.12",
 ]
