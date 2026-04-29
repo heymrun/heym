@@ -1,17 +1,21 @@
 """
-Execute MCP (Model Context Protocol) tool calls via stdio or SSE transport.
+Execute MCP (Model Context Protocol) tool calls via stdio, SSE, or Streamable HTTP transport.
 """
 
 import asyncio
 import json
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
 
+import httpx
 from mcp import types
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +96,13 @@ def _normalize_connection(connection: dict[str, Any]) -> dict[str, Any]:
     return conn
 
 
-async def _list_mcp_tools_async(connection: dict[str, Any], timeout: float) -> list[dict[str, Any]]:
-    """List tools from MCP server (async)."""
-    conn = _normalize_connection(connection)
+@asynccontextmanager
+async def _open_transport(
+    conn: dict[str, Any],
+    timeout: float,
+) -> AsyncGenerator[tuple[Any, Any], None]:
+    """Normalize stdio/sse/streamable_http context managers to a (read, write) pair."""
     transport = conn.get("transport", "stdio")
-    connection_id = conn.get("id", "default")
-    label = conn.get("label") or connection_id
 
     if transport == "stdio":
         command = conn.get("command", "")
@@ -110,24 +115,48 @@ async def _list_mcp_tools_async(connection: dict[str, Any], timeout: float) -> l
             args=args if isinstance(args, list) else [],
             env=env,
         )
-        transport_ctx = stdio_client(server_params)
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            yield read_stream, write_stream
+
     elif transport == "sse":
         url = conn.get("url", "")
         headers = conn.get("headers") or {}
         if not url:
             raise ValueError("sse connection requires 'url'")
-        transport_ctx = sse_client(
+        async with sse_client(
             url,
             headers=headers,
             timeout=min(5.0, timeout),
             sse_read_timeout=timeout,
-        )
+        ) as (read_stream, write_stream):
+            yield read_stream, write_stream
+
+    elif transport == "streamable_http":
+        url = conn.get("url", "")
+        headers = conn.get("headers") or {}
+        if not url:
+            raise ValueError("streamable_http connection requires 'url'")
+        async with httpx.AsyncClient(headers=headers, timeout=timeout) as http_client:
+            async with streamable_http_client(url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                yield read_stream, write_stream
+
     else:
         raise ValueError(f"Unknown MCP transport: {transport}")
 
+
+async def _list_mcp_tools_async(connection: dict[str, Any], timeout: float) -> list[dict[str, Any]]:
+    """List tools from MCP server (async)."""
+    conn = _normalize_connection(connection)
+    connection_id = conn.get("id", "default")
+    label = conn.get("label") or connection_id
+
     tools_out: list[dict[str, Any]] = []
     read_timeout = timedelta(seconds=timeout) if timeout and timeout > 0 else None
-    async with transport_ctx as (read_stream, write_stream):
+    async with _open_transport(conn, timeout) as (read_stream, write_stream):
         async with ClientSession(
             read_stream,
             write_stream,
@@ -148,36 +177,8 @@ async def _execute_mcp_tool_async(
 ) -> object:
     """Execute a tool on MCP server (async)."""
     conn = _normalize_connection(connection)
-    transport = conn.get("transport", "stdio")
-
-    if transport == "stdio":
-        command = conn.get("command", "")
-        args = conn.get("args") or []
-        env = conn.get("env")
-        if not command:
-            raise ValueError("stdio connection requires 'command'")
-        server_params = StdioServerParameters(
-            command=command,
-            args=args if isinstance(args, list) else [],
-            env=env,
-        )
-        transport_ctx = stdio_client(server_params)
-    elif transport == "sse":
-        url = conn.get("url", "")
-        headers = conn.get("headers") or {}
-        if not url:
-            raise ValueError("sse connection requires 'url'")
-        transport_ctx = sse_client(
-            url,
-            headers=headers,
-            timeout=min(5.0, timeout),
-            sse_read_timeout=timeout,
-        )
-    else:
-        raise ValueError(f"Unknown MCP transport: {transport}")
-
     read_timeout = timedelta(seconds=timeout) if timeout and timeout > 0 else None
-    async with transport_ctx as (read_stream, write_stream):
+    async with _open_transport(conn, timeout) as (read_stream, write_stream):
         async with ClientSession(
             read_stream,
             write_stream,
@@ -199,8 +200,8 @@ def list_mcp_tools(
     List tools from an MCP server. Runs async code in a new event loop (thread-safe).
 
     Args:
-        connection: Dict with transport, and either (command, args, env) for stdio
-                    or (url, headers) for sse.
+        connection: Dict with transport, and either (command, args, env) for stdio,
+                    (url, headers) for sse, or (url, headers) for streamable_http.
         timeout_seconds: Max time for the operation.
 
     Returns:
@@ -224,8 +225,8 @@ def execute_mcp_tool(
     Execute a tool on an MCP server. Runs async code in a new event loop (thread-safe).
 
     Args:
-        connection: Dict with transport, and either (command, args, env) for stdio
-                    or (url, headers) for sse.
+        connection: Dict with transport, and either (command, args, env) for stdio,
+                    (url, headers) for sse, or (url, headers) for streamable_http.
         tool_name: Name of the tool to call.
         arguments: Dict of arguments to pass.
         timeout_seconds: Max execution time.
