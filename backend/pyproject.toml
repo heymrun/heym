@@ -1,6 +1,6 @@
 [project]
 name = "heym-backend"
-version = "0.0.2"
+version = "0.0.3"
 description = "AI Workflow Automation Platform Backend"
 license = { text = "Commons Clause + MIT" }
 requires-python = ">=3.11"
