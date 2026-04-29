@@ -684,11 +684,12 @@ When you need structured data from the agent (e.g., classification, extraction, 
 The agent will return structured JSON matching the schema, accessible via `$agentNodeLabel.status`, `$agentNodeLabel.reason`, etc.
 
 **MCP connection** (each item in `mcpConnections` array):
-- `transport`: "stdio" | "sse"
+- `transport`: "stdio" | "sse" | "streamable_http"
 - `timeoutSeconds`: Timeout for this connection (default: 30)
 - `label`: Optional display name for the server
 - **stdio**: `command` (e.g. "npx"), `args` (JSON array, e.g. `["-y", "@modelcontextprotocol/server-filesystem", "--path", "/tmp"]`)
 - **sse**: `url` (SSE endpoint), `headers` (JSON object for auth/custom headers)
+- **streamable_http**: `url` (MCP endpoint, e.g. "https://example.com/mcp"), `headers` (JSON object for auth/custom headers)
 
 **Tool definition** (each item in `tools` array):
 - `name`: Tool name the LLM will call (e.g., "count_characters")
@@ -773,6 +774,29 @@ The agent will return structured JSON matching the schema, accessible via `$agen
         "label": "remote",
         "timeoutSeconds": 60,
         "url": "https://example.com/mcp/sse",
+        "headers": {"Authorization": "Bearer YOUR_TOKEN"}
+      }
+    ]
+  }
+}
+```
+
+**Agent with MCP Example (Streamable HTTP):**
+```json
+{
+  "type": "agent",
+  "data": {
+    "label": "remoteAgent",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "model": "gpt-4o",
+    "userMessage": "$userInput.body.text",
+    "mcpConnections": [
+      {
+        "id": "http1",
+        "transport": "streamable_http",
+        "label": "remote",
+        "timeoutSeconds": 60,
+        "url": "https://example.com/mcp",
         "headers": {"Authorization": "Bearer YOUR_TOKEN"}
       }
     ]
