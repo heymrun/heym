@@ -11,7 +11,7 @@ interface Column {
 }
 
 interface Props {
-  modelValue: string;
+  modelValue?: string;
   columns?: Column[];
   inputMode: "raw" | "selective";
   nodes?: WorkflowNode[];
