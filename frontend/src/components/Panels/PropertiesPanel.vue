@@ -6413,6 +6413,7 @@ onUnmounted(() => {
                         :options="[
                           { value: 'stdio', label: 'stdio' },
                           { value: 'sse', label: 'SSE' },
+                          { value: 'streamable_http', label: 'Streamable HTTP' },
                         ]"
                         @update:model-value="updateAgentMCPConnection(idx, 'transport', $event)"
                       />
@@ -6457,12 +6458,12 @@ onUnmounted(() => {
                       />
                     </div>
                   </template>
-                  <template v-else>
+                  <template v-else-if="conn.transport === 'sse' || conn.transport === 'streamable_http'">
                     <div>
                       <Label class="text-xs">URL</Label>
                       <Input
                         :model-value="conn.url ?? ''"
-                        placeholder="https://example.com/mcp/sse"
+                        :placeholder="conn.transport === 'streamable_http' ? 'https://example.com/mcp' : 'https://example.com/mcp/sse'"
                         @update:model-value="updateAgentMCPConnection(idx, 'url', $event)"
                       />
                     </div>
@@ -6483,7 +6484,7 @@ onUnmounted(() => {
                       size="sm"
                       class="gap-1"
                       :disabled="(conn.transport === 'stdio' && !conn.command) ||
-                        (conn.transport === 'sse' && !conn.url) ||
+                        ((conn.transport === 'sse' || conn.transport === 'streamable_http') && !conn.url) ||
                         getMCPFetchState(conn.id).loading
                       "
                       @click="fetchMCPTools(conn, idx)"
@@ -6533,7 +6534,7 @@ onUnmounted(() => {
                 </div>
               </div>
               <p class="text-xs text-muted-foreground">
-                MCP servers the agent can call. Optional. stdio: command + args. SSE: url + headers.
+                MCP servers the agent can call. Optional. stdio: command + args. SSE / Streamable HTTP: url + headers.
               </p>
             </div>
             <div class="space-y-2 pt-2 border-t">
