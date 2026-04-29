@@ -49,12 +49,52 @@ Explore the product site at **[heym.run](https://heym.run)**.
 
 ---
 
+## Product Demos
+
+### Generate Workflows from Natural Language
+
+Describe the agents, orchestration pattern, and user-facing result you want; Heym builds the workflow on the canvas.
+
+![Workflow Creation Demo](./docs/screenshots/workflow_creation.gif)
+
+**Example prompt**
+
+> Create a workflow for me that includes a Roadmap Agent and a Best Food Agent. When the Orchestrator Agent receives a request, it will invoke these subagents in parallel and return the result to the user.
+
+### Runing Workflows
+
+Execute the workflow directly from the canvas and inspect each step as results move through the graph.
+
+![Workflow Run Demo](./docs/screenshots/run.gif)
+
+### Create Skills for Agents
+
+Create agent skills from natural language, preview the generated `SKILL.md`, and attach them to the agent.
+
+![Skill Creation Demo](./docs/screenshots/skill_creation.gif)
+
+**Example prompt**
+
+> Create a skill for me and add it to the agent. The Orchestrator Agent will call this skill after receiving information from the subagents, and the skill will create a simple execution plan explaining what can actually be done in the destination city.
+
+### Call Workflows from Chat
+
+Turn a workflow into a chat experience so users can invoke the orchestration with a natural request.
+
+![Chat Workflow Demo](./docs/screenshots/chat.gif)
+
+**Example prompt**
+
+> I live in Berlin and am planning to go to Frankfurt. How many kilometers is it on the Autobahn? Also, where can I find the best doner in Frankfurt?
+
+---
+
 ## 📸 Screenshots
 <table>
   <tr>
     <td align="center" width="50%">
       <img src="docs/screenshots/login.png" alt="Login Page" width="100%"/>
-      <br/><sub><b>Login</b> — Animated workflow canvas in the background</sub>
+      <br/><sub><b>Login</b> — Workflow canvas preview in the background</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/screenshots/dashboard_light.png" alt="Workflows Dashboard" width="100%"/>
