@@ -90,7 +90,7 @@ export interface AgentTool {
   code: string;
 }
 
-export type MCPTransportType = "stdio" | "sse";
+export type MCPTransportType = "stdio" | "sse" | "streamable_http";
 export type AgentSkillFileEncoding = "text" | "base64";
 
 export interface AgentMCPConnection {

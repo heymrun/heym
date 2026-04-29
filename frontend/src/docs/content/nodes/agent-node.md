@@ -152,7 +152,7 @@ Connect to [Model Context Protocol](https://modelcontextprotocol.io/) servers to
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `transport` | `"stdio"` \| `"sse"` | Connection type |
+| `transport` | `"stdio"` \| `"sse"` \| `"streamable_http"` | Connection type |
 | `timeoutSeconds` | number | Timeout for this connection (default: 30) |
 | `label` | string | Optional display name |
 
@@ -168,6 +168,13 @@ Connect to [Model Context Protocol](https://modelcontextprotocol.io/) servers to
 | Field | Description |
 |-------|-------------|
 | `url` | SSE endpoint URL |
+| `headers` | JSON object for auth/custom headers |
+
+**Streamable HTTP** (remote server):
+
+| Field | Description |
+|-------|-------------|
+| `url` | MCP endpoint URL (e.g. `https://example.com/mcp`) |
 | `headers` | JSON object for auth/custom headers |
 
 ## Skills

@@ -12,11 +12,11 @@ import {
 } from "@/lib/googleSheetsValuesMatrix";
 
 interface Props {
-  modelValue: string;
-  inputMode: "raw" | "selective";
-  selectiveCols: string;
+  modelValue?: string;
+  inputMode?: "raw" | "selective";
+  selectiveCols?: string;
   /** Selective mode always edits a single logical row (one sheet row). */
-  selectiveSingleRow: boolean;
+  selectiveSingleRow?: boolean;
   nodes?: WorkflowNode[];
   nodeResults?: NodeResult[];
   edges?: WorkflowEdge[];
