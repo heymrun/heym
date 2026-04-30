@@ -5,10 +5,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
-from jose import jwt
+import jwt
 from starlette.datastructures import Headers
 
-_TEST_SECRET = "test-secret-key-for-tests-only"
+_TEST_SECRET = "test-secret-key-for-tests-only-32-bytes"
 _ALGORITHM = "HS256"
 
 

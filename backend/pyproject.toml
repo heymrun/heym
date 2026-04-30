@@ -11,7 +11,6 @@ dependencies = [
     "asyncpg>=0.29.0",
     "pydantic[email]>=2.13.3",
     "pydantic-settings>=2.14.0",
-    "python-jose[cryptography]>=3.5.0",
     "bcrypt>=4.0.0",
     "alembic>=1.18.4",
     "python-multipart>=0.0.27",
@@ -34,6 +33,7 @@ dependencies = [
     "playwright>=1.40.0",
     "jsonschema>=4.20.0",
     "websockets>=16.0",
+    "pyjwt[crypto]>=2.12.0",
 ]
 
 [build-system]

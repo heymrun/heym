@@ -44,6 +44,13 @@ updates:
     commit-message:
       prefix: "deps(frontend)"
       include: "scope"
+    ignore:
+      - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@vitejs/*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       frontend-vue-stack:
         applies-to: "security-updates"

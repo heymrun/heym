@@ -6,7 +6,8 @@ all uvicorn workers without any shared state.
 
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from app.config import settings
 
@@ -34,5 +35,5 @@ def validate_token(token: str | None) -> str | None:
         if payload.get("type") != _TOKEN_TYPE:
             return None
         return payload.get("sub")
-    except JWTError:
+    except InvalidTokenError:
         return None

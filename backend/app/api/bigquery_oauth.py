@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +60,7 @@ def handle_callback_state(state: str) -> dict | None:
         if payload.get("type") != _STATE_TYPE:
             return None
         return payload
-    except JWTError:
+    except InvalidTokenError:
         return None
 
 
