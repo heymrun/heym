@@ -15,6 +15,7 @@ import {
   History,
   LayoutTemplate,
   Pin,
+  PinOff,
   Plus,
   RotateCcw,
   Settings,
@@ -478,7 +479,7 @@ async function updateWorkflow(): Promise<void> {
   }
 }
 
-async function copyWorkflow(id: string, event: Event): Promise<void> {
+async function copyWorkflow(id: string, event: Event, scheduleAfterCopy = false): Promise<void> {
   event.stopPropagation();
   if (copyingId.value) return;
 
@@ -493,6 +494,9 @@ async function copyWorkflow(id: string, event: Event): Promise<void> {
       nodes: sourceWorkflow.nodes,
       edges: sourceWorkflow.edges,
     });
+    if (scheduleAfterCopy) {
+      await workflowApi.scheduleForDeletion(newWorkflow.id);
+    }
     await loadWorkflows();
     await folderStore.fetchFolderTree();
     showToast("Workflow copied successfully", "success");
@@ -1418,6 +1422,15 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                           <Button
                             variant="ghost"
                             size="icon"
+                            class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-primary hover:text-primary hover:bg-primary/10 rounded-lg"
+                            title="Unpin workflow"
+                            @click.stop="quickDrawerStore.togglePin(workflow.id)"
+                          >
+                            <PinOff class="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
                             title="Edit workflow"
                             @click="openEditDialog(workflow, $event)"
@@ -1555,6 +1568,23 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                         <Button
                           variant="ghost"
                           size="icon"
+                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 hover:bg-primary/10 rounded-lg"
+                          :class="quickDrawerPinnedWorkflowIds.includes(workflow.id) ? 'text-primary' : 'text-muted-foreground hover:text-primary'"
+                          :title="quickDrawerPinnedWorkflowIds.includes(workflow.id) ? 'Unpin workflow' : 'Pin workflow'"
+                          @click.stop="quickDrawerStore.togglePin(workflow.id)"
+                        >
+                          <PinOff
+                            v-if="quickDrawerPinnedWorkflowIds.includes(workflow.id)"
+                            class="w-3.5 h-3.5"
+                          />
+                          <Pin
+                            v-else
+                            class="w-3.5 h-3.5"
+                          />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
                           title="Edit workflow"
                           @click="openEditDialog(workflow, $event)"
@@ -1665,6 +1695,28 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                         </div>
                       </div>
                       <div class="flex items-center gap-0.5 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
+                          title="Edit workflow"
+                          @click="openEditDialog(workflow, $event)"
+                        >
+                          <Settings class="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
+                          title="Copy workflow"
+                          :disabled="copyingId === workflow.id"
+                          @click="copyWorkflow(workflow.id, $event, true)"
+                        >
+                          <Copy
+                            class="w-3.5 h-3.5"
+                            :class="{ 'animate-spin-slow': copyingId === workflow.id }"
+                          />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
