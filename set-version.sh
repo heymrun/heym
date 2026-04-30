@@ -33,16 +33,31 @@ if [ -f "$PROJECT_ROOT/backend/pyproject.toml" ]; then
     sed -i.bak 's/^version = ".*"/version = "'"$VERSION"'"/' "$PROJECT_ROOT/backend/pyproject.toml" && rm "$PROJECT_ROOT/backend/pyproject.toml.bak"
 fi
 
-# Update uv.lock
-echo "Updating uv.lock..."
-cd "$PROJECT_ROOT/backend"
-if command -v uv &> /dev/null; then
-    uv lock --upgrade-package heym-backend
-    echo "uv.lock updated"
-else
-    echo "Warning: uv command not found, skipping uv.lock update"
+# Sync root package version in uv.lock only (uv has no "metadata-only" lock mode;
+# `uv lock` can reorder or refresh deps and create large diffs)
+LOCK_FILE="$PROJECT_ROOT/backend/uv.lock"
+if [ -f "$LOCK_FILE" ] && command -v python3 &> /dev/null; then
+    SET_VERSION_UV_LOCK="$VERSION" SET_VERSION_LOCK_PATH="$LOCK_FILE" python3 << 'PY'
+import os
+import re
+import pathlib
+
+version = os.environ["SET_VERSION_UV_LOCK"]
+if any(c in version for c in '"\n\r'):
+    raise SystemExit("refusing unsafe version string for uv.lock patch")
+path = pathlib.Path(os.environ["SET_VERSION_LOCK_PATH"])
+text = path.read_text()
+pattern = r'(\[\[package\]\]\r?\nname = "heym-backend"\r?\nversion = )"[^"]*"'
+new_text, n = re.subn(pattern, rf'\1"{version}"', text, count=1)
+if n != 1:
+    raise SystemExit(
+        f"uv.lock: expected exactly one heym-backend [[package]] block, matched {n}"
+    )
+path.write_text(new_text)
+PY
+elif [ -f "$LOCK_FILE" ]; then
+    echo "Warning: python3 not found; skipping uv.lock root version sync" >&2
 fi
-cd "$PROJECT_ROOT"
 
 # Update package.json
 if [ -f "$PROJECT_ROOT/frontend/package.json" ]; then
