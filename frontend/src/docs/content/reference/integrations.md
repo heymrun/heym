@@ -365,6 +365,10 @@ These credentials power AI nodes.
 | **Custom** | API key + base URL for OpenAI-compatible endpoints (Ollama, vLLM, LM Studio, etc.) |
 | **Cohere** | API key for Cohere embeddings |
 
+### OpenAI Prompt Caching
+
+OpenAI automatically caches the static (unchanging) prefix of your system prompt — no extra configuration required. Repeated workflow runs that share the same system prompt prefix benefit from cached token pricing, which reduces both cost and latency. This is especially useful when you have long, fixed instructions and only the user message changes between runs. Monitor cache hit rates and token savings in the [Traces tab](../tabs/traces-tab.md) or the OpenAI usage dashboard to optimize your prompt structure for maximum cache reuse.
+
 ### Used By
 
 - [LLM node](../nodes/llm-node.md)
