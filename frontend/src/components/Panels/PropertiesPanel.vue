@@ -6689,14 +6689,17 @@ onUnmounted(() => {
                     <div
                       v-for="(f, fi) in skill.files"
                       :key="fi"
-                      class="rounded border bg-muted/20 p-2"
+                      class="rounded border bg-muted/20 p-2 min-w-0"
                     >
-                      <div class="flex justify-between items-center mb-1">
-                        <span class="text-xs font-mono">{{ f.path }}</span>
+                      <div class="flex justify-between items-center gap-2 mb-1 min-w-0">
+                        <span
+                          class="text-xs font-mono min-w-0 flex-1 truncate"
+                          :title="f.path"
+                        >{{ f.path }}</span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          class="gap-1 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          class="gap-1 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                           @click="removeAgentSkillFile(idx, fi)"
                         >
                           <Trash2 class="w-3.5 h-3.5" />
