@@ -503,13 +503,13 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <div class="flex flex-wrap gap-2 border-b border-border/60 px-3 py-3">
+            <div class="flex flex-col gap-2 border-b border-border/60 px-3 py-3">
               <button
                 v-for="(file, index) in previewFiles"
                 :key="file.path"
                 type="button"
                 :class="[
-                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors',
+                  'flex w-full min-w-0 items-center justify-start gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs transition-colors',
                   index === activeFileIndex
                     ? 'border-primary/40 bg-primary/10 text-primary'
                     : 'border-border/60 bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
@@ -518,9 +518,9 @@ onUnmounted(() => {
               >
                 <component
                   :is="getFileIcon(file.path)"
-                  class="h-3.5 w-3.5"
+                  class="h-3.5 w-3.5 shrink-0"
                 />
-                {{ file.path }}
+                <span class="min-w-0 break-all">{{ file.path }}</span>
               </button>
             </div>
 
