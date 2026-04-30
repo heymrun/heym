@@ -731,6 +731,7 @@ body,
   border-radius: 12px;
   border: 1px solid hsl(var(--border)) !important;
   box-shadow: 0 4px 20px hsl(0 0% 0% / 0.15);
+  overflow: hidden;
 }
 
 @media (max-width: 768px) {
