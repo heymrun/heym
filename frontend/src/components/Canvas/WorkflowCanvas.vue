@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { Background } from "@vue-flow/background";
+import { Background, BackgroundVariant } from "@vue-flow/background";
 import { ControlButton, Controls } from "@vue-flow/controls";
 import { VueFlow, useVueFlow, SelectionMode } from "@vue-flow/core";
 import type { EdgeChange, NodeChange, OnConnectStartParams } from "@vue-flow/core";
@@ -32,7 +32,41 @@ import "@vue-flow/minimap/dist/style.css";
 const workflowStore = useWorkflowStore();
 const router = useRouter();
 const { showToast } = useToast();
-const { onConnect, onConnectStart, onConnectEnd, onNodeDragStop, onPaneClick, onEdgesChange, onNodesChange, fitView, updateNodeInternals, getNodes, getSelectedNodes, getSelectedEdges, addSelectedNodes, removeSelectedNodes, nodesSelectionActive } = useVueFlow();
+const { onConnect, onConnectStart, onConnectEnd, onNodeDragStop, onPaneClick, onEdgesChange, onNodesChange, fitView, updateNodeInternals, getNodes, getSelectedNodes, getSelectedEdges, addSelectedNodes, removeSelectedNodes, nodesSelectionActive, onMove } = useVueFlow();
+
+const showMiniMap = ref(false);
+const miniMapHovered = ref(false);
+let miniMapHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleMiniMapHide(): void {
+  if (miniMapHideTimer !== null) {
+    clearTimeout(miniMapHideTimer);
+    miniMapHideTimer = null;
+  }
+  if (miniMapHovered.value) return;
+  miniMapHideTimer = setTimeout(() => {
+    showMiniMap.value = false;
+    miniMapHideTimer = null;
+  }, 2000);
+}
+
+onMove(() => {
+  showMiniMap.value = true;
+  scheduleMiniMapHide();
+});
+
+function onMiniMapMouseEnter(): void {
+  miniMapHovered.value = true;
+  if (miniMapHideTimer !== null) {
+    clearTimeout(miniMapHideTimer);
+    miniMapHideTimer = null;
+  }
+}
+
+function onMiniMapMouseLeave(): void {
+  miniMapHovered.value = false;
+  if (showMiniMap.value) scheduleMiniMapHide();
+}
 
 const pendingConnection = ref<{ nodeId: string; handleId: string | null } | null>(null);
 const isDraggingFile = ref(false);
@@ -1329,8 +1363,10 @@ watch(
       </template>
 
       <Background
-        pattern-color="hsl(var(--muted-foreground) / 0.1)"
-        :gap="20"
+        :variant="BackgroundVariant.Dots"
+        pattern-color="hsl(var(--muted-foreground) / 0.35)"
+        :gap="24"
+        :size="1.5"
       />
       <Controls position="bottom-left">
         <ControlButton
@@ -1341,13 +1377,20 @@ watch(
         </ControlButton>
       </Controls>
 
-      <MiniMap
-        position="bottom-right"
-        :pannable="true"
-        :zoomable="true"
-        :node-color="() => 'hsl(var(--primary))'"
-        class="hidden md:block"
-      />
+      <Transition name="minimap-fade">
+        <MiniMap
+          v-show="showMiniMap"
+          position="bottom-right"
+          :pannable="true"
+          :zoomable="true"
+          :width="200"
+          :height="112"
+          :node-color="() => 'hsl(var(--primary))'"
+          class="hidden md:block"
+          @mouseenter="onMiniMapMouseEnter"
+          @mouseleave="onMiniMapMouseLeave"
+        />
+      </Transition>
     </VueFlow>
 
     <NodeContextMenu
@@ -1389,3 +1432,14 @@ watch(
     />
   </div>
 </template>
+
+<style scoped>
+.minimap-fade-enter-active,
+.minimap-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.minimap-fade-enter-from,
+.minimap-fade-leave-to {
+  opacity: 0;
+}
+</style>
