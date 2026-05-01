@@ -487,6 +487,14 @@ export interface WorkflowShare {
   shared_at: string;
 }
 
+export interface ExecutionToken {
+  id: string;
+  token: string;
+  expires_at: string;
+  created_at: string;
+  revoked: boolean;
+}
+
 export interface ExecutionResult {
   workflow_id: string;
   status: "success" | "error" | "pending";

@@ -168,3 +168,22 @@ async def cleanup_expired_refresh_tokens(db: AsyncSession) -> int:
     )
     await db.flush()
     return result.rowcount
+
+
+def create_workflow_execution_token(
+    user_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    ttl_seconds: int,
+) -> tuple[str, uuid.UUID, datetime]:
+    """Create a scoped JWT valid only for the given workflow's execute endpoints."""
+    jti = uuid.uuid4()
+    expire = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    to_encode = {
+        "sub": str(user_id),
+        "wid": str(workflow_id),
+        "scope": "workflow:execute",
+        "jti": str(jti),
+        "exp": expire,
+    }
+    token = jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
+    return token, jti, expire

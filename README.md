@@ -41,6 +41,14 @@ Unlike platforms that started as classic trigger-action automation and layered A
 
 Explore the product site at **[heym.run](https://heym.run)**.
 
+## No Enterprise Gatekeeping
+
+Many automation platforms turn essential production features into upgrade pressure: global variables, execution history and search, insights, AI Builder / Motherboard capabilities, observability, audit-style logs, team controls, scaling, or customer-facing portals.
+
+Heym takes the opposite position. These are core workflow primitives, not enterprise bait. They ship in the free self-hostable product because serious AI automation should be inspectable, shareable, observable, and deployable from day one without any kind of weird production run limits. 
+
+Our enterprise offering is for commercial licensing, deployment help, dedicated support, and additional security layers. It is not a strategy for hiding core workflow and AI-native capabilities behind a sales call, now or later.
+
 <div align="center">
 
 ![Heym Banner](./docs/screenshots/heym-banner-standalone.webp)

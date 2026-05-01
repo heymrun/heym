@@ -7,6 +7,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Glob
 import axios from "axios";
 
 import type {
+  ExecutionToken,
   SseNodeConfig,
   WebhookBodyMode,
   WorkflowAuthType,
@@ -69,6 +70,13 @@ const authType = ref<WorkflowAuthType>("jwt");
 const authHeaderKey = ref("");
 const authHeaderValue = ref("");
 const curlCopied = ref(false);
+const executionTokens = ref<ExecutionToken[]>([]);
+const selectedTokenId = ref<string | null>(null);
+const tokenTtlSeconds = ref<number>(900);
+const tokenMode = ref<"short" | "long">("long");
+const tokenVisibility = ref<Record<string, boolean>>({});
+const tokenCreating = ref(false);
+const tokenRevoking = ref<string | null>(null);
 const sseEnabled = ref(false);
 const simpleResponse = ref(true);
 const sseNodeConfig = ref<Record<string, SseNodeConfig>>({});
@@ -532,7 +540,7 @@ watch(shareOpen, async (open) => {
   await loadShares();
 });
 
-watch(curlOpen, (open) => {
+watch(curlOpen, async (open) => {
   if (!open) return;
   syncCurlInputFromWorkflow();
   const workflow = workflowStore.currentWorkflow;
@@ -553,6 +561,13 @@ watch(curlOpen, (open) => {
     sseNodeConfig.value = { ...(workflow.sse_node_config ?? {}) };
     editingNodeId.value = null;
     editingNodeMessage.value = "";
+    if (authType.value === "jwt") {
+      executionTokens.value = await workflowApi.executionTokens.list(workflowId.value);
+      const firstActive = executionTokens.value.find(
+        (t) => !t.revoked && new Date(t.expires_at) > new Date(),
+      );
+      selectedTokenId.value = firstActive?.id ?? null;
+    }
   }
 });
 
@@ -706,7 +721,9 @@ const curlCommand = computed(() => {
     headerLines.push('  -H "Accept: text/event-stream" \\');
   }
   if (authType.value === "jwt") {
-    headerLines.push('  -H "Authorization: Bearer <your-access-token>" \\');
+    const activeToken = executionTokens.value.find((t) => t.id === selectedTokenId.value);
+    const bearer = activeToken ? activeToken.token : "<your-execution-token>";
+    headerLines.push(`  -H "Authorization: Bearer ${bearer}" \\`);
   } else if (authType.value === "header_auth") {
     const key = authHeaderKey.value || "X-API-Key";
     const value = authHeaderValue.value || "your-secret-value";
@@ -734,6 +751,49 @@ async function copyCurlCommand(): Promise<void> {
 function formatCurlJson(): void {
   if (curlBodyError.value) return;
   curlInput.value = stringifyWebhookJson(curlPayload.value);
+}
+
+async function createExecutionToken(): Promise<void> {
+  tokenCreating.value = true;
+  try {
+    const ttl = tokenMode.value === "long" ? 315360000 : Math.max(60, Math.floor(Number(tokenTtlSeconds.value)));
+    const token = await workflowApi.executionTokens.create(workflowId.value, ttl);
+    executionTokens.value.unshift(token);
+    selectedTokenId.value = token.id;
+  } finally {
+    tokenCreating.value = false;
+  }
+}
+
+async function revokeExecutionToken(tokenId: string): Promise<void> {
+  tokenRevoking.value = tokenId;
+  try {
+    await workflowApi.executionTokens.revoke(workflowId.value, tokenId);
+    const token = executionTokens.value.find((t) => t.id === tokenId);
+    if (token) token.revoked = true;
+    if (selectedTokenId.value === tokenId) {
+      const nextActive = executionTokens.value.find(
+        (t) => !t.revoked && new Date(t.expires_at) > new Date(),
+      );
+      selectedTokenId.value = nextActive?.id ?? null;
+    }
+  } finally {
+    tokenRevoking.value = null;
+  }
+}
+
+function formatTokenDate(isoString: string): string {
+  return new Date(isoString).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isTokenExpired(isoString: string): boolean {
+  return new Date(isoString) < new Date();
 }
 
 async function loadShares(): Promise<void> {
@@ -1319,9 +1379,181 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
         </div>
         <div
           v-if="authType === 'jwt'"
-          class="text-xs text-muted-foreground bg-muted/50 p-2 rounded"
+          class="space-y-3"
         >
-          Requires a valid JWT Bearer token in the Authorization header.
+          <div class="flex items-center gap-3">
+            <div class="flex rounded-md border overflow-hidden text-xs">
+              <button
+                :class="[
+                  'px-3 py-1.5 transition-colors',
+                  tokenMode === 'short'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-transparent text-muted-foreground hover:bg-muted',
+                ]"
+                @click="tokenMode = 'short'"
+              >
+                Short-lived
+              </button>
+              <button
+                :class="[
+                  'px-3 py-1.5 transition-colors',
+                  tokenMode === 'long'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-transparent text-muted-foreground hover:bg-muted',
+                ]"
+                @click="tokenMode = 'long'"
+              >
+                Long-lived
+              </button>
+            </div>
+            <div
+              v-if="tokenMode === 'short'"
+              class="flex items-center gap-1.5 text-xs"
+            >
+              <Input
+                v-model.number="tokenTtlSeconds"
+                type="number"
+                min="60"
+                class="h-7 w-24 text-xs"
+              />
+              <span class="text-muted-foreground">seconds</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              class="ml-auto text-xs h-7"
+              :disabled="tokenCreating"
+              @click="createExecutionToken"
+            >
+              {{ tokenCreating ? "Creating…" : "+ New Token" }}
+            </Button>
+          </div>
+
+          <div
+            v-if="executionTokens.length > 0"
+            class="divide-y rounded border text-xs"
+          >
+            <div
+              v-for="token in executionTokens"
+              :key="token.id"
+              :class="[
+                'flex flex-col gap-1 px-3 py-2 cursor-pointer transition-colors',
+                token.revoked || isTokenExpired(token.expires_at)
+                  ? 'opacity-50'
+                  : selectedTokenId === token.id
+                    ? 'bg-muted'
+                    : 'hover:bg-muted/50',
+              ]"
+              @click="
+                !token.revoked &&
+                  !isTokenExpired(token.expires_at) &&
+                  (selectedTokenId = token.id)
+              "
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground">
+                  Created: {{ formatTokenDate(token.created_at) }} ·
+                  <span
+                    :class="
+                      token.revoked
+                        ? 'text-destructive'
+                        : isTokenExpired(token.expires_at)
+                          ? 'text-amber-500'
+                          : ''
+                    "
+                  >
+                    {{
+                      token.revoked
+                        ? "Revoked"
+                        : isTokenExpired(token.expires_at)
+                          ? "Expired"
+                          : "Expires: " + formatTokenDate(token.expires_at)
+                    }}
+                  </span>
+                </span>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button
+                    class="p-0.5 hover:text-foreground text-muted-foreground"
+                    :title="tokenVisibility[token.id] ? 'Hide token' : 'Show token'"
+                    @click.stop="
+                      tokenVisibility[token.id] = !(tokenVisibility[token.id] ?? false)
+                    "
+                  >
+                    <svg
+                      v-if="!tokenVisibility[token.id]"
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      />
+                    </svg>
+                    <svg
+                      v-else
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    v-if="!token.revoked"
+                    class="p-0.5 hover:text-destructive text-muted-foreground"
+                    :disabled="tokenRevoking === token.id"
+                    title="Revoke token"
+                    @click.stop="revokeExecutionToken(token.id)"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div
+                v-if="tokenVisibility[token.id]"
+                class="font-mono text-[10px] break-all text-muted-foreground select-all"
+              >
+                {{ token.token }}
+              </div>
+            </div>
+          </div>
+          <p
+            v-else
+            class="text-xs text-muted-foreground"
+          >
+            No tokens yet. Create one to use in the curl command.
+          </p>
         </div>
         <div
           v-if="authType === 'anonymous'"

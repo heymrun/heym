@@ -23,6 +23,7 @@ from app.db.models import (
     User,
     Workflow,
     WorkflowAuthType,
+    WorkflowExecutionToken,
     WorkflowShare,
     WorkflowTeamShare,
     WorkflowVersion,
@@ -33,6 +34,8 @@ from app.models.schemas import (
     ExecutionHistoryListResponse,
     ExecutionHistoryResponse,
     ExecutionHistoryWithWorkflowResponse,
+    ExecutionTokenCreate,
+    ExecutionTokenResponse,
     HistoryListResponse,
     InputFieldSchema,
     OutputNodeSchema,
@@ -50,6 +53,7 @@ from app.models.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
 )
+from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -1783,6 +1787,77 @@ async def get_credentials_context(
     return context
 
 
+@router.post("/{workflow_id}/execution-tokens", response_model=ExecutionTokenResponse)
+async def create_execution_token_endpoint(
+    workflow_id: uuid.UUID,
+    body: ExecutionTokenCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExecutionTokenResponse:
+    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    workflow = result.scalar_one_or_none()
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    if not await user_has_workflow_access(db, workflow, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    token_str, jti, expires_at = create_workflow_execution_token(
+        current_user.id, workflow_id, body.ttl_seconds
+    )
+    row = WorkflowExecutionToken(
+        jti=jti,
+        token=token_str,
+        user_id=current_user.id,
+        workflow_id=workflow_id,
+        expires_at=expires_at,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return ExecutionTokenResponse.model_validate(row)
+
+
+@router.get("/{workflow_id}/execution-tokens", response_model=list[ExecutionTokenResponse])
+async def list_execution_tokens_endpoint(
+    workflow_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExecutionTokenResponse]:
+    result = await db.execute(
+        select(WorkflowExecutionToken)
+        .where(
+            WorkflowExecutionToken.workflow_id == workflow_id,
+            WorkflowExecutionToken.user_id == current_user.id,
+        )
+        .order_by(WorkflowExecutionToken.created_at.desc())
+    )
+    rows = result.scalars().all()
+    return [ExecutionTokenResponse.model_validate(r) for r in rows]
+
+
+@router.delete(
+    "/{workflow_id}/execution-tokens/{token_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_execution_token_endpoint(
+    workflow_id: uuid.UUID,
+    token_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(WorkflowExecutionToken).where(
+            WorkflowExecutionToken.id == token_id,
+            WorkflowExecutionToken.workflow_id == workflow_id,
+            WorkflowExecutionToken.user_id == current_user.id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+    row.revoked = True
+    await db.commit()
+
+
 async def validate_workflow_auth(
     workflow: Workflow,
     request: Request,
@@ -1794,6 +1869,27 @@ async def validate_workflow_auth(
 
     if workflow.auth_type == WorkflowAuthType.jwt:
         if current_user is None:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                raw_token = auth_header[7:]
+                payload = decode_token(raw_token)
+                if payload and payload.get("scope") == "workflow:execute":
+                    jti_str = payload.get("jti")
+                    wid_str = payload.get("wid")
+                    if jti_str and wid_str == str(workflow.id):
+                        try:
+                            jti = uuid.UUID(jti_str)
+                        except ValueError:
+                            pass
+                        else:
+                            token_result = await db.execute(
+                                select(WorkflowExecutionToken).where(
+                                    WorkflowExecutionToken.jti == jti,
+                                    WorkflowExecutionToken.revoked.is_(False),
+                                )
+                            )
+                            if token_result.scalar_one_or_none() is not None:
+                                return
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="JWT authentication required",

@@ -419,7 +419,13 @@ See also [Agent Node](../nodes/agent-node.md), [Portal](./portal.md), [Execution
 
 Workflows can be triggered via [HTTP](../nodes/http-node.md) at `POST /api/workflows/{workflow_id}/execute`, or streamed incrementally from `POST /api/workflows/{workflow_id}/execute/stream`. The request body is passed as body to [Input](../nodes/input-node.md) nodes; headers and query params are available in [Expression DSL](./expression-dsl.md) expressions. Configure per-workflow auth: anonymous, JWT, or custom header. Optional response caching, rate limiting, and the editor's Run with cURL dialog all live on the workflow and apply to both modes.
 
-See also [Input](../nodes/input-node.md), [SSE Streaming](./sse-streaming.md), [HTTP](../nodes/http-node.md), and [Workflow Structure](./workflow-structure.md).
+See also [Input](../nodes/input-node.md), [Execution Tokens](./execution-tokens.md), [SSE Streaming](./sse-streaming.md), [HTTP](../nodes/http-node.md), and [Workflow Structure](./workflow-structure.md).
+
+### [Execution Tokens](./execution-tokens.md)
+
+Execution tokens are scoped JWTs that grant access to a single workflow's execute and stream endpoints. When a workflow uses JWT authentication, tokens let external scripts, CI pipelines, and integrations call the workflow without sharing a user session. Each token carries a `wid` claim that pins it to one workflow, a `jti` used for instant revocation, and a configurable TTL (60 seconds to 10 years). Create, select, and revoke tokens directly from the **Run with cURL** dialog — the selected token is embedded in the generated command automatically.
+
+See also [Webhooks](./webhooks.md), [Security](./security.md), and [SSE Streaming](./sse-streaming.md).
 
 ### [SSE Streaming](./sse-streaming.md)
 
@@ -477,9 +483,9 @@ See also [Drive](../tabs/drive-tab.md), [File Generation](./file-generation.md),
 
 ### [Security](./security.md)
 
-Heym enforces a password policy (length, uppercase, lowercase, digit), stores access tokens in HttpOnly cookies, and rotates refresh tokens on use. Rate limiting applies to login, register, and [Portal](./portal.md) login. [Credentials](./credentials.md) are encrypted at rest with AES-256 (Fernet). [MCP](../tabs/mcp-tab.md) API key is used for client auth; content safety is available via [Guardrails](./guardrails.md) on [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md) nodes.
+Heym enforces a password policy (length, uppercase, lowercase, digit), stores access tokens in HttpOnly cookies, and rotates refresh tokens on use. Rate limiting applies to login, register, and [Portal](./portal.md) login. [Credentials](./credentials.md) are encrypted at rest with AES-256 (Fernet). [MCP](../tabs/mcp-tab.md) API key is used for client auth; content safety is available via [Guardrails](./guardrails.md) on [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md) nodes. [Execution Tokens](./execution-tokens.md) provide per-workflow scoped JWTs for external callers.
 
-See also [Guardrails](./guardrails.md), [Portal](./portal.md), and [Credentials](./credentials.md).
+See also [Execution Tokens](./execution-tokens.md), [Guardrails](./guardrails.md), [Portal](./portal.md), and [Credentials](./credentials.md).
 
 ### [Third-Party Integrations](./integrations.md)
 

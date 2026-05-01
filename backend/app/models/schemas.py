@@ -1260,3 +1260,18 @@ class ScheduleEvent(BaseModel):
 class ScheduleListResponse(BaseModel):
     events: list[ScheduleEvent]
     total: int
+
+
+class ExecutionTokenCreate(BaseModel):
+    ttl_seconds: int = Field(ge=60, le=315360000)
+
+
+class ExecutionTokenResponse(BaseModel):
+    id: uuid.UUID
+    token: str
+    expires_at: datetime
+    created_at: datetime
+    revoked: bool
+
+    class Config:
+        from_attributes = True
