@@ -963,6 +963,33 @@ class RefreshToken(Base):
     user: Mapped["User"] = relationship("User")
 
 
+class WorkflowExecutionToken(Base):
+    """Scoped JWT stored for display and revocation; valid for one workflow's execute endpoints."""
+
+    __tablename__ = "workflow_execution_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    jti: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), unique=True, nullable=False, index=True
+    )
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship("User")
+    workflow: Mapped["Workflow"] = relationship("Workflow")
+
+
 class TemplateKind(str, PyEnum):
     workflow = "workflow"
     node = "node"

@@ -90,6 +90,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "agent-persistent-memory", title: "Agent Persistent Memory" },
       { slug: "human-in-the-loop", title: "Human-in-the-Loop" },
       { slug: "webhooks", title: "Webhooks" },
+      { slug: "execution-tokens", title: "Execution Tokens" },
       { slug: "sse-streaming", title: "SSE Streaming" },
       { slug: "triggers", title: "Triggers" },
       { slug: "execution-history", title: "Execution History" },

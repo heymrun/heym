@@ -43,10 +43,12 @@ Configure per workflow in the editor (workflow settings). Auth is checked before
 | auth_type | Behavior |
 |-----------|----------|
 | **anonymous** | No auth required. Anyone can call the endpoint. |
-| **jwt** | Bearer token required. User must have workflow access. |
+| **jwt** | Bearer token required. Accepts either a user session token (user must have workflow access) or a scoped [Execution Token](./execution-tokens.md) created for this workflow. |
 | **header_auth** | Custom header must match. Set `auth_header_key` (e.g. `X-API-Key`) and `auth_header_value`. |
 
 For `header_auth`, the request header value must exactly match the configured value. JWT users with workflow access can also call without the custom header.
+
+For `jwt`, [Execution Tokens](./execution-tokens.md) are the recommended way to call workflows from external systems — they are scoped to a single workflow and can be revoked independently.
 
 ## Response Caching
 
@@ -110,7 +112,7 @@ The **Run with cURL** toolbar button (top-right of the editor, `cURL` icon) open
 | Field | Description |
 |-------|-------------|
 | **Request Body Mode** | Choose **Defined** or **Generic**. Generic keeps the body as raw JSON instead of shaping it from Input fields. |
-| **Authentication** | Choose Anonymous, JWT Token, or Header Auth. Sets the correct auth header in the command. |
+| **Authentication** | Choose Anonymous, JWT Token, or Header Auth. Sets the correct auth header in the command. When JWT Token is selected, the dialog shows an [Execution Token](./execution-tokens.md) manager — create or select a token to embed it directly in the command. |
 | **Header Key / Value** | Visible when Header Auth is selected. Pre-filled from the workflow's auth settings. |
 | **Response Cache** | Minutes to cache identical responses (0 = disabled). Changes are saved to the workflow. |
 | **Rate Limit** | Max requests per time window. Changes are saved to the workflow. |
@@ -158,7 +160,7 @@ Example:
 curl -X POST --no-buffer \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
-  -H "Authorization: Bearer <your-access-token>" \
+  -H "Authorization: Bearer <your-execution-token>" \
   "https://app.heym.ai/api/workflows/{workflow_id}/execute/stream" \
   -d '{"message":"Hello"}'
 ```
@@ -183,6 +185,7 @@ If the header is not sent, `trigger_source` defaults to `"API"` and the run is l
 
 ## Related
 
+- [Execution Tokens](./execution-tokens.md) – Scoped JWTs for calling workflows from external systems
 - [SSE Streaming](./sse-streaming.md) – Stream node events in real time via Server-Sent Events
 - [Triggers](./triggers.md) – All workflow entry points including webhook
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges

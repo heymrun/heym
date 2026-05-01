@@ -37,6 +37,7 @@ import type {
   LLMBatchProgressEvent,
   NodeResult,
   ServerExecutionHistory,
+  ExecutionToken,
   WebhookBodyMode,
   Workflow,
   WorkflowListItem,
@@ -769,6 +770,25 @@ export const workflowApi = {
     }
 
     return { name: workflow.name, inputFields };
+  },
+
+  executionTokens: {
+    list: async (workflowId: string): Promise<ExecutionToken[]> => {
+      const response = await api.get<ExecutionToken[]>(
+        `/workflows/${workflowId}/execution-tokens`,
+      );
+      return response.data;
+    },
+    create: async (workflowId: string, ttlSeconds: number): Promise<ExecutionToken> => {
+      const response = await api.post<ExecutionToken>(
+        `/workflows/${workflowId}/execution-tokens`,
+        { ttl_seconds: ttlSeconds },
+      );
+      return response.data;
+    },
+    revoke: async (workflowId: string, tokenId: string): Promise<void> => {
+      await api.delete(`/workflows/${workflowId}/execution-tokens/${tokenId}`);
+    },
   },
 };
 

@@ -48,6 +48,16 @@ The MCP API key is used to authenticate external MCP clients connecting to the `
 
 The OAuth 2.0 authorization server (used for MCP clients) supports only the `authorization_code` grant with PKCE (`S256`). The consent form uses HMAC-SHA256 CSRF tokens valid for 10 minutes. All values displayed in the consent page are HTML-escaped.
 
+## Execution Tokens
+
+[Execution tokens](./execution-tokens.md) are scoped JWTs for calling a workflow's execute endpoint from external systems. Unlike user session tokens, they are:
+
+- **Single-workflow scoped** — a token is rejected for any other workflow.
+- **Independently revocable** — revoking a token has no effect on the issuing user's session.
+- **Short or long-lived** — choose a TTL from 60 seconds to 10 years.
+
+Tokens are signed with the same application secret (`SECRET_KEY`) and checked on every request: signature, expiry, `wid` claim match, and revocation status. See [Execution Tokens](./execution-tokens.md) for setup and API reference.
+
 ## Content Safety
 
 Use [Guardrails](./guardrails.md) on LLM and Agent nodes to block unsafe or policy-violating user messages before they reach the model. Guardrails support nine content categories (violence, hate speech, sexual content, etc.) with configurable sensitivity levels.
@@ -55,6 +65,7 @@ Use [Guardrails](./guardrails.md) on LLM and Agent nodes to block unsafe or poli
 ## Related
 
 - [Running & Deployment](../getting-started/running-and-deployment.md) – Configure `SECRET_KEY`, `ENCRYPTION_KEY`, and `ALLOW_REGISTER` at startup
+- [Execution Tokens](./execution-tokens.md) – Scoped JWTs for calling workflows from external systems
 - [Guardrails](./guardrails.md) – Block unsafe content in LLM and Agent nodes
 - [User Defaults](./user-defaults.md) – Change your password
 - [Credentials Tab](../tabs/credentials-tab.md) – Manage API keys
