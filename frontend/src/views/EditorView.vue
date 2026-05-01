@@ -756,7 +756,7 @@ function formatCurlJson(): void {
 async function createExecutionToken(): Promise<void> {
   tokenCreating.value = true;
   try {
-    const ttl = tokenMode.value === "long" ? 315360000 : tokenTtlSeconds.value;
+    const ttl = tokenMode.value === "long" ? 315360000 : Math.max(60, Math.floor(Number(tokenTtlSeconds.value)));
     const token = await workflowApi.executionTokens.create(workflowId.value, ttl);
     executionTokens.value.unshift(token);
     selectedTokenId.value = token.id;
@@ -1403,7 +1403,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 ]"
                 @click="tokenMode = 'long'"
               >
-                Long-lived (10yr)
+                Long-lived
               </button>
             </div>
             <div
