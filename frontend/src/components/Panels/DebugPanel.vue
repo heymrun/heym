@@ -26,12 +26,13 @@ import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { cn, formatFileSize } from "@/lib/utils";
+import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { aiApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
 
-const { fitView, updateNodeInternals } = useVueFlow();
+const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
 const workflowStore = useWorkflowStore();
 
@@ -1764,6 +1765,20 @@ function tidyUpNodes(): void {
   const START_X = 50;
   const START_Y = 200;
   const STRIDE = NODE_HEIGHT + VERTICAL_GAP;
+  const measuredNodeSizes = buildMeasuredNodeSizeMap(getNodes.value);
+  const layoutNodeById = new Map(layoutNodes.map((node) => [node.id, node]));
+  const getNodeWidth = (nodeId: string): number => {
+    const node = layoutNodeById.get(nodeId);
+    if (node === undefined) return NODE_WIDTH;
+    return getWorkflowNodeLayoutSize(node, measuredNodeSizes, {
+      isSubAgent: subAgentNodeIds.has(nodeId),
+    }).width;
+  };
+  const getLevelWidth = (level: string[]): number => {
+    const placedNodeIds = level.filter((nodeId) => !subAgentNodeIds.has(nodeId));
+    if (placedNodeIds.length === 0) return NODE_WIDTH;
+    return Math.max(...placedNodeIds.map((nodeId) => getNodeWidth(nodeId)));
+  };
 
   const loopBranchNodes = new Set<string>();
   const doneBranchNodes = new Set<string>();
@@ -1812,7 +1827,7 @@ function tidyUpNodes(): void {
       return n?.type === "llm" && n.data?.batchModeEnabled === true;
     });
     const extra = prevHasBatchLlm ? BATCH_LLM_INTER_COLUMN_EXTRA : 0;
-    columnX.push(columnX[k - 1] + NODE_WIDTH + HORIZONTAL_GAP + extra);
+    columnX.push(columnX[k - 1] + getLevelWidth(levels[k - 1]) + HORIZONTAL_GAP + extra);
   }
 
   levels.forEach((level, levelIndex) => {
@@ -1875,12 +1890,15 @@ function tidyUpNodes(): void {
     const pos = nodePositions.get(orchId);
     if (!pos) return;
     const subY = pos.y + STRIDE;
-    const orchCenterX = pos.x + NODE_WIDTH / 2;
-    const totalSubWidth =
-      subIds.length * NODE_WIDTH + (subIds.length - 1) * HORIZONTAL_GAP;
+    const orchCenterX = pos.x + getNodeWidth(orchId) / 2;
+    const subWidths = subIds.map((subId) => getNodeWidth(subId));
+    const totalSubWidth = subWidths.reduce((sum, width) => sum + width, 0)
+      + (subIds.length - 1) * HORIZONTAL_GAP;
     const startX = orchCenterX - totalSubWidth / 2;
+    let nextX = startX;
     subIds.forEach((subId, index) => {
-      const x = startX + index * (NODE_WIDTH + HORIZONTAL_GAP);
+      const x = nextX;
+      nextX += (subWidths[index] ?? NODE_WIDTH) + HORIZONTAL_GAP;
       workflowStore.updateNodePosition(subId, { x, y: subY });
     });
   });
