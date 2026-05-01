@@ -2,8 +2,10 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useVueFlow } from "@vue-flow/core";
 import axios from "axios";
+import DOMPurify from "dompurify";
 import { jsonrepair } from "jsonrepair";
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, X } from "lucide-vue-next";
+import { marked } from "marked";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, FileText, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -49,6 +51,7 @@ const agentProgressLogs = computed(() => workflowStore.agentProgressLogs);
 const selectedNode = computed(() => workflowStore.selectedNode);
 const logsCopied = ref(false);
 const showTimeline = ref(false);
+const showMarkdownInExecutionLog = ref(true);
 
 const runningAgentNode = computed(() => {
   const id = runningNodeId.value;
@@ -558,6 +561,30 @@ function getOutputText(output: unknown): string | null {
   const o = output as Record<string, unknown> | undefined;
   const t = o?.text;
   return typeof t === "string" ? t : null;
+}
+
+function getMarkdownDisplayText(output: unknown): string | null {
+  if (typeof output === "string") {
+    return output;
+  }
+  return getOutputText(output);
+}
+
+function getGenericResultOutputText(output: unknown): string {
+  const text = getOutputText(output);
+  if (getToolCalls(output)?.length && text !== null) {
+    return text;
+  }
+  return JSON.stringify(output);
+}
+
+function renderExecutionMarkdown(content: string): string {
+  if (!content) return "";
+  const html = marked(content, {
+    breaks: true,
+    gfm: true,
+  }) as string;
+  return DOMPurify.sanitize(html);
 }
 
 interface HITLPendingPayload {
@@ -2239,6 +2266,16 @@ function renderContent(content: string): string {
           <ChevronsUp class="w-3.5 h-3.5" />
         </Button>
         <Button
+          v-if="(executionResult || nodeResults.length > 0) && !isCollapsed"
+          :variant="showMarkdownInExecutionLog ? 'secondary' : 'ghost'"
+          size="icon"
+          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          :title="showMarkdownInExecutionLog ? 'Show plain text' : 'Show markdown'"
+          @click.stop="showMarkdownInExecutionLog = !showMarkdownInExecutionLog"
+        >
+          <FileText class="w-3.5 h-3.5" />
+        </Button>
+        <Button
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
           variant="ghost"
           size="icon"
@@ -2654,14 +2691,22 @@ function renderContent(content: string): string {
               </div>
               <div
                 v-if="shouldShowGenericResultOutput(result.rawOutput)"
-                class="text-muted-foreground text-xs mt-1 break-all whitespace-pre-wrap"
+                class="text-muted-foreground text-xs mt-1"
               >
-                <template v-if="getToolCalls(result.output)?.length && getOutputText(result.output) != null">
-                  {{ getOutputText(result.output) }}
-                </template>
-                <template v-else>
-                  {{ JSON.stringify(result.output) }}
-                </template>
+                <div
+                  v-if="showMarkdownInExecutionLog && getMarkdownDisplayText(result.output) !== null"
+                  class="execution-markdown-output break-words font-sans"
+                >
+                  <!-- eslint-disable vue/no-v-html -->
+                  <div v-html="renderExecutionMarkdown(getMarkdownDisplayText(result.output)!)" />
+                  <!-- eslint-enable vue/no-v-html -->
+                </div>
+                <div
+                  v-else
+                  class="break-all whitespace-pre-wrap"
+                >
+                  {{ getGenericResultOutputText(result.output) }}
+                </div>
               </div>
             </template>
           </div>
@@ -3203,6 +3248,90 @@ function renderContent(content: string): string {
   flex-direction: column;
   z-index: 101;
   overflow: hidden;
+}
+
+.execution-markdown-output :deep(p) {
+  margin: 0.35rem 0;
+}
+
+.execution-markdown-output :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.execution-markdown-output :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.execution-markdown-output :deep(h1),
+.execution-markdown-output :deep(h2),
+.execution-markdown-output :deep(h3),
+.execution-markdown-output :deep(h4),
+.execution-markdown-output :deep(h5),
+.execution-markdown-output :deep(h6) {
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0.65rem 0 0.35rem;
+}
+
+.execution-markdown-output :deep(ul),
+.execution-markdown-output :deep(ol) {
+  margin: 0.35rem 0;
+  padding-left: 1.25rem;
+}
+
+.execution-markdown-output :deep(li) {
+  margin: 0.15rem 0;
+}
+
+.execution-markdown-output :deep(code) {
+  background: hsl(var(--muted) / 0.65);
+  border-radius: 0.25rem;
+  color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85em;
+  padding: 0.1rem 0.3rem;
+}
+
+.execution-markdown-output :deep(pre) {
+  background: hsl(var(--background) / 0.7);
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 0.375rem;
+  margin: 0.45rem 0;
+  overflow-x: auto;
+  padding: 0.625rem;
+}
+
+.execution-markdown-output :deep(pre code) {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.execution-markdown-output :deep(blockquote) {
+  border-left: 2px solid hsl(var(--border));
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+}
+
+.execution-markdown-output :deep(a) {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.execution-markdown-output :deep(table) {
+  border-collapse: collapse;
+  display: block;
+  margin: 0.5rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.execution-markdown-output :deep(th),
+.execution-markdown-output :deep(td) {
+  border: 1px solid hsl(var(--border));
+  padding: 0.25rem 0.4rem;
 }
 
 .ai-panel-header {
