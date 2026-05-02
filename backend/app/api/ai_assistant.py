@@ -104,6 +104,7 @@ class DashboardChatRequest(BaseModel):
     chat_surface: Literal["dashboard", "documentation"] | None = None
     user_rules: str | None = None
     client_local_datetime: str | None = None
+    attachment: FileAttachment | None = None
 
 
 class FixTranscriptionRequest(BaseModel):
@@ -2030,7 +2031,7 @@ async def dashboard_chat_stream(
     if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
         history = history[-MAX_DASHBOARD_CHAT_HISTORY:]
     messages: list[dict] = list(history)
-    messages.append({"role": "user", "content": request.message})
+    messages.append(_build_user_message(request.message, request.attachment))
 
     trace_context = LLMTraceContext(
         user_id=current_user.id,
@@ -2071,6 +2072,8 @@ async def dashboard_chat_stream(
             + "\n\nCurrent user local date and time: "
             + request.client_local_datetime.strip()
         )
+    if request.attachment:
+        system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
     public_base_url = build_public_base_url(http_request)
     cancel_event = Event()
 
