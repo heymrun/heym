@@ -146,7 +146,7 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
             "role": "user",
             "content": [
                 {"type": "text", "text": message},
-                {"type": "image_url", "url": attachment.content},
+                {"type": "image_url", "image_url": {"url": attachment.content}},
             ],
         }
     embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"

@@ -401,7 +401,9 @@ class BuildUserMessageTests(unittest.TestCase):
         self.assertIsInstance(content, list)
         self.assertEqual(len(content), 2)
         self.assertEqual(content[0], {"type": "text", "text": "Describe this"})
-        self.assertEqual(content[1], {"type": "image_url", "url": "data:image/png;base64,abc123"})
+        self.assertEqual(
+            content[1], {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}}
+        )
 
 
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
