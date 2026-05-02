@@ -138,18 +138,17 @@ _ATTACHMENT_ROUTING_INSTRUCTIONS = (
 
 
 def _build_user_message(message: str, attachment: FileAttachment | None) -> dict:
-    """Build the user role message dict, embedding attachment content when present."""
+    """Build the user role message dict, embedding attachment content when present.
+
+    All attachment kinds (including images) are embedded as a labelled text block so that
+    any LLM — including non-vision models used in dashboard chat — can read and route the
+    content to the correct workflow input field. Vision processing happens inside the
+    workflow's own LLM node, not in the dashboard chat LLM.
+    """
     if attachment is None:
         return {"role": "user", "content": message}
-    if attachment.kind == "image":
-        return {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": message},
-                {"type": "image_url", "image_url": {"url": attachment.content}},
-            ],
-        }
-    embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
+    tag = "IMAGE" if attachment.kind == "image" else "FILE"
+    embedded = f"{message}\n\n[ATTACHED {tag}: {attachment.name}]\n{attachment.content}"
     return {"role": "user", "content": embedded}
 
 

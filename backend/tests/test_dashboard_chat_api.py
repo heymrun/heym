@@ -391,19 +391,16 @@ class BuildUserMessageTests(unittest.TestCase):
         self.assertIn("[ATTACHED FILE: report.pdf]", result["content"])
         self.assertIn("Extracted text", result["content"])
 
-    def test_image_attachment_builds_multipart_content(self) -> None:
+    def test_image_attachment_embeds_as_text_block(self) -> None:
         attachment = FileAttachment(
             name="photo.png", kind="image", content="data:image/png;base64,abc123"
         )
         result = _build_user_message("Describe this", attachment)
         self.assertEqual(result["role"], "user")
-        content = result["content"]
-        self.assertIsInstance(content, list)
-        self.assertEqual(len(content), 2)
-        self.assertEqual(content[0], {"type": "text", "text": "Describe this"})
-        self.assertEqual(
-            content[1], {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}}
-        )
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Describe this", result["content"])
+        self.assertIn("[ATTACHED IMAGE: photo.png]", result["content"])
+        self.assertIn("data:image/png;base64,abc123", result["content"])
 
 
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
