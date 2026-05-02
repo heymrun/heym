@@ -1,0 +1,819 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" fill="none" font-family="Inter, system-ui, sans-serif">
+  
+  <defs>
+    <style>
+      .ff-orb-a { animation: ffOrbA 7s ease-in-out infinite; transform-origin: 200px 140px; }
+      .ff-orb-b { animation: ffOrbB 8s ease-in-out infinite; transform-origin: 1080px 580px; }
+      .ff-progress { animation: ffProgress 80s linear infinite; }
+      .ff-scene { opacity: 0; animation: ffScene 80s linear infinite both; }
+      .ff-scene.s02 { animation-delay: -75s; }
+      .ff-scene.s03 { animation-delay: -70s; }
+      .ff-scene.s04 { animation-delay: -65s; }
+      .ff-scene.s05 { animation-delay: -60s; }
+      .ff-scene.s06 { animation-delay: -55s; }
+      .ff-scene.s07 { animation-delay: -50s; }
+      .ff-scene.s08 { animation-delay: -45s; }
+      .ff-scene.s09 { animation-delay: -40s; }
+      .ff-scene.s10 { animation-delay: -35s; }
+      .ff-scene.s11 { animation-delay: -30s; }
+      .ff-scene.s12 { animation-delay: -25s; }
+      .ff-scene.s13 { animation-delay: -20s; }
+      .ff-scene.s14 { animation-delay: -15s; }
+      .ff-scene.s15 { animation-delay: -10s; }
+      .ff-scene.s16 { animation-delay: -5s; }
+      .ff-flow { stroke-dasharray: 8 8; animation: ffDash 1.6s linear infinite; }
+      .ff-blink { animation: ffBlink 1s steps(2, jump-none) infinite; }
+      .ff-wave { animation: ffWave 1.2s ease-in-out infinite; }
+      .ff-wave.w2 { animation-delay: .08s; }
+      .ff-wave.w3 { animation-delay: .16s; }
+      .ff-wave.w4 { animation-delay: .24s; }
+      .ff-wave.w5 { animation-delay: .32s; }
+      .ff-wave.w6 { animation-delay: .4s; }
+      .ff-pulse { animation: ffPulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .ff-fill { animation: ffFill 2.2s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
+      .ff-spin { animation: ffSpin 9s linear infinite; transform-box: fill-box; transform-origin: center; }
+      .ff-pkt { offset-distance: 0%; animation: ffMotion 2.8s ease-in-out infinite; }
+      .ff-pkt.pkt2 { animation-delay: .35s; }
+      .ff-pkt.pkt3 { animation-delay: .7s; }
+      .ff-bar { transform-box: fill-box; transform-origin: bottom; animation: ffBar 1.8s ease-in-out infinite; }
+      .ff-bar.b2 { animation-delay: .12s; }
+      .ff-bar.b3 { animation-delay: .24s; }
+      .ff-bar.b4 { animation-delay: .36s; }
+      .ff-logo-tile { transform-origin: center; animation: ffLogoGlow 2.8s ease-in-out infinite; }
+      .ff-logo-mark { stroke-dasharray: 10 6; animation: ffLogoDash 2.4s linear infinite; }
+      @keyframes ffScene {
+        0%, 5.2% { opacity: 1; transform: translateY(0); }
+        6.25% { opacity: 0; transform: translateY(10px); }
+        6.26%, 100% { opacity: 0; transform: translateY(10px); }
+      }
+      @keyframes ffProgress {
+        0% { width: 0; fill: #A78BFA; }
+        35% { fill: #22D3EE; }
+        70% { fill: #10D9A0; }
+        100% { width: 1152px; fill: #A78BFA; }
+      }
+      @keyframes ffDash { to { stroke-dashoffset: -32; } }
+      @keyframes ffBlink { 50% { opacity: .15; } }
+      @keyframes ffWave {
+        0%, 100% { opacity: .35; }
+        50% { opacity: 1; }
+      }
+      @keyframes ffPulse {
+        0%, 100% { opacity: .55; transform: scale(.96); }
+        50% { opacity: 1; transform: scale(1.08); }
+      }
+      @keyframes ffFill {
+        0%, 100% { transform: scaleX(.15); opacity: .3; }
+        55% { transform: scaleX(1); opacity: .9; }
+      }
+      @keyframes ffSpin { to { transform: rotate(360deg); } }
+      @keyframes ffMotion {
+        0% { offset-distance: 0%; opacity: 0; }
+        12%, 86% { opacity: 1; }
+        100% { offset-distance: 100%; opacity: 0; }
+      }
+      @keyframes ffBar {
+        0%, 100% { transform: scaleY(.55); opacity: .55; }
+        50% { transform: scaleY(1); opacity: 1; }
+      }
+      @keyframes ffOrbA {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: .9; }
+        50% { transform: translate3d(18px, 10px, 0) scale(1.08); opacity: .65; }
+      }
+      @keyframes ffOrbB {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: .85; }
+        50% { transform: translate3d(-20px, -14px, 0) scale(1.06); opacity: .6; }
+      }
+      @keyframes ffLogoDash { to { stroke-dashoffset: -32; } }
+      @keyframes ffLogoGlow {
+        0%, 100% { filter: drop-shadow(0 0 0 rgba(139, 92, 246, 0)); }
+        50% { filter: drop-shadow(0 0 14px rgba(139, 92, 246, .65)); }
+      }
+    </style>
+    
+
+    <linearGradient id="ff-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0A0E1A"></stop>
+      <stop offset="100%" stop-color="#0F1320"></stop>
+    </linearGradient>
+    <pattern id="ff-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1F2937"></circle>
+    </pattern>
+    <radialGradient id="ff-orb-purp"><stop offset="0%" stop-color="#7C3AED" stop-opacity="0.4"></stop><stop offset="100%" stop-color="#7C3AED" stop-opacity="0"></stop></radialGradient>
+    <radialGradient id="ff-orb-cyan"><stop offset="0%" stop-color="#22D3EE" stop-opacity="0.35"></stop><stop offset="100%" stop-color="#22D3EE" stop-opacity="0"></stop></radialGradient>
+    <linearGradient id="ff-title-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#A78BFA"></stop>
+      <stop offset="50%" stop-color="#22D3EE"></stop>
+      <stop offset="100%" stop-color="#10D9A0"></stop>
+    </linearGradient>
+    <linearGradient id="ff-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"></stop>
+      <stop offset="100%" stop-color="#6366F1"></stop>
+    </linearGradient>
+    <filter id="ff-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3"></feGaussianBlur>
+      <feMerge><feMergeNode></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+    </filter>
+  </defs>
+
+  
+  <rect width="1280" height="720" fill="url(#ff-bg)"></rect>
+  <rect width="1280" height="720" fill="url(#ff-grid)"></rect>
+  <circle cx="200" cy="140" r="220" fill="url(#ff-orb-purp)" class="ff-orb-a"></circle>
+  <circle cx="1080" cy="580" r="240" fill="url(#ff-orb-cyan)" class="ff-orb-b"></circle>
+
+  
+  <g transform="translate(64,56)">
+    <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="3">FULL FEATURE SET · 16 PRIMITIVES</text>
+    <text y="36" font-size="32" font-weight="800" fill="url(#ff-title-grad)" letter-spacing="-1">Heym is a true AI-native workflow automation platform</text>
+  </g>
+  <g transform="translate(1146,44) scale(1.75)">
+    <rect class="ff-logo-tile" width="32" height="32" rx="8" fill="url(#ff-logo-grad)"></rect>
+    <path class="ff-logo-mark" d="M8 16h6M18 16h6M14 10v12M18 10v12" stroke="white" stroke-width="2" stroke-linecap="round"></path>
+  </g>
+
+  
+  <g transform="translate(64,150)">
+    <rect width="1152" height="3" rx="1.5" fill="#1F2937"></rect>
+    <rect class="ff-progress" x="0" y="0" height="3" rx="1.5" fill="#A78BFA"></rect>
+    
+    <g fill="#374151">
+      <circle cx="0" cy="1.5" r="3"></circle>
+      <circle cx="76.8" cy="1.5" r="3"></circle>
+      <circle cx="153.6" cy="1.5" r="3"></circle>
+      <circle cx="230.4" cy="1.5" r="3"></circle>
+      <circle cx="307.2" cy="1.5" r="3"></circle>
+      <circle cx="384" cy="1.5" r="3"></circle>
+      <circle cx="460.8" cy="1.5" r="3"></circle>
+      <circle cx="537.6" cy="1.5" r="3"></circle>
+      <circle cx="614.4" cy="1.5" r="3"></circle>
+      <circle cx="691.2" cy="1.5" r="3"></circle>
+      <circle cx="768" cy="1.5" r="3"></circle>
+      <circle cx="844.8" cy="1.5" r="3"></circle>
+      <circle cx="921.6" cy="1.5" r="3"></circle>
+      <circle cx="998.4" cy="1.5" r="3"></circle>
+      <circle cx="1075.2" cy="1.5" r="3"></circle>
+      <circle cx="1152" cy="1.5" r="3"></circle>
+    </g>
+  </g>
+
+  
+  <g transform="translate(64,200)">
+
+    
+    <g class="ff-scene s01">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#7C3AED" letter-spacing="2">01 · VISUAL WORKFLOW EDITOR</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Drag. Drop.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#A78BFA" letter-spacing="-2">It runs.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">A visual canvas with 30+ node types — wire intent into execution.</text>
+
+      
+      <g transform="translate(640,30)">
+        <rect width="500" height="300" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+        <rect width="500" height="28" rx="14" fill="#151B2E"></rect>
+        <rect y="14" width="500" height="14" fill="#151B2E"></rect>
+        <circle cx="14" cy="14" r="4" fill="#EF4444"></circle>
+        <circle cx="28" cy="14" r="4" fill="#F59E0B"></circle>
+        <circle cx="42" cy="14" r="4" fill="#10D9A0"></circle>
+        <text x="250" y="18" text-anchor="middle" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">canvas · vue flow</text>
+
+        
+        <g transform="translate(40,80)">
+          <rect width="100" height="48" rx="10" fill="#0A0E1A" stroke="#7C3AED"></rect>
+          <rect width="100" height="3" rx="1.5" fill="#7C3AED"></rect>
+          <text x="50" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">Input</text>
+        </g>
+        <path d="M 140 104 L 180 104" stroke="#A78BFA" stroke-width="1.6" class="ff-flow" fill="none"></path>
+        <g transform="translate(180,80)">
+          <rect width="100" height="48" rx="10" fill="#0A0E1A" stroke="#22D3EE"></rect>
+          <rect width="100" height="3" rx="1.5" fill="#22D3EE"></rect>
+          <text x="50" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">LLM</text>
+        </g>
+        <path d="M 280 104 L 320 104" stroke="#22D3EE" stroke-width="1.6" class="ff-flow" fill="none"></path>
+        <g transform="translate(320,80)">
+          <rect width="100" height="48" rx="10" fill="#0A0E1A" stroke="#10D9A0"></rect>
+          <rect width="100" height="3" rx="1.5" fill="#10D9A0"></rect>
+          <text x="50" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">Output</text>
+        </g>
+
+        
+        <g transform="translate(54,188)" opacity="0.78">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#22D3EE" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#22D3EE" font-weight="600">+ RAG</text>
+        </g>
+        <g transform="translate(156,188)" opacity="0.82">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#F59E0B" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#F59E0B" font-weight="600">+ HTTP</text>
+        </g>
+        <g transform="translate(258,188)" opacity="0.78">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#10D9A0" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#10D9A0" font-weight="600">+ HITL</text>
+        </g>
+        <g transform="translate(360,188)" opacity="0.74">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#A78BFA" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#A78BFA" font-weight="600">+ MCP</text>
+        </g>
+        <g transform="translate(156,238)" opacity="0.74">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#22D3EE" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#22D3EE" font-weight="600">+ Eval</text>
+        </g>
+        <g transform="translate(258,238)" opacity="0.74">
+          <rect width="78" height="34" rx="8" fill="#0A0E1A" stroke="#10D9A0" stroke-dasharray="3 3"></rect>
+          <text x="39" y="22" text-anchor="middle" font-size="9.5" fill="#10D9A0" font-weight="600">+ Table</text>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s02">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">02 · AI ASSISTANT</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Tell it.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">It builds.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Describe a workflow in plain text or voice — nodes wire themselves.</text>
+
+      <g transform="translate(640,40)">
+        
+        <rect width="520" height="64" rx="12" fill="#0F1320" stroke="#22D3EE" stroke-opacity="0.5"></rect>
+        <text x="20" y="40" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="14" fill="#9CA3AF">▸ &#34;summarize new emails, post to slack&#34;</text>
+        <rect x="372" y="20" width="2" height="28" fill="#22D3EE" class="ff-blink"></rect>
+        
+        <path d="M 260 80 L 260 120 M 252 110 L 260 120 L 268 110" stroke="#22D3EE" stroke-width="2" fill="none"></path>
+        
+        <g transform="translate(0,140)">
+          <g><rect width="100" height="42" rx="9" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="50" y="26" text-anchor="middle" font-size="10.5" fill="#F3F4F6" font-weight="600">IMAP</text></g>
+          <g transform="translate(110,0)"><rect width="100" height="42" rx="9" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="50" y="26" text-anchor="middle" font-size="10.5" fill="#F3F4F6" font-weight="600">LLM</text></g>
+          <g transform="translate(220,0)"><rect width="100" height="42" rx="9" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="50" y="26" text-anchor="middle" font-size="10.5" fill="#F3F4F6" font-weight="600">Slack</text></g>
+          <g transform="translate(330,0)"><rect width="100" height="42" rx="9" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="50" y="26" text-anchor="middle" font-size="10.5" fill="#F3F4F6" font-weight="600">Output</text></g>
+        </g>
+        
+        <g transform="translate(0,220)">
+          <text font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11" fill="#6B7280">VOICE</text>
+          <rect class="ff-wave" x="60" y="-8" width="3" height="16" fill="#22D3EE"></rect>
+          <rect class="ff-wave w2" x="68" y="-12" width="3" height="24" fill="#22D3EE"></rect>
+          <rect class="ff-wave w3" x="76" y="-6" width="3" height="12" fill="#22D3EE"></rect>
+          <rect class="ff-wave w4" x="84" y="-14" width="3" height="28" fill="#22D3EE"></rect>
+          <rect class="ff-wave w5" x="92" y="-10" width="3" height="20" fill="#22D3EE"></rect>
+          <rect class="ff-wave w6" x="100" y="-8" width="3" height="16" fill="#22D3EE"></rect>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s03">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">03 · CHAT WITH DOCS</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">The docs</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">talk back.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Context-aware Q&amp;A from any docs page — the current article is the prompt.</text>
+
+      <g transform="translate(640,30)">
+        <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+        <rect width="500" height="36" rx="14" fill="#151B2E"></rect>
+        <rect y="20" width="500" height="16" fill="#151B2E"></rect>
+        <text x="20" y="22" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">/docs/agent-node.md</text>
+        <circle cx="470" cy="18" r="5" fill="#10D9A0" class="ff-pulse"></circle>
+        
+        <g transform="translate(20,60)">
+          <rect width="200" height="8" rx="2" fill="#374151"></rect>
+          <rect y="18" width="240" height="6" rx="2" fill="#1F2937"></rect>
+          <rect y="32" width="220" height="6" rx="2" fill="#1F2937"></rect>
+          <rect y="46" width="180" height="6" rx="2" fill="#1F2937"></rect>
+        </g>
+        
+        <g transform="translate(20,140)">
+          <rect width="280" height="44" rx="10" fill="#22D3EE" fill-opacity="0.1" stroke="#22D3EE" stroke-opacity="0.4"></rect>
+          <text x="14" y="28" font-size="12" fill="#E5E7EB">how does sub-agent depth work?</text>
+        </g>
+        
+        <g transform="translate(120,200)">
+          <rect width="360" height="92" rx="10" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-opacity="0.4"></rect>
+          <text x="14" y="26" font-size="12" fill="#10D9A0" font-weight="600">heym docs</text>
+          <text x="14" y="48" font-size="12" fill="#E5E7EB">Max nesting is 5 — orchestrators can</text>
+          <text x="14" y="66" font-size="12" fill="#E5E7EB">call sub-agents that call sub-agents</text>
+          <text x="14" y="84" font-size="12" fill="#E5E7EB">up to that depth.</text>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s04">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#F59E0B" letter-spacing="2">04 · AI SKILL BUILDER</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Skills built</text>
+      <text y="124" font-size="64" font-weight="800" fill="#F59E0B" letter-spacing="-2">by chat.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">SKILL.md and Python files — drafted, previewed, and saved live.</text>
+
+      <g transform="translate(640,30)">
+        <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+        <line x1="220" y1="0" x2="220" y2="320" stroke="#1F2937"></line>
+        
+        <text x="14" y="24" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">CHAT</text>
+        <g transform="translate(14,40)">
+          <rect width="190" height="36" rx="8" fill="#22D3EE" fill-opacity="0.1"></rect>
+          <text x="10" y="22" font-size="11" fill="#E5E7EB">Build a CSV cleaner</text>
+        </g>
+        <g transform="translate(14,90)">
+          <rect width="190" height="60" rx="8" fill="#F59E0B" fill-opacity="0.1"></rect>
+          <text x="10" y="22" font-size="11" fill="#F59E0B">Drafting SKILL.md…</text>
+          <text x="10" y="42" font-size="11" fill="#E5E7EB">Adding clean.py</text>
+        </g>
+        <g transform="translate(14,165)" font-family="&#39;JetBrains Mono&#39;,monospace">
+          <rect width="190" height="44" rx="8" fill="#0A0E1A" stroke="#1F2937"></rect>
+          <rect class="ff-fill" x="0" y="0" height="44" rx="8" fill="#F59E0B" fill-opacity="0.18"></rect>
+          <text x="10" y="20" font-size="10" fill="#9CA3AF">streaming…</text>
+          <text x="10" y="36" font-size="10" fill="#10D9A0">✓ tools generated</text>
+        </g>
+        
+        <text x="234" y="24" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">SKILL.md</text>
+        <g transform="translate(234,40)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="10" fill="#A78BFA">
+          <text y="14"># csv-cleaner</text>
+          <text y="32" fill="#9CA3AF">Cleans, dedupes, normalizes</text>
+          <text y="50" fill="#9CA3AF">CSV input.</text>
+          <text y="80" fill="#F59E0B">## tools</text>
+          <text y="98" fill="#E5E7EB">- clean(rows)</text>
+          <text y="114" fill="#E5E7EB">- dedupe(rows, key)</text>
+          <text y="132" fill="#E5E7EB">- normalize_headers()</text>
+        </g>
+        <g transform="translate(234,200)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="10">
+          <rect width="240" height="100" rx="8" fill="#0A0E1A" stroke="#1F2937"></rect>
+          <text x="10" y="18" fill="#22D3EE">clean.py</text>
+          <text x="10" y="36" fill="#9CA3AF">def clean(rows):</text>
+          <text x="10" y="52" fill="#9CA3AF">    return [r for r in rows</text>
+          <text x="10" y="68" fill="#9CA3AF">            if r and r.values()]</text>
+          <rect x="10" y="76" width="6" height="12" fill="#10D9A0" class="ff-blink"></rect>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s05">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#A78BFA" letter-spacing="2">05 · LLM &amp; AGENT NODES</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">First-class</text>
+      <text y="124" font-size="64" font-weight="800" fill="#A78BFA" letter-spacing="-2">agents.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Tool calling · Python · MCP · skills · memory · batch · fallback.</text>
+
+      <g transform="translate(660,40)">
+        
+        <g transform="translate(220,140)">
+          <circle r="74" fill="#7C3AED" fill-opacity="0.12" stroke="#A78BFA" stroke-width="1.5"></circle>
+          <circle r="92" fill="none" stroke="#A78BFA" stroke-width="1" stroke-dasharray="3 4" class="ff-spin"></circle>
+          <circle r="30" fill="#A78BFA"></circle>
+          <text y="5" text-anchor="middle" font-size="12" font-weight="800" fill="#0A0E1A">AGENT</text>
+        </g>
+        
+        <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="10">
+          <g transform="translate(0,30)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#22D3EE" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#22D3EE">tools</text></g>
+          <g transform="translate(0,80)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#10D9A0" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#10D9A0">python</text></g>
+          <g transform="translate(0,130)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#F59E0B">mcp</text></g>
+          <g transform="translate(330,30)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#22D3EE" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#22D3EE">skills</text></g>
+          <g transform="translate(330,80)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#10D9A0" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#10D9A0">memory</text></g>
+          <g transform="translate(330,130)"><rect width="110" height="30" rx="6" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.4"></rect><text x="55" y="19" text-anchor="middle" fill="#F59E0B">batch</text></g>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s06">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#7C3AED" letter-spacing="2">06 · MULTI-AGENT ORCHESTRATION</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">One leads.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#7C3AED" letter-spacing="-2">Many run.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">An orchestrator visually delegates to named sub-agents and sub-workflows.</text>
+
+      <g transform="translate(660,40)">
+        
+        <g transform="translate(180,40)">
+          <rect width="140" height="50" rx="10" fill="#0F1320" stroke="#7C3AED" stroke-width="1.5"></rect>
+          <rect width="140" height="3" rx="1.5" fill="#7C3AED"></rect>
+          <text x="70" y="22" text-anchor="middle" font-size="9" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">ORCHESTRATOR</text>
+          <text x="70" y="40" text-anchor="middle" font-size="13" fill="#F3F4F6" font-weight="700">Lead</text>
+        </g>
+        
+        <g transform="translate(20,180)">
+          <rect width="120" height="46" rx="9" fill="#0F1320" stroke="#A78BFA"></rect>
+          <rect width="120" height="3" rx="1.5" fill="#A78BFA"></rect>
+          <text x="60" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">crawler</text>
+        </g>
+        <g transform="translate(180,180)">
+          <rect width="120" height="46" rx="9" fill="#0F1320" stroke="#22D3EE"></rect>
+          <rect width="120" height="3" rx="1.5" fill="#22D3EE"></rect>
+          <text x="60" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">analyst</text>
+        </g>
+        <g transform="translate(340,180)">
+          <rect width="120" height="46" rx="9" fill="#0F1320" stroke="#10D9A0"></rect>
+          <rect width="120" height="3" rx="1.5" fill="#10D9A0"></rect>
+          <text x="60" y="30" text-anchor="middle" font-size="11" fill="#F3F4F6" font-weight="600">writer</text>
+        </g>
+        
+        <g fill="none" stroke-width="1.5">
+          <path d="M 220 90 Q 200 130, 80 180" stroke="#A78BFA" stroke-opacity="0.6"></path>
+          <path d="M 250 90 L 240 180" stroke="#22D3EE" stroke-opacity="0.6"></path>
+          <path d="M 280 90 Q 320 130, 400 180" stroke="#10D9A0" stroke-opacity="0.6"></path>
+        </g>
+        <circle r="3" fill="#A78BFA" filter="url(#ff-glow)" class="ff-pkt" style="offset-path: path(&#39;M 220 90 Q 200 130, 80 180&#39;);"></circle>
+        <circle r="3" fill="#22D3EE" filter="url(#ff-glow)" class="ff-pkt pkt2" style="offset-path: path(&#39;M 250 90 L 240 180&#39;);"></circle>
+        <circle r="3" fill="#10D9A0" filter="url(#ff-glow)" class="ff-pkt pkt3" style="offset-path: path(&#39;M 280 90 Q 320 130, 400 180&#39;);"></circle>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s07">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#F59E0B" letter-spacing="2">07 · HUMAN-IN-THE-LOOP</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">AI proposes.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#F59E0B" letter-spacing="-2">You decide.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Pause execution. Public review URL. Edit, accept, or refuse — then resume.</text>
+
+      <g transform="translate(660,30)">
+        <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.4" stroke-dasharray="4 4"></rect>
+        
+        <text x="20" y="32" font-size="11" font-family="&#39;JetBrains Mono&#39;,monospace" fill="#F59E0B">⏸ PAUSED · awaiting review</text>
+        <text x="480" y="32" text-anchor="end" font-size="10" font-family="&#39;JetBrains Mono&#39;,monospace" fill="#6B7280">/review/8a2f…</text>
+        
+        <g transform="translate(20,60)">
+          <rect width="460" height="160" rx="10" fill="#0A0E1A" stroke="#1F2937"></rect>
+          <text x="16" y="26" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">PROPOSED REPLY</text>
+          <text x="16" y="58" font-size="13" fill="#E5E7EB">Hi Sam — refund approved on order</text>
+          <text x="16" y="78" font-size="13" fill="#E5E7EB">#A-3128. You&#39;ll see it in 3-5 days.</text>
+          <text x="16" y="120" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">guideline: refunds &gt; $200 need approval</text>
+        </g>
+        
+        <g transform="translate(20,240)">
+          <g><rect width="120" height="40" rx="10" fill="#10D9A0" fill-opacity="0.15" stroke="#10D9A0"></rect><text x="60" y="25" text-anchor="middle" font-size="13" fill="#10D9A0" font-weight="600">accept</text></g>
+          <g transform="translate(140,0)"><rect width="120" height="40" rx="10" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B"></rect><text x="60" y="25" text-anchor="middle" font-size="13" fill="#F59E0B" font-weight="600">edit</text></g>
+          <g transform="translate(280,0)"><rect width="120" height="40" rx="10" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444"></rect><text x="60" y="25" text-anchor="middle" font-size="13" fill="#EF4444" font-weight="600">refuse</text></g>
+        </g>
+        <circle cx="20" cy="290" r="6" fill="#F59E0B" class="ff-pulse"></circle>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s08">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">08 · GUARDRAILS</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Unsafe in.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Caught here.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Filtering, NSFW protection, multilingual safety — on every LLM and Agent.</text>
+
+      <g transform="translate(660,40)">
+        
+        <g transform="translate(220,40)">
+          <path d="M 0 0 L 80 -20 L 160 0 L 160 80 C 160 130, 120 160, 80 170 C 40 160, 0 130, 0 80 Z" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-width="2"></path>
+          <path d="M 56 80 L 76 100 L 110 64" stroke="#10D9A0" stroke-width="3" fill="none" stroke-linecap="round"></path>
+        </g>
+        
+        <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11">
+          <g transform="translate(0,40)">
+            <rect width="160" height="32" rx="6" fill="#EF4444" fill-opacity="0.1" stroke="#EF4444" stroke-opacity="0.5"></rect>
+            <text x="12" y="20" fill="#EF4444">prompt injection</text>
+          </g>
+          <g transform="translate(0,90)">
+            <rect width="160" height="32" rx="6" fill="#EF4444" fill-opacity="0.1" stroke="#EF4444" stroke-opacity="0.5"></rect>
+            <text x="12" y="20" fill="#EF4444">nsfw content</text>
+          </g>
+          <g transform="translate(0,140)">
+            <rect width="160" height="32" rx="6" fill="#EF4444" fill-opacity="0.1" stroke="#EF4444" stroke-opacity="0.5"></rect>
+            <text x="12" y="20" fill="#EF4444">leaked secrets</text>
+          </g>
+          <path d="M 162 56 L 220 100" stroke="#EF4444" stroke-width="1.5" class="ff-flow" fill="none"></path>
+          <path d="M 162 106 L 220 110" stroke="#EF4444" stroke-width="1.5" class="ff-flow" fill="none"></path>
+          <path d="M 162 156 L 220 130" stroke="#EF4444" stroke-width="1.5" class="ff-flow" fill="none"></path>
+        </g>
+        
+        <g transform="translate(390,90)">
+          <text font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11" fill="#10D9A0">✓ safe pass</text>
+          <path d="M 0 14 L 80 14" stroke="#10D9A0" stroke-width="2" class="ff-flow" fill="none"></path>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s09">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">09 · BUILT-IN RAG</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Drop docs.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">Search them.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Insert + semantic search on managed QDrant — two nodes, no glue code.</text>
+
+      <g transform="translate(660,40)">
+        
+        <g transform="translate(0,30)">
+          <g><rect width="60" height="80" rx="6" fill="#0F1320" stroke="#22D3EE"></rect><text x="30" y="46" text-anchor="middle" font-size="11" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">PDF</text></g>
+          <g transform="translate(0,90)"><rect width="60" height="80" rx="6" fill="#0F1320" stroke="#22D3EE"></rect><text x="30" y="46" text-anchor="middle" font-size="11" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">MD</text></g>
+        </g>
+        
+        <g transform="translate(160,80)">
+          <ellipse cx="60" cy="0" rx="60" ry="14" fill="#0F1320" stroke="#22D3EE"></ellipse>
+          <path d="M 0 0 L 0 80 C 0 90, 30 96, 60 96 C 90 96, 120 90, 120 80 L 120 0" fill="#0F1320" stroke="#22D3EE"></path>
+          <ellipse cx="60" cy="40" rx="60" ry="14" fill="none" stroke="#22D3EE" stroke-opacity="0.4"></ellipse>
+          <text x="60" y="45" text-anchor="middle" font-size="11" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">Qdrant</text>
+        </g>
+        
+        <g transform="translate(340,80)">
+          <rect width="140" height="40" rx="8" fill="#0A0E1A" stroke="#22D3EE"></rect>
+          <text x="70" y="25" text-anchor="middle" font-size="12" fill="#E5E7EB">&#34;refund policy&#34;</text>
+        </g>
+        
+        <g transform="translate(340,140)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="10">
+          <g><rect width="140" height="22" rx="4" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-opacity="0.4"></rect><text x="8" y="15" fill="#10D9A0">0.92 · sec 4</text></g>
+          <g transform="translate(0,28)"><rect width="140" height="22" rx="4" fill="#10D9A0" fill-opacity="0.08" stroke="#10D9A0" stroke-opacity="0.3"></rect><text x="8" y="15" fill="#10D9A0">0.81 · sec 7</text></g>
+          <g transform="translate(0,56)"><rect width="140" height="22" rx="4" fill="#10D9A0" fill-opacity="0.06" stroke="#10D9A0" stroke-opacity="0.25"></rect><text x="8" y="15" fill="#10D9A0">0.74 · sec 2</text></g>
+        </g>
+        <path d="M 60 110 L 160 100" stroke="#22D3EE" stroke-width="1.5" class="ff-flow" fill="none"></path>
+        <path d="M 280 100 L 340 100" stroke="#22D3EE" stroke-width="1.5" class="ff-flow" fill="none"></path>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s10">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#A78BFA" letter-spacing="2">10 · MCP SUPPORT</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Speak MCP</text>
+      <text y="124" font-size="64" font-weight="800" fill="#A78BFA" letter-spacing="-2">both ways.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Connect Agent nodes to any server. Expose your workflow as one.</text>
+
+      <g transform="translate(660,30)">
+        
+        <g transform="translate(220,140)">
+          <rect x="-60" y="-30" width="120" height="60" rx="12" fill="#0F1320" stroke="#A78BFA" stroke-width="1.5"></rect>
+          <rect x="-60" y="-30" width="120" height="3" rx="1.5" fill="#A78BFA"></rect>
+          <text y="6" text-anchor="middle" font-size="14" fill="#F3F4F6" font-weight="700">heym</text>
+        </g>
+        
+        <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11">
+          <g transform="translate(0,40)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="60" y="20" text-anchor="middle" fill="#22D3EE">github mcp</text></g>
+          <g transform="translate(0,90)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="60" y="20" text-anchor="middle" fill="#22D3EE">notion mcp</text></g>
+          <g transform="translate(0,140)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#22D3EE"></rect><text x="60" y="20" text-anchor="middle" fill="#22D3EE">stripe mcp</text></g>
+        </g>
+        
+        <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11">
+          <g transform="translate(320,40)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#10D9A0"></rect><text x="60" y="20" text-anchor="middle" fill="#10D9A0">claude desktop</text></g>
+          <g transform="translate(320,90)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#10D9A0"></rect><text x="60" y="20" text-anchor="middle" fill="#10D9A0">cursor</text></g>
+          <g transform="translate(320,140)"><rect width="120" height="32" rx="8" fill="#0A0E1A" stroke="#10D9A0"></rect><text x="60" y="20" text-anchor="middle" fill="#10D9A0">your client</text></g>
+        </g>
+        
+        <g fill="none" stroke-width="1.5">
+          <path d="M 120 56 L 160 130" stroke="#22D3EE" class="ff-flow"></path>
+          <path d="M 120 106 L 160 140" stroke="#22D3EE" class="ff-flow"></path>
+          <path d="M 120 156 L 160 150" stroke="#22D3EE" class="ff-flow"></path>
+          <path d="M 280 130 L 320 56" stroke="#10D9A0" class="ff-flow"></path>
+          <path d="M 280 140 L 320 106" stroke="#10D9A0" class="ff-flow"></path>
+          <path d="M 280 150 L 320 156" stroke="#10D9A0" class="ff-flow"></path>
+        </g>
+        <text x="60" y="200" text-anchor="middle" font-size="10" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">CLIENT MODE</text>
+        <text x="380" y="200" text-anchor="middle" font-size="10" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;,monospace">SERVER MODE</text>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s11">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">11 · PORTAL</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Any workflow,</text>
+      <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">a chat UI.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Public at /chat/{slug} — streaming, file uploads, no frontend code.</text>
+
+      <g transform="translate(660,30)">
+        
+        <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+        <rect width="500" height="36" rx="14" fill="#151B2E"></rect>
+        <rect y="20" width="500" height="16" fill="#151B2E"></rect>
+        <circle cx="14" cy="18" r="4" fill="#EF4444"></circle>
+        <circle cx="28" cy="18" r="4" fill="#F59E0B"></circle>
+        <circle cx="42" cy="18" r="4" fill="#10D9A0"></circle>
+        <rect x="60" y="8" width="380" height="20" rx="10" fill="#0A0E1A"></rect>
+        <text x="74" y="22" font-size="11" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">heym.run/chat/support</text>
+        
+        <g transform="translate(20,60)">
+          <rect width="280" height="36" rx="12" fill="#22D3EE" fill-opacity="0.12"></rect>
+          <text x="14" y="22" font-size="12" fill="#E5E7EB">where&#39;s my order #4128?</text>
+        </g>
+        <g transform="translate(180,110)">
+          <rect width="280" height="80" rx="12" fill="#A78BFA" fill-opacity="0.12"></rect>
+          <text x="14" y="22" font-size="12" fill="#A78BFA" font-weight="600">support</text>
+          <text x="14" y="42" font-size="12" fill="#E5E7EB">Out for delivery. ETA today,</text>
+          <text x="14" y="60" font-size="12" fill="#E5E7EB">3:40pm. Tracking: 1Z9...</text>
+        </g>
+        
+        <g transform="translate(20,260)">
+          <rect width="460" height="40" rx="20" fill="#0A0E1A" stroke="#1F2937"></rect>
+          <text x="20" y="25" font-size="12" fill="#6B7280">message…</text>
+          <circle cx="440" cy="20" r="6" fill="#10D9A0" class="ff-pulse"></circle>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s12">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">12 · WEBHOOK · SSE STREAMING</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">cURL it.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Watch live.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">/execute/stream emits per-node start, complete, and result events.</text>
+
+      <g transform="translate(660,30)">
+        <rect width="500" height="320" rx="14" fill="#0A0E1A" stroke="#1F2937"></rect>
+        <rect width="500" height="28" rx="14" fill="#151B2E"></rect>
+        <rect y="14" width="500" height="14" fill="#151B2E"></rect>
+        <text x="20" y="20" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">terminal · sse</text>
+        <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="12" transform="translate(20,60)">
+          <text fill="#10D9A0">$ curl --no-buffer https://heym.run/api/wf/.../execute/stream</text>
+          <text y="32" fill="#22D3EE">event: execution_started</text>
+          <text y="60" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[Input]</tspan></text>
+          <text y="78" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[Input] 12ms</tspan></text>
+          <text y="106" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[LLM]</tspan></text>
+          <text y="134" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[RAG]</tspan></text>
+          <text y="162" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[RAG] 84ms</tspan></text>
+          <text y="190" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[LLM] 1.4s</tspan></text>
+          <text y="218" fill="#22D3EE">event: execution_complete</text>
+          <rect x="195" y="208" width="8" height="14" fill="#22D3EE" class="ff-blink"></rect>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s13">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#7C3AED" letter-spacing="2">13 · DATA TABLES · TEMPLATES</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Tables &amp; starts</text>
+      <text y="124" font-size="64" font-weight="800" fill="#7C3AED" letter-spacing="-2">included.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Structured storage out of the box. Pre-built workflows to launch from.</text>
+
+      <g transform="translate(660,30)">
+        
+        <g>
+          <rect width="240" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+          <text x="16" y="28" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">customers</text>
+          <line x1="0" y1="40" x2="240" y2="40" stroke="#1F2937"></line>
+          <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11">
+            <text x="16" y="62" fill="#A78BFA">id</text>
+            <text x="80" y="62" fill="#A78BFA">name</text>
+            <text x="170" y="62" fill="#A78BFA">tier</text>
+            <line x1="0" y1="74" x2="240" y2="74" stroke="#1F2937"></line>
+            <text x="16" y="92" fill="#9CA3AF">001</text>
+            <text x="80" y="92" fill="#E5E7EB">acme</text>
+            <text x="170" y="92" fill="#10D9A0">pro</text>
+            <text x="16" y="112" fill="#9CA3AF">002</text>
+            <text x="80" y="112" fill="#E5E7EB">orbit</text>
+            <text x="170" y="112" fill="#22D3EE">free</text>
+            <text x="16" y="132" fill="#9CA3AF">003</text>
+            <text x="80" y="132" fill="#E5E7EB">north</text>
+            <text x="170" y="132" fill="#F59E0B">trial</text>
+            <text x="16" y="152" fill="#9CA3AF">004</text>
+            <text x="80" y="152" fill="#E5E7EB">delta</text>
+            <text x="170" y="152" fill="#10D9A0">pro</text>
+            <text x="16" y="172" fill="#9CA3AF">005</text>
+            <text x="80" y="172" fill="#E5E7EB">nova</text>
+            <text x="170" y="172" fill="#10D9A0">pro</text>
+            <text x="16" y="192" fill="#9CA3AF">006</text>
+            <text x="80" y="192" fill="#E5E7EB">linear</text>
+            <text x="170" y="192" fill="#22D3EE">free</text>
+            <text x="16" y="212" fill="#9CA3AF">007</text>
+            <text x="80" y="212" fill="#E5E7EB">atlas</text>
+            <text x="170" y="212" fill="#F59E0B">trial</text>
+            <text x="16" y="232" fill="#9CA3AF">008</text>
+            <text x="80" y="232" fill="#E5E7EB">ridge</text>
+            <text x="170" y="232" fill="#10D9A0">pro</text>
+          </g>
+          <rect x="0" y="80" width="240" height="20" fill="#7C3AED" fill-opacity="0.1" class="ff-pulse"></rect>
+        </g>
+        
+        <g transform="translate(260,0)">
+          <text x="0" y="22" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">START FROM TEMPLATE</text>
+          <g transform="translate(0,40)"><rect width="240" height="60" rx="10" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.5"></rect><rect width="3" height="60" rx="1.5" fill="#F59E0B"></rect><text x="16" y="28" font-size="13" fill="#F3F4F6" font-weight="600">Email triage</text><text x="16" y="48" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">imap → llm → slack</text></g>
+          <g transform="translate(0,116)"><rect width="240" height="60" rx="10" fill="#0F1320" stroke="#22D3EE" stroke-opacity="0.5"></rect><rect width="3" height="60" rx="1.5" fill="#22D3EE"></rect><text x="16" y="28" font-size="13" fill="#F3F4F6" font-weight="600">RAG chatbot</text><text x="16" y="48" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">rag → agent → portal</text></g>
+          <g transform="translate(0,192)"><rect width="240" height="60" rx="10" fill="#0F1320" stroke="#10D9A0" stroke-opacity="0.5"></rect><rect width="3" height="60" rx="1.5" fill="#10D9A0"></rect><text x="16" y="28" font-size="13" fill="#F3F4F6" font-weight="600">Lead scorer</text><text x="16" y="48" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">crawler → llm → table</text></g>
+          <g transform="translate(0,268)"><rect width="240" height="40" rx="8" fill="#7C3AED" fill-opacity="0.15" stroke="#7C3AED"></rect><text x="120" y="26" text-anchor="middle" font-size="12" fill="#A78BFA" font-weight="600">+ start blank</text></g>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s14">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">14 · PARALLEL · AUTO HEAL</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">It runs wide.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Heals itself.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Independent nodes go concurrent. Broken Playwright selectors? AI rewrites them.</text>
+
+      <g transform="translate(660,30)">
+        
+        <g>
+          <text font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">PARALLEL DAG</text>
+          <g transform="translate(0,20)">
+            <rect width="80" height="30" rx="6" fill="#0F1320" stroke="#A78BFA"></rect>
+            <text x="40" y="20" text-anchor="middle" font-size="11" fill="#F3F4F6">Input</text>
+          </g>
+          <g transform="translate(120,0)"><rect width="80" height="30" rx="6" fill="#0F1320" stroke="#22D3EE"></rect><text x="40" y="20" text-anchor="middle" font-size="11" fill="#F3F4F6">A</text></g>
+          <g transform="translate(120,40)"><rect width="80" height="30" rx="6" fill="#0F1320" stroke="#22D3EE"></rect><text x="40" y="20" text-anchor="middle" font-size="11" fill="#F3F4F6">B</text></g>
+          <g transform="translate(120,80)"><rect width="80" height="30" rx="6" fill="#0F1320" stroke="#22D3EE"></rect><text x="40" y="20" text-anchor="middle" font-size="11" fill="#F3F4F6">C</text></g>
+          <g transform="translate(240,40)"><rect width="80" height="30" rx="6" fill="#0F1320" stroke="#10D9A0"></rect><text x="40" y="20" text-anchor="middle" font-size="11" fill="#F3F4F6">Merge</text></g>
+          <g fill="none" stroke-width="1.5" stroke="#22D3EE">
+            <path d="M 80 35 L 120 15" class="ff-flow"></path>
+            <path d="M 80 35 L 120 55" class="ff-flow"></path>
+            <path d="M 80 35 L 120 95" class="ff-flow"></path>
+            <path d="M 200 15 L 240 55" class="ff-flow"></path>
+            <path d="M 200 55 L 240 55" class="ff-flow"></path>
+            <path d="M 200 95 L 240 55" class="ff-flow"></path>
+          </g>
+        </g>
+        
+        <g transform="translate(0,170)">
+          <text font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">AUTO HEAL · PLAYWRIGHT</text>
+          <g transform="translate(0,16)">
+            <rect width="460" height="38" rx="8" fill="#0A0E1A" stroke="#EF4444" stroke-opacity="0.5"></rect>
+            <text x="14" y="24" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11" fill="#EF4444">✗ click(&#39;#submit-btn-old&#39;)</text>
+          </g>
+          <text x="14" y="80" font-size="11" fill="#F59E0B" font-family="&#39;JetBrains Mono&#39;,monospace">↳ AI inspects DOM…</text>
+          <g transform="translate(0,90)">
+            <rect width="460" height="38" rx="8" fill="#0A0E1A" stroke="#10D9A0" stroke-opacity="0.5"></rect>
+            <text x="14" y="24" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11" fill="#10D9A0">✓ click(&#39;button[data-action=submit]&#39;)</text>
+            <rect class="ff-fill" x="0" y="0" height="38" rx="8" fill="#10D9A0" fill-opacity="0.08"></rect>
+          </g>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s15">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">15 · LLM TRACES · EVALS</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Every call.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">Every test.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Full request, response, tool calls, timing — and a one-click test suite.</text>
+
+      <g transform="translate(660,30)">
+        
+        <g>
+          <rect width="240" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+          <text x="16" y="26" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">TRACES</text>
+          <g transform="translate(16,46)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="10">
+            <rect x="0" y="0" width="200" height="14" rx="3" fill="#22D3EE" fill-opacity="0.4"></rect>
+            <text x="0" y="-2" fill="#9CA3AF">agent.plan · 0.4s</text>
+            <rect x="20" y="34" width="160" height="14" rx="3" fill="#A78BFA" fill-opacity="0.4"></rect>
+            <text x="20" y="32" fill="#9CA3AF">tool.search · 0.3s</text>
+            <rect x="20" y="68" width="100" height="14" rx="3" fill="#A78BFA" fill-opacity="0.4"></rect>
+            <text x="20" y="66" fill="#9CA3AF">tool.fetch · 0.2s</text>
+            <rect x="0" y="102" width="180" height="14" rx="3" fill="#10D9A0" fill-opacity="0.4"></rect>
+            <text x="0" y="100" fill="#9CA3AF">agent.write · 0.6s</text>
+            <text x="0" y="148" fill="#22D3EE">total: 1.5s · 4 spans</text>
+            <text x="0" y="166" fill="#10D9A0">tokens: 1,840</text>
+          </g>
+        </g>
+        
+        <g transform="translate(260,0)">
+          <rect width="240" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
+          <text x="16" y="26" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">EVALS</text>
+          <g transform="translate(16,260)">
+            <rect class="ff-bar" x="0" y="-100" width="32" height="100" rx="4" fill="#10D9A0"></rect>
+            <rect class="ff-bar b2" x="44" y="-140" width="32" height="140" rx="4" fill="#10D9A0"></rect>
+            <rect class="ff-bar b3" x="88" y="-80" width="32" height="80" rx="4" fill="#F59E0B"></rect>
+            <rect class="ff-bar b4" x="132" y="-160" width="32" height="160" rx="4" fill="#10D9A0"></rect>
+            <rect x="176" y="-120" width="32" height="120" rx="4" fill="#10D9A0"></rect>
+            <line x1="-4" y1="2" x2="216" y2="2" stroke="#374151"></line>
+          </g>
+          <text x="16" y="56" font-size="13" fill="#F3F4F6" font-weight="700">42 / 45 pass</text>
+          <text x="16" y="74" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">93.3% · last run 12m ago</text>
+          <g transform="translate(16,90)">
+            <rect width="80" height="22" rx="4" fill="#10D9A0" fill-opacity="0.15" stroke="#10D9A0" stroke-opacity="0.5"></rect>
+            <text x="40" y="15" text-anchor="middle" font-size="11" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;,monospace">▸ run all</text>
+          </g>
+        </g>
+      </g>
+    </g>
+
+    
+    <g class="ff-scene s16">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#A78BFA" letter-spacing="2">16 · SELF-HOSTED · COMMAND PALETTE</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Your data.</text>
+      <text y="124" font-size="64" font-weight="800" fill="url(#ff-title-grad)" letter-spacing="-2">Your runtime.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">One container. No telemetry. ⌘K for everything else.</text>
+
+      <g transform="translate(660,40)">
+        
+        <g>
+          <rect width="500" height="120" rx="14" fill="#0A0E1A" stroke="#1F2937"></rect>
+          <rect width="500" height="28" rx="14" fill="#151B2E"></rect>
+          <rect y="14" width="500" height="14" fill="#151B2E"></rect>
+          <circle cx="14" cy="14" r="4" fill="#EF4444"></circle>
+          <circle cx="28" cy="14" r="4" fill="#F59E0B"></circle>
+          <circle cx="42" cy="14" r="4" fill="#10D9A0"></circle>
+          <text x="20" y="62" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#10D9A0">$</tspan> <tspan fill="#E5E7EB">docker compose up</tspan></text>
+          <text x="20" y="86" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#22D3EE">▸</tspan> <tspan fill="#9CA3AF">heym ready on :4017</tspan></text>
+          <text x="20" y="106" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#10D9A0">✓</tspan> <tspan fill="#10D9A0">no telemetry · no run limits</tspan></text>
+        </g>
+        
+        <g transform="translate(0,140)">
+          <rect width="500" height="160" rx="14" fill="#0F1320" stroke="#A78BFA" stroke-opacity="0.5"></rect>
+          <rect width="500" height="40" rx="14" fill="#0A0E1A"></rect>
+          <rect y="20" width="500" height="20" fill="#0A0E1A"></rect>
+          <text x="20" y="26" font-size="13" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">⌘K</text>
+          <text x="56" y="26" font-size="13" fill="#E5E7EB">jump to workflow…</text>
+          <rect x="190" y="14" width="2" height="14" fill="#A78BFA" class="ff-blink"></rect>
+          <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="12" transform="translate(20,60)">
+            <text fill="#A78BFA">▸ run workflow</text>
+            <text x="200" fill="#6B7280">⏎</text>
+            <text y="24" fill="#9CA3AF">▸ open traces</text>
+            <text y="48" fill="#9CA3AF">▸ new credential</text>
+            <text y="72" fill="#9CA3AF">▸ go to evals</text>
+          </g>
+        </g>
+      </g>
+    </g>
+
+  </g>
+
+  
+  <g transform="translate(64,680)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="11">
+    <text fill="#6B7280">heym · source-available · self-hosted</text>
+    <text x="1152" text-anchor="end" fill="#A78BFA">→ heym.run</text>
+  </g>
+</svg>
