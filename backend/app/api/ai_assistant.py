@@ -164,8 +164,9 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
         embedded = (
             f"{message}\n\n"
             f"[ATTACHED IMAGE: {attachment.name}]\n"
-            f"(The image data is available server-side and will be automatically injected "
-            f"into the matching image/base64 workflow input field when you call execute_workflow.)"
+            f"IMPORTANT: Do NOT include image data or any image field in the workflow inputs — "
+            f"the image is handled server-side automatically. "
+            f"Only include the non-image input fields (e.g. text, query, instruction) in your execute_workflow call."
         )
         return {"role": "user", "content": embedded}
     embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
@@ -1452,7 +1453,7 @@ async def stream_dashboard_chat(
                     if attachment is not None and w is not None:
                         field_keys = [f.key for f in extract_input_fields_from_workflow(w)]
                         inject_key = _find_injection_field(field_keys, attachment.kind)
-                        if inject_key and inject_key not in inputs:
+                        if inject_key:
                             inputs[inject_key] = attachment.content
                     result = await run_execute_workflow_tool(
                         db,
