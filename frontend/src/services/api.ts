@@ -1146,6 +1146,12 @@ export interface FixTranscriptionResponse {
   fixed_text: string;
 }
 
+export interface FileAttachmentPayload {
+  name: string;
+  kind: "text" | "image" | "pdf";
+  content: string;
+}
+
 export interface DashboardChatRequest {
   credentialId: string;
   model: string;
@@ -1156,6 +1162,7 @@ export interface DashboardChatRequest {
   userRules?: string | null;
   /** Client local date and time (one line), sent at request time. */
   clientLocalDatetime?: string | null;
+  attachment?: FileAttachmentPayload;
 }
 
 export interface DashboardChatPendingReview {
@@ -1583,6 +1590,15 @@ export const aiApi = {
           : {}),
         ...(request.clientLocalDatetime?.trim()
           ? { client_local_datetime: request.clientLocalDatetime.trim() }
+          : {}),
+        ...(request.attachment
+          ? {
+              attachment: {
+                name: request.attachment.name,
+                kind: request.attachment.kind,
+                content: request.attachment.content,
+              },
+            }
           : {}),
       }),
       signal,
