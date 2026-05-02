@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 520" width="1280" height="520" fill="none" font-family="Inter, system-ui, sans-serif">
+  
+  <defs>
+    <style>
+      .pkt { offset-distance: 0%; animation: wfPacket 4.2s linear infinite; }
+      .pkt-2 { animation-duration: 3.6s; }
+      .pkt-d1 { animation-delay: 0s; }
+      .pkt-d2 { animation-delay: 0.8s; }
+      .pkt-d3 { animation-delay: 1.6s; }
+      .agent-pulse { opacity: 0; animation: wfAgentPulse 2.4s ease-in-out infinite; }
+      .dot1, .dot2, .dot3 { animation: wfDot 1.2s ease-in-out infinite; }
+      .dot2 { animation-delay: 0.18s; }
+      .dot3 { animation-delay: 0.36s; }
+      .par { animation: wfParallel 2.2s ease-in-out infinite; }
+      .hitl-edge { animation: wfDash 1.2s linear infinite; }
+      .hitl-pkt { offset-distance: 0%; animation: wfHitlPacket 2.4s linear infinite; }
+      @keyframes wfPacket { from { offset-distance: 0%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } to { offset-distance: 100%; opacity: 0; } }
+      @keyframes wfAgentPulse { 0%, 100% { opacity: 0; } 45% { opacity: 0.14; } }
+      @keyframes wfDot { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+      @keyframes wfParallel { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+      @keyframes wfDash { to { stroke-dashoffset: -16; } }
+      @keyframes wfHitlPacket { 0% { offset-distance: 0%; opacity: 0; } 18% { opacity: 1; } 82% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
+    </style>
+    <linearGradient id="wf-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0A0E1A"></stop><stop offset="100%" stop-color="#0F1320"></stop></linearGradient>
+    <pattern id="wf-grid" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#1F2937"></circle></pattern>
+    <filter id="wf-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"></feGaussianBlur><feMerge><feMergeNode></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+    <linearGradient id="wf-edge-violet" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#7C3AED" stop-opacity="0.2"></stop><stop offset="50%" stop-color="#A78BFA" stop-opacity="1"></stop><stop offset="100%" stop-color="#22D3EE" stop-opacity="0.4"></stop></linearGradient>
+    <linearGradient id="wf-edge-cyan" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#22D3EE" stop-opacity="0.2"></stop><stop offset="100%" stop-color="#10D9A0" stop-opacity="1"></stop></linearGradient>
+  </defs>
+
+  <rect width="1280" height="520" fill="url(#wf-bg)"></rect>
+  <rect width="1280" height="520" fill="url(#wf-grid)"></rect>
+
+  <g transform="translate(24, 20)">
+    <rect width="1232" height="44" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <circle cx="20" cy="22" r="5" fill="#EF4444"></circle>
+    <circle cx="36" cy="22" r="5" fill="#F59E0B"></circle>
+    <circle cx="52" cy="22" r="5" fill="#10D9A0"></circle>
+    <text x="80" y="27" font-size="13" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">heym · workflow / customer-research-agent</text>
+    <g transform="translate(986, 10)">
+      <rect width="84" height="24" rx="6" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-opacity="0.35"></rect>
+      <text x="42" y="16" text-anchor="middle" font-size="10" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" class="par">‖ parallel</text>
+    </g>
+    <g transform="translate(1080, 10)"><rect width="60" height="24" rx="6" fill="#7C3AED"></rect><text x="30" y="16" text-anchor="middle" fill="white" font-size="11" font-weight="600">▶ Run</text></g>
+    <g transform="translate(1148, 10)"><rect width="64" height="24" rx="6" fill="#0F1320" stroke="#1F2937"></rect><text x="32" y="16" text-anchor="middle" fill="#9CA3AF" font-size="11" font-weight="500">Deploy</text></g>
+  </g>
+
+  
+  <g fill="none" stroke-width="2" stroke-linecap="round">
+    <path d="M 240 168 C 320 168, 340 220, 420 220" stroke="url(#wf-edge-violet)"></path>
+    <path d="M 580 220 C 660 220, 680 140, 760 140" stroke="url(#wf-edge-violet)"></path>
+    <path d="M 580 236 C 650 236, 690 320, 760 320" stroke="url(#wf-edge-cyan)"></path>
+    <path d="M 920 140 C 1000 140, 1016 220, 1070 220" stroke="url(#wf-edge-violet)"></path>
+    <path d="M 920 320 C 1000 320, 1016 220, 1070 220" stroke="url(#wf-edge-cyan)"></path>
+    <path class="hitl-edge" d="M 500 260 L 500 348" stroke="#F59E0B" stroke-opacity="0.75" stroke-dasharray="4 4"></path>
+  </g>
+
+  
+  <circle r="5" fill="#A78BFA" filter="url(#wf-glow)" class="pkt pkt-d1" style="offset-path: path(&#39;M 240 168 C 320 168, 340 220, 420 220&#39;);"></circle>
+  <circle r="5" fill="#A78BFA" filter="url(#wf-glow)" class="pkt pkt-d2" style="offset-path: path(&#39;M 240 168 C 320 168, 340 220, 420 220&#39;);"></circle>
+  <circle r="5" fill="#A78BFA" filter="url(#wf-glow)" class="pkt pkt-2 pkt-d1" style="offset-path: path(&#39;M 580 220 C 660 220, 680 140, 760 140&#39;);"></circle>
+  <circle r="4" fill="#22D3EE" filter="url(#wf-glow)" class="pkt pkt-2 pkt-d2" style="offset-path: path(&#39;M 580 236 C 650 236, 690 320, 760 320&#39;);"></circle>
+  <circle r="4" fill="#22D3EE" filter="url(#wf-glow)" class="pkt pkt-2 pkt-d3" style="offset-path: path(&#39;M 580 236 C 650 236, 690 320, 760 320&#39;);"></circle>
+  <circle r="5" fill="#A78BFA" filter="url(#wf-glow)" class="pkt pkt-d2" style="offset-path: path(&#39;M 920 140 C 1000 140, 1016 220, 1070 220&#39;);"></circle>
+  <circle r="4" fill="#10D9A0" filter="url(#wf-glow)" class="pkt pkt-d3" style="offset-path: path(&#39;M 920 320 C 1000 320, 1016 220, 1070 220&#39;);"></circle>
+  <circle r="4" fill="#F59E0B" filter="url(#wf-glow)" class="hitl-pkt" style="offset-path: path(&#39;M 500 260 L 500 348&#39;);"></circle>
+
+  
+  <g transform="translate(120, 138)">
+    <rect width="120" height="60" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="120" height="6" rx="3" fill="#10D9A0"></rect>
+    <circle cx="20" cy="36" r="10" fill="#10D9A0" fill-opacity="0.15"></circle>
+    <path d="M 16 32 L 24 36 L 16 40 Z" fill="#10D9A0"></path>
+    <text x="38" y="32" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">TRIGGER</text>
+    <text x="38" y="46" font-size="13" fill="#F3F4F6" font-weight="600">Webhook</text>
+    <circle cx="120" cy="30" r="4" fill="#7C3AED"></circle>
+  </g>
+
+  
+  <g transform="translate(420, 180)">
+    <rect width="160" height="80" rx="12" fill="#0F1320" stroke="#7C3AED" stroke-width="1.5"></rect>
+    <rect width="160" height="6" rx="3" fill="#7C3AED"></rect>
+    <rect width="160" height="80" rx="12" fill="#7C3AED" class="agent-pulse"></rect>
+    <circle cx="20" cy="32" r="12" fill="#7C3AED" fill-opacity="0.18"></circle>
+    <path d="M 14 28 L 14 36 M 26 28 L 26 36 M 17 25 L 23 25 M 17 39 L 23 39" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round"></path>
+    <circle cx="20" cy="32" r="3" fill="#A78BFA"></circle>
+    <text x="40" y="28" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">AGENT</text>
+    <text x="40" y="44" font-size="14" fill="#F3F4F6" font-weight="600">Research Agent</text>
+    <text x="40" y="60" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">tools · memory</text>
+    <g transform="translate(132, 60)">
+      <circle cx="0" cy="0" r="2" fill="#10D9A0" class="dot1"></circle>
+      <circle cx="6" cy="0" r="2" fill="#10D9A0" class="dot2"></circle>
+      <circle cx="12" cy="0" r="2" fill="#10D9A0" class="dot3"></circle>
+    </g>
+    <circle cx="0" cy="40" r="4" fill="#7C3AED"></circle>
+    <circle cx="160" cy="32" r="4" fill="#A78BFA"></circle>
+    <circle cx="160" cy="56" r="4" fill="#22D3EE"></circle>
+  </g>
+
+  
+  <g transform="translate(760, 100)">
+    <rect width="160" height="72" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="160" height="6" rx="3" fill="#A78BFA"></rect>
+    <circle cx="20" cy="36" r="12" fill="#A78BFA" fill-opacity="0.18"></circle>
+    <text x="20" y="40" text-anchor="middle" fill="#A78BFA" font-size="14" font-weight="700" font-family="&#39;JetBrains Mono&#39;, monospace">∑</text>
+    <text x="40" y="32" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">LLM</text>
+    <text x="40" y="48" font-size="13" fill="#F3F4F6" font-weight="600">Claude Sonnet 4</text>
+    <text x="40" y="62" font-size="10.5" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">temp 0.2 · stream</text>
+    <circle cx="0" cy="40" r="4" fill="#A78BFA"></circle>
+    <circle cx="160" cy="40" r="4" fill="#A78BFA"></circle>
+  </g>
+
+  
+  <g transform="translate(760, 290)">
+    <rect width="160" height="72" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="160" height="6" rx="3" fill="#22D3EE"></rect>
+    <g transform="translate(14, 24)">
+      <rect width="20" height="20" rx="5" fill="#22D3EE" fill-opacity="0.18"></rect>
+      <path d="M 5 10 L 9 14 L 15 6" stroke="#22D3EE" stroke-width="2" fill="none" stroke-linecap="round"></path>
+    </g>
+    <text x="42" y="32" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">MCP TOOLS</text>
+    <text x="42" y="48" font-size="13" fill="#F3F4F6" font-weight="600">Notion · Slack</text>
+    <text x="42" y="62" font-size="10.5" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">+ web_search</text>
+    <circle cx="0" cy="30" r="4" fill="#22D3EE"></circle>
+    <circle cx="160" cy="30" r="4" fill="#22D3EE"></circle>
+  </g>
+
+  
+  <g transform="translate(1070, 180)">
+    <rect width="176" height="80" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="176" height="6" rx="3" fill="#10D9A0"></rect>
+    <g transform="translate(14, 24)">
+      <ellipse cx="10" cy="4" rx="9" ry="3" fill="none" stroke="#10D9A0" stroke-width="1.5"></ellipse>
+      <path d="M 1 4 L 1 14 C 1 16, 5 17, 10 17 C 15 17, 19 16, 19 14 L 19 4" fill="none" stroke="#10D9A0" stroke-width="1.5"></path>
+      <ellipse cx="10" cy="11" rx="9" ry="3" fill="none" stroke="#10D9A0" stroke-width="1.5" stroke-opacity="0.6"></ellipse>
+    </g>
+    <text x="42" y="32" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">MEMORY</text>
+    <text x="42" y="48" font-size="13" fill="#F3F4F6" font-weight="600">Knowledge Graph</text>
+    <text x="42" y="62" font-size="10" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">+ QDrant RAG</text>
+    <circle cx="0" cy="40" r="4" fill="#10D9A0"></circle>
+  </g>
+
+  
+  <g transform="translate(420, 348)">
+    <rect width="160" height="60" rx="12" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.5" stroke-dasharray="3 3"></rect>
+    <rect width="160" height="6" rx="3" fill="#F59E0B"></rect>
+    <g transform="translate(14, 22)">
+      <circle cx="10" cy="6" r="4" fill="none" stroke="#F59E0B" stroke-width="1.5"></circle>
+      <path d="M 2 22 C 2 16, 6 14, 10 14 C 14 14, 18 16, 18 22" fill="none" stroke="#F59E0B" stroke-width="1.5"></path>
+    </g>
+    <text x="42" y="28" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">HITL · APPROVAL</text>
+    <text x="42" y="44" font-size="13" fill="#F3F4F6" font-weight="600">Human Review</text>
+    <circle cx="80" cy="0" r="4" fill="#F59E0B"></circle>
+  </g>
+
+  <text x="655" y="292" font-size="10" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" class="par">tools</text>
+
+  <g transform="translate(24, 472)">
+    <rect width="1232" height="32" rx="8" fill="#0F1320" stroke="#1F2937"></rect>
+    <text x="16" y="20" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">
+      <tspan fill="#10D9A0">●</tspan> healthy <tspan fill="#6B7280" dx="12">·</tspan> <tspan dx="6">7 nodes</tspan> <tspan fill="#6B7280" dx="12">·</tspan> <tspan dx="6">2 parallel branches</tspan> <tspan fill="#6B7280" dx="12">·</tspan> <tspan dx="6">avg 1.84s</tspan> <tspan fill="#6B7280" dx="12">·</tspan> <tspan dx="6" fill="#A78BFA">trace #4f2c</tspan>
+    </text>
+    <text x="1216" y="20" text-anchor="end" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">Vue Flow · 30+ node types</text>
+  </g>
+</svg>

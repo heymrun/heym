@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" fill="none" font-family="Inter, system-ui, sans-serif">
+  
+  <defs>
+    <style>
+      .grid-stroke { stroke: #1F2937; opacity: 0.7; animation: gridFade 6s ease-in-out infinite; }
+      .orb-a { animation: orbDriftA 8s ease-in-out infinite; transform-origin: 120px 80px; }
+      .orb-b { animation: orbDriftB 9s ease-in-out infinite; transform-origin: 1180px 280px; }
+      .caret, .bcaret { animation: blink 1s steps(2, start) infinite; }
+      .typewipe { animation: revealCommand 5s steps(48, end) infinite; }
+      .term-line { animation: terminalLine 5s ease-in-out infinite; }
+      .l1 { animation-delay: 0.5s; }
+      .l2 { animation-delay: 0.9s; }
+      .l3 { animation-delay: 1.3s; }
+      .l4 { animation-delay: 1.7s; }
+      .l5 { animation-delay: 2.1s; }
+      .l6 { animation-delay: 2.5s; }
+      .live-dot { animation: livePulse 1.4s ease-in-out infinite; }
+      .gs-1 { animation: hueShiftA 5s ease-in-out infinite; }
+      .gs-2 { animation: hueShiftB 5s ease-in-out infinite; }
+      @keyframes gridFade { 50% { opacity: 1; } }
+      @keyframes orbDriftA { 50% { transform: translate(28px, 18px) scale(1.08); opacity: 0.85; } }
+      @keyframes orbDriftB { 50% { transform: translate(-24px, -18px) scale(1.06); opacity: 0.9; } }
+      @keyframes blink { 50% { opacity: 0; } }
+      @keyframes revealCommand { 0%, 12% { transform: translateX(0); } 55%, 82% { transform: translateX(900px); } 100% { transform: translateX(0); } }
+      @keyframes terminalLine { 0%, 18% { opacity: 0; transform: translateY(6px); } 28%, 78% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-3px); } }
+      @keyframes livePulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; r: 6px; } }
+      @keyframes hueShiftA { 50% { stop-color: #22D3EE; } }
+      @keyframes hueShiftB { 50% { stop-color: #10D9A0; } }
+    </style>
+    <linearGradient id="hero-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A0E1A"></stop>
+      <stop offset="100%" stop-color="#0F1320"></stop>
+    </linearGradient>
+    <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"></stop>
+      <stop offset="100%" stop-color="#6366F1"></stop>
+    </linearGradient>
+    <linearGradient id="hero-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#A78BFA" class="gs-1"></stop>
+      <stop offset="50%" stop-color="#22D3EE" class="gs-2"></stop>
+      <stop offset="100%" stop-color="#A78BFA" class="gs-3"></stop>
+    </linearGradient>
+    <radialGradient id="hero-orb-a"><stop offset="0%" stop-color="#7C3AED" stop-opacity="0.5"></stop><stop offset="100%" stop-color="#7C3AED" stop-opacity="0"></stop></radialGradient>
+    <radialGradient id="hero-orb-b"><stop offset="0%" stop-color="#22D3EE" stop-opacity="0.4"></stop><stop offset="100%" stop-color="#22D3EE" stop-opacity="0"></stop></radialGradient>
+    <pattern id="hero-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" class="grid-stroke" stroke-width="1"></path>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="360" fill="url(#hero-bg)"></rect>
+  <rect width="1280" height="360" fill="url(#hero-grid)"></rect>
+
+  <circle cx="120" cy="80" r="180" fill="url(#hero-orb-a)" class="orb-a"></circle>
+  <circle cx="1180" cy="280" r="200" fill="url(#hero-orb-b)" class="orb-b"></circle>
+
+  
+  <g transform="translate(64, 64) scale(2.5)">
+    <rect width="32" height="32" rx="8" fill="url(#logo-grad)"></rect>
+    <path d="M8 16h6M18 16h6M14 10v12M18 10v12" stroke="white" stroke-width="2" stroke-linecap="round"></path>
+  </g>
+
+  
+  <text x="180" y="140" font-size="80" font-weight="800" fill="url(#hero-grad)" font-family="Inter, system-ui, sans-serif" letter-spacing="-3">heym</text>
+  <rect class="caret" x="380" y="80" width="8" height="68" fill="#22D3EE"></rect>
+
+  
+  <g>
+    <text x="64" y="220" font-family="&#39;JetBrains Mono&#39;, ui-monospace, Menlo, monospace" font-size="18" fill="#9CA3AF">
+      <tspan fill="#10D9A0">$</tspan> heym <tspan fill="#A78BFA">--visual</tspan> <tspan fill="#A78BFA">--ai-native</tspan> <tspan fill="#A78BFA">--self-hosted</tspan>
+    </text>
+    <rect class="typewipe" x="64" y="200" width="900" height="32" fill="#0A0E1A"></rect>
+  </g>
+
+  
+  <g transform="translate(800, 60)" font-family="&#39;JetBrains Mono&#39;, ui-monospace, Menlo, monospace">
+    <rect width="416" height="220" rx="16" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="416" height="32" rx="16" fill="#151B2E"></rect>
+    <rect y="16" width="416" height="16" fill="#151B2E"></rect>
+    <circle cx="16" cy="16" r="5" fill="#EF4444"></circle>
+    <circle cx="32" cy="16" r="5" fill="#F59E0B"></circle>
+    <circle cx="48" cy="16" r="5" fill="#10D9A0"></circle>
+    <text x="208" y="20" text-anchor="middle" fill="#6B7280" font-size="11">heym ~ executing</text>
+
+    <g font-size="13">
+      <text x="20" y="60" class="term-line l1" fill="#9CA3AF" opacity="0">
+        <tspan fill="#10D9A0">▸</tspan> <tspan fill="#22D3EE">agent.run</tspan>(<tspan fill="#A78BFA">&#34;summarize&#34;</tspan>)
+      </text>
+      <text x="20" y="84" class="term-line l2" fill="#6B7280" opacity="0">  → tools: web_search, mcp.notion</text>
+      <text x="20" y="108" class="term-line l3" fill="#6B7280" opacity="0">  → memory: kg.heym/123</text>
+      <text x="20" y="132" class="term-line l4" fill="#9CA3AF" opacity="0">
+        <tspan fill="#10D9A0">▸</tspan> <tspan fill="#22D3EE">stream</tspan> ⏵ 184 tok/s
+      </text>
+      <text x="20" y="156" class="term-line l5" fill="#9CA3AF" opacity="0">
+        <tspan fill="#10D9A0">▸</tspan> <tspan fill="#22D3EE">trace</tspan> ⏵ 4 spans · 1.8s
+      </text>
+      <text x="20" y="180" class="term-line l6" fill="#10D9A0" opacity="0">✓ done</text>
+      <rect class="bcaret" x="62" y="170" width="8" height="14" fill="#10D9A0"></rect>
+    </g>
+  </g>
+
+  
+  <g transform="translate(64, 290)">
+    <g>
+      <rect width="148" height="32" rx="16" fill="#7C3AED" fill-opacity="0.12" stroke="#7C3AED" stroke-opacity="0.4"></rect>
+      <circle cx="14" cy="16" r="4" fill="#A78BFA" class="live-dot"></circle>
+      <text x="26" y="20" font-size="12" font-weight="600" fill="#A78BFA">SOURCE AVAILABLE</text>
+    </g>
+    <g transform="translate(160, 0)"><rect width="124" height="32" rx="16" fill="#22D3EE" fill-opacity="0.1" stroke="#22D3EE" stroke-opacity="0.35"></rect><text x="62" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#22D3EE">SELF-HOSTED</text></g>
+    <g transform="translate(296, 0)"><rect width="148" height="32" rx="16" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-opacity="0.35"></rect><text x="74" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#10D9A0">NO RUN LIMITS</text></g>
+    <g transform="translate(456, 0)"><rect width="180" height="32" rx="16" fill="#F59E0B" fill-opacity="0.1" stroke="#F59E0B" stroke-opacity="0.35"></rect><text x="90" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#F59E0B">30+ NODE TYPES · MCP</text></g>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <style>
+      rect { transform-origin: center; animation: logoGlow 2.8s ease-in-out infinite; }
+      path { stroke-dasharray: 10 6; animation: logoDash 2.4s linear infinite; }
+      @keyframes logoDash { to { stroke-dashoffset: -32; } }
+    </style>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8B5CF6"></stop>
+      <stop offset="100%" style="stop-color:#6366F1"></stop>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#grad)"></rect>
+  <path d="M8 16h6M18 16h6M14 10v12M18 10v12" stroke="white" stroke-width="2" stroke-linecap="round"></path>
+</svg>
