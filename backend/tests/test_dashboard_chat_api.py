@@ -2,7 +2,13 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.ai_assistant import DashboardChatRequest, dashboard_chat_stream, stream_dashboard_chat
+from app.api.ai_assistant import (
+    DashboardChatRequest,
+    FileAttachment,
+    _build_user_message,
+    dashboard_chat_stream,
+    stream_dashboard_chat,
+)
 from app.db.models import CredentialType
 from app.services.llm_trace import LLMTraceContext
 
@@ -362,3 +368,37 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 'data: {"type":"done"}\n\n',
             ],
         )
+
+
+class BuildUserMessageTests(unittest.TestCase):
+    def test_no_attachment_returns_string_content(self) -> None:
+        result = _build_user_message("Hello", None)
+        self.assertEqual(result, {"role": "user", "content": "Hello"})
+
+    def test_text_attachment_embeds_in_content(self) -> None:
+        attachment = FileAttachment(name="notes.txt", kind="text", content="line1\nline2")
+        result = _build_user_message("Summarize this", attachment)
+        self.assertEqual(result["role"], "user")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Summarize this", result["content"])
+        self.assertIn("[ATTACHED FILE: notes.txt]", result["content"])
+        self.assertIn("line1\nline2", result["content"])
+
+    def test_pdf_attachment_embeds_in_content(self) -> None:
+        attachment = FileAttachment(name="report.pdf", kind="pdf", content="Extracted text")
+        result = _build_user_message("Analyze this", attachment)
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("[ATTACHED FILE: report.pdf]", result["content"])
+        self.assertIn("Extracted text", result["content"])
+
+    def test_image_attachment_builds_multipart_content(self) -> None:
+        attachment = FileAttachment(
+            name="photo.png", kind="image", content="data:image/png;base64,abc123"
+        )
+        result = _build_user_message("Describe this", attachment)
+        self.assertEqual(result["role"], "user")
+        content = result["content"]
+        self.assertIsInstance(content, list)
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0], {"type": "text", "text": "Describe this"})
+        self.assertEqual(content[1], {"type": "image_url", "url": "data:image/png;base64,abc123"})

@@ -90,6 +90,12 @@ class AIAssistantRequest(BaseModel):
     ask_mode: bool = False
 
 
+class FileAttachment(BaseModel):
+    name: str
+    kind: Literal["text", "image", "pdf"]
+    content: str  # plain text for text/pdf, base64 data URL for images
+
+
 class DashboardChatRequest(BaseModel):
     credential_id: uuid.UUID
     model: str
@@ -119,6 +125,31 @@ def _get_dashboard_chat_node_label(
     if chat_surface == "documentation":
         return "Documentation Chat"
     return "Dashboard Chat"
+
+
+_ATTACHMENT_ROUTING_INSTRUCTIONS = (
+    "When the user has attached a file, route its content to the most appropriate "
+    "workflow input field when calling a workflow tool:\n"
+    '- Image attachment → fields named "image", "base64", "photo", "picture", or similar\n'
+    '- Text/PDF attachment → fields named "text", "document", "content", "file", "data", or similar\n'
+    "- If no dedicated field exists → embed the content in the primary message/query/input field"
+)
+
+
+def _build_user_message(message: str, attachment: FileAttachment | None) -> dict:
+    """Build the user role message dict, embedding attachment content when present."""
+    if attachment is None:
+        return {"role": "user", "content": message}
+    if attachment.kind == "image":
+        return {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": message},
+                {"type": "image_url", "url": attachment.content},
+            ],
+        }
+    embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
+    return {"role": "user", "content": embedded}
 
 
 def _load_agents_md_content() -> str:
