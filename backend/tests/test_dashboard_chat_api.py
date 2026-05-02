@@ -46,6 +46,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages
@@ -142,6 +143,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["trace_context"] = _trace_context
             yield 'data: {"type":"done"}\n\n'
@@ -250,6 +252,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["messages"] = messages
             yield 'data: {"type":"done"}\n\n'
@@ -322,6 +325,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             yield 'data: {"type":"step","label":"Searching documentation..."}\n\n'
             yield 'data: {"type":"done"}\n\n'
@@ -391,7 +395,7 @@ class BuildUserMessageTests(unittest.TestCase):
         self.assertIn("[ATTACHED FILE: report.pdf]", result["content"])
         self.assertIn("Extracted text", result["content"])
 
-    def test_image_attachment_embeds_as_text_block(self) -> None:
+    def test_image_attachment_embeds_metadata_only(self) -> None:
         attachment = FileAttachment(
             name="photo.png", kind="image", content="data:image/png;base64,abc123"
         )
@@ -400,7 +404,8 @@ class BuildUserMessageTests(unittest.TestCase):
         self.assertIsInstance(result["content"], str)
         self.assertIn("Describe this", result["content"])
         self.assertIn("[ATTACHED IMAGE: photo.png]", result["content"])
-        self.assertIn("data:image/png;base64,abc123", result["content"])
+        # base64 data must NOT appear in the LLM context to avoid context overflow
+        self.assertNotIn("data:image/png;base64,abc123", result["content"])
 
 
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -431,6 +436,7 @@ class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages

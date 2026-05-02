@@ -137,18 +137,38 @@ _ATTACHMENT_ROUTING_INSTRUCTIONS = (
 )
 
 
-def _build_user_message(message: str, attachment: FileAttachment | None) -> dict:
-    """Build the user role message dict, embedding attachment content when present.
+_IMAGE_FIELD_KEYWORDS = {"image", "base64", "photo", "picture", "img"}
+_TEXT_FIELD_KEYWORDS = {"text", "document", "content", "file", "data"}
 
-    All attachment kinds (including images) are embedded as a labelled text block so that
-    any LLM — including non-vision models used in dashboard chat — can read and route the
-    content to the correct workflow input field. Vision processing happens inside the
-    workflow's own LLM node, not in the dashboard chat LLM.
+
+def _find_injection_field(input_fields: list[str], kind: str) -> str | None:
+    """Return the best input field key to inject an attachment into, or None."""
+    keywords = _IMAGE_FIELD_KEYWORDS if kind == "image" else _TEXT_FIELD_KEYWORDS
+    for field in input_fields:
+        if any(kw in field.lower() for kw in keywords):
+            return field
+    return input_fields[0] if input_fields else None
+
+
+def _build_user_message(message: str, attachment: FileAttachment | None) -> dict:
+    """Build the user role message dict.
+
+    For text/PDF: embeds content inline so the LLM can use it directly.
+    For images: embeds only metadata (not the base64) to avoid context overflow on
+    non-vision models. The actual image bytes are auto-injected into the workflow input
+    field by the execute_workflow tool handler at call time.
     """
     if attachment is None:
         return {"role": "user", "content": message}
-    tag = "IMAGE" if attachment.kind == "image" else "FILE"
-    embedded = f"{message}\n\n[ATTACHED {tag}: {attachment.name}]\n{attachment.content}"
+    if attachment.kind == "image":
+        embedded = (
+            f"{message}\n\n"
+            f"[ATTACHED IMAGE: {attachment.name}]\n"
+            f"(The image data is available server-side and will be automatically injected "
+            f"into the matching image/base64 workflow input field when you call execute_workflow.)"
+        )
+        return {"role": "user", "content": embedded}
+    embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
     return {"role": "user", "content": embedded}
 
 
@@ -1256,6 +1276,7 @@ async def stream_dashboard_chat(
     public_base_url: str,
     trace_context: LLMTraceContext | None = None,
     cancel_event: Event | None = None,
+    attachment: FileAttachment | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content."""
     user_id = user.id
@@ -1414,6 +1435,7 @@ async def stream_dashboard_chat(
                 elif name == "execute_workflow":
                     workflow_id_str = args.get("workflow_id", "") or ""
                     step_label = "Running workflow..."
+                    w = None
                     try:
                         wid = uuid.UUID(workflow_id_str)
                         w = await get_workflow_for_user(db, wid, user_id)
@@ -1423,11 +1445,20 @@ async def stream_dashboard_chat(
                         pass
                     yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
                     step_start = time.time()
+                    inputs = dict(args.get("inputs") or {})
+                    # Auto-inject attachment content into the matching workflow input field.
+                    # The LLM only received metadata for images (no base64 in its context),
+                    # so we inject the actual content here before execution.
+                    if attachment is not None and w is not None:
+                        field_keys = [f.key for f in extract_input_fields_from_workflow(w)]
+                        inject_key = _find_injection_field(field_keys, attachment.kind)
+                        if inject_key and inject_key not in inputs:
+                            inputs[inject_key] = attachment.content
                     result = await run_execute_workflow_tool(
                         db,
                         user_id,
                         workflow_id_str,
-                        args.get("inputs") or {},
+                        inputs,
                         public_base_url,
                         cancel_event,
                     )
@@ -2100,6 +2131,7 @@ async def dashboard_chat_stream(
                 public_base_url,
                 trace_context,
                 cancel_event,
+                request.attachment,
             ):
                 if cancel_event.is_set():
                     break
