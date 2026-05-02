@@ -59,6 +59,7 @@ import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { nodeIcons } from "@/lib/nodeIcons";
 import { cn, formatDate } from "@/lib/utils";
+import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { credentialsApi, folderApi, templatesApi, workflowApi } from "@/services/api";
 import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
 import { useMediaQuery } from "@vueuse/core";
@@ -925,6 +926,7 @@ async function importZipFile(file: File): Promise<void> {
 
       const workflowName = parsed.name || fileName || "Imported Workflow";
       const sanitizedNodes = parsed.nodes.map((node) => sanitizeImportedNode(node, sanitizeContext));
+      const sanitizedEdges = normalizeWorkflowEdges(parsed.edges, sanitizedNodes);
 
       const workflow = await workflowApi.create({
         name: workflowName,
@@ -932,7 +934,7 @@ async function importZipFile(file: File): Promise<void> {
       });
       await workflowApi.update(workflow.id, {
         nodes: sanitizedNodes,
-        edges: parsed.edges || [],
+        edges: sanitizedEdges,
       });
 
       if (folderId) {
@@ -1008,6 +1010,7 @@ async function handleJsonDrop(event: DragEvent): Promise<void> {
       ),
     };
     const sanitizedNodes = parsed.nodes.map((node) => sanitizeImportedNode(node, sanitizeContext));
+    const sanitizedEdges = normalizeWorkflowEdges(parsed.edges, sanitizedNodes);
 
     const workflowName = parsed.name || fileName || "Imported Workflow";
     const workflow = await workflowApi.create({
@@ -1017,7 +1020,7 @@ async function handleJsonDrop(event: DragEvent): Promise<void> {
 
     await workflowApi.update(workflow.id, {
       nodes: sanitizedNodes,
-      edges: parsed.edges || [],
+      edges: sanitizedEdges,
     });
 
     showToast(`Workflow "${workflowName}" imported successfully`, "success");

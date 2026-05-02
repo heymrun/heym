@@ -21,6 +21,7 @@ import { buildSubAgentEdges, getSubAgentLabels } from "@/lib/agentCanvasLinks";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
+import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { evalsApi, templatesApi } from "@/services/api";
 import { useToast } from "@/composables/useToast";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -568,7 +569,11 @@ function handleDrop(event: DragEvent): void {
           return;
         }
         workflowStore.nodes.splice(0, workflowStore.nodes.length, ...parsed.nodes);
-        workflowStore.edges.splice(0, workflowStore.edges.length, ...(parsed.edges || []));
+        workflowStore.edges.splice(
+          0,
+          workflowStore.edges.length,
+          ...normalizeWorkflowEdges(parsed.edges, parsed.nodes),
+        );
         workflowStore.hasUnsavedChanges = true;
         setTimeout(() => fitView({ padding: 0.2 }), 100);
       } catch {

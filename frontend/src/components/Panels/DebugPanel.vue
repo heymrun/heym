@@ -27,6 +27,7 @@ import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/e
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
+import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { aiApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -2137,7 +2138,11 @@ function applyWorkflowChanges(showMessage = true): void {
   }
 
   workflowStore.nodes.splice(0, workflowStore.nodes.length, ...sanitizedNodes);
-  workflowStore.edges.splice(0, workflowStore.edges.length, ...edgesToApply);
+  workflowStore.edges.splice(
+    0,
+    workflowStore.edges.length,
+    ...normalizeWorkflowEdges(edgesToApply, sanitizedNodes),
+  );
   workflowStore.hasUnsavedChanges = true;
   workflowStore.clearExecution();
 
