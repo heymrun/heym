@@ -5,8 +5,9 @@
       .grid-stroke { stroke: #1F2937; opacity: 0.7; animation: gridFade 6s ease-in-out infinite; }
       .orb-a { animation: orbDriftA 8s ease-in-out infinite; transform-origin: 120px 80px; }
       .orb-b { animation: orbDriftB 9s ease-in-out infinite; transform-origin: 1180px 280px; }
-      .caret, .bcaret { animation: blink 1s steps(2, start) infinite; }
-      .typewipe { animation: revealCommand 5s steps(48, end) infinite; }
+      .caret { animation: blink 1s steps(2, start) infinite; }
+      .bcaret { opacity: 0; animation: doneCaret 5s ease-in-out infinite, blink 1s steps(2, start) infinite; animation-delay: 2.5s, 0s; }
+      .command-clip { width: 0; animation: commandReveal 5s steps(48, end) infinite; }
       .term-line { animation: terminalLine 5s ease-in-out infinite; }
       .l1 { animation-delay: 0.5s; }
       .l2 { animation-delay: 0.9s; }
@@ -15,17 +16,14 @@
       .l5 { animation-delay: 2.1s; }
       .l6 { animation-delay: 2.5s; }
       .live-dot { animation: livePulse 1.4s ease-in-out infinite; }
-      .gs-1 { animation: hueShiftA 5s ease-in-out infinite; }
-      .gs-2 { animation: hueShiftB 5s ease-in-out infinite; }
       @keyframes gridFade { 50% { opacity: 1; } }
       @keyframes orbDriftA { 50% { transform: translate(28px, 18px) scale(1.08); opacity: 0.85; } }
       @keyframes orbDriftB { 50% { transform: translate(-24px, -18px) scale(1.06); opacity: 0.9; } }
       @keyframes blink { 50% { opacity: 0; } }
-      @keyframes revealCommand { 0%, 12% { transform: translateX(0); } 55%, 82% { transform: translateX(900px); } 100% { transform: translateX(0); } }
+      @keyframes commandReveal { 0%, 12%, 100% { width: 0; } 55%, 82% { width: 640px; } }
       @keyframes terminalLine { 0%, 18% { opacity: 0; transform: translateY(6px); } 28%, 78% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-3px); } }
+      @keyframes doneCaret { 0%, 18% { opacity: 0; } 28%, 78% { opacity: 1; } 100% { opacity: 0; } }
       @keyframes livePulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; r: 6px; } }
-      @keyframes hueShiftA { 50% { stop-color: #22D3EE; } }
-      @keyframes hueShiftB { 50% { stop-color: #10D9A0; } }
     </style>
     <linearGradient id="hero-bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0A0E1A"></stop>
@@ -36,15 +34,18 @@
       <stop offset="100%" stop-color="#6366F1"></stop>
     </linearGradient>
     <linearGradient id="hero-grad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#A78BFA" class="gs-1"></stop>
-      <stop offset="50%" stop-color="#22D3EE" class="gs-2"></stop>
-      <stop offset="100%" stop-color="#A78BFA" class="gs-3"></stop>
+      <stop offset="0%" stop-color="#F8FAFC"></stop>
+      <stop offset="42%" stop-color="#A78BFA"></stop>
+      <stop offset="100%" stop-color="#22D3EE"></stop>
     </linearGradient>
     <radialGradient id="hero-orb-a"><stop offset="0%" stop-color="#7C3AED" stop-opacity="0.5"></stop><stop offset="100%" stop-color="#7C3AED" stop-opacity="0"></stop></radialGradient>
     <radialGradient id="hero-orb-b"><stop offset="0%" stop-color="#22D3EE" stop-opacity="0.4"></stop><stop offset="100%" stop-color="#22D3EE" stop-opacity="0"></stop></radialGradient>
     <pattern id="hero-grid" width="48" height="48" patternUnits="userSpaceOnUse">
       <path d="M 48 0 L 0 0 0 48" fill="none" class="grid-stroke" stroke-width="1"></path>
     </pattern>
+    <clipPath id="hero-command-clip">
+      <rect class="command-clip" x="64" y="196" height="44"></rect>
+    </clipPath>
   </defs>
 
   <rect width="1280" height="360" fill="url(#hero-bg)"></rect>
@@ -60,15 +61,14 @@
   </g>
 
   
-  <text x="180" y="140" font-size="80" font-weight="800" fill="url(#hero-grad)" font-family="Inter, system-ui, sans-serif" letter-spacing="-3">heym</text>
-  <rect class="caret" x="380" y="80" width="8" height="68" fill="#22D3EE"></rect>
+  <text x="180" y="140" font-size="80" font-weight="800" fill="url(#hero-grad)" font-family="Inter, system-ui, sans-serif" letter-spacing="-3">Heym</text>
+  <rect class="caret" x="398" y="80" width="8" height="68" fill="#22D3EE"></rect>
 
   
-  <g>
+  <g clip-path="url(#hero-command-clip)">
     <text x="64" y="220" font-family="&#39;JetBrains Mono&#39;, ui-monospace, Menlo, monospace" font-size="18" fill="#9CA3AF">
       <tspan fill="#10D9A0">$</tspan> heym <tspan fill="#A78BFA">--visual</tspan> <tspan fill="#A78BFA">--ai-native</tspan> <tspan fill="#A78BFA">--self-hosted</tspan>
     </text>
-    <rect class="typewipe" x="64" y="200" width="900" height="32" fill="#0A0E1A"></rect>
   </g>
 
   
@@ -94,7 +94,7 @@
         <tspan fill="#10D9A0">▸</tspan> <tspan fill="#22D3EE">trace</tspan> ⏵ 4 spans · 1.8s
       </text>
       <text x="20" y="180" class="term-line l6" fill="#10D9A0" opacity="0">✓ done</text>
-      <rect class="bcaret" x="62" y="170" width="8" height="14" fill="#10D9A0"></rect>
+      <rect class="bcaret" x="76" y="170" width="8" height="14" fill="#10D9A0"></rect>
     </g>
   </g>
 

@@ -373,8 +373,10 @@
       <rect width="24" height="24" rx="6" fill="#7C3AED" fill-opacity="0.2"></rect>
       <path d="M 12 6 L 18 9 L 18 14 C 18 18, 15 20, 12 21 C 9 20, 6 18, 6 14 L 6 9 Z" fill="none" stroke="#A78BFA" stroke-width="1.4"></path>
     </g>
-    <text x="58" y="32" font-size="14" font-weight="600" fill="#F3F4F6">Self-Hosted.</text>
-    <text x="170" y="32" font-size="14" fill="#9CA3AF">Your data, your infrastructure. No telemetry. No surprises.</text>
-    <text x="1180" y="32" text-anchor="end" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0">$ docker compose up</text>
+    <text x="58" y="34" font-size="14" dominant-baseline="middle">
+      <tspan font-weight="600" fill="#F3F4F6">Self-Hosted.</tspan>
+      <tspan fill="#9CA3AF"> Your data, your infrastructure. No telemetry. No surprises.</tspan>
+    </text>
+    <text x="1180" y="36" text-anchor="end" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0">$ docker compose up</text>
   </g>
 </svg>

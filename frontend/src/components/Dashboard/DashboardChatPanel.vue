@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { Bot, Check, ChevronDown, Copy, Loader2, Mic, MicOff, Send, Square, Trash2 } from "lucide-vue-next";
+import { Bot, Check, ChevronDown, Copy, Loader2, Mic, MicOff, Paperclip, Send, Square, Trash2, X } from "lucide-vue-next";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useRoute } from "vue-router";
@@ -16,6 +16,8 @@ import { aiApi, credentialsApi, templatesApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
+import { useFileAttachment } from "@/composables/useFileAttachment";
+import type { AttachedFile } from "@/composables/useFileAttachment";
 
 const MAX_CONTEXT_MESSAGES = 25;
 
@@ -24,6 +26,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  attachmentName?: string;
 }
 
 interface SpeechRecognitionResultAlternative {
@@ -117,6 +120,23 @@ let copiedMessageIdTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const imageLightboxSrc = ref<string | null>(null);
 const route = useRoute();
+
+const { attachedFile, attachmentError, attachmentLoading, processFile, clearAttachment } =
+  useFileAttachment();
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+function openFilePicker(): void {
+  fileInputRef.value?.click();
+}
+
+async function handleFileInputChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  await processFile(file);
+  // reset so the same file can be re-selected after clearing
+  input.value = "";
+}
 
 function handleMarkdownImageClick(event: MouseEvent): void {
   const target = event.target as HTMLElement;
@@ -338,6 +358,8 @@ function handleSubmit(): void {
     || !selectedCredentialId.value
     || !selectedModel.value
     || modelsLoadFailed.value
+    || attachmentError.value !== null
+    || attachmentLoading.value
   ) {
     return;
   }
@@ -346,9 +368,13 @@ function handleSubmit(): void {
     id: crypto.randomUUID(),
     role: "user",
     content: text,
+    ...(attachedFile.value ? { attachmentName: attachedFile.value.name } : {}),
   };
   messages.value.push(userMsg);
   inputText.value = "";
+
+  const payloadAttachment: AttachedFile | null = attachedFile.value;
+  clearAttachment();
 
   const assistantId = crypto.randomUUID();
   messages.value.push({
@@ -380,6 +406,15 @@ function handleSubmit(): void {
       conversationHistory: conversationHistoryForRequest.value,
       userRules: combinedRules || undefined,
       clientLocalDatetime: new Date().toLocaleString(),
+      ...(payloadAttachment
+        ? {
+            attachment: {
+              name: payloadAttachment.name,
+              kind: payloadAttachment.kind,
+              content: payloadAttachment.content,
+            },
+          }
+        : {}),
     },
     (chunk) => {
       const m = messages.value.find((msg) => msg.id === assistantId);
@@ -681,12 +716,18 @@ onUnmounted(() => {
                 <span>{{ steps.length > 0 ? "Preparing response..." : "Thinking..." }}</span>
               </div>
             </template>
-            <p
-              v-else
-              class="whitespace-pre-wrap break-words overflow-wrap-anywhere"
-            >
-              {{ msg.content }}
-            </p>
+            <template v-else>
+              <div
+                v-if="msg.attachmentName"
+                class="flex items-center gap-1 mb-1.5 text-xs text-primary-foreground/70"
+              >
+                <Paperclip class="w-3 h-3 shrink-0" />
+                <span class="truncate max-w-[200px]">{{ msg.attachmentName }}</span>
+              </div>
+              <p class="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+                {{ msg.content }}
+              </p>
+            </template>
           </div>
         </div>
       </template>
@@ -699,10 +740,62 @@ onUnmounted(() => {
     />
 
     <div class="chat-input-area shrink-0 px-3 sm:px-4 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <input
+        ref="fileInputRef"
+        type="file"
+        accept=".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf"
+        class="hidden"
+        @change="handleFileInputChange"
+      >
+      <!-- Attachment badge -->
+      <div
+        v-if="attachedFile || attachmentError"
+        class="flex items-center gap-2 mb-2 px-1"
+      >
+        <div
+          v-if="attachedFile"
+          class="flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border/40 px-2.5 py-1 text-xs text-foreground max-w-xs"
+        >
+          <Paperclip class="w-3 h-3 shrink-0 text-muted-foreground" />
+          <span class="truncate">{{ attachedFile.name }}</span>
+          <span class="text-muted-foreground shrink-0">· {{ attachedFile.sizeKb }} KB</span>
+          <button
+            type="button"
+            class="shrink-0 ml-0.5 rounded hover:bg-muted/80 p-0.5"
+            aria-label="Remove attachment"
+            @click="clearAttachment"
+          >
+            <X class="w-3 h-3" />
+          </button>
+        </div>
+        <p
+          v-if="attachmentError"
+          class="text-xs text-destructive"
+        >
+          {{ attachmentError }}
+        </p>
+      </div>
       <form
         class="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/40 px-3 py-2 min-h-[52px] focus-within:border-primary/30 focus-within:bg-muted/50 transition-colors"
         @submit.prevent="handleSubmit"
       >
+        <button
+          type="button"
+          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+          :disabled="streaming || attachmentLoading"
+          title="Attach file"
+          aria-label="Attach file"
+          @click="openFilePicker"
+        >
+          <Loader2
+            v-if="attachmentLoading"
+            class="w-4 h-4 animate-spin"
+          />
+          <Paperclip
+            v-else
+            class="w-4 h-4"
+          />
+        </button>
         <textarea
           ref="chatInputRef"
           v-model="inputText"
@@ -735,7 +828,7 @@ onUnmounted(() => {
           type="submit"
           variant="gradient"
           size="icon"
-          :disabled="!inputText.trim() || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+          :disabled="!inputText.trim() || !selectedCredentialId || !selectedModel || modelsLoadFailed || !!attachmentError || attachmentLoading"
           class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl touch-manipulation"
         >
           <Send class="w-4 h-4" />

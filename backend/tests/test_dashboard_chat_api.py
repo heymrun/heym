@@ -2,7 +2,13 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.ai_assistant import DashboardChatRequest, dashboard_chat_stream, stream_dashboard_chat
+from app.api.ai_assistant import (
+    DashboardChatRequest,
+    FileAttachment,
+    _build_user_message,
+    dashboard_chat_stream,
+    stream_dashboard_chat,
+)
 from app.db.models import CredentialType
 from app.services.llm_trace import LLMTraceContext
 
@@ -40,6 +46,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages
@@ -136,6 +143,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["trace_context"] = _trace_context
             yield 'data: {"type":"done"}\n\n'
@@ -244,6 +252,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             captured["messages"] = messages
             yield 'data: {"type":"done"}\n\n'
@@ -316,6 +325,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _public_base_url: str,
             _trace_context: object,
             _cancel_event: object,
+            _attachment: object = None,
         ):
             yield 'data: {"type":"step","label":"Searching documentation..."}\n\n'
             yield 'data: {"type":"done"}\n\n'
@@ -362,3 +372,108 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 'data: {"type":"done"}\n\n',
             ],
         )
+
+
+class BuildUserMessageTests(unittest.TestCase):
+    def test_no_attachment_returns_string_content(self) -> None:
+        result = _build_user_message("Hello", None)
+        self.assertEqual(result, {"role": "user", "content": "Hello"})
+
+    def test_text_attachment_embeds_in_content(self) -> None:
+        attachment = FileAttachment(name="notes.txt", kind="text", content="line1\nline2")
+        result = _build_user_message("Summarize this", attachment)
+        self.assertEqual(result["role"], "user")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Summarize this", result["content"])
+        self.assertIn("[ATTACHED FILE: notes.txt]", result["content"])
+        self.assertIn("line1\nline2", result["content"])
+
+    def test_pdf_attachment_embeds_in_content(self) -> None:
+        attachment = FileAttachment(name="report.pdf", kind="pdf", content="Extracted text")
+        result = _build_user_message("Analyze this", attachment)
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("[ATTACHED FILE: report.pdf]", result["content"])
+        self.assertIn("Extracted text", result["content"])
+
+    def test_image_attachment_embeds_metadata_only(self) -> None:
+        attachment = FileAttachment(
+            name="photo.png", kind="image", content="data:image/png;base64,abc123"
+        )
+        result = _build_user_message("Describe this", attachment)
+        self.assertEqual(result["role"], "user")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Describe this", result["content"])
+        self.assertIn("[ATTACHED IMAGE: photo.png]", result["content"])
+        # base64 data must NOT appear in the LLM context to avoid context overflow
+        self.assertNotIn("data:image/png;base64,abc123", result["content"])
+
+
+class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dashboard_chat_injects_routing_instructions_when_attachment_present(
+        self,
+    ) -> None:
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.type = CredentialType.openai
+        credential.encrypted_config = "encrypted-config"
+
+        current_user = MagicMock()
+        current_user.id = uuid.uuid4()
+
+        http_request = MagicMock()
+        http_request.is_disconnected = AsyncMock(return_value=False)
+
+        captured: dict[str, object] = {}
+
+        async def fake_stream(
+            _client: object,
+            _model: str,
+            system_prompt: str,
+            messages: list[dict],
+            _db: object,
+            _user: object,
+            _provider: str,
+            _public_base_url: str,
+            _trace_context: object,
+            _cancel_event: object,
+            _attachment: object = None,
+        ):
+            captured["system_prompt"] = system_prompt
+            captured["messages"] = messages
+            yield 'data: {"type":"done"}\n\n'
+
+        request = DashboardChatRequest(
+            credential_id=credential.id,
+            model="gpt-4o-mini",
+            message="Analyze this",
+            attachment=FileAttachment(name="data.csv", kind="text", content="a,b\n1,2"),
+        )
+
+        db = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_credential_for_user", return_value=credential),
+            patch("app.api.ai_assistant.decrypt_config", return_value={}),
+            patch("app.api.ai_assistant.get_openai_client", return_value=(MagicMock(), "openai")),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("app.api.ai_assistant._load_agents_md_content", return_value=None),
+            patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
+            patch("app.api.ai_assistant.stream_dashboard_chat", side_effect=fake_stream),
+        ):
+            response = await dashboard_chat_stream(
+                http_request=http_request,
+                request=request,
+                current_user=current_user,
+                db=db,
+            )
+            _chunks = [chunk async for chunk in response.body_iterator]
+
+        self.assertIn("route its content", captured["system_prompt"])
+        last_msg = captured["messages"][-1]
+        self.assertIsInstance(last_msg["content"], str)
+        self.assertIn("[ATTACHED FILE: data.csv]", last_msg["content"])
+        self.assertIn("a,b\n1,2", last_msg["content"])

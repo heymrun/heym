@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { replaceNodeLabelRefs } from "@/lib/utils";
+import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { workflowApi } from "@/services/api";
 import { useToast } from "@/composables/useToast";
 import type {
@@ -483,9 +484,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
   async function loadWorkflow(id: string): Promise<void> {
     const workflow = await workflowApi.get(id);
-    currentWorkflow.value = workflow;
-    nodes.value = workflow.nodes || [];
-    edges.value = workflow.edges || [];
+    const loadedNodes = workflow.nodes || [];
+    const loadedEdges = normalizeWorkflowEdges(workflow.edges, loadedNodes);
+    currentWorkflow.value = { ...workflow, nodes: loadedNodes, edges: loadedEdges };
+    nodes.value = loadedNodes;
+    edges.value = loadedEdges;
     resetRunInputJsonFromMode();
     hasUnsavedChanges.value = false;
     executionResult.value = null;

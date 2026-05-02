@@ -172,6 +172,12 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 
 For a complete list of all features with short descriptions, see **[Full Feature Set](frontend/src/docs/content/reference/features.md)**. It covers Getting Started, every node type, reference topics (Expression DSL, workflow structure, webhooks, SSE streaming, AI Assistant, Chat with Docs, Portal, security, etc.), and all dashboard tabs (Workflows, Templates, Variables, Chat, Credentials, Vectorstores, MCP, Traces, Analytics, Evals, Teams, Logs and more).
 
+<div align="center">
+
+<img src="./docs/readme-assets/full-feature-showcase.svg" width="100%" alt="Animated Heym full feature set showcase"/>
+
+</div>
+
 ---
 
 ## 🎯 Why Heym?

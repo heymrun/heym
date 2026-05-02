@@ -27,6 +27,7 @@ import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/e
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
+import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { aiApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -1157,7 +1158,14 @@ const lastWorkflowJson = computed(() => {
 });
 
 const currentWorkflowContext = computed(() => {
-  if (workflowStore.nodes.length === 0 && workflowStore.edges.length === 0) {
+  const currentWorkflow = workflowStore.currentWorkflow;
+  const hasWorkflowMetadata = Boolean(
+    currentWorkflow?.id ||
+      currentWorkflow?.name?.trim() ||
+      currentWorkflow?.description?.trim(),
+  );
+
+  if (!hasWorkflowMetadata && workflowStore.nodes.length === 0 && workflowStore.edges.length === 0) {
     return undefined;
   }
 
@@ -1177,8 +1185,9 @@ const currentWorkflowContext = computed(() => {
   });
 
   return {
-    id: workflowStore.currentWorkflow?.id,
-    name: workflowStore.currentWorkflow?.name,
+    id: currentWorkflow?.id,
+    name: currentWorkflow?.name,
+    description: currentWorkflow?.description ?? null,
     nodes: filteredNodes,
     edges: workflowStore.edges,
   };
@@ -2137,7 +2146,11 @@ function applyWorkflowChanges(showMessage = true): void {
   }
 
   workflowStore.nodes.splice(0, workflowStore.nodes.length, ...sanitizedNodes);
-  workflowStore.edges.splice(0, workflowStore.edges.length, ...edgesToApply);
+  workflowStore.edges.splice(
+    0,
+    workflowStore.edges.length,
+    ...normalizeWorkflowEdges(edgesToApply, sanitizedNodes),
+  );
   workflowStore.hasUnsavedChanges = true;
   workflowStore.clearExecution();
 

@@ -26,6 +26,7 @@
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.2",
     "mobile-drag-drop": "^3.0.0-rc.0",
+    "pdfjs-dist": "^5.7.284",
     "pinia": "^3.0.4",
     "radix-vue": "^1.9.0",
     "tailwind-merge": "^2.2.0",

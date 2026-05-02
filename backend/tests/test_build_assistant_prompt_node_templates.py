@@ -29,6 +29,22 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn("Shared LLM preset", prompt)
         self.assertIn("node_type", prompt)
 
+    def test_includes_current_workflow_goal_without_nodes(self) -> None:
+        prompt = build_assistant_prompt(
+            {
+                "id": "00000000-0000-4000-8000-000000000002",
+                "name": "Lead qualification workflow",
+                "description": "Score inbound leads and route qualified prospects.",
+                "nodes": [],
+                "edges": [],
+            }
+        )
+
+        self.assertIn("## Current Workflow Goal", prompt)
+        self.assertIn("Lead qualification workflow", prompt)
+        self.assertIn("Score inbound leads", prompt)
+        self.assertIn("when the user says to generate/build/create it", prompt)
+
     def test_includes_imap_trigger_guidance(self) -> None:
         prompt = build_assistant_prompt()
 

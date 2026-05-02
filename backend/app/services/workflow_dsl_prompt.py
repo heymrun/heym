@@ -3644,6 +3644,27 @@ def build_assistant_prompt(
         prompt += json.dumps(available_node_templates, ensure_ascii=False, indent=2)
         prompt += "\n```\n"
 
+    if current_workflow:
+        workflow_name = current_workflow.get("name")
+        workflow_description = current_workflow.get("description")
+        if workflow_name or workflow_description:
+            prompt += "\n\n## Current Workflow Goal\n\n"
+            prompt += (
+                "The user has already named/described the workflow in the editor. Treat this "
+                "metadata as product intent when generating or modifying the workflow, especially "
+                "when the user says to generate/build/create it without repeating the details.\n\n"
+            )
+            prompt += "```json\n"
+            prompt += json.dumps(
+                {
+                    "name": workflow_name or "",
+                    "description": workflow_description or "",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            prompt += "\n```\n"
+
     if current_workflow and (current_workflow.get("nodes") or current_workflow.get("edges")):
         prompt += "\n\n## Current Workflow Context\n\n"
         prompt += (
@@ -3652,9 +3673,12 @@ def build_assistant_prompt(
         prompt += "```json\n"
         prompt += json.dumps(
             {
+                "name": current_workflow.get("name", ""),
+                "description": current_workflow.get("description", ""),
                 "nodes": current_workflow.get("nodes", []),
                 "edges": current_workflow.get("edges", []),
             },
+            ensure_ascii=False,
             indent=2,
         )
         prompt += "\n```\n\n"
