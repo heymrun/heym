@@ -2,7 +2,7 @@
 
 <br/>
 
-<img src="frontend/public/fav.svg" width="80" height="80" alt="Heym Logo"/>
+<img src="./docs/readme-assets/logo.svg" width="80" height="80" alt="Heym Logo"/>
 
 # Heym
 
@@ -29,6 +29,10 @@
 
 <br/>
 
+<img src="./docs/readme-assets/hero.svg" width="100%" alt="Heym animated AI-native workflow automation hero"/>
+
+<br/>
+
 </div>
 
 ---
@@ -41,6 +45,12 @@ Unlike platforms that started as classic trigger-action automation and layered A
 
 Explore the product site at **[heym.run](https://heym.run)**.
 
+<div align="center">
+
+<img src="./docs/readme-assets/workflow-canvas.svg" width="100%" alt="Animated Heym workflow canvas"/>
+
+</div>
+
 ## No Enterprise Gatekeeping
 
 Many automation platforms turn essential production features into upgrade pressure: global variables, execution history and search, insights, AI Builder / Motherboard capabilities, observability, audit-style logs, team controls, scaling, or customer-facing portals.
@@ -51,7 +61,7 @@ Our enterprise offering is for commercial licensing, deployment help, dedicated 
 
 <div align="center">
 
-![Heym Banner](./docs/screenshots/heym-banner-standalone.webp)
+<img src="./docs/readme-assets/no-gatekeeping.svg" width="100%" alt="No enterprise gatekeeping animation"/>
 
 </div>
 
@@ -126,6 +136,12 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 ---
 
 ## ✨ Key Capabilities
+
+<div align="center">
+
+<img src="./docs/readme-assets/key-capabilities.svg" width="100%" alt="Animated Heym key capabilities grid"/>
+
+</div>
 
 - **Visual Workflow Editor** — Drag-and-drop canvas powered by Vue Flow with 30+ node types
 - **AI Assistant** — Describe what you want in natural language (or voice) and the assistant generates and wires nodes on the canvas automatically
@@ -316,6 +332,12 @@ cp .env.example .env
   </tbody>
 </table>
 
+<div align="center">
+
+![Heym Banner](./docs/screenshots/heym-banner-standalone.webp)
+
+</div>
+
 ---
 
 ## 🧩 Node Library
@@ -341,11 +363,23 @@ Describe what you want in plain text or via voice — the assistant generates no
 
 When a workflow already contains Agent skills, the assistant sends only each skill's `SKILL.md` into the builder context. Large `.py` files and binary attachments stay out of the prompt so workflow editing remains reliable even with complex skills loaded on the canvas.
 
+<div align="center">
+
+<img src="./docs/readme-assets/ai-assistant.svg" width="100%" alt="AI assistant builds a workflow animation"/>
+
+</div>
+
 ### AI Skill Builder
 Inside the Agent node's Skills section, use **AI Build** to create a new skill or the inline sparkle action to revise an existing one. The modal streams a chat conversation, previews generated `SKILL.md` and `.py` files live, and saves them back through the same ZIP ingestion path used by manual skill uploads.
 
 ### Multi-Agent Orchestration
 Build orchestrator/sub-agent pipelines visually. One agent delegates tasks to named sub-agents or sub-workflows — composing complex behavior without custom orchestration code. Configure reasoning effort and temperature per agent for fine-grained control.
+
+<div align="center">
+
+<img src="./docs/readme-assets/multi-agent.svg" width="100%" alt="Multi-agent orchestration animation"/>
+
+</div>
 
 ### Human-in-the-Loop (HITL)
 Pause agent execution at any point to request user approval, clarification, or input before proceeding. Build workflows where AI proposes and humans decide — combining automation speed with human judgment.

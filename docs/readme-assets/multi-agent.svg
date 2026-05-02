@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 480" width="1280" height="480" fill="none" font-family="Inter, system-ui, sans-serif">
+  
+  <defs>
+    <style>
+      .orb { animation: maOrb 5s ease-in-out infinite; }
+      .ring { transform-box: fill-box; transform-origin: center; animation: maSpin 4s linear infinite; }
+      .pkt { offset-distance: 0%; animation: maPacket 3.8s linear infinite; }
+      .pkt-rev { offset-distance: 100%; animation: maPacketRev 4.5s linear infinite; }
+      .d1 { animation-delay: 0s; }
+      .d2 { animation-delay: 0.6s; }
+      .d3 { animation-delay: 1.2s; }
+      .d4 { animation-delay: 1.8s; }
+      .pending { animation: maPending 1.4s ease-in-out infinite; }
+      @keyframes maOrb { 0%, 100% { opacity: 0.65; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
+      @keyframes maSpin { to { transform: rotate(360deg); } }
+      @keyframes maPacket { from { offset-distance: 0%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } to { offset-distance: 100%; opacity: 0; } }
+      @keyframes maPacketRev { from { offset-distance: 100%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } to { offset-distance: 0%; opacity: 0; } }
+      @keyframes maPending { 50% { opacity: 0.45; } }
+    </style>
+    <linearGradient id="ma-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0A0E1A"></stop><stop offset="100%" stop-color="#0F1320"></stop></linearGradient>
+    <pattern id="ma-grid" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#1F2937"></circle></pattern>
+    <radialGradient id="ma-orbiter" cx="0.5" cy="0.5" r="0.5"><stop offset="0%" stop-color="#7C3AED" stop-opacity="0.3"></stop><stop offset="100%" stop-color="#7C3AED" stop-opacity="0"></stop></radialGradient>
+    <filter id="ma-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"></feGaussianBlur><feMerge><feMergeNode></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+  </defs>
+
+  <rect width="1280" height="480" fill="url(#ma-bg)"></rect>
+  <rect width="1280" height="480" fill="url(#ma-grid)"></rect>
+
+  <text x="40" y="44" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="2">MULTI-AGENT ORCHESTRATION</text>
+
+  <g transform="translate(640, 240)">
+    <circle r="180" fill="url(#ma-orbiter)" class="orb"></circle>
+    <g transform="translate(-90, -54)">
+      <rect width="180" height="108" rx="14" fill="#0F1320" stroke="#7C3AED" stroke-width="1.5" filter="url(#ma-glow)"></rect>
+      <rect width="180" height="6" rx="3" fill="#7C3AED"></rect>
+      <g transform="translate(16, 22)">
+        <circle cx="14" cy="14" r="14" fill="#7C3AED" fill-opacity="0.2"></circle>
+        <circle cx="14" cy="14" r="4" fill="#A78BFA"></circle>
+        <circle cx="14" cy="14" r="9" fill="none" stroke="#A78BFA" stroke-width="1.2" stroke-dasharray="3 3" class="ring"></circle>
+      </g>
+      <text x="50" y="34" font-size="10.5" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">ORCHESTRATOR</text>
+      <text x="50" y="52" font-size="14" fill="#F3F4F6" font-weight="600">Research Lead</text>
+      <text x="50" y="68" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;, monospace">routes · plans</text>
+      <g transform="translate(16, 84)"><rect width="68" height="16" rx="4" fill="#7C3AED" fill-opacity="0.12"></rect><text x="34" y="11" text-anchor="middle" font-size="9.5" fill="#A78BFA" font-family="&#39;JetBrains Mono&#39;, monospace">3 spawns</text></g>
+      <g transform="translate(92, 84)"><rect width="72" height="16" rx="4" fill="#10D9A0" fill-opacity="0.12"></rect><text x="36" y="11" text-anchor="middle" font-size="9.5" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;, monospace">parallel</text></g>
+    </g>
+  </g>
+
+  
+  <g fill="none" stroke-width="1.8" stroke-linecap="round">
+    <path d="M 580 240 Q 440 240, 280 160" stroke="#A78BFA" stroke-opacity="0.6"></path>
+    <path d="M 580 240 Q 420 280, 240 360" stroke="#22D3EE" stroke-opacity="0.6"></path>
+    <path d="M 700 240 Q 860 200, 1000 140" stroke="#10D9A0" stroke-opacity="0.6"></path>
+    <path d="M 700 240 Q 860 280, 1040 360" stroke="#F59E0B" stroke-opacity="0.6"></path>
+  </g>
+
+  
+  <circle r="4" fill="#A78BFA" filter="url(#ma-glow)" class="pkt d1" style="offset-path: path(&#39;M 580 240 Q 440 240, 280 160&#39;);"></circle>
+  <circle r="3" fill="#A78BFA" class="pkt-rev d3" style="offset-path: path(&#39;M 580 240 Q 440 240, 280 160&#39;);"></circle>
+
+  <circle r="4" fill="#22D3EE" filter="url(#ma-glow)" class="pkt d2" style="offset-path: path(&#39;M 580 240 Q 420 280, 240 360&#39;);"></circle>
+  <circle r="3" fill="#22D3EE" class="pkt-rev d4" style="offset-path: path(&#39;M 580 240 Q 420 280, 240 360&#39;);"></circle>
+
+  <circle r="4" fill="#10D9A0" filter="url(#ma-glow)" class="pkt d2" style="offset-path: path(&#39;M 700 240 Q 860 200, 1000 140&#39;);"></circle>
+  <circle r="3" fill="#10D9A0" class="pkt-rev d1" style="offset-path: path(&#39;M 700 240 Q 860 200, 1000 140&#39;);"></circle>
+
+  <circle r="4" fill="#F59E0B" filter="url(#ma-glow)" class="pkt d3" style="offset-path: path(&#39;M 700 240 Q 860 280, 1040 360&#39;);"></circle>
+
+  
+  <g transform="translate(120, 130)">
+    <rect width="160" height="64" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="160" height="5" rx="2" fill="#A78BFA"></rect>
+    <g transform="translate(14, 20)">
+      <rect width="22" height="22" rx="5" fill="#A78BFA" fill-opacity="0.18"></rect>
+      <circle cx="11" cy="11" r="6" fill="none" stroke="#A78BFA" stroke-width="1.4"></circle>
+      <line x1="15" y1="15" x2="19" y2="19" stroke="#A78BFA" stroke-width="1.6" stroke-linecap="round"></line>
+    </g>
+    <text x="44" y="28" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">SUB-AGENT</text>
+    <text x="44" y="44" font-size="12" fill="#F3F4F6" font-weight="600">Web Crawler</text>
+    <text x="44" y="58" font-size="10" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;, monospace">● running</text>
+  </g>
+
+  <g transform="translate(80, 332)">
+    <rect width="160" height="64" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="160" height="5" rx="2" fill="#22D3EE"></rect>
+    <g transform="translate(14, 20)">
+      <rect width="22" height="22" rx="5" fill="#22D3EE" fill-opacity="0.18"></rect>
+      <path d="M 7 14 L 11 7 L 15 14 L 11 17 Z" fill="#22D3EE"></path>
+    </g>
+    <text x="44" y="28" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">SKILL</text>
+    <text x="44" y="44" font-size="12" fill="#F3F4F6" font-weight="600">PDF Extractor</text>
+    <text x="44" y="58" font-size="10" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;, monospace">● running</text>
+  </g>
+
+  <g transform="translate(1000, 110)">
+    <rect width="170" height="64" rx="12" fill="#0F1320" stroke="#1F2937"></rect>
+    <rect width="170" height="5" rx="2" fill="#10D9A0"></rect>
+    <g transform="translate(14, 20)">
+      <rect width="22" height="22" rx="5" fill="#10D9A0" fill-opacity="0.18"></rect>
+      <path d="M 6 16 L 10 10 L 14 13 L 18 7" stroke="#10D9A0" stroke-width="1.6" fill="none" stroke-linecap="round"></path>
+    </g>
+    <text x="44" y="28" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">SUB-WORKFLOW</text>
+    <text x="44" y="44" font-size="12" fill="#F3F4F6" font-weight="600">Sentiment Pipe</text>
+    <text x="44" y="58" font-size="10" fill="#10D9A0" font-family="&#39;JetBrains Mono&#39;, monospace">● done · 1.2s</text>
+  </g>
+
+  <g transform="translate(1040, 332)">
+    <rect width="170" height="64" rx="12" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.5" stroke-dasharray="3 3"></rect>
+    <rect width="170" height="5" rx="2" fill="#F59E0B"></rect>
+    <g transform="translate(14, 20)">
+      <rect width="22" height="22" rx="5" fill="#F59E0B" fill-opacity="0.18"></rect>
+      <circle cx="11" cy="9" r="3" fill="none" stroke="#F59E0B" stroke-width="1.4"></circle>
+      <path d="M 5 18 C 5 14, 8 12, 11 12 C 14 12, 17 14, 17 18" stroke="#F59E0B" stroke-width="1.4" fill="none"></path>
+    </g>
+    <text x="44" y="28" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;, monospace">HITL · APPROVAL</text>
+    <text x="44" y="44" font-size="12" fill="#F3F4F6" font-weight="600">Reviewer</text>
+    <text x="44" y="58" font-size="10" fill="#F59E0B" font-family="&#39;JetBrains Mono&#39;, monospace" class="pending">⏸ awaiting input</text>
+  </g>
+
+  <g transform="translate(40, 432)" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="11">
+    <g><circle cx="6" cy="0" r="4" fill="#7C3AED"></circle><text x="18" y="4" fill="#9CA3AF">orchestrator</text></g>
+    <g transform="translate(140, 0)"><circle cx="6" cy="0" r="4" fill="#A78BFA"></circle><text x="18" y="4" fill="#9CA3AF">sub-agent</text></g>
+    <g transform="translate(252, 0)"><circle cx="6" cy="0" r="4" fill="#10D9A0"></circle><text x="18" y="4" fill="#9CA3AF">sub-workflow</text></g>
+    <g transform="translate(382, 0)"><circle cx="6" cy="0" r="4" fill="#22D3EE"></circle><text x="18" y="4" fill="#9CA3AF">skill / tool</text></g>
+    <g transform="translate(496, 0)"><rect x="2" y="-4" width="8" height="8" rx="2" fill="none" stroke="#F59E0B" stroke-dasharray="2 2"></rect><text x="18" y="4" fill="#9CA3AF">human-in-the-loop</text></g>
+    <text x="1200" y="4" text-anchor="end" fill="#6B7280">guardrails · llm fallback · auto-heal</text>
+  </g>
+</svg>
