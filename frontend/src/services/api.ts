@@ -1122,6 +1122,7 @@ export interface AIAssistantRequest {
   currentWorkflow?: {
     id?: string;
     name?: string;
+    description?: string | null;
     nodes: unknown[];
     edges: unknown[];
   };

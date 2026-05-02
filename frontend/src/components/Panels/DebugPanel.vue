@@ -1158,7 +1158,14 @@ const lastWorkflowJson = computed(() => {
 });
 
 const currentWorkflowContext = computed(() => {
-  if (workflowStore.nodes.length === 0 && workflowStore.edges.length === 0) {
+  const currentWorkflow = workflowStore.currentWorkflow;
+  const hasWorkflowMetadata = Boolean(
+    currentWorkflow?.id ||
+      currentWorkflow?.name?.trim() ||
+      currentWorkflow?.description?.trim(),
+  );
+
+  if (!hasWorkflowMetadata && workflowStore.nodes.length === 0 && workflowStore.edges.length === 0) {
     return undefined;
   }
 
@@ -1178,8 +1185,9 @@ const currentWorkflowContext = computed(() => {
   });
 
   return {
-    id: workflowStore.currentWorkflow?.id,
-    name: workflowStore.currentWorkflow?.name,
+    id: currentWorkflow?.id,
+    name: currentWorkflow?.name,
+    description: currentWorkflow?.description ?? null,
     nodes: filteredNodes,
     edges: workflowStore.edges,
   };
