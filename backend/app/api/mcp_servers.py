@@ -322,8 +322,7 @@ async def named_server_sse(
 ) -> StreamingResponse:
     user, mcp_server = server
     session_token = mcp_session_store.create(str(user.id), server_id=str(mcp_server.id))
-    base_url = str(request.base_url).rstrip("/")
-    message_endpoint = f"{base_url}/api/mcp/servers/{server_id}/message?session={session_token}"
+    message_endpoint = f"/api/mcp/servers/{server_id}/message?session={session_token}"
 
     async def event_generator() -> AsyncGenerator[str, None]:
         yield f"event: endpoint\ndata: {message_endpoint}\n\n"

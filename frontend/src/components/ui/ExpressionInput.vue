@@ -2435,7 +2435,7 @@ defineExpose({
         />
 
         <div
-          class="pointer-events-auto relative z-10 mx-4 flex h-[80vh] w-[80vw] max-w-[1400px] flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+          class="pointer-events-auto relative z-10 mx-3 flex h-[min(92dvh,900px)] w-[min(96vw,1400px)] flex-col overflow-hidden rounded-lg border bg-background shadow-2xl sm:mx-4"
         >
           <div
             class="relative z-[60] flex min-w-0 shrink-0 items-center justify-between border-b bg-background px-4 py-3"
@@ -2583,14 +2583,14 @@ defineExpose({
               </button>
             </div>
             <div
-              class="flex max-h-[min(34dvh,260px)] shrink-0 flex-col overflow-y-auto overscroll-y-contain px-4 pt-3 pb-0 [scrollbar-gutter:stable]"
+              class="flex max-h-[min(calc(28dvh-8px),212px)] shrink-0 flex-col overflow-y-auto overscroll-y-contain px-4 pb-0 pt-3 [scrollbar-gutter:stable] lg:max-h-[min(calc(32dvh-8px),242px)]"
             >
               <textarea
                 ref="dialogTextareaRef"
                 :value="dialogValue"
                 :placeholder="placeholder"
                 rows="6"
-                class="box-border w-full min-h-[8.5rem] rounded-md border-2 border-input bg-background px-4 py-3 font-mono text-base leading-relaxed placeholder:text-muted-foreground transition-colors focus-visible:border-primary focus-visible:outline-none resize-none"
+                class="box-border h-[clamp(6.5rem,calc(22dvh-8px),12.5rem)] min-h-[6.5rem] w-full resize-none rounded-md border-2 border-input bg-background px-4 py-3 font-mono text-base leading-relaxed placeholder:text-muted-foreground transition-colors focus-visible:border-primary focus-visible:outline-none lg:h-[clamp(7.5rem,calc(26dvh-8px),14.5rem)]"
                 @input="handleDialogInput"
                 @keydown="handleDialogKeyDown"
                 @keyup="updateDialogSelection()"

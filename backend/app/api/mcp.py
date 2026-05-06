@@ -345,7 +345,12 @@ async def get_mcp_config(
             )
         )
 
-    base_url = str(request.base_url).rstrip("/")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if forwarded_proto and forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host}"
+    else:
+        base_url = str(request.base_url).rstrip("/")
     mcp_endpoint_url = f"{base_url}/api/mcp/sse"
 
     return MCPConfigResponse(
@@ -957,13 +962,11 @@ async def mcp_sse_endpoint(
     mcp_user: User = Depends(get_mcp_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    base_url = str(request.base_url).rstrip("/")
-
     # Issue a short-lived session token so the long-lived credential
     # (MCP API key or OAuth bearer) never appears in the message endpoint URL
     # or server access logs.
     session_token = mcp_session_store.create(str(mcp_user.id))
-    message_endpoint = f"{base_url}/api/mcp/message?session={session_token}"
+    message_endpoint = f"/api/mcp/message?session={session_token}"
 
     async def event_generator():
         yield f"event: endpoint\ndata: {message_endpoint}\n\n"
