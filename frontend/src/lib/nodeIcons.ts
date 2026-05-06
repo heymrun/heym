@@ -18,6 +18,7 @@ import {
   MessageSquare,
   MonitorPlay,
   Play,
+  Plug,
   Rabbit,
   Radio,
   Repeat,
@@ -75,6 +76,7 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   consoleLog: Terminal,
   playwright: MonitorPlay,
   drive: HardDrive,
+  mcpCall: Plug,
 };
 
 /** Tailwind text-* classes aligned with canvas node header tints (BaseNode). */
@@ -117,4 +119,5 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   consoleLog: "text-node-console-log",
   playwright: "text-node-playwright",
   drive: "text-node-drive",
+  mcpCall: "text-node-agent",
 };

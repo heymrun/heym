@@ -158,7 +158,8 @@ export type NodeType =
   | "playwright"
   | "dataTable"
   | "drive"
-  | "slackTrigger";
+  | "slackTrigger"
+  | "mcpCall";
 
 export type VariableType =
   | "string"
@@ -480,6 +481,10 @@ export interface NodeData {
   gsValuesSelectiveRows?: string;
   gsValuesSelectiveCols?: string;
   gsValues?: string;
+  connection?: AgentMCPConnection;
+  selectedTool?: string;
+  toolArguments?: Record<string, string>;
+  timeoutSeconds?: number;
 }
 
 export interface WorkflowShare {

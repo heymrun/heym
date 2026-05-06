@@ -646,4 +646,27 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       bqMappings: [{ key: "field", value: "$input.text" }],
     },
   },
+  mcpCall: {
+    type: "mcpCall",
+    label: "MCP Call",
+    description: "Call a specific MCP tool directly — no LLM required",
+    color: "node-agent",
+    icon: "Plug",
+    inputs: 1,
+    outputs: 1,
+    defaultData: {
+      label: "mcpCall",
+      connection: {
+        id: "",
+        transport: "sse" as const,
+        label: "",
+        timeoutSeconds: 30,
+        url: "",
+        headers: {},
+      },
+      selectedTool: "",
+      toolArguments: {} as Record<string, string>,
+      timeoutSeconds: 30,
+    },
+  },
 };

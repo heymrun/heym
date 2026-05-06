@@ -870,6 +870,13 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     dataTable: { label: "dataTable", dataTableId: "", dataTableOperation: undefined, dataTableFilter: "{}", dataTableData: "{}", dataTableRowId: "", dataTableLimit: 100, dataTableSort: "" },
     drive: { label: "drive", driveOperation: undefined, driveFileId: "" },
     slackTrigger: { label: "slackTrigger", credentialId: "" },
+    mcpCall: {
+      label: "mcpCall",
+      connection: { id: "", transport: "sse", label: "", timeoutSeconds: 30, url: "", headers: {} },
+      selectedTool: "",
+      toolArguments: {},
+      timeoutSeconds: 30,
+    },
   };
   return defaults[type];
 }

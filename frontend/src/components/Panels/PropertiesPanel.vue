@@ -9,7 +9,7 @@ import {
   type ComponentPublicInstance,
 } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BookOpen, Bot, Braces, Brain, Bug, CalendarClock, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Database, Download, ExternalLink, FileArchive, FileJson, GitBranch, GitMerge, Globe, HardDrive, Inbox, Loader2, Mail, Maximize2, MessageSquare, Minus, Minimize2, MonitorPlay, MousePointerClick, Play, Plus, Power, Rabbit, Radio, Repeat, Search, Send, Server, Settings, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Trash2, Type, Variable, X, XCircle, Zap } from "lucide-vue-next";
+import { AlertTriangle, Ban, BookOpen, Bot, Braces, Brain, Bug, CalendarClock, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Database, Download, ExternalLink, FileArchive, FileJson, GitBranch, GitMerge, Globe, HardDrive, Inbox, Loader2, Mail, Maximize2, MessageSquare, Minus, Minimize2, MonitorPlay, MousePointerClick, Play, Plug, Plus, Power, Rabbit, Radio, Repeat, Search, Send, Server, Settings, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Trash2, Type, Variable, X, XCircle, Zap } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -99,6 +99,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   playwright: MonitorPlay,
   dataTable: Table2,
   drive: HardDrive,
+  mcpCall: Plug,
 };
 
 const nodeColorMap: Record<NodeType, string> = {
@@ -140,6 +141,7 @@ const nodeColorMap: Record<NodeType, string> = {
   playwright: "node-playwright",
   dataTable: "node-datatable",
   drive: "node-drive",
+  mcpCall: "node-agent",
 };
 
 const nodeDocSlugMap: Record<NodeType, string> = {
@@ -181,6 +183,7 @@ const nodeDocSlugMap: Record<NodeType, string> = {
   playwright: "playwright-node",
   dataTable: "datatable-node",
   drive: "drive-node",
+  mcpCall: "mcp-call-node",
 };
 
 const workflowStore = useWorkflowStore();
