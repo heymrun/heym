@@ -2908,6 +2908,40 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 - `$agentLabel._generated_files[0].mime_type` - MIME type
 - `$agentLabel._generated_files[0].size_bytes` - File size in bytes
 
+### 30. mcpCall (Direct MCP Tool Call)
+- **Purpose**: Call a specific MCP tool directly without an LLM deciding which tool to use
+- **Inputs**: 1 | **Outputs**: 1
+- **WHEN TO USE**: When you know exactly which MCP tool to call. Deterministic — no LLM loop.
+- **DO NOT connect** mcpCall nodes to agent `tool-input` handles.
+- **Tool selection is REQUIRED** — `selectedTool` must be non-empty or the node will error.
+- **Data fields**:
+  - `label`: Node identifier (camelCase)
+  - `connection`: MCP connection config object:
+    - `transport`: `"sse"` | `"streamable_http"` | `"stdio"`
+    - `url`: Server URL (sse/streamable_http only); supports DSL expressions
+    - `command`: Executable path (stdio only)
+    - `args`: JSON array string or array (stdio only)
+    - `env`: JSON object string or object of env vars (stdio only)
+    - `headers`: JSON object string or object (sse/streamable_http only); supports DSL expressions
+    - `timeoutSeconds`: Per-connection timeout in seconds (default: 30)
+  - `selectedTool`: Name of the MCP tool to call (required, non-empty)
+  - `toolArguments`: Object of key→value pairs; values support DSL expressions
+  - `timeoutSeconds`: Node-level timeout (default: 30)
+- **Output**: `$label.result` — smart-unwrapped tool result (JSON object if parseable, otherwise string)
+
+**Example (SSE transport):**
+```json
+{"type": "mcpCall", "data": {"label": "searchCall", "connection": {"transport": "sse", "url": "https://mcp.example.com/sse", "timeoutSeconds": 30}, "selectedTool": "search", "toolArguments": {"query": "$userInput.body.text", "limit": "10"}, "timeoutSeconds": 30}}
+```
+
+**Example (stdio transport):**
+```json
+{"type": "mcpCall", "data": {"label": "readFile", "connection": {"transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "--path", "/tmp"], "timeoutSeconds": 30}, "selectedTool": "read_file", "toolArguments": {"path": "$userInput.body.filePath"}, "timeoutSeconds": 30}}
+```
+
+**Downstream access:**
+- `$searchCall.result` → tool result (object or string)
+
 ## Expression Syntax
 
 Expressions use `$nodeName` to reference node outputs by their label.
