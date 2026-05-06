@@ -50,6 +50,7 @@ import {
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { cn } from "@/lib/utils";
 import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
+import type { MCPFetchToolItem } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useToast } from "@/composables/useToast";
 import type { DataTableListItem } from "@/types/dataTable";
@@ -4419,6 +4420,78 @@ async function fetchMCPTools(conn: AgentMCPConnection, _index: number): Promise<
     };
   }
 }
+
+// ─── mcpCall node helpers ────────────────────────────────────────────────────
+
+interface MCPCallFetchState {
+  loading: boolean;
+  error: string | null;
+  tools: MCPFetchToolItem[];
+}
+
+const mcpCallFetchState = ref<MCPCallFetchState>({ loading: false, error: null, tools: [] });
+
+function updateMCPCallConnectionField(field: keyof AgentMCPConnection, value: unknown): void {
+  if (!selectedNode.value) return;
+  const current = { ...(selectedNode.value.data.connection ?? {}) };
+  (current as Record<string, unknown>)[field] = value;
+  updateNodeData("connection", current);
+}
+
+async function fetchMCPCallTools(): Promise<void> {
+  if (!selectedNode.value) return;
+  const conn = selectedNode.value.data.connection as AgentMCPConnection;
+  mcpCallFetchState.value = { loading: true, error: null, tools: [] };
+  const connection = {
+    id: conn?.id || "mcpCall",
+    transport: conn?.transport,
+    label: conn?.label,
+    timeoutSeconds: conn?.timeoutSeconds ?? 30,
+    command: conn?.command,
+    args: conn?.args,
+    env: conn?.env,
+    url: conn?.url,
+    headers: conn?.headers,
+  };
+  try {
+    const res = await mcpApi.fetchTools(connection);
+    mcpCallFetchState.value = { loading: false, error: null, tools: res.tools };
+  } catch (e: unknown) {
+    const msg =
+      e && typeof e === "object" && "response" in e
+        ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        : String(e);
+    mcpCallFetchState.value = { loading: false, error: msg || "Failed to connect", tools: [] };
+  }
+}
+
+function selectMCPCallTool(toolName: string): void {
+  if (!selectedNode.value) return;
+  updateNodeData("selectedTool", toolName);
+  const tool = mcpCallFetchState.value.tools.find((t) => t.name === toolName);
+  const props = tool?.inputSchema?.properties ?? {};
+  const freshArgs: Record<string, string> = {};
+  for (const key of Object.keys(props)) {
+    freshArgs[key] = (selectedNode.value.data.toolArguments?.[key] as string) ?? "";
+  }
+  updateNodeData("toolArguments", freshArgs);
+}
+
+function updateMCPCallArgument(key: string, value: string): void {
+  if (!selectedNode.value) return;
+  const current = { ...(selectedNode.value.data.toolArguments ?? {}) };
+  current[key] = value;
+  updateNodeData("toolArguments", current);
+}
+
+const mcpCallSelectedTool = computed(() => {
+  if (!selectedNode.value) return null;
+  const name = selectedNode.value.data.selectedTool as string | undefined;
+  if (!name) return null;
+  return mcpCallFetchState.value.tools.find((t) => t.name === name) ?? null;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function formatJsonSchema(): void {
   if (!selectedNode.value) return;
@@ -10916,6 +10989,216 @@ onUnmounted(() => {
                   <div>${{ selectedNode.data.label }}.localStorage - Browser localStorage key-value pairs</div>
                   <div>${{ selectedNode.data.label }}.sessionStorage - Browser sessionStorage key-value pairs</div>
                 </template>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'mcpCall'">
+            <div class="space-y-4">
+              <!-- Connection -->
+              <div class="space-y-2">
+                <Label class="text-muted-foreground flex items-center gap-1">
+                  <Plug class="w-3.5 h-3.5" />
+                  MCP Connection
+                </Label>
+                <div class="rounded border p-3 space-y-2">
+                  <div class="flex gap-2">
+                    <div class="flex-1">
+                      <Label class="text-xs">Transport</Label>
+                      <Select
+                        :model-value="selectedNode.data.connection?.transport ?? 'sse'"
+                        :options="[
+                          { value: 'stdio', label: 'stdio' },
+                          { value: 'sse', label: 'SSE' },
+                          { value: 'streamable_http', label: 'Streamable HTTP' },
+                        ]"
+                        @update:model-value="updateMCPCallConnectionField('transport', $event)"
+                      />
+                    </div>
+                    <div class="w-24">
+                      <Label class="text-xs">Timeout (s)</Label>
+                      <Input
+                        type="number"
+                        :model-value="String(selectedNode.data.connection?.timeoutSeconds ?? 30)"
+                        min="1"
+                        max="300"
+                        placeholder="30"
+                        @update:model-value="updateMCPCallConnectionField('timeoutSeconds', parseInt($event, 10) || 30)"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label class="text-xs">Label (optional)</Label>
+                    <Input
+                      :model-value="selectedNode.data.connection?.label ?? ''"
+                      placeholder="my-mcp-server"
+                      @update:model-value="updateMCPCallConnectionField('label', $event)"
+                    />
+                  </div>
+                  <template v-if="selectedNode.data.connection?.transport === 'stdio'">
+                    <div>
+                      <Label class="text-xs">Command</Label>
+                      <Input
+                        :model-value="selectedNode.data.connection?.command ?? ''"
+                        placeholder="npx"
+                        @update:model-value="updateMCPCallConnectionField('command', $event)"
+                      />
+                    </div>
+                    <div>
+                      <Label class="text-xs">Args (JSON array)</Label>
+                      <Textarea
+                        :model-value="typeof selectedNode.data.connection?.args === 'string' ? selectedNode.data.connection.args : JSON.stringify(selectedNode.data.connection?.args ?? [], null, 2)"
+                        placeholder="[&quot;-y&quot;, &quot;@modelcontextprotocol/server-filesystem&quot;]"
+                        :rows="2"
+                        wrap="off"
+                        class="overflow-x-auto whitespace-pre font-mono text-xs"
+                        @update:model-value="updateMCPCallConnectionField('args', $event)"
+                      />
+                    </div>
+                    <div>
+                      <Label class="text-xs">Env (JSON object)</Label>
+                      <Textarea
+                        :model-value="typeof selectedNode.data.connection?.env === 'string' ? selectedNode.data.connection.env : JSON.stringify(selectedNode.data.connection?.env ?? {}, null, 2)"
+                        placeholder="{&quot;API_KEY&quot;: &quot;your_key&quot;}"
+                        :rows="2"
+                        wrap="off"
+                        class="overflow-x-auto whitespace-pre font-mono text-xs"
+                        @update:model-value="updateMCPCallConnectionField('env', $event)"
+                      />
+                    </div>
+                  </template>
+                  <template v-else-if="selectedNode.data.connection?.transport === 'sse' || selectedNode.data.connection?.transport === 'streamable_http'">
+                    <div>
+                      <Label class="text-xs">URL</Label>
+                      <Input
+                        :model-value="selectedNode.data.connection?.url ?? ''"
+                        :placeholder="selectedNode.data.connection?.transport === 'streamable_http' ? 'https://example.com/mcp' : 'https://example.com/mcp/sse'"
+                        @update:model-value="updateMCPCallConnectionField('url', $event)"
+                      />
+                    </div>
+                    <div>
+                      <Label class="text-xs">Headers (JSON object)</Label>
+                      <Textarea
+                        :model-value="typeof selectedNode.data.connection?.headers === 'string' ? selectedNode.data.connection.headers : JSON.stringify(selectedNode.data.connection?.headers ?? {}, null, 2)"
+                        placeholder="{&quot;Authorization&quot;: &quot;Bearer ...&quot;}"
+                        :rows="2"
+                        wrap="off"
+                        class="overflow-x-auto whitespace-pre font-mono text-xs"
+                        @update:model-value="updateMCPCallConnectionField('headers', $event)"
+                      />
+                    </div>
+                  </template>
+                  <!-- Fetch tools button -->
+                  <div class="pt-2 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="gap-1"
+                      :disabled="
+                        (selectedNode.data.connection?.transport === 'stdio' && !selectedNode.data.connection?.command) ||
+                          ((selectedNode.data.connection?.transport === 'sse' || selectedNode.data.connection?.transport === 'streamable_http') && !selectedNode.data.connection?.url) ||
+                          mcpCallFetchState.loading
+                      "
+                      @click="fetchMCPCallTools"
+                    >
+                      <Loader2
+                        v-if="mcpCallFetchState.loading"
+                        class="w-3.5 h-3.5 animate-spin"
+                      />
+                      <Server
+                        v-else
+                        class="w-3.5 h-3.5"
+                      />
+                      {{ mcpCallFetchState.loading ? "Connecting…" : "Fetch tools" }}
+                    </Button>
+                    <span
+                      v-if="mcpCallFetchState.error"
+                      class="text-xs text-destructive truncate min-w-0 flex-1"
+                      :title="mcpCallFetchState.error"
+                    >{{ mcpCallFetchState.error }}</span>
+                    <span
+                      v-else-if="mcpCallFetchState.tools.length > 0"
+                      class="text-xs text-muted-foreground"
+                    >{{ mcpCallFetchState.tools.length }} tool(s) found</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tool selection (required) -->
+              <div class="space-y-2">
+                <Label class="text-xs flex items-center gap-1">
+                  Tool
+                  <span class="text-destructive">*</span>
+                </Label>
+                <Select
+                  :model-value="selectedNode.data.selectedTool ?? ''"
+                  :options="[
+                    { value: '', label: mcpCallFetchState.tools.length ? 'Select a tool…' : 'Fetch tools first' },
+                    ...mcpCallFetchState.tools.map(t => ({ value: t.name, label: t.name }))
+                  ]"
+                  :class="!selectedNode.data.selectedTool ? 'border-destructive' : ''"
+                  @update:model-value="selectMCPCallTool($event ?? '')"
+                />
+                <p
+                  v-if="!selectedNode.data.selectedTool"
+                  class="text-xs text-destructive"
+                >
+                  A tool must be selected — this node will not run without one.
+                </p>
+                <p
+                  v-else-if="mcpCallSelectedTool?.description"
+                  class="text-xs text-muted-foreground"
+                >
+                  {{ mcpCallSelectedTool.description }}
+                </p>
+              </div>
+
+              <!-- Tool arguments -->
+              <div
+                v-if="mcpCallSelectedTool"
+                class="space-y-2"
+              >
+                <Label class="text-xs text-muted-foreground">Arguments</Label>
+                <div
+                  v-if="Object.keys(mcpCallSelectedTool.inputSchema?.properties ?? {}).length === 0"
+                  class="text-xs text-muted-foreground italic"
+                >
+                  This tool takes no arguments.
+                </div>
+                <div
+                  v-for="(propDef, propKey) in (mcpCallSelectedTool.inputSchema?.properties ?? {})"
+                  :key="propKey"
+                  class="space-y-1"
+                >
+                  <Label class="text-xs flex items-center gap-1">
+                    {{ propKey }}
+                    <span
+                      v-if="mcpCallSelectedTool.inputSchema?.required?.includes(String(propKey))"
+                      class="text-destructive"
+                    >*</span>
+                    <span
+                      v-if="propDef.description"
+                      class="text-muted-foreground font-normal"
+                    >— {{ propDef.description }}</span>
+                  </Label>
+                  <Input
+                    :model-value="String(selectedNode.data.toolArguments?.[propKey] ?? '')"
+                    placeholder="value or $expr"
+                    class="font-mono text-xs"
+                    @update:model-value="updateMCPCallArgument(String(propKey), $event)"
+                  />
+                </div>
+                <p class="text-xs text-muted-foreground">
+                  Values support DSL expressions: <code class="bg-muted px-1 rounded">$nodeLabel.field</code>
+                </p>
+              </div>
+
+              <!-- Output reference -->
+              <div class="space-y-1 pt-2 border-t">
+                <Label class="text-xs text-muted-foreground">Output</Label>
+                <div class="text-xs font-mono">
+                  <div>${{ selectedNode.data.label }}.result — tool result (object or string)</div>
+                </div>
               </div>
             </div>
           </template>
