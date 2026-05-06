@@ -6,13 +6,14 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_current_user
 from app.api.mcp import (
+    _accept_sse_response_if_active,
     _add_mcp_workflow_trace,
     get_credentials_context_for_user,
     workflow_to_mcp_tool,
@@ -39,7 +40,7 @@ from app.models.schemas import (
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
-from app.services.mcp_session import mcp_session_store
+from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
@@ -325,11 +326,20 @@ async def named_server_sse(
     message_endpoint = f"/api/mcp/servers/{server_id}/message?session={session_token}"
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        yield f"event: endpoint\ndata: {message_endpoint}\n\n"
-        while True:
-            if await request.is_disconnected():
-                break
-            await asyncio.sleep(30)
+        response_queue = mcp_sse_channels.register(session_token)
+        try:
+            yield f"event: endpoint\ndata: {message_endpoint}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(response_queue.get(), timeout=15)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"event: message\ndata: {payload}\n\n"
+        finally:
+            mcp_sse_channels.unregister(session_token)
 
     return StreamingResponse(
         event_generator(),
@@ -520,13 +530,15 @@ async def _dispatch_named_server_jsonrpc(
     }
 
 
-@router.post("/{server_id}/message")
+@router.post("/{server_id}/message", response_model=None)
 async def handle_named_server_message(
     server_id: uuid.UUID,
     request: Request,
     server: tuple[User, MCPServer] = Depends(_get_named_server_context),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    return await _dispatch_named_server_jsonrpc(
+) -> dict | Response:
+    response = await _dispatch_named_server_jsonrpc(
         server_id=server_id, request=request, server=server, db=db
     )
+    sse_response = await _accept_sse_response_if_active(request, response)
+    return sse_response or response

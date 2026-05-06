@@ -30,13 +30,16 @@ AFTER (fixed)
    headers are absent (local / direct access).
 """
 
+import json
 import unittest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.mcp import get_mcp_config, mcp_sse_endpoint
-from app.api.mcp_servers import named_server_sse
+from fastapi import Request
+
+from app.api.mcp import get_mcp_config, handle_mcp_message, mcp_sse_endpoint
+from app.api.mcp_servers import handle_named_server_message, named_server_sse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,6 +74,26 @@ def _make_empty_db() -> AsyncMock:
     result.scalars = MagicMock(return_value=scalars)
     db.execute = AsyncMock(return_value=result)
     return db
+
+
+def _make_json_request(path: str, body: dict, query_string: bytes = b"") -> Request:
+    async def receive() -> dict[str, object]:
+        return {
+            "type": "http.request",
+            "body": json.dumps(body).encode("utf-8"),
+            "more_body": False,
+        }
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": path,
+            "headers": [(b"content-type", b"application/json")],
+            "query_string": query_string,
+        },
+        receive,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +156,36 @@ class DefaultSSEOriginTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("session=unique-session-xyz", event)
 
+    @patch("app.api.mcp.mcp_session_store")
+    async def test_message_response_is_sent_over_sse_stream(self, mock_store: MagicMock) -> None:
+        """Legacy SSE transport receives JSON-RPC responses as event: message."""
+        mock_store.create.return_value = "stream-tok"
+        request = _make_request()
+        request.is_disconnected = AsyncMock(return_value=False)
+        user = SimpleNamespace(id=uuid.uuid4())
+
+        response = await mcp_sse_endpoint(request=request, mcp_user=user, db=AsyncMock())
+        body_iterator = response.body_iterator
+        first_event = await body_iterator.__anext__()
+
+        post_response = await handle_mcp_message(
+            request=_make_json_request(
+                "/api/mcp/message",
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+                b"session=stream-tok",
+            ),
+            mcp_user=user,
+            db=AsyncMock(),
+        )
+        message_event = await body_iterator.__anext__()
+        await body_iterator.aclose()
+
+        self.assertEqual(post_response.status_code, 202)
+        self.assertIn("event: endpoint", first_event)
+        self.assertIn("event: message", message_event)
+        self.assertIn('"id": 1', message_event)
+        self.assertIn('"result"', message_event)
+
 
 # ---------------------------------------------------------------------------
 # /{server_id}/sse  (named server endpoint)
@@ -186,6 +239,45 @@ class NamedServerSSEOriginTests(unittest.IsolatedAsyncioTestCase):
         event = await _first_sse_event(response)
 
         self.assertIn(str(server_id), event)
+
+    @patch("app.api.mcp_servers.mcp_session_store")
+    async def test_named_message_response_is_sent_over_sse_stream(
+        self, mock_store: MagicMock
+    ) -> None:
+        """Named legacy SSE transport also emits JSON-RPC responses on SSE."""
+        mock_store.create.return_value = "named-stream-tok"
+        server_id = uuid.uuid4()
+        user = SimpleNamespace(id=uuid.uuid4())
+        mcp_server = SimpleNamespace(id=server_id)
+        request = _make_request()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        response = await named_server_sse(
+            server_id=server_id,
+            request=request,
+            server=(user, mcp_server),
+        )
+        body_iterator = response.body_iterator
+        first_event = await body_iterator.__anext__()
+
+        post_response = await handle_named_server_message(
+            server_id=server_id,
+            request=_make_json_request(
+                f"/api/mcp/servers/{server_id}/message",
+                {"jsonrpc": "2.0", "id": "init-1", "method": "initialize"},
+                b"session=named-stream-tok",
+            ),
+            server=(user, mcp_server),
+            db=AsyncMock(),
+        )
+        message_event = await body_iterator.__anext__()
+        await body_iterator.aclose()
+
+        self.assertEqual(post_response.status_code, 202)
+        self.assertIn("event: endpoint", first_event)
+        self.assertIn("event: message", message_event)
+        self.assertIn('"id": "init-1"', message_event)
+        self.assertIn('"result"', message_event)
 
 
 # ---------------------------------------------------------------------------

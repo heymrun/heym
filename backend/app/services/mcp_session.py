@@ -6,6 +6,7 @@ instead of the actual MCP API key or OAuth bearer token.  This avoids
 leaking long-lived credentials in server access logs.
 """
 
+import asyncio
 import secrets
 import threading
 import time
@@ -67,3 +68,40 @@ class MCPSessionStore:
 
 
 mcp_session_store = MCPSessionStore()
+
+
+class MCPSSEChannelStore:
+    """In-memory response channels for legacy MCP SSE sessions."""
+
+    def __init__(self) -> None:
+        self._channels: dict[str, asyncio.Queue[str]] = {}
+        self._lock = threading.Lock()
+
+    def register(self, token: str) -> asyncio.Queue[str]:
+        """Register an SSE response queue for a session token."""
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        with self._lock:
+            self._channels[token] = queue
+        return queue
+
+    def exists(self, token: str) -> bool:
+        """Return whether an SSE response queue is active for a token."""
+        with self._lock:
+            return token in self._channels
+
+    async def send(self, token: str, payload: str) -> bool:
+        """Send a payload to the active SSE response queue for a token."""
+        with self._lock:
+            queue = self._channels.get(token)
+        if queue is None:
+            return False
+        await queue.put(payload)
+        return True
+
+    def unregister(self, token: str) -> None:
+        """Remove the SSE response queue for a session token."""
+        with self._lock:
+            self._channels.pop(token, None)
+
+
+mcp_sse_channels = MCPSSEChannelStore()

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,10 +53,23 @@ from app.services.execution_cancellation import (
     register_execution,
 )
 from app.services.global_variables_service import get_global_variables_context
-from app.services.mcp_session import mcp_session_store
+from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
+
+
+async def _accept_sse_response_if_active(request: Request, response: dict) -> Response | None:
+    session_token = request.query_params.get("session")
+    if not session_token or not mcp_sse_channels.exists(session_token):
+        return None
+
+    if "id" in response:
+        payload = json.dumps(response, ensure_ascii=False)
+        if not await mcp_sse_channels.send(session_token, payload):
+            return None
+
+    return Response("Accepted", status_code=status.HTTP_202_ACCEPTED)
 
 
 async def get_mcp_user(
@@ -618,11 +631,10 @@ async def call_mcp_tool(
         clear_active_execution(execution_id)
 
 
-@router.post("/message")
-async def handle_mcp_message(
+async def _dispatch_mcp_jsonrpc(
     request: Request,
-    mcp_user: User = Depends(get_mcp_user),
-    db: AsyncSession = Depends(get_db),
+    mcp_user: User,
+    db: AsyncSession,
 ) -> dict:
     body = await request.json()
     msg = MCPJSONRPCRequest(**body)
@@ -786,6 +798,17 @@ async def handle_mcp_message(
         "id": msg.id,
         "error": {"code": -32601, "message": f"Method not found: {msg.method}"},
     }
+
+
+@router.post("/message", response_model=None)
+async def handle_mcp_message(
+    request: Request,
+    mcp_user: User = Depends(get_mcp_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict | Response:
+    response = await _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
+    sse_response = await _accept_sse_response_if_active(request, response)
+    return sse_response or response
 
 
 @router.post("/sse")
@@ -969,12 +992,21 @@ async def mcp_sse_endpoint(
     message_endpoint = f"/api/mcp/message?session={session_token}"
 
     async def event_generator():
-        yield f"event: endpoint\ndata: {message_endpoint}\n\n"
+        response_queue = mcp_sse_channels.register(session_token)
+        try:
+            yield f"event: endpoint\ndata: {message_endpoint}\n\n"
 
-        while True:
-            if await request.is_disconnected():
-                break
-            await asyncio.sleep(30)
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(response_queue.get(), timeout=15)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"event: message\ndata: {payload}\n\n"
+        finally:
+            mcp_sse_channels.unregister(session_token)
 
     return StreamingResponse(
         event_generator(),
