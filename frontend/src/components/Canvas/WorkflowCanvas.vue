@@ -75,6 +75,7 @@ const BLOCKED_AS_TOOL = new Set<string>([
   "merge", "switch", "loop", "agent", "llm", "condition",
   "execute", "sticky", "errorHandler",
   "cron", "textInput", "telegramTrigger", "websocketTrigger", "slackTrigger", "imapTrigger",
+  "mcpCall",
 ]);
 
 const pendingConnection = ref<{ nodeId: string; handleId: string | null } | null>(null);

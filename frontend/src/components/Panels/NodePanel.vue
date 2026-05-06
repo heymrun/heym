@@ -173,6 +173,7 @@ const BLOCKED_AS_TOOL = new Set<string>([
   "merge", "switch", "loop", "agent", "llm", "condition",
   "execute", "sticky", "errorHandler",
   "cron", "textInput", "telegramTrigger", "websocketTrigger", "slackTrigger", "imapTrigger",
+  "mcpCall",
 ]);
 
 const allNodeTypes = Object.values(NODE_DEFINITIONS);
