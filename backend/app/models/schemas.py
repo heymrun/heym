@@ -4,6 +4,8 @@ from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.config import settings
+
 
 def _validate_password_strength(value: str) -> str:
     """Enforce minimum password complexity."""
@@ -835,7 +837,7 @@ class MCPServerCapabilities(BaseModel):
 
 class MCPServerInfo(BaseModel):
     name: str = "heym-mcp"
-    version: str = "1.0.0"
+    version: str = Field(default_factory=lambda: settings.resolved_version)
 
 
 class MCPInitializeResult(BaseModel):

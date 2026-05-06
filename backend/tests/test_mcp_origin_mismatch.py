@@ -40,6 +40,8 @@ from fastapi import Request
 
 from app.api.mcp import get_mcp_config, handle_mcp_message, mcp_sse_endpoint
 from app.api.mcp_servers import handle_named_server_message, named_server_sse
+from app.config import settings
+from app.models.schemas import MCPInitializeResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,6 +96,14 @@ def _make_json_request(path: str, body: dict, query_string: bytes = b"") -> Requ
         },
         receive,
     )
+
+
+class MCPInitializeVersionTests(unittest.TestCase):
+    def test_initialize_result_uses_application_version(self) -> None:
+        result = MCPInitializeResult()
+
+        self.assertEqual(result.serverInfo.version, settings.resolved_version)
+        self.assertNotEqual(result.serverInfo.version, "1.0.0")
 
 
 # ---------------------------------------------------------------------------
