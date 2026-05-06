@@ -794,6 +794,7 @@ class MCPToolsListResponse(BaseModel):
 class MCPFetchToolItem(BaseModel):
     name: str
     description: str
+    inputSchema: dict | None = None  # noqa: N815
 
 
 class MCPFetchToolsResponse(BaseModel):

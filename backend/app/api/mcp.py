@@ -482,7 +482,11 @@ async def fetch_mcp_tools(
         ) from e
 
     tools = [
-        MCPFetchToolItem(name=t.get("name", ""), description=t.get("description") or "")
+        MCPFetchToolItem(
+            name=t.get("name", ""),
+            description=t.get("description") or "",
+            inputSchema=t.get("parameters") or None,
+        )
         for t in raw_tools
     ]
     return MCPFetchToolsResponse(tools=tools)

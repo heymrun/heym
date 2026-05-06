@@ -1409,6 +1409,11 @@ export interface MCPRegenerateKeyResponse {
 export interface MCPFetchToolItem {
   name: string;
   description: string;
+  inputSchema?: {
+    type?: string;
+    properties?: Record<string, { type?: string; description?: string }>;
+    required?: string[];
+  };
 }
 
 export interface MCPFetchToolsResponse {
