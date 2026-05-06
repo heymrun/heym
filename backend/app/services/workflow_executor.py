@@ -8791,8 +8791,7 @@ class WorkflowExecutor:
                 mcp_connection = self._resolve_mcp_connection(mcp_connection, inputs, node_id)
 
                 resolved_args = {
-                    k: self.resolve_expression(str(v), inputs)
-                    for k, v in tool_arguments.items()
+                    k: self.resolve_expression(str(v), inputs) for k, v in tool_arguments.items()
                 }
 
                 mcp_result = execute_mcp_tool(mcp_connection, selected_tool, resolved_args, timeout)
