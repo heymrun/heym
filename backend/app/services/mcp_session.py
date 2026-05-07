@@ -45,9 +45,7 @@ class MCPSessionStore:
         ]
         for k in expired:
             del self._sessions[k]
-        expired_jtis = [
-            k for k, expires_at in self._revoked_jtis.items() if expires_at <= now
-        ]
+        expired_jtis = [k for k, expires_at in self._revoked_jtis.items() if expires_at <= now]
         for k in expired_jtis:
             del self._revoked_jtis[k]
         self._last_cleanup = now
