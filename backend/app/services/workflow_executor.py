@@ -2200,13 +2200,82 @@ class WorkflowExecutor:
         return result
 
     def _handle_error_branch_routing(self, node_id: str) -> None:
-        """Skip non-error downstream nodes when error branch is taken."""
-        for edge in self.edges:
-            if edge["source"] == node_id:
-                source_handle = edge.get("sourceHandle")
-                if source_handle != "error":
-                    target = edge["target"]
-                    self.mark_branch_as_skipped(target)
+        """Skip only non-error downstream nodes that depend exclusively on the failed node."""
+        active_edges = [
+            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
+        ]
+        error_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") == "error"
+        ]
+        inactive_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") != "error"
+        ]
+        preserved_node_ids: set[str] = set()
+        for target in error_targets:
+            preserved_node_ids.update(self.get_branch_node_ids(target, active_edges))
+
+        exclusive_nodes = self.get_exclusive_branch_node_ids(
+            root_node_id=node_id,
+            start_node_ids=inactive_targets,
+            edges=active_edges,
+            preserve_node_ids=preserved_node_ids,
+        )
+        self.skipped_nodes.update(exclusive_nodes)
+
+    def get_exclusive_branch_node_ids(
+        self,
+        *,
+        root_node_id: str,
+        start_node_ids: list[str],
+        edges: list[dict],
+        preserve_node_ids: set[str] | None = None,
+    ) -> set[str]:
+        """Return downstream nodes whose execution depends only on the branch root.
+
+        Shared downstream nodes, such as a common output reached by another parallel branch, must
+        stay active so the other branch can still complete the workflow.
+        """
+        preserved = preserve_node_ids or set()
+        branch_node_ids: set[str] = set()
+        for start_node_id in start_node_ids:
+            branch_node_ids.update(
+                self.get_branch_node_ids(
+                    start_node_id,
+                    edges,
+                    exclude_node_ids=preserved,
+                )
+            )
+
+        exclusive_node_ids: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for candidate in branch_node_ids - exclusive_node_ids - preserved:
+                incoming_edges = [
+                    edge
+                    for edge in edges
+                    if edge["target"] == candidate
+                    and not (
+                        self.nodes.get(candidate, {}).get("type") == "loop"
+                        and edge.get("targetHandle") == "loop"
+                    )
+                ]
+                if not incoming_edges:
+                    continue
+
+                depends_only_on_root_or_exclusive_nodes = all(
+                    edge["source"] == root_node_id or edge["source"] in exclusive_node_ids
+                    for edge in incoming_edges
+                )
+                if depends_only_on_root_or_exclusive_nodes:
+                    exclusive_node_ids.add(candidate)
+                    changed = True
+
+        return exclusive_node_ids
 
     def _record_notification_branch_results(self, results: list[NodeResult]) -> None:
         if not results:

@@ -1,4 +1,14 @@
-import type { WorkflowEdge, WorkflowNode } from "@/types/workflow";
+import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
+import { NODE_DEFINITIONS } from "@/types/node";
+
+const PRIMARY_OUTPUT_EXCLUDED_TYPES = new Set<NodeType>([
+  "condition",
+  "switch",
+  "loop",
+  "sticky",
+  "throwError",
+  "jsonOutputMapper",
+]);
 
 function stringValue(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) {
@@ -28,6 +38,38 @@ function uniqueEdgeId(baseId: string, usedIds: Set<string>): string {
   }
   usedIds.add(candidate);
   return candidate;
+}
+
+function hasPrimaryOutputHandle(node: WorkflowNode): boolean {
+  if (PRIMARY_OUTPUT_EXCLUDED_TYPES.has(node.type)) {
+    return false;
+  }
+
+  if (node.type === "output" && node.data.allowDownstream !== true) {
+    return false;
+  }
+
+  return NODE_DEFINITIONS[node.type].outputs > 0;
+}
+
+export function resolveRenderedSourceHandle(
+  edge: WorkflowEdge,
+  nodes: WorkflowNode[],
+): string | undefined {
+  if (edge.targetHandle === "tool-input") {
+    return "tool-output";
+  }
+
+  if (edge.sourceHandle) {
+    return edge.sourceHandle;
+  }
+
+  const sourceNode = nodes.find((node) => node.id === edge.source);
+  if (!sourceNode || !hasPrimaryOutputHandle(sourceNode)) {
+    return undefined;
+  }
+
+  return "output";
 }
 
 export function normalizeWorkflowEdges(

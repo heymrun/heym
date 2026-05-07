@@ -11,6 +11,7 @@ import InsertableEdge from "@/components/Canvas/InsertableEdge.vue";
 import ReadonlyCanvasViewportFitter from "@/components/Canvas/ReadonlyCanvasViewportFitter.vue";
 import StickyNoteNode from "@/components/Nodes/StickyNoteNode.vue";
 import { buildSubAgentEdges, getSubAgentLabels } from "@/lib/agentCanvasLinks";
+import { resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
@@ -89,7 +90,7 @@ const vueFlowEdges = computed(() =>
     type: "insertable",
     source: edge.source,
     target: edge.target,
-    sourceHandle: edge.sourceHandle,
+    sourceHandle: resolveRenderedSourceHandle(edge, props.nodes),
     targetHandle: edge.targetHandle,
     animated: true,
   })),

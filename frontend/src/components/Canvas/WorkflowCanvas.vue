@@ -22,7 +22,7 @@ import { buildSubAgentEdges, getSubAgentLabels } from "@/lib/agentCanvasLinks";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
-import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
+import { normalizeWorkflowEdges, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 import { evalsApi, templatesApi } from "@/services/api";
 import { useToast } from "@/composables/useToast";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -105,6 +105,13 @@ function scheduleFitViewAfterLayout(): void {
   }, FIT_VIEW_AFTER_LAYOUT_MS);
 }
 
+function updateNodeInternalsAfterDom(nodeIds: string[]): void {
+  if (nodeIds.length === 0) return;
+  void nextTick(() => {
+    updateNodeInternals(nodeIds);
+  });
+}
+
 function handleOpenAgentMemory(nodeId: string): void {
   agentMemoryCanvasNodeId.value = nodeId;
   agentMemoryDialogOpen.value = true;
@@ -148,7 +155,7 @@ const vueFlowEdges = computed(() => [
     type: edge.targetHandle === "tool-input" ? "default" : "insertable",
     source: edge.source,
     target: edge.target,
-    sourceHandle: edge.targetHandle === "tool-input" ? "tool-output" : edge.sourceHandle,
+    sourceHandle: resolveRenderedSourceHandle(edge, workflowStore.nodes),
     targetHandle: edge.targetHandle,
     animated: true,
     style:
@@ -1413,7 +1420,7 @@ watch(
           const isEnabled = newVal[index] === true;
 
           if (wasEnabled !== isEnabled) {
-            updateNodeInternals([node.id]);
+            updateNodeInternalsAfterDom([node.id]);
 
             if (wasEnabled && !isEnabled) {
               const outgoingEdges = workflowStore.edges.filter((e) => e.source === node.id);
@@ -1426,7 +1433,63 @@ watch(
       });
     }
   },
-  { deep: true }
+  { deep: true, flush: "post" },
+);
+
+watch(
+  () => workflowStore.nodes.map((n) => n.data.onErrorEnabled === true),
+  (newVal, oldVal) => {
+    if (!oldVal || !newVal) return;
+
+    const changedNodeIds: string[] = [];
+    workflowStore.nodes.forEach((node, index) => {
+      const wasEnabled = oldVal[index] === true;
+      const isEnabled = newVal[index] === true;
+      if (wasEnabled === isEnabled) return;
+
+      changedNodeIds.push(node.id);
+      if (wasEnabled && !isEnabled) {
+        const outgoingEdges = workflowStore.edges.filter(
+          (edge) => edge.source === node.id && edge.sourceHandle === "error",
+        );
+        outgoingEdges.forEach((edge) => {
+          workflowStore.removeEdge(edge.id);
+        });
+      }
+    });
+
+    updateNodeInternalsAfterDom(changedNodeIds);
+  },
+  { deep: true, flush: "post" },
+);
+
+watch(
+  () => workflowStore.nodes.map((n) => (n.type === "agent" ? n.data.hitlEnabled === true : null)),
+  (newVal, oldVal) => {
+    if (!oldVal || !newVal) return;
+
+    const changedNodeIds: string[] = [];
+    workflowStore.nodes.forEach((node, index) => {
+      if (node.type !== "agent") return;
+
+      const wasEnabled = oldVal[index] === true;
+      const isEnabled = newVal[index] === true;
+      if (wasEnabled === isEnabled) return;
+
+      changedNodeIds.push(node.id);
+      if (wasEnabled && !isEnabled) {
+        const outgoingEdges = workflowStore.edges.filter(
+          (edge) => edge.source === node.id && edge.sourceHandle === "hitl",
+        );
+        outgoingEdges.forEach((edge) => {
+          workflowStore.removeEdge(edge.id);
+        });
+      }
+    });
+
+    updateNodeInternalsAfterDom(changedNodeIds);
+  },
+  { deep: true, flush: "post" },
 );
 
 watch(
@@ -1440,7 +1503,7 @@ watch(
         const isEnabled = newVal[index] === true;
         if (wasEnabled === isEnabled) return;
 
-        updateNodeInternals([node.id]);
+        updateNodeInternalsAfterDom([node.id]);
         if (wasEnabled && !isEnabled) {
           const outgoingEdges = workflowStore.edges.filter(
             (edge) => edge.source === node.id && edge.sourceHandle === "batchStatus",
@@ -1452,7 +1515,7 @@ watch(
       });
     }
   },
-  { deep: true },
+  { deep: true, flush: "post" },
 );
 </script>
 

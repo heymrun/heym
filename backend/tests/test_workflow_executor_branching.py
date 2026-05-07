@@ -211,6 +211,61 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         self.assertEqual(results["errorBranch"]["status"], "success")
         self.assertEqual(result.outputs, {"errorBranch": {"result": "false branch"}})
 
+    def test_error_branch_preserves_output_reached_by_parallel_branch(self) -> None:
+        nodes = [
+            {
+                "id": "input_1",
+                "type": "textInput",
+                "data": {"label": "start", "inputFields": [{"key": "text"}]},
+            },
+            {
+                "id": "watch_1",
+                "type": "mcpCall",
+                "data": {
+                    "label": "watch",
+                    "connection": {
+                        "id": "conn_1",
+                        "transport": "sse",
+                        "url": "http://localhost:3000/sse",
+                        "timeoutSeconds": 30,
+                    },
+                    "selectedTool": "",
+                    "toolArguments": {},
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "star_1",
+                "type": "wait",
+                "data": {"label": "star", "duration": 10},
+            },
+            {
+                "id": "output_1",
+                "type": "output",
+                "data": {"label": "searchResult", "message": "$star.body.text"},
+            },
+        ]
+        edges = [
+            {"id": "e1", "source": "input_1", "target": "watch_1"},
+            {"id": "e2", "source": "input_1", "target": "star_1"},
+            {"id": "e3", "source": "watch_1", "target": "output_1", "sourceHandle": "output"},
+            {"id": "e4", "source": "star_1", "target": "output_1", "sourceHandle": "output"},
+        ]
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+
+        result = executor.execute(
+            workflow_id=uuid.uuid4(),
+            initial_inputs={"headers": {}, "query": {}, "body": {"text": "hello"}},
+        )
+        results = {row["node_label"]: row for row in result.node_results}
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(results["watch"]["status"], "success")
+        self.assertTrue(results["watch"]["output"]["_errorBranch"])
+        self.assertEqual(results["star"]["status"], "success")
+        self.assertEqual(results["searchResult"]["status"], "success")
+        self.assertEqual(result.outputs, {"searchResult": {"result": "hello"}})
+
     def test_loop_done_branch_waits_for_loop_done_output(self) -> None:
         nodes, edges, initial_inputs = _make_loop_done_workflow()
         executor = WorkflowExecutor(nodes=nodes, edges=edges)
