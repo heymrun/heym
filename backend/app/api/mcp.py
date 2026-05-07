@@ -473,8 +473,21 @@ async def fetch_mcp_tools(
     conn = dict(connection)
     conn.setdefault("id", conn.get("label", "default"))
 
+    # Cap the hard timeout so a silent auth failure (e.g. 401 in a background
+    # SSE task) doesn't leave the frontend spinner running for the full
+    # connection timeout. The MCP read_timeout is still respected internally;
+    # this adds an outer asyncio deadline on top.
+    hard_timeout = min(timeout_seconds + 3.0, 15.0)
     try:
-        raw_tools = await asyncio.to_thread(list_mcp_tools, conn, timeout_seconds)
+        raw_tools = await asyncio.wait_for(
+            asyncio.to_thread(list_mcp_tools, conn, timeout_seconds),
+            timeout=hard_timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Connection timed out. Check the server URL and authentication headers.",
+        ) from exc
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

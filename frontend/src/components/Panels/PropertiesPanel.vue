@@ -4488,7 +4488,42 @@ const mcpCallSelectedTool = computed(() => {
   if (!selectedNode.value) return null;
   const name = selectedNode.value.data.selectedTool as string | undefined;
   if (!name) return null;
-  return mcpCallFetchState.value.tools.find((t) => t.name === name) ?? null;
+  const fetched = mcpCallFetchState.value.tools.find((t) => t.name === name);
+  if (fetched) return fetched;
+  // After a page refresh the fetched list is empty but the saved toolArguments
+  // keys are still in node data. Build a synthetic schema from them so the
+  // argument fields remain editable without requiring a re-fetch.
+  const savedKeys = Object.keys(selectedNode.value.data.toolArguments ?? {});
+  type PropDef = { type?: string; description?: string };
+  return {
+    name,
+    description: undefined as string | undefined,
+    inputSchema: savedKeys.length
+      ? {
+          properties: Object.fromEntries(
+            savedKeys.map((k): [string, PropDef] => [k, {}]),
+          ) as Record<string, PropDef>,
+          required: [] as string[],
+        }
+      : undefined,
+  };
+});
+
+const mcpCallToolOptions = computed(() => {
+  const saved = selectedNode.value?.data.selectedTool as string | undefined;
+  const fetched = mcpCallFetchState.value.tools;
+  const placeholder = fetched.length
+    ? "Select a tool…"
+    : saved
+      ? "Fetch tools to update"
+      : "Fetch tools first";
+  const opts: { value: string; label: string }[] = [{ value: "", label: placeholder }];
+  if (fetched.length > 0) {
+    opts.push(...fetched.map((t) => ({ value: t.name, label: t.name })));
+  } else if (saved) {
+    opts.push({ value: saved, label: saved });
+  }
+  return opts;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -11132,10 +11167,7 @@ onUnmounted(() => {
                 </Label>
                 <Select
                   :model-value="selectedNode.data.selectedTool ?? ''"
-                  :options="[
-                    { value: '', label: mcpCallFetchState.tools.length ? 'Select a tool…' : 'Fetch tools first' },
-                    ...mcpCallFetchState.tools.map(t => ({ value: t.name, label: t.name }))
-                  ]"
+                  :options="mcpCallToolOptions"
                   :class="!selectedNode.data.selectedTool ? 'border-destructive' : ''"
                   @update:model-value="selectMCPCallTool($event ?? '')"
                 />
