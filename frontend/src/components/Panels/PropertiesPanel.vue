@@ -6712,7 +6712,7 @@ onUnmounted(() => {
                       <Label class="text-xs">Env (JSON object)</Label>
                       <ExpressionInput
                         :ref="(el) => setAgentMCPEnvInputRef(conn.id, el)"
-                        :model-value="formatMCPJsonValue(conn.env, {}, true)"
+                        :model-value="formatMCPJsonValue(conn.env, {})"
                         placeholder="{&quot;API_KEY&quot;: &quot;your_key&quot;}"
                         :rows="2"
                         wrap="off"
@@ -11235,7 +11235,7 @@ onUnmounted(() => {
                       <Label class="text-xs">Env (JSON object)</Label>
                       <ExpressionInput
                         ref="mcpCallConnectionEnvInputRef"
-                        :model-value="formatMCPJsonValue(selectedNode.data.connection?.env, {}, true)"
+                        :model-value="formatMCPJsonValue(selectedNode.data.connection?.env, {})"
                         placeholder="{&quot;API_KEY&quot;: &quot;your_key&quot;}"
                         :rows="2"
                         wrap="off"

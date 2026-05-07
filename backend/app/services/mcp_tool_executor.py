@@ -348,6 +348,16 @@ async def _execute_mcp_tool_async(
             read_timeout_seconds=read_timeout,
         ) as session:
             await session.initialize()
+            tools_result = await session.list_tools()
+            available_tool_names = [tool.name for tool in tools_result.tools]
+            if tool_name not in available_tool_names:
+                available_preview = ", ".join(available_tool_names[:20])
+                if len(available_tool_names) > 20:
+                    available_preview += f", ... ({len(available_tool_names)} total)"
+                raise ValueError(
+                    f"MCP tool '{tool_name}' is not available on this connection. "
+                    f"Available tools: {available_preview or '(none)'}"
+                )
             call_result = await session.call_tool(
                 tool_name,
                 arguments=arguments or {},

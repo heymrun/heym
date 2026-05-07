@@ -1,13 +1,16 @@
 """Unit tests for mcp_tool_executor helper functions."""
 
 import unittest
-from unittest.mock import MagicMock
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 from mcp import types
 from mcp.shared.message import SessionMessage
 
 from app.services.mcp_tool_executor import (
+    _execute_mcp_tool_async,
     _extract_tool_result,
     _mcp_tool_to_openai_format,
     _normalize_connection,
@@ -211,3 +214,90 @@ class ListMcpToolsErrorPathTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             list_mcp_tools({"transport": "streamable_http"}, timeout_seconds=5.0)
         self.assertIn("url", str(ctx.exception))
+
+
+class ExecuteMcpToolSessionToolListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_call_tool_lists_tools_in_same_session_first(self) -> None:
+        calls: list[str] = []
+
+        @asynccontextmanager
+        async def fake_open_transport(_conn: dict, _timeout: float):
+            yield object(), object()
+
+        class FakeSession:
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.initialize = AsyncMock(side_effect=lambda: calls.append("initialize"))
+                self.list_tools = AsyncMock(
+                    side_effect=lambda: (
+                        calls.append("list_tools")
+                        or SimpleNamespace(tools=[SimpleNamespace(name="search")])
+                    )
+                )
+                self.call_tool = AsyncMock(
+                    side_effect=lambda *_args, **_kwargs: (
+                        calls.append("call_tool")
+                        or types.CallToolResult(
+                            content=[types.TextContent(type="text", text='{"ok": true}')],
+                            isError=False,
+                        )
+                    )
+                )
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args) -> None:
+                return None
+
+        with (
+            patch("app.services.mcp_tool_executor._open_transport", fake_open_transport),
+            patch("app.services.mcp_tool_executor.ClientSession", FakeSession),
+        ):
+            result = await _execute_mcp_tool_async(
+                {"transport": "stdio", "command": "fake"},
+                "search",
+                {"q": "hello"},
+                5,
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(calls, ["initialize", "list_tools", "call_tool"])
+
+    async def test_missing_tool_raises_with_available_tools(self) -> None:
+        @asynccontextmanager
+        async def fake_open_transport(_conn: dict, _timeout: float):
+            yield object(), object()
+
+        class FakeSession:
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.initialize = AsyncMock()
+                self.list_tools = AsyncMock(
+                    return_value=SimpleNamespace(
+                        tools=[
+                            SimpleNamespace(name="list_notifications"),
+                            SimpleNamespace(name="manage_notification_subscription"),
+                        ]
+                    )
+                )
+                self.call_tool = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args) -> None:
+                return None
+
+        with (
+            patch("app.services.mcp_tool_executor._open_transport", fake_open_transport),
+            patch("app.services.mcp_tool_executor.ClientSession", FakeSession),
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                await _execute_mcp_tool_async(
+                    {"transport": "stdio", "command": "fake"},
+                    "manage_repository_notification_subscription",
+                    {},
+                    5,
+                )
+
+        self.assertIn("is not available on this connection", str(ctx.exception))
+        self.assertIn("list_notifications", str(ctx.exception))
