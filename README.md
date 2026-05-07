@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/heymrun-heym-badge.png)](https://mseep.ai/app/heymrun-heym)
+
 <div align="center">
 
 <br/>
