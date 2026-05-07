@@ -9693,7 +9693,7 @@ onUnmounted(() => {
               />
               <div class="flex items-center justify-between">
                 <p class="text-xs text-muted-foreground">
-                  Exact-match filter: {"column": "value"}
+                  Exact-match filter: {"column": "$input.value"}
                 </p>
                 <button
                   class="text-xs text-primary hover:underline"

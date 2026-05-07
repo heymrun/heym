@@ -13,6 +13,7 @@ from fastapi import HTTPException, Request
 from app.api.ai_assistant import run_execute_workflow_tool
 from app.api.portal import portal_cancel_execution
 from app.api.workflows import execute_workflow_endpoint, execute_workflow_stream, parse_execute_body
+from app.db.models import DataTable, DataTableRow
 from app.services.workflow_executor import (
     ExecutionResult,
     SubWorkflowExecution,
@@ -394,6 +395,90 @@ class _ScalarResult:
 
     def scalar_one_or_none(self) -> object:
         return self._value
+
+
+class _FakeQuery:
+    def __init__(self, result: object) -> None:
+        self._result = result
+
+    def filter(self, *_args: object) -> "_FakeQuery":
+        return self
+
+    def first(self) -> object:
+        return self._result
+
+
+class _FakeDataTableSession:
+    def __init__(self, table: object, existing_row: object | None = None) -> None:
+        self.table = table
+        self.existing_row = existing_row
+        self.added_rows: list[DataTableRow] = []
+        self.commits = 0
+
+    def __enter__(self) -> "_FakeDataTableSession":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def query(self, model: object) -> _FakeQuery:
+        if model is DataTable:
+            return _FakeQuery(self.table)
+        if model is DataTableRow:
+            return _FakeQuery(self.existing_row)
+        return _FakeQuery(None)
+
+    def add(self, row: DataTableRow) -> None:
+        self.added_rows.append(row)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def refresh(self, _row: DataTableRow) -> None:
+        return None
+
+
+class WorkflowExecutorDataTableNodeTests(unittest.TestCase):
+    def test_upsert_insert_coerces_row_data_without_local_import_scope_error(self) -> None:
+        table_id = uuid.uuid4()
+        table = SimpleNamespace(
+            id=table_id,
+            owner_id=uuid.uuid4(),
+            columns=[
+                {"name": "username", "type": "string"},
+                {"name": "githubToken", "type": "string"},
+                {"name": "targetRepo", "type": "string"},
+            ],
+        )
+        fake_db = _FakeDataTableSession(table)
+        nodes = [
+            {
+                "id": "dt",
+                "type": "dataTable",
+                "data": {
+                    "label": "dataTable",
+                    "dataTableId": str(table_id),
+                    "dataTableOperation": "upsert",
+                    "dataTableFilter": '{"username": "ada"}',
+                    "dataTableData": (
+                        '{"username": "ada", "githubToken": "tok", "targetRepo": ""}'
+                    ),
+                },
+            }
+        ]
+        executor = WorkflowExecutor(nodes=nodes, edges=[])
+
+        with patch("app.db.session.SessionLocal", return_value=fake_db):
+            result = executor.execute_node("dt", {})
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.output["operation"], "insert")
+        self.assertEqual(fake_db.commits, 1)
+        self.assertEqual(len(fake_db.added_rows), 1)
+        self.assertEqual(
+            fake_db.added_rows[0].data,
+            {"username": "ada", "githubToken": "tok", "targetRepo": ""},
+        )
 
 
 class ParseExecuteBodyXTriggerSourceTests(unittest.IsolatedAsyncioTestCase):

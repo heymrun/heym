@@ -26,6 +26,7 @@ from urllib.parse import quote, unquote
 import httpx
 from simpleeval import DEFAULT_FUNCTIONS, EvalWithCompoundTypes, SimpleEval
 
+from app.api.data_tables import _coerce_row_data
 from app.http_identity import HEYM_USER_AGENT
 from app.services.execution_cancellation import (
     clear_execution as _clear_sub_execution,
@@ -8429,8 +8430,6 @@ class WorkflowExecutor:
                             )
                         except Exception:
                             row_data = {}
-
-                        from app.api.data_tables import _coerce_row_data
 
                         coerced_data = row_data if isinstance(row_data, dict) else {}
                         coerced_data, _ = _coerce_row_data(coerced_data, table.columns or [])
