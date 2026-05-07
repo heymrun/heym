@@ -9,13 +9,20 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
+import anyio
 import httpx
+from anyio.abc import TaskStatus
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from httpx_sse import aconnect_sse
+from httpx_sse._exceptions import SSEError
 from mcp import types
 from mcp.client.session import ClientSession
-from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared.message import SessionMessage
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +35,154 @@ def _extract_root_exception(exc: BaseException) -> BaseException:
     if isinstance(exc, BaseExceptionGroup) and exc.exceptions:
         return _extract_root_exception(exc.exceptions[0])
     return exc
+
+
+def _remove_request_params(url: str) -> str:
+    return urljoin(url, urlparse(url).path)
+
+
+def _post_failure_message(
+    session_message: SessionMessage,
+    exc: BaseException,
+) -> SessionMessage | Exception:
+    root = session_message.message.root
+    request_id = getattr(root, "id", None)
+    if request_id is None:
+        return exc
+
+    status_code = -32000
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+    message = f"MCP SSE POST failed: {exc}"
+    return SessionMessage(
+        types.JSONRPCMessage(
+            types.JSONRPCError(
+                jsonrpc="2.0",
+                id=request_id,
+                error=types.ErrorData(code=status_code, message=message),
+            )
+        )
+    )
+
+
+@asynccontextmanager
+async def _sse_client_fail_fast(
+    url: str,
+    headers: dict[str, Any] | None = None,
+    timeout: float = 5,
+    sse_read_timeout: float = 60 * 5,
+) -> AsyncGenerator[tuple[Any, Any], None]:
+    """
+    SSE transport with the MCP SDK behaviour plus fail-fast POST errors.
+
+    The upstream SDK logs POST failures but does not forward them to the read
+    side, so callers can sit until their read timeout after a 401/403. This
+    wrapper converts failed POSTs into JSON-RPC errors for request messages and
+    closes the read stream immediately.
+    """
+    read_stream: MemoryObjectReceiveStream[SessionMessage | Exception]
+    read_stream_writer: MemoryObjectSendStream[SessionMessage | Exception]
+    write_stream: MemoryObjectSendStream[SessionMessage]
+    write_stream_reader: MemoryObjectReceiveStream[SessionMessage]
+
+    read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
+    write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
+
+    async with anyio.create_task_group() as tg:
+        try:
+            logger.debug("Connecting to SSE endpoint: %s", _remove_request_params(url))
+            async with create_mcp_http_client(
+                headers=headers,
+                timeout=httpx.Timeout(timeout, read=sse_read_timeout),
+            ) as client:
+                async with aconnect_sse(client, "GET", url) as event_source:
+                    event_source.response.raise_for_status()
+                    logger.debug("SSE connection established")
+
+                    async def sse_reader(
+                        task_status: TaskStatus[str] = anyio.TASK_STATUS_IGNORED,
+                    ) -> None:
+                        try:
+                            async for sse in event_source.aiter_sse():
+                                logger.debug("Received SSE event: %s", sse.event)
+                                if sse.event == "endpoint":
+                                    endpoint_url = urljoin(url, sse.data)
+                                    logger.debug("Received endpoint URL: %s", endpoint_url)
+                                    url_parsed = urlparse(url)
+                                    endpoint_parsed = urlparse(endpoint_url)
+                                    if (
+                                        url_parsed.netloc != endpoint_parsed.netloc
+                                        or url_parsed.scheme != endpoint_parsed.scheme
+                                    ):
+                                        error_msg = (
+                                            "Endpoint origin does not match connection origin: "
+                                            f"{endpoint_url}"
+                                        )
+                                        logger.error(error_msg)
+                                        raise ValueError(error_msg)
+                                    task_status.started(endpoint_url)
+                                elif sse.event == "message":
+                                    if not sse.data:
+                                        continue
+                                    try:
+                                        message = types.JSONRPCMessage.model_validate_json(sse.data)
+                                        logger.debug("Received server message: %s", message)
+                                    except Exception as exc:
+                                        logger.exception("Error parsing server message")
+                                        await read_stream_writer.send(exc)
+                                        continue
+                                    await read_stream_writer.send(SessionMessage(message))
+                                else:
+                                    logger.warning("Unknown SSE event: %s", sse.event)
+                        except SSEError as exc:
+                            logger.exception("Encountered SSE exception")
+                            raise exc
+                        except Exception as exc:
+                            logger.exception("Error in sse_reader")
+                            await read_stream_writer.send(exc)
+                        finally:
+                            await read_stream_writer.aclose()
+
+                    async def post_writer(endpoint_url: str) -> None:
+                        try:
+                            async with write_stream_reader:
+                                async for session_message in write_stream_reader:
+                                    logger.debug("Sending client message: %s", session_message)
+                                    try:
+                                        response = await client.post(
+                                            endpoint_url,
+                                            json=session_message.message.model_dump(
+                                                by_alias=True,
+                                                mode="json",
+                                                exclude_none=True,
+                                            ),
+                                        )
+                                        response.raise_for_status()
+                                    except Exception as exc:
+                                        logger.exception("Error in post_writer")
+                                        await read_stream_writer.send(
+                                            _post_failure_message(session_message, exc)
+                                        )
+                                        await read_stream_writer.aclose()
+                                        return
+                                    logger.debug(
+                                        "Client message sent successfully: %s",
+                                        response.status_code,
+                                    )
+                        finally:
+                            await write_stream.aclose()
+
+                    endpoint_url = await tg.start(sse_reader)
+                    logger.debug("Starting post writer with endpoint URL: %s", endpoint_url)
+                    tg.start_soon(post_writer, endpoint_url)
+
+                    try:
+                        yield read_stream, write_stream
+                    finally:
+                        tg.cancel_scope.cancel()
+        finally:
+            await read_stream_writer.aclose()
+            await write_stream.aclose()
 
 
 def _mcp_tool_to_openai_format(
@@ -131,7 +286,7 @@ async def _open_transport(
         headers = conn.get("headers") or {}
         if not url:
             raise ValueError("sse connection requires 'url'")
-        async with sse_client(
+        async with _sse_client_fail_fast(
             url,
             headers=headers,
             timeout=min(5.0, timeout),

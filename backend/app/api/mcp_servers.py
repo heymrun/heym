@@ -15,6 +15,7 @@ from app.api.deps import get_current_user
 from app.api.mcp import (
     _accept_sse_response_if_active,
     _add_mcp_workflow_trace,
+    _reject_if_sse_channel_missing,
     get_credentials_context_for_user,
     workflow_to_mcp_tool,
 )
@@ -537,6 +538,7 @@ async def handle_named_server_message(
     server: tuple[User, MCPServer] = Depends(_get_named_server_context),
     db: AsyncSession = Depends(get_db),
 ) -> dict | Response:
+    _reject_if_sse_channel_missing(request)
     response = await _dispatch_named_server_jsonrpc(
         server_id=server_id, request=request, server=server, db=db
     )

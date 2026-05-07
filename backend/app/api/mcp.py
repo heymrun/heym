@@ -28,7 +28,7 @@ from app.db.models import (
     Workflow,
     WorkflowShare,
 )
-from app.db.session import get_db
+from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
     MCPConfigResponse,
     MCPFetchToolItem,
@@ -70,6 +70,19 @@ async def _accept_sse_response_if_active(request: Request, response: dict) -> Re
             return None
 
     return Response("Accepted", status_code=status.HTTP_202_ACCEPTED)
+
+
+def _reject_if_sse_channel_missing(request: Request) -> None:
+    session_token = request.query_params.get("session")
+    if not session_token or mcp_sse_channels.exists(session_token):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "SSE session is not active on this backend worker. Enable sticky sessions "
+            "for MCP SSE traffic or use Streamable HTTP."
+        ),
+    )
 
 
 async def get_mcp_user(
@@ -156,6 +169,21 @@ async def get_mcp_user(
         )
 
     return user
+
+
+async def get_mcp_user_for_sse(
+    request: Request,
+    x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
+) -> User:
+    """
+    Authenticate MCP SSE without holding a DB dependency for the stream lifetime.
+
+    FastAPI finalizes yield dependencies after a StreamingResponse completes, so
+    using get_db() directly on long-lived SSE routes can pin pooled DB
+    connections until the client disconnects.
+    """
+    async with async_session_maker() as db:
+        return await get_mcp_user(request=request, x_mcp_key=x_mcp_key, db=db)
 
 
 async def get_user_mcp_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[Workflow]:
@@ -823,6 +851,7 @@ async def handle_mcp_message(
     mcp_user: User = Depends(get_mcp_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict | Response:
+    _reject_if_sse_channel_missing(request)
     response = await _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
     sse_response = await _accept_sse_response_if_active(request, response)
     return sse_response or response
@@ -999,8 +1028,7 @@ async def mcp_sse_post_endpoint(
 @router.get("/sse")
 async def mcp_sse_endpoint(
     request: Request,
-    mcp_user: User = Depends(get_mcp_user),
-    db: AsyncSession = Depends(get_db),
+    mcp_user: User = Depends(get_mcp_user_for_sse),
 ) -> StreamingResponse:
     # Issue a short-lived session token so the long-lived credential
     # (MCP API key or OAuth bearer) never appears in the message endpoint URL

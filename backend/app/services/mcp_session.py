@@ -1,9 +1,10 @@
 """Short-lived MCP SSE session tokens.
 
-When a client connects to the SSE endpoint it is issued a short-lived,
-single-use session token that is embedded in the message endpoint URL
-instead of the actual MCP API key or OAuth bearer token.  This avoids
-leaking long-lived credentials in server access logs.
+When a client connects to the SSE endpoint it is issued a short-lived signed
+session token that is embedded in the message endpoint URL instead of the
+actual MCP API key or OAuth bearer token. This avoids leaking long-lived
+credentials in server access logs while still working across multiple backend
+workers.
 """
 
 import asyncio
@@ -12,8 +13,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+import jwt
+from jwt import InvalidTokenError
+
+from app.config import settings
+
 _SESSION_TTL_SECONDS = 3600  # 1 hour
 _CLEANUP_INTERVAL_SECONDS = 600
+_TOKEN_TYPE = "mcp_sse_session"
 
 
 @dataclass
@@ -26,6 +33,7 @@ class _MCPSession:
 class MCPSessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, _MCPSession] = {}
+        self._revoked_jtis: dict[str, float] = {}
         self._lock = threading.Lock()
         self._last_cleanup = time.time()
 
@@ -37,23 +45,56 @@ class MCPSessionStore:
         ]
         for k in expired:
             del self._sessions[k]
+        expired_jtis = [
+            k for k, expires_at in self._revoked_jtis.items() if expires_at <= now
+        ]
+        for k in expired_jtis:
+            del self._revoked_jtis[k]
         self._last_cleanup = now
 
     def create(self, user_id: str, server_id: str | None = None) -> str:
-        """Create a new session token mapped to user_id (and optionally server_id)."""
-        token = secrets.token_urlsafe(32)
+        """Create a signed session token mapped to user_id (and optionally server_id)."""
         now = time.time()
+        expires_at = now + _SESSION_TTL_SECONDS
+        payload = {
+            "sub": user_id,
+            "type": _TOKEN_TYPE,
+            "jti": secrets.token_urlsafe(16),
+            "exp": int(expires_at),
+        }
+        if server_id is not None:
+            payload["sid"] = server_id
+        token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
         with self._lock:
             self._cleanup(now)
-            self._sessions[token] = _MCPSession(
-                user_id=user_id, created_at=now, server_id=server_id
-            )
         return token
 
     def resolve(self, token: str) -> tuple[str, str | None] | None:
         """Return (user_id, server_id) for a valid non-expired token, or None."""
         now = time.time()
         with self._lock:
+            self._cleanup(now)
+            try:
+                payload = jwt.decode(
+                    token, settings.secret_key, algorithms=[settings.jwt_algorithm]
+                )
+            except InvalidTokenError:
+                payload = None
+
+            if payload is not None:
+                jti = payload.get("jti")
+                if payload.get("type") != _TOKEN_TYPE or not isinstance(jti, str):
+                    return None
+                if jti in self._revoked_jtis:
+                    return None
+                user_id = payload.get("sub")
+                server_id = payload.get("sid")
+                if not isinstance(user_id, str):
+                    return None
+                if server_id is not None and not isinstance(server_id, str):
+                    return None
+                return user_id, server_id
+
             session = self._sessions.get(token)
             if session is None:
                 return None
@@ -64,6 +105,18 @@ class MCPSessionStore:
 
     def revoke(self, token: str) -> None:
         with self._lock:
+            try:
+                payload = jwt.decode(
+                    token, settings.secret_key, algorithms=[settings.jwt_algorithm]
+                )
+            except InvalidTokenError:
+                payload = None
+            if payload is not None:
+                jti = payload.get("jti")
+                exp = payload.get("exp")
+                if isinstance(jti, str) and isinstance(exp, (int, float)):
+                    self._revoked_jtis[jti] = float(exp)
+                return
             self._sessions.pop(token, None)
 
 

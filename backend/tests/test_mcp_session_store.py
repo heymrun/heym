@@ -23,6 +23,17 @@ class MCPSessionStoreTests(unittest.TestCase):
         self.assertEqual(user_id, "user-456")
         self.assertEqual(server_id, "server-abc")
 
+    def test_signed_token_resolves_in_different_store_instance(self) -> None:
+        token = self.store.create("user-456", server_id="server-abc")
+        other_store = MCPSessionStore()
+
+        result = other_store.resolve(token)
+
+        self.assertIsNotNone(result)
+        user_id, server_id = result
+        self.assertEqual(user_id, "user-456")
+        self.assertEqual(server_id, "server-abc")
+
     def test_resolve_unknown_token_returns_none(self) -> None:
         self.assertIsNone(self.store.resolve("nonexistent-token"))
 

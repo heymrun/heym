@@ -3,12 +3,15 @@
 import unittest
 from unittest.mock import MagicMock
 
+import httpx
 from mcp import types
+from mcp.shared.message import SessionMessage
 
 from app.services.mcp_tool_executor import (
     _extract_tool_result,
     _mcp_tool_to_openai_format,
     _normalize_connection,
+    _post_failure_message,
 )
 
 
@@ -132,6 +135,50 @@ class McpToolToOpenAiFormatTests(unittest.TestCase):
         tool.inputSchema = {"type": "object", "properties": {"q": {"type": "string"}}}
         result = _mcp_tool_to_openai_format(tool, {}, "c", "s")
         self.assertEqual(result["parameters"]["properties"]["q"]["type"], "string")
+
+
+class SSEPostFailureMessageTests(unittest.TestCase):
+    def test_http_status_error_becomes_jsonrpc_error_for_pending_request(self) -> None:
+        request = httpx.Request("POST", "https://example.com/message")
+        response = httpx.Response(401, request=request)
+        exc = httpx.HTTPStatusError(
+            "Client error '401 Unauthorized'",
+            request=request,
+            response=response,
+        )
+        session_message = SessionMessage(
+            types.JSONRPCMessage(
+                types.JSONRPCRequest(
+                    jsonrpc="2.0",
+                    id=7,
+                    method="tools/list",
+                )
+            )
+        )
+
+        result = _post_failure_message(session_message, exc)
+
+        self.assertIsInstance(result, SessionMessage)
+        root = result.message.root
+        self.assertIsInstance(root, types.JSONRPCError)
+        self.assertEqual(root.id, 7)
+        self.assertEqual(root.error.code, 401)
+        self.assertIn("MCP SSE POST failed", root.error.message)
+
+    def test_notification_post_failure_returns_exception(self) -> None:
+        exc = RuntimeError("closed")
+        session_message = SessionMessage(
+            types.JSONRPCMessage(
+                types.JSONRPCNotification(
+                    jsonrpc="2.0",
+                    method="notifications/initialized",
+                )
+            )
+        )
+
+        result = _post_failure_message(session_message, exc)
+
+        self.assertIs(result, exc)
 
 
 class ListMcpToolsErrorPathTests(unittest.TestCase):
