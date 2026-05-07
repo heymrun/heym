@@ -65,6 +65,7 @@ interface Props {
   placeholder?: string;
   disabled?: boolean;
   rows?: number;
+  wrap?: "soft" | "hard" | "off";
   singleLine?: boolean;
   nodes?: WorkflowNode[];
   nodeResults?: NodeResult[];
@@ -109,6 +110,7 @@ const props = withDefaults(defineProps<Props>(), {
   placeholder: "",
   disabled: false,
   rows: 3,
+  wrap: "soft",
   singleLine: false,
   nodes: () => [],
   nodeResults: () => [],
@@ -2312,6 +2314,7 @@ defineExpose({
           :placeholder="placeholder"
           :disabled="disabled"
           :rows="rows"
+          :wrap="wrap"
           :class="cn(textareaClasses, expandable && 'pr-10')"
           @input="handleInput"
           @keydown="handleKeyDown"

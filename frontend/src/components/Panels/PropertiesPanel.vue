@@ -4241,6 +4241,12 @@ function updateAgentMCPConnection(
   }
 }
 
+function formatMCPJsonValue(value: unknown, fallback: unknown, compact = false): string {
+  if (typeof value === "string") return value;
+  const formatted = JSON.stringify(value ?? fallback, null, compact ? 0 : 2);
+  return typeof formatted === "string" ? formatted : "";
+}
+
 function addAgentSkill(): void {
   if (!selectedNode.value) return;
   const current = selectedNode.value.data.skills || [];
@@ -6694,7 +6700,7 @@ onUnmounted(() => {
                     <div>
                       <Label class="text-xs">Args (JSON array)</Label>
                       <Textarea
-                        :model-value="typeof conn.args === 'string' ? conn.args : JSON.stringify(conn.args ?? [], null, 2)"
+                        :model-value="formatMCPJsonValue(conn.args, [])"
                         placeholder="[&quot;-y&quot;, &quot;@modelcontextprotocol/server-filesystem&quot;, &quot;--path&quot;, &quot;/tmp&quot;]"
                         :rows="2"
                         wrap="off"
@@ -6706,9 +6712,10 @@ onUnmounted(() => {
                       <Label class="text-xs">Env (JSON object)</Label>
                       <ExpressionInput
                         :ref="(el) => setAgentMCPEnvInputRef(conn.id, el)"
-                        :model-value="typeof conn.env === 'string' ? conn.env : JSON.stringify(conn.env ?? {}, null, 2)"
+                        :model-value="formatMCPJsonValue(conn.env, {}, true)"
                         placeholder="{&quot;API_KEY&quot;: &quot;your_key&quot;}"
                         :rows="2"
+                        wrap="off"
                         :nodes="workflowStore.nodes"
                         :node-results="workflowStore.nodeResults"
                         :edges="workflowStore.edges"
@@ -6737,7 +6744,7 @@ onUnmounted(() => {
                     <div>
                       <Label class="text-xs">Headers (JSON object)</Label>
                       <Textarea
-                        :model-value="typeof conn.headers === 'string' ? conn.headers : JSON.stringify(conn.headers ?? {}, null, 2)"
+                        :model-value="formatMCPJsonValue(conn.headers, {})"
                         placeholder="{&quot;Authorization&quot;: &quot;Bearer ...&quot;, &quot;X-Custom&quot;: &quot;value&quot;}"
                         :rows="2"
                         wrap="off"
@@ -11216,7 +11223,7 @@ onUnmounted(() => {
                     <div>
                       <Label class="text-xs">Args (JSON array)</Label>
                       <Textarea
-                        :model-value="typeof selectedNode.data.connection?.args === 'string' ? selectedNode.data.connection.args : JSON.stringify(selectedNode.data.connection?.args ?? [], null, 2)"
+                        :model-value="formatMCPJsonValue(selectedNode.data.connection?.args, [])"
                         placeholder="[&quot;-y&quot;, &quot;@modelcontextprotocol/server-filesystem&quot;]"
                         :rows="2"
                         wrap="off"
@@ -11228,9 +11235,10 @@ onUnmounted(() => {
                       <Label class="text-xs">Env (JSON object)</Label>
                       <ExpressionInput
                         ref="mcpCallConnectionEnvInputRef"
-                        :model-value="typeof selectedNode.data.connection?.env === 'string' ? selectedNode.data.connection.env : JSON.stringify(selectedNode.data.connection?.env ?? {}, null, 2)"
+                        :model-value="formatMCPJsonValue(selectedNode.data.connection?.env, {}, true)"
                         placeholder="{&quot;API_KEY&quot;: &quot;your_key&quot;}"
                         :rows="2"
+                        wrap="off"
                         :nodes="workflowStore.nodes"
                         :node-results="workflowStore.nodeResults"
                         :edges="workflowStore.edges"
@@ -11254,7 +11262,7 @@ onUnmounted(() => {
                     <div>
                       <Label class="text-xs">Headers (JSON object)</Label>
                       <Textarea
-                        :model-value="typeof selectedNode.data.connection?.headers === 'string' ? selectedNode.data.connection.headers : JSON.stringify(selectedNode.data.connection?.headers ?? {}, null, 2)"
+                        :model-value="formatMCPJsonValue(selectedNode.data.connection?.headers, {})"
                         placeholder="{&quot;Authorization&quot;: &quot;Bearer ...&quot;}"
                         :rows="2"
                         wrap="off"
