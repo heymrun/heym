@@ -253,6 +253,38 @@ class MCPServerAuthTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
 
+    async def test_session_token_auth_does_not_query_database(self) -> None:
+        from fastapi import Request
+
+        from app.services.mcp_session import mcp_session_store
+
+        user_id = str(uuid.uuid4())
+        server_id = uuid.uuid4()
+        token = mcp_session_store.create(user_id, server_id=str(server_id))
+
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": f"/api/mcp/servers/{server_id}/message",
+                "headers": [],
+                "query_string": f"session={token}".encode(),
+            }
+        )
+
+        db = AsyncMock()
+
+        user, server = await _get_named_server_context(
+            server_id=server_id,
+            request=request,
+            x_mcp_key=None,
+            db=db,
+        )
+
+        self.assertEqual(str(user.id), user_id)
+        self.assertEqual(server.id, server_id)
+        db.execute.assert_not_called()
+
 
 class MCPServerDefaultUnaffectedTests(unittest.TestCase):
     def test_default_server_session_has_none_server_id(self) -> None:

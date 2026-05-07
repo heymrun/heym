@@ -16,6 +16,8 @@ from app.api.mcp import (
     _accept_sse_response_if_active,
     _add_mcp_workflow_trace,
     _reject_if_sse_channel_missing,
+    _run_mcp_protocol_limited,
+    _session_user_from_id,
     get_credentials_context_for_user,
     workflow_to_mcp_tool,
 )
@@ -28,7 +30,7 @@ from app.db.models import (
     User,
     Workflow,
 )
-from app.db.session import get_db
+from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
     MCPInitializeResult,
     MCPJSONRPCRequest,
@@ -85,6 +87,15 @@ def _sanitize_tool_name(name: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "" for c in n)
 
 
+def _session_server_from_id(server_id: uuid.UUID, user_id: uuid.UUID) -> MCPServer:
+    return MCPServer(
+        id=server_id,
+        user_id=user_id,
+        name="",
+        api_key="",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency for MCP protocol endpoints (SSE / message / tools)
 # ---------------------------------------------------------------------------
@@ -111,15 +122,8 @@ async def _get_named_server_context(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Session token not valid for this server",
             )
-        user_res = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
-        user = user_res.scalar_one_or_none()
-        server_res = await db.execute(select(MCPServer).where(MCPServer.id == server_id))
-        server = server_res.scalar_one_or_none()
-        if user is None or server is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="User or server not found"
-            )
-        return user, server
+        user = _session_user_from_id(user_id_str)
+        return user, _session_server_from_id(server_id, user.id)
 
     # 1. OAuth Bearer token
     auth_header = request.headers.get("Authorization", "")
@@ -177,6 +181,23 @@ async def _get_named_server_context(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user, server
+
+
+async def _get_named_server_context_for_sse(
+    server_id: uuid.UUID,
+    request: Request,
+    x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
+) -> tuple[User, MCPServer]:
+    """
+    Authenticate named MCP SSE without holding a DB dependency for the stream lifetime.
+    """
+    async with async_session_maker() as db:
+        return await _get_named_server_context(
+            server_id=server_id,
+            request=request,
+            x_mcp_key=x_mcp_key,
+            db=db,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +341,14 @@ async def list_named_server_tools(
 async def named_server_sse(
     server_id: uuid.UUID,
     request: Request,
-    server: tuple[User, MCPServer] = Depends(_get_named_server_context),
+    server: tuple[User, MCPServer] = Depends(_get_named_server_context_for_sse),
 ) -> StreamingResponse:
     user, mcp_server = server
+    if not mcp_sse_channels.can_register():
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many active MCP SSE sessions. Try again shortly.",
+        )
     session_token = mcp_session_store.create(str(user.id), server_id=str(mcp_server.id))
     message_endpoint = f"/api/mcp/servers/{server_id}/message?session={session_token}"
 
@@ -361,8 +387,10 @@ async def named_server_sse_post(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Streamable HTTP transport (MCP 2025-03-26): POST directly to SSE endpoint."""
-    return await _dispatch_named_server_jsonrpc(
-        server_id=server_id, request=request, server=server, db=db
+    return await _run_mcp_protocol_limited(
+        lambda: _dispatch_named_server_jsonrpc(
+            server_id=server_id, request=request, server=server, db=db
+        )
     )
 
 
@@ -539,8 +567,10 @@ async def handle_named_server_message(
     db: AsyncSession = Depends(get_db),
 ) -> dict | Response:
     _reject_if_sse_channel_missing(request)
-    response = await _dispatch_named_server_jsonrpc(
-        server_id=server_id, request=request, server=server, db=db
+    response = await _run_mcp_protocol_limited(
+        lambda: _dispatch_named_server_jsonrpc(
+            server_id=server_id, request=request, server=server, db=db
+        )
     )
     sse_response = await _accept_sse_response_if_active(request, response)
     return sse_response or response

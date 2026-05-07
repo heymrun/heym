@@ -130,10 +130,21 @@ class MCPSSEChannelStore:
         self._channels: dict[str, asyncio.Queue[str]] = {}
         self._lock = threading.Lock()
 
+    def can_register(self) -> bool:
+        """Return whether the process can accept another legacy SSE session."""
+        max_sessions = settings.mcp_sse_max_sessions
+        if max_sessions <= 0:
+            return True
+        with self._lock:
+            return len(self._channels) < max_sessions
+
     def register(self, token: str) -> asyncio.Queue[str]:
         """Register an SSE response queue for a session token."""
         queue: asyncio.Queue[str] = asyncio.Queue()
         with self._lock:
+            max_sessions = settings.mcp_sse_max_sessions
+            if max_sessions > 0 and len(self._channels) >= max_sessions:
+                raise RuntimeError("Too many active MCP SSE sessions")
             self._channels[token] = queue
         return queue
 

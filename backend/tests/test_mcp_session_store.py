@@ -1,6 +1,7 @@
 import unittest
 
-from app.services.mcp_session import MCPSessionStore
+from app.config import settings
+from app.services.mcp_session import MCPSessionStore, MCPSSEChannelStore
 
 
 class MCPSessionStoreTests(unittest.TestCase):
@@ -41,3 +42,20 @@ class MCPSessionStoreTests(unittest.TestCase):
         token = self.store.create("user-789")
         self.store.revoke(token)
         self.assertIsNone(self.store.resolve(token))
+
+
+class MCPSSEChannelStoreTests(unittest.TestCase):
+    def test_can_register_respects_session_limit(self) -> None:
+        original_limit = settings.mcp_sse_max_sessions
+        settings.mcp_sse_max_sessions = 1
+        try:
+            store = MCPSSEChannelStore()
+            self.assertTrue(store.can_register())
+            store.register("tok-1")
+
+            self.assertFalse(store.can_register())
+
+            store.unregister("tok-1")
+            self.assertTrue(store.can_register())
+        finally:
+            settings.mcp_sse_max_sessions = original_limit
