@@ -2742,6 +2742,14 @@ const driveExpressionFieldCount = computed((): number => {
   return n.data.driveOperation === "setPassword" ? 2 : 1;
 });
 
+const isDriveFileIdAgentProvided = computed((): boolean => {
+  const n = workflowStore.selectedNode;
+  if (!n || n.type !== "drive") {
+    return false;
+  }
+  return (n.data.agentProvidedFields ?? []).includes("driveFileId");
+});
+
 function openDriveExpressionFieldAtIndex(index: number): void {
   const n = selectedNode.value;
   if (!n || n.type !== "drive") {
@@ -9843,14 +9851,28 @@ onUnmounted(() => {
               v-if="selectedNode.data.driveOperation && !['downloadUrl', 'getAll'].includes(selectedNode.data.driveOperation)"
               class="space-y-2"
             >
-              <Label>File ID</Label>
+              <div class="flex items-center justify-between gap-2">
+                <Label>File ID</Label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="driveFileId"
+                />
+              </div>
               <template v-if="selectedNode.data.driveOperation === 'get'">
                 <Select
                   :model-value="selectedNode.data.driveFileId || ''"
                   :options="driveFileOptions"
+                  :disabled="isDriveFileIdAgentProvided"
                   @update:model-value="updateNodeData('driveFileId', $event || undefined)"
                 />
+                <div
+                  v-if="isDriveFileIdAgentProvided"
+                  class="rounded-md border border-violet-800/30 bg-violet-950/20 px-3 py-2 text-xs italic text-violet-400"
+                >
+                  Agent will provide this at runtime.
+                </div>
                 <ExpressionInput
+                  v-else
                   ref="driveFileIdExpressionInputRef"
                   :model-value="selectedNode.data.driveFileId || ''"
                   placeholder="$skill._generated_files[0].id"
@@ -9866,7 +9888,14 @@ onUnmounted(() => {
                 />
               </template>
               <template v-else>
+                <div
+                  v-if="isDriveFileIdAgentProvided"
+                  class="rounded-md border border-violet-800/30 bg-violet-950/20 px-3 py-2 text-xs italic text-violet-400"
+                >
+                  Agent will provide this at runtime.
+                </div>
                 <ExpressionInput
+                  v-else
                   ref="driveFileIdExpressionInputRef"
                   :model-value="selectedNode.data.driveFileId || ''"
                   placeholder="$skill._generated_files[0].id"
@@ -9951,6 +9980,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="drivePassword"
                 expandable
                 :dialog-node-label="selectedNodeEvaluateDialogLabel"
                 dialog-key-label="Drive set password · Password"

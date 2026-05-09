@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   FileText,
   HardDrive,
@@ -88,20 +88,40 @@ async function clearAllFiles() {
 const isDragging = ref(false);
 const uploading = ref(false);
 const uploadError = ref("");
+const dragDepth = ref(0);
 
-function handleDragOver(e: DragEvent): void {
+function isFileDrag(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+}
+
+function handleWindowDragEnter(e: DragEvent): void {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
+  dragDepth.value++;
+  isDragging.value = true;
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+}
+
+function handleWindowDragOver(e: DragEvent): void {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   isDragging.value = true;
 }
 
-function handleDragLeave(e: DragEvent): void {
-  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+function handleWindowDragLeave(e: DragEvent): void {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth.value = Math.max(0, dragDepth.value - 1);
+  if (dragDepth.value === 0) {
     isDragging.value = false;
   }
 }
 
 async function handleDrop(e: DragEvent): Promise<void> {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
+  dragDepth.value = 0;
   isDragging.value = false;
   const droppedFiles = Array.from(e.dataTransfer?.files ?? []);
   if (!droppedFiles.length) return;
@@ -145,16 +165,25 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize));
 watch(page, () => {
   if (!clearing.value) void loadFiles();
 });
-onMounted(loadFiles);
+
+onMounted(() => {
+  void loadFiles();
+  window.addEventListener("dragenter", handleWindowDragEnter);
+  window.addEventListener("dragover", handleWindowDragOver);
+  window.addEventListener("dragleave", handleWindowDragLeave);
+  window.addEventListener("drop", handleDrop);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("dragenter", handleWindowDragEnter);
+  window.removeEventListener("dragover", handleWindowDragOver);
+  window.removeEventListener("dragleave", handleWindowDragLeave);
+  window.removeEventListener("drop", handleDrop);
+});
 </script>
 
 <template>
-  <div
-    class="space-y-4 relative"
-    @dragover="handleDragOver"
-    @dragleave="handleDragLeave"
-    @drop="handleDrop"
-  >
+  <div class="space-y-4 relative min-h-[calc(100vh-220px)]">
     <!-- Drag overlay -->
     <div
       v-if="isDragging"

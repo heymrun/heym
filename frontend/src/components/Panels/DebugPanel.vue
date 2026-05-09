@@ -24,7 +24,7 @@ import JsonTree from "@/components/ui/JsonTree.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
-import { isRetryAttemptNodeResult } from "@/lib/executionLog";
+import { formatExecutionLogToolCallTitle, isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
@@ -503,24 +503,7 @@ interface ToolCallEntry {
 }
 
 function formatToolCallTitle(tc: ToolCallEntry): string {
-  if (tc.name === "_context_compression") {
-    const compressed = tc.arguments?.messages_compressed;
-    return typeof compressed === "number"
-      ? `Context compressed (${compressed} messages → summary)`
-      : "Context compressed";
-  }
-  if (tc.name === "call_sub_workflow") {
-    const wn = tc.workflow_name;
-    const wid =
-      typeof tc.arguments?.workflow_id === "string" ? tc.arguments.workflow_id : "";
-    if (wn && wid) {
-      return `call_sub_workflow(${wn}, ${wid})`;
-    }
-    if (wn) {
-      return `call_sub_workflow(${wn})`;
-    }
-  }
-  return `${tc.name}(${JSON.stringify(tc.arguments)})`;
+  return formatExecutionLogToolCallTitle(tc);
 }
 
 function callSubWorkflowInputsPayload(tc: ToolCallEntry): unknown {
@@ -2712,7 +2695,7 @@ function renderContent(content: string): string {
                   class="rounded border border-border/50 bg-muted/20 p-2 text-xs"
                 >
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-medium text-primary">
+                    <span class="min-w-0 max-w-full break-all font-medium text-primary">
                       {{ formatToolCallTitle(tc) }}
                     </span>
                     <span
@@ -2823,7 +2806,7 @@ function renderContent(content: string): string {
                 class="rounded border border-border/50 bg-muted/20 p-2 text-xs"
               >
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-medium text-primary">
+                  <span class="min-w-0 max-w-full break-all font-medium text-primary">
                     {{ formatToolCallTitle(tc) }}
                   </span>
                   <span

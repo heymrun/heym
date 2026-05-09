@@ -22,7 +22,11 @@ import {
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Select from "@/components/ui/Select.vue";
-import { buildDisplayNodeResults, type DisplayNodeResult } from "@/lib/executionLog";
+import {
+  buildDisplayNodeResults,
+  formatExecutionLogToolCallTitle,
+  type DisplayNodeResult,
+} from "@/lib/executionLog";
 import { cn } from "@/lib/utils";
 import { workflowApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -385,6 +389,11 @@ interface ToolCallEntry {
   result: unknown;
   source?: string;
   mcp_server?: string;
+  workflow_name?: string;
+}
+
+function formatToolCallTitle(tc: ToolCallEntry): string {
+  return formatExecutionLogToolCallTitle(tc);
 }
 
 function getToolCalls(output: unknown): ToolCallEntry[] | undefined {
@@ -963,8 +972,8 @@ function bringToCanvas(): void {
                         class="rounded border border-border/50 bg-muted/20 p-2 text-xs"
                       >
                         <div class="flex items-center gap-2 flex-wrap">
-                          <span class="font-medium text-primary">
-                            {{ tc.name }}({{ JSON.stringify(tc.arguments) }})
+                          <span class="min-w-0 max-w-full break-all font-medium text-primary">
+                            {{ formatToolCallTitle(tc) }}
                           </span>
                           <span
                             v-if="tc.source === 'mcp'"

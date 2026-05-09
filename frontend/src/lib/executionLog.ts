@@ -1,11 +1,37 @@
 import type { NodeResult } from "@/types/workflow";
 
+const TOOL_CALL_ARGUMENT_PREVIEW_MAX_LENGTH = 180;
+
 export interface DisplayNodeResult extends NodeResult {
   displayKey: string;
   isRetryAttempt: boolean;
   retryAttempt: number | null;
   retryMaxAttempts: number | null;
   retryWaitSeconds: number | null;
+}
+
+interface ExecutionLogToolCallTitleInput {
+  name: string;
+  arguments?: Record<string, unknown>;
+  workflow_name?: string;
+}
+
+function stringifyExecutionLogValue(value: unknown): string {
+  try {
+    const stringified = JSON.stringify(value);
+    return stringified ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function trimExecutionLogPreview(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  const suffix = "...";
+  return `${text.slice(0, Math.max(0, maxLength - suffix.length))}${suffix}`;
 }
 
 function getMetadataNumber(result: NodeResult, key: string): number | null {
@@ -65,4 +91,33 @@ export function getLatestNodeResultForNode(
   }
 
   return latestRetry;
+}
+
+export function formatExecutionLogToolCallTitle(
+  toolCall: ExecutionLogToolCallTitleInput,
+): string {
+  if (toolCall.name === "_context_compression") {
+    const compressed = toolCall.arguments?.messages_compressed;
+    return typeof compressed === "number"
+      ? `Context compressed (${compressed} messages -> summary)`
+      : "Context compressed";
+  }
+
+  if (toolCall.name === "call_sub_workflow") {
+    const workflowName = toolCall.workflow_name;
+    const workflowId =
+      typeof toolCall.arguments?.workflow_id === "string" ? toolCall.arguments.workflow_id : "";
+    if (workflowName && workflowId) {
+      return `call_sub_workflow(${workflowName}, ${workflowId})`;
+    }
+    if (workflowName) {
+      return `call_sub_workflow(${workflowName})`;
+    }
+  }
+
+  const argumentPreview = trimExecutionLogPreview(
+    stringifyExecutionLogValue(toolCall.arguments ?? {}),
+    TOOL_CALL_ARGUMENT_PREVIEW_MAX_LENGTH,
+  );
+  return `${toolCall.name}(${argumentPreview})`;
 }
