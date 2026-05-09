@@ -173,6 +173,7 @@ Standard library is always available. Third-party libraries available in Heym:
 - `Pillow` for image processing
 - `requests` for HTTP calls
 - `pandas` and `openpyxl` for spreadsheet work
+- `pypdf` for PDF processing
 
 ### Critical rules
 
