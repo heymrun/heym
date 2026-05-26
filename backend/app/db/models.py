@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
@@ -10,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -465,6 +467,7 @@ class WorkflowAnalyticsSnapshot(Base):
 
 class LLMTrace(Base):
     __tablename__ = "llm_traces"
+    __table_args__ = (Index("ix_llm_traces_user_created", "user_id", "created_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -500,6 +503,56 @@ class LLMTrace(Base):
     user: Mapped["User"] = relationship("User")
     credential: Mapped["Credential | None"] = relationship("Credential")
     workflow: Mapped["Workflow | None"] = relationship("Workflow")
+
+
+class LLMPricing(Base):
+    __tablename__ = "llm_pricing"
+    __table_args__ = (
+        UniqueConstraint("provider", "model", "operator", name="uq_llm_pricing_pmo"),
+        Index("ix_llm_pricing_model", "model"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    operator: Mapped[str] = mapped_column(String(20), nullable=False, default="equals")
+    input_per_1m_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    output_per_1m_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="helicone")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LLMPricingOverride(Base):
+    __tablename__ = "llm_pricing_override"
+    __table_args__ = (
+        UniqueConstraint("user_id", "model", name="uq_llm_pricing_override_user_model"),
+        Index("ix_llm_pricing_override_user", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    input_per_1m_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    output_per_1m_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    base_pricing_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_pricing.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship("User")
+    base_pricing: Mapped["LLMPricing | None"] = relationship("LLMPricing")
 
 
 class RunHistory(Base):
