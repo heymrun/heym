@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -1310,3 +1312,86 @@ class ExecutionTokenResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LLMPricingRow(BaseModel):
+    """Merged view: global pricing rows + this user's overrides applied."""
+
+    id: uuid.UUID
+    provider: str | None
+    model: str
+    operator: str
+    input_per_1m_usd: Decimal
+    output_per_1m_usd: Decimal
+    source: str
+    is_override: bool
+    is_custom: bool
+    override_id: uuid.UUID | None = None
+    updated_at: datetime
+
+
+class LLMPricingPatch(BaseModel):
+    input_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    output_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    note: str | None = None
+
+
+class LLMPricingCustomCreate(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    input_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    output_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    note: str | None = None
+
+
+class LLMPricingSyncStatus(BaseModel):
+    last_synced_at: datetime | None
+    total_rows: int
+    override_rows: int
+
+
+TraceTimeRange = Literal["1h", "24h", "7d", "30d", "all"]
+
+
+class TraceStatsRangeMeta(BaseModel):
+    start: datetime | None
+    end: datetime
+    bucket_seconds: int
+
+
+class TraceStatsKpis(BaseModel):
+    total_calls: int
+    success_calls: int
+    error_calls: int
+    error_pct: float
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    total_cost_usd: Decimal
+    avg_latency_ms: float
+    unpriced_models: list[str]
+
+
+class TraceStatsByModel(BaseModel):
+    model: str
+    provider: str | None
+    calls: int
+    total_tokens: int
+    cost_usd: Decimal
+    is_priced: bool
+    is_other: bool = False
+
+
+class TraceStatsByTime(BaseModel):
+    bucket_start: datetime
+    calls: int
+    success: int
+    error: int
+    total_tokens: int
+    cost_usd: Decimal
+
+
+class TraceStatsResponse(BaseModel):
+    range: TraceStatsRangeMeta
+    kpis: TraceStatsKpis
+    by_model: list[TraceStatsByModel]
+    by_time: list[TraceStatsByTime]
