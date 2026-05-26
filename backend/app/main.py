@@ -28,6 +28,7 @@ from app.api import (
     global_variables,
     google_sheets_oauth,
     hitl,
+    llm_pricing,
     logs,
     mcp,
     mcp_servers,
@@ -221,6 +222,7 @@ app.include_router(config.router, prefix="/api/config", tags=["Config"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["MCP"])
 app.include_router(mcp_servers.router, prefix="/api/mcp/servers", tags=["MCP Servers"])
 app.include_router(traces.router, prefix="/api/traces", tags=["Traces"])
+app.include_router(llm_pricing.router, prefix="/api/llm-pricing", tags=["LLM Pricing"])
 app.include_router(portal.router, prefix="/api/portal", tags=["Portal"])
 app.include_router(hitl.router, prefix="/api/hitl", tags=["HITL"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
