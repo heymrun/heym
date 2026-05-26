@@ -4,10 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 import { Check, ChevronLeft, ChevronRight, Clock, Copy, ExternalLink, RefreshCcw, Search, Trash2, X } from "lucide-vue-next";
 
 import type { CredentialListItem } from "@/types/credential";
-import type { LLMTraceDetail, LLMTraceListItem } from "@/types/trace";
+import type { LLMTraceDetail, LLMTraceListItem, TraceStatsResponse, TraceTimeRange } from "@/types/trace";
 import type { WorkflowListItem } from "@/types/workflow";
 
 import TraceDurationChart, { type TraceSpan } from "@/components/Traces/TraceDurationChart.vue";
+import TracesStatsHeader from "@/components/Traces/TracesStatsHeader.vue";
+import TracesTimeRangeSelect from "@/components/Traces/TracesTimeRangeSelect.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import Dialog from "@/components/ui/Dialog.vue";
@@ -28,6 +30,10 @@ const limit = ref(25);
 const offset = ref(0);
 const loading = ref(false);
 const error = ref("");
+
+const timeRange = ref<TraceTimeRange>("7d");
+const stats = ref<TraceStatsResponse | null>(null);
+const statsLoading = ref(false);
 
 const credentials = ref<CredentialListItem[]>([]);
 const workflows = ref<WorkflowListItem[]>([]);
@@ -318,6 +324,7 @@ async function loadTraces(): Promise<void> {
           : undefined,
       search: searchQuery.value || undefined,
       order: "desc",
+      range: timeRange.value,
     });
     traces.value = response.items;
     total.value = response.total;
@@ -328,6 +335,30 @@ async function loadTraces(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadStats(): Promise<void> {
+  statsLoading.value = true;
+  try {
+    stats.value = await traceApi.stats({
+      range: timeRange.value,
+      source: sourceFilter.value === "all" ? undefined : sourceFilter.value,
+      credentialId: credentialFilter.value === "all" ? undefined : credentialFilter.value,
+      workflowId:
+        isWorkflowSource.value && workflowFilter.value !== "all"
+          ? workflowFilter.value
+          : undefined,
+      search: searchQuery.value || undefined,
+    });
+  } catch {
+    stats.value = null;
+  } finally {
+    statsLoading.value = false;
+  }
+}
+
+async function loadAll(): Promise<void> {
+  await Promise.all([loadTraces(), loadStats()]);
 }
 
 function resetPagination(): void {
@@ -450,6 +481,7 @@ async function clearTraces(): Promise<void> {
     traces.value = [];
     total.value = 0;
     offset.value = 0;
+    await loadStats();
   } catch {
     error.value = "Failed to clear traces";
   } finally {
@@ -464,7 +496,7 @@ function toggleSearch(): void {
   } else if (searchQuery.value) {
     searchQuery.value = "";
     resetPagination();
-    loadTraces();
+    loadAll();
   }
 }
 
@@ -473,14 +505,14 @@ function onSearchInput(event: Event): void {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(() => {
     resetPagination();
-    loadTraces();
+    loadAll();
   }, 300);
 }
 
 function clearSearch(): void {
   searchQuery.value = "";
   resetPagination();
-  loadTraces();
+  loadAll();
   searchInputRef.value?.focus();
 }
 
@@ -490,9 +522,9 @@ watch(sourceFilter, (next, prev) => {
   }
 });
 
-watch([sourceFilter, credentialFilter, workflowFilter], () => {
+watch([timeRange, sourceFilter, credentialFilter, workflowFilter], () => {
   resetPagination();
-  loadTraces();
+  loadAll();
 });
 
 watch(
@@ -517,7 +549,7 @@ function handleKeyDown(event: KeyboardEvent): void {
 onMounted(async () => {
   await loadCredentials();
   await loadWorkflows();
-  await loadTraces();
+  await loadAll();
   await openTraceFromRoute();
   const unsub = onDismissOverlays(closeDetail);
   document.addEventListener("keydown", handleKeyDown);
@@ -594,11 +626,20 @@ onMounted(async () => {
       </button>
     </div>
 
+    <TracesStatsHeader
+      :stats="stats"
+      :loading="statsLoading"
+    />
+
     <div class="space-y-4">
       <div
         class="grid gap-4 grid-cols-1 sm:grid-cols-2"
-        :class="isWorkflowSource ? 'md:grid-cols-3' : ''"
+        :class="isWorkflowSource ? 'md:grid-cols-4' : 'md:grid-cols-3'"
       >
+        <div class="space-y-2">
+          <Label>Time range</Label>
+          <TracesTimeRangeSelect v-model="timeRange" />
+        </div>
         <div class="space-y-2">
           <Label>Source</Label>
           <Select
