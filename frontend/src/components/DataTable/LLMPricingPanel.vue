@@ -243,8 +243,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-4">
-    <div class="flex flex-wrap items-center gap-2 justify-between">
-      <div>
+    <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div class="min-w-0">
         <h2 class="text-xl font-semibold flex items-center gap-2">
           <Coins class="w-5 h-5" />
           LLM Cost Table
@@ -253,22 +253,26 @@ onBeforeUnmount(() => {
           Per-model pricing used to compute cost in the Traces dashboard. Global rows are
           synced from Helicone; your edits create per-user overrides.
         </p>
-      </div>
-      <div class="flex items-center gap-2">
-        <div class="text-xs text-muted-foreground text-right">
-          <div v-if="syncStatus">
+        <div
+          v-if="syncStatus"
+          class="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5"
+        >
+          <span class="font-semibold text-foreground">
             {{ (syncStatus.total_rows ?? 0).toLocaleString() }} models
-            <span v-if="(syncStatus.override_rows ?? 0) > 0">
-              · {{ syncStatus.override_rows }} customized
-            </span>
-          </div>
-          <div v-if="syncStatus?.last_synced_at">
-            Last synced: {{ formatDate(syncStatus.last_synced_at) }}
-          </div>
-          <div v-else>
-            Never synced
-          </div>
+          </span>
+          <span v-if="(syncStatus.override_rows ?? 0) > 0">
+            · <span class="font-semibold text-foreground">{{ syncStatus.override_rows }}</span>
+            customized
+          </span>
+          <span v-if="syncStatus.last_synced_at">
+            · Last synced {{ formatDate(syncStatus.last_synced_at) }}
+          </span>
+          <span v-else>
+            · Never synced
+          </span>
         </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
         <Button
           variant="outline"
           size="sm"
@@ -282,7 +286,9 @@ onBeforeUnmount(() => {
           size="sm"
           @click="showAddDialog = true"
         >
-          <Plus class="w-4 h-4 mr-1" /> Add Custom Model
+          <Plus class="w-4 h-4 mr-1" />
+          <span class="hidden sm:inline">Add Custom Model</span>
+          <span class="sm:hidden">Add</span>
         </Button>
         <Button
           variant="destructive"
@@ -291,7 +297,9 @@ onBeforeUnmount(() => {
           :disabled="(syncStatus?.override_rows ?? 0) === 0"
           @click="clearAll"
         >
-          <Trash2 class="w-4 h-4 mr-1" /> Clear All
+          <Trash2 class="w-4 h-4 mr-1" />
+          <span class="hidden sm:inline">Clear All</span>
+          <span class="sm:hidden">Clear</span>
         </Button>
       </div>
     </div>
@@ -313,131 +321,133 @@ onBeforeUnmount(() => {
       :hover="false"
       class="p-0 overflow-hidden"
     >
-      <table class="w-full text-sm">
-        <thead class="bg-muted/30">
-          <tr class="text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th class="px-3 py-2">
-              Provider
-            </th>
-            <th class="px-3 py-2">
-              Model
-            </th>
-            <th class="px-3 py-2">
-              Op
-            </th>
-            <th class="px-3 py-2">
-              Input $/1M
-            </th>
-            <th class="px-3 py-2">
-              Output $/1M
-            </th>
-            <th class="px-3 py-2">
-              Source
-            </th>
-            <th class="px-3 py-2 text-right">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="row in filteredRows"
-            :key="row.id"
-            class="border-t border-border/40"
-          >
-            <td class="px-3 py-2 text-xs text-muted-foreground">
-              {{ row.provider ?? "—" }}
-            </td>
-            <td class="px-3 py-2 font-mono text-xs">
-              {{ row.model }}
-              <span
-                v-if="badgeFor(row)"
-                class="ml-2 text-[10px] px-1.5 py-0.5 rounded"
-                :class="badgeFor(row)?.classes"
-              >
-                {{ badgeFor(row)?.label }}
-              </span>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              {{ row.operator }}
-            </td>
-            <td class="px-3 py-2">
-              <Input
-                v-if="editingId === row.id"
-                v-model="editInput.input"
-                class="h-7 w-24"
-              />
-              <span v-else>${{ fmtPrice(row.input_per_1m_usd) }}</span>
-            </td>
-            <td class="px-3 py-2">
-              <Input
-                v-if="editingId === row.id"
-                v-model="editInput.output"
-                class="h-7 w-24"
-              />
-              <span v-else>${{ fmtPrice(row.output_per_1m_usd) }}</span>
-            </td>
-            <td class="px-3 py-2 text-xs text-muted-foreground">
-              {{ row.source }}
-            </td>
-            <td class="px-3 py-2 text-right">
-              <div class="flex items-center justify-end gap-1">
-                <template v-if="editingId === row.id">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    @click="saveEdit(row)"
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    @click="cancelEdit"
-                  >
-                    <X class="w-3 h-3" />
-                  </Button>
-                </template>
-                <template v-else>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    @click="startEdit(row)"
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    v-if="row.is_override"
-                    size="sm"
-                    variant="ghost"
-                    title="Reset to default"
-                    @click="resetOverride(row)"
-                  >
-                    <RotateCcw class="w-3 h-3" />
-                  </Button>
-                  <Button
-                    v-if="row.is_custom"
-                    size="sm"
-                    variant="ghost"
-                    title="Delete"
-                    @click="deleteCustom(row)"
-                  >
-                    <Trash2 class="w-3 h-3 text-destructive" />
-                  </Button>
-                </template>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="filteredRows.length === 0">
-            <td
-              colspan="7"
-              class="px-3 py-6 text-center text-sm text-muted-foreground"
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[640px] text-sm">
+          <thead class="bg-muted/30">
+            <tr class="text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th class="px-3 py-2">
+                Provider
+              </th>
+              <th class="px-3 py-2">
+                Model
+              </th>
+              <th class="px-3 py-2">
+                Op
+              </th>
+              <th class="px-3 py-2">
+                Input $/1M
+              </th>
+              <th class="px-3 py-2">
+                Output $/1M
+              </th>
+              <th class="px-3 py-2">
+                Source
+              </th>
+              <th class="px-3 py-2 text-right">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in filteredRows"
+              :key="row.id"
+              class="border-t border-border/40"
             >
-              {{ loading ? "Loading…" : "No pricing rows" }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+              <td class="px-3 py-2 text-xs text-muted-foreground">
+                {{ row.provider ?? "—" }}
+              </td>
+              <td class="px-3 py-2 font-mono text-xs">
+                {{ row.model }}
+                <span
+                  v-if="badgeFor(row)"
+                  class="ml-2 text-[10px] px-1.5 py-0.5 rounded"
+                  :class="badgeFor(row)?.classes"
+                >
+                  {{ badgeFor(row)?.label }}
+                </span>
+              </td>
+              <td class="px-3 py-2 text-xs">
+                {{ row.operator }}
+              </td>
+              <td class="px-3 py-2">
+                <Input
+                  v-if="editingId === row.id"
+                  v-model="editInput.input"
+                  class="h-7 w-24"
+                />
+                <span v-else>${{ fmtPrice(row.input_per_1m_usd) }}</span>
+              </td>
+              <td class="px-3 py-2">
+                <Input
+                  v-if="editingId === row.id"
+                  v-model="editInput.output"
+                  class="h-7 w-24"
+                />
+                <span v-else>${{ fmtPrice(row.output_per_1m_usd) }}</span>
+              </td>
+              <td class="px-3 py-2 text-xs text-muted-foreground">
+                {{ row.source }}
+              </td>
+              <td class="px-3 py-2 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <template v-if="editingId === row.id">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      @click="saveEdit(row)"
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      @click="cancelEdit"
+                    >
+                      <X class="w-3 h-3" />
+                    </Button>
+                  </template>
+                  <template v-else>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      @click="startEdit(row)"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      v-if="row.is_override"
+                      size="sm"
+                      variant="ghost"
+                      title="Reset to default"
+                      @click="resetOverride(row)"
+                    >
+                      <RotateCcw class="w-3 h-3" />
+                    </Button>
+                    <Button
+                      v-if="row.is_custom"
+                      size="sm"
+                      variant="ghost"
+                      title="Delete"
+                      @click="deleteCustom(row)"
+                    >
+                      <Trash2 class="w-3 h-3 text-destructive" />
+                    </Button>
+                  </template>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="filteredRows.length === 0">
+              <td
+                colspan="7"
+                class="px-3 py-6 text-center text-sm text-muted-foreground"
+              >
+                {{ loading ? "Loading…" : "No pricing rows" }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </Card>
 
     <Dialog
