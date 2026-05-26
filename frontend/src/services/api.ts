@@ -1651,6 +1651,9 @@ export const llmPricingApi = {
     const response = await api.post<LLMPricingRow>("/llm-pricing/custom", payload);
     return response.data;
   },
+  clearAll: async (): Promise<void> => {
+    await api.delete("/llm-pricing");
+  },
 };
 
 export const aiApi = {

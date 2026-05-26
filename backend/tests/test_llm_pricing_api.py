@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
 from app.api.llm_pricing import (
+    clear_user_customizations,
     create_custom_pricing,
     delete_pricing_override,
     list_pricing,
@@ -239,6 +240,22 @@ class CustomCreateTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
         self.assertEqual(ctx.exception.status_code, 409)
+
+
+class ClearCustomizationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_clear_executes_scoped_delete_and_commits(self):
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = AsyncMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+
+        response = await clear_user_customizations(current_user=user, db=db)
+
+        self.assertEqual(response.status_code, 204)
+        # Single DELETE issued, then commit
+        self.assertEqual(db.execute.await_count, 1)
+        db.commit.assert_awaited_once()
 
 
 class SyncEndpointTests(unittest.IsolatedAsyncioTestCase):

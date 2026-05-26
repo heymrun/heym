@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Coins, Plus, RefreshCcw, RotateCcw, Trash2, X } from "lucide-vue-next";
 
 import type { LLMPricingRow, LLMPricingSyncStatus } from "@/types/pricing";
@@ -16,8 +16,10 @@ const rows = ref<LLMPricingRow[]>([]);
 const syncStatus = ref<LLMPricingSyncStatus | null>(null);
 const loading = ref(false);
 const syncing = ref(false);
+const clearing = ref(false);
 const error = ref("");
 const search = ref("");
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const editingId = ref<string | null>(null);
 const editInput = ref({ input: "", output: "" });
@@ -36,7 +38,50 @@ const filteredRows = computed(() => {
   );
 });
 
-async function loadAll(): Promise<void> {
+function stopPolling(): void {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+/**
+ * Watch sync-status in the background and refetch the row list when the
+ * sync task completes (last_synced_at changes or total_rows grows).
+ * Self-stops after `timeoutMs` or when a change is detected.
+ */
+function pollUntilSyncSettles(timeoutMs = 30_000, intervalMs = 1_500): void {
+  stopPolling();
+  const initialSyncedAt = syncStatus.value?.last_synced_at ?? null;
+  const initialTotal = syncStatus.value?.total_rows ?? 0;
+  const deadline = Date.now() + timeoutMs;
+
+  const tick = async (): Promise<void> => {
+    try {
+      const status = await llmPricingApi.syncStatus();
+      const changed =
+        status.last_synced_at !== initialSyncedAt ||
+        status.total_rows > initialTotal;
+      if (changed) {
+        syncStatus.value = status;
+        rows.value = await llmPricingApi.list();
+        stopPolling();
+        return;
+      }
+    } catch {
+      // ignore; we'll keep polling until timeout
+    }
+    if (Date.now() < deadline) {
+      pollTimer = setTimeout(tick, intervalMs);
+    } else {
+      stopPolling();
+    }
+  };
+
+  pollTimer = setTimeout(tick, intervalMs);
+}
+
+async function loadAll(opts: { startPoll?: boolean } = {}): Promise<void> {
   loading.value = true;
   error.value = "";
   try {
@@ -51,23 +96,34 @@ async function loadAll(): Promise<void> {
   } finally {
     loading.value = false;
   }
+  if (opts.startPoll) {
+    pollUntilSyncSettles();
+  }
 }
 
 async function refreshSync(): Promise<void> {
   syncing.value = true;
   try {
     await llmPricingApi.sync();
-    for (let i = 0; i < 5; i++) {
-      await new Promise<void>((r) => setTimeout(r, 800));
-      const status = await llmPricingApi.syncStatus();
-      if (status.last_synced_at !== syncStatus.value?.last_synced_at) {
-        syncStatus.value = status;
-        rows.value = await llmPricingApi.list();
-        break;
-      }
-    }
   } finally {
     syncing.value = false;
+  }
+  // The /sync call schedules an async background task. Poll until it lands.
+  pollUntilSyncSettles();
+}
+
+async function clearAll(): Promise<void> {
+  if (!confirm("Reset all your customizations and custom rows? Global defaults will remain.")) {
+    return;
+  }
+  clearing.value = true;
+  try {
+    await llmPricingApi.clearAll();
+    await loadAll();
+  } catch {
+    error.value = "Failed to clear customizations";
+  } finally {
+    clearing.value = false;
   }
 }
 
@@ -151,7 +207,11 @@ function badgeFor(row: LLMPricingRow): { label: string; classes: string } | null
 }
 
 onMounted(() => {
-  loadAll();
+  loadAll({ startPoll: true });
+});
+
+onBeforeUnmount(() => {
+  stopPolling();
 });
 </script>
 
@@ -169,11 +229,19 @@ onMounted(() => {
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <div class="text-xs text-muted-foreground">
-          <span v-if="syncStatus?.last_synced_at">
+        <div class="text-xs text-muted-foreground text-right">
+          <div v-if="syncStatus">
+            {{ (syncStatus.total_rows ?? 0).toLocaleString() }} models
+            <span v-if="(syncStatus.override_rows ?? 0) > 0">
+              · {{ syncStatus.override_rows }} customized
+            </span>
+          </div>
+          <div v-if="syncStatus?.last_synced_at">
             Last synced: {{ formatDate(syncStatus.last_synced_at) }}
-          </span>
-          <span v-else>Never synced</span>
+          </div>
+          <div v-else>
+            Never synced
+          </div>
         </div>
         <Button
           variant="outline"
@@ -189,6 +257,15 @@ onMounted(() => {
           @click="showAddDialog = true"
         >
           <Plus class="w-4 h-4 mr-1" /> Add Custom Model
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          :loading="clearing"
+          :disabled="(syncStatus?.override_rows ?? 0) === 0"
+          @click="clearAll"
+        >
+          <Trash2 class="w-4 h-4 mr-1" /> Clear All
         </Button>
       </div>
     </div>

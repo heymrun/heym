@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -131,6 +131,20 @@ async def sync_now(
 ) -> Response:
     await ensure_pricing_synced(db, force=True)
     return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_user_customizations(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Delete all of this user's pricing overrides and custom rows.
+    Global Helicone-managed rows are not touched."""
+    await db.execute(
+        delete(LLMPricingOverride).where(LLMPricingOverride.user_id == current_user.id)
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/{model_name:path}", response_model=LLMPricingRow)
