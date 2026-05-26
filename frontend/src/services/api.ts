@@ -18,7 +18,18 @@ import type {
   LLMModel,
   UpdateCredentialRequest,
 } from "@/types/credential";
-import type { LLMTraceDetail, LLMTraceListResponse } from "@/types/trace";
+import type {
+  LLMPricingCustomPayload,
+  LLMPricingPatchPayload,
+  LLMPricingRow,
+  LLMPricingSyncStatus,
+} from "@/types/pricing";
+import type {
+  LLMTraceDetail,
+  LLMTraceListResponse,
+  TraceStatsResponse,
+  TraceTimeRange,
+} from "@/types/trace";
 import type {
   ActiveExecutionItem,
   AgentProgressEvent,
@@ -1562,6 +1573,7 @@ export const traceApi = {
     status?: string;
     search?: string;
     order?: "asc" | "desc";
+    range?: TraceTimeRange;
   }): Promise<LLMTraceListResponse> => {
     const response = await api.get<LLMTraceListResponse>("/traces", {
       params: {
@@ -1573,6 +1585,7 @@ export const traceApi = {
         status: params.status,
         search: params.search,
         order: params.order,
+        range: params.range,
       },
     });
     return response.data;
@@ -1585,6 +1598,58 @@ export const traceApi = {
 
   clear: async (): Promise<void> => {
     await api.delete("/traces");
+  },
+
+  stats: async (params: {
+    range?: TraceTimeRange;
+    source?: string;
+    credentialId?: string;
+    workflowId?: string;
+    status?: string;
+    search?: string;
+  }): Promise<TraceStatsResponse> => {
+    const response = await api.get<TraceStatsResponse>("/traces/stats", {
+      params: {
+        range: params.range,
+        source: params.source,
+        credential_id: params.credentialId,
+        workflow_id: params.workflowId,
+        status: params.status,
+        search: params.search,
+      },
+    });
+    return response.data;
+  },
+};
+
+export const llmPricingApi = {
+  list: async (): Promise<LLMPricingRow[]> => {
+    const response = await api.get<LLMPricingRow[]>("/llm-pricing");
+    return response.data;
+  },
+  syncStatus: async (): Promise<LLMPricingSyncStatus> => {
+    const response = await api.get<LLMPricingSyncStatus>("/llm-pricing/sync-status");
+    return response.data;
+  },
+  sync: async (): Promise<void> => {
+    await api.post("/llm-pricing/sync");
+  },
+  updateOverride: async (
+    model: string,
+    payload: LLMPricingPatchPayload,
+  ): Promise<LLMPricingRow> => {
+    const response = await api.patch<LLMPricingRow>(
+      `/llm-pricing/${encodeURIComponent(model)}`,
+      payload,
+    );
+    return response.data;
+  },
+  deleteOverride: async (model: string): Promise<void> => {
+    await api.delete(`/llm-pricing/${encodeURIComponent(model)}`);
+  },
+  createCustom: async (payload: LLMPricingCustomPayload): Promise<LLMPricingRow> => {
+    const response = await api.post<LLMPricingRow>("/llm-pricing/custom", payload);
+    return response.data;
   },
 };
 
