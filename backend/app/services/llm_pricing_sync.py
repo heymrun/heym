@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import LLMPricing
-from app.db.session import SessionLocal
+from app.db.session import async_session_maker
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ async def sync_pricing_from_helicone(db: AsyncSession) -> int:
 
 
 async def _run_sync_with_own_session() -> None:
-    async with SessionLocal() as db:
+    async with async_session_maker() as db:
         await sync_pricing_from_helicone(db)
 
 

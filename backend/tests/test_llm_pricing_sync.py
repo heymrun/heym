@@ -104,7 +104,7 @@ class EnsurePricingSyncedTests(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(return_value=scalar_result)
 
         with (
-            patch("app.services.llm_pricing_sync.SessionLocal") as session_cls,
+            patch("app.services.llm_pricing_sync.async_session_maker") as session_cls,
             patch(
                 "app.services.llm_pricing_sync.sync_pricing_from_helicone",
                 AsyncMock(return_value=2),
@@ -129,7 +129,7 @@ class EnsurePricingSyncedTests(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(return_value=scalar_result)
 
         with (
-            patch("app.services.llm_pricing_sync.SessionLocal") as session_cls,
+            patch("app.services.llm_pricing_sync.async_session_maker") as session_cls,
             patch(
                 "app.services.llm_pricing_sync.sync_pricing_from_helicone",
                 AsyncMock(return_value=0),
