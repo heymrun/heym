@@ -192,7 +192,7 @@ async def get_trace_stats(
     )
     kpi_row = (await db.execute(kpi_stmt)).one()
 
-    # 2. By model
+    # 2. By model (skip NULL-model rows like MCP workflow-server invocations)
     by_model_stmt = _apply_search(
         select(
             LLMTrace.model.label("model"),
@@ -202,7 +202,7 @@ async def get_trace_stats(
             func.coalesce(func.sum(LLMTrace.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(LLMTrace.completion_tokens), 0).label("completion_tokens"),
         )
-        .where(*filters)
+        .where(*filters, LLMTrace.model.is_not(None))
         .group_by(LLMTrace.model, LLMTrace.provider)
         .order_by(func.coalesce(func.sum(LLMTrace.total_tokens), 0).desc())
     )

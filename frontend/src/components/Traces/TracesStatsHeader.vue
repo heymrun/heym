@@ -196,15 +196,8 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
         :hover="false"
         class="p-3"
       >
-        <div class="text-sm font-medium mb-2 flex items-center justify-between">
-          <span>Cost by Model</span>
-          <router-link
-            v-if="!hasCostData && !loading && hasModelData"
-            :to="{ path: '/dashboard', query: { tab: 'datatable/llm-pricing' } }"
-            class="text-xs text-primary hover:underline"
-          >
-            Configure pricing
-          </router-link>
+        <div class="text-sm font-medium mb-2">
+          Cost by Model
         </div>
         <div
           v-if="!hasModelData || !hasCostData"
@@ -219,6 +212,13 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
           :options="costByModelOptions"
           :series="costByModelSeries"
         />
+        <div
+          v-if="showUnpriced"
+          class="mt-2 text-[11px] text-muted-foreground break-words"
+        >
+          {{ kpis?.unpriced_models.length }} model(s) without pricing:
+          <span class="font-mono">{{ kpis?.unpriced_models.join(", ") }}</span>
+        </div>
       </Card>
       <Card
         variant="flat"
@@ -242,21 +242,6 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
           :series="callsOverTimeSeries"
         />
       </Card>
-    </div>
-
-    <div
-      v-if="showUnpriced"
-      class="text-xs text-muted-foreground rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2"
-    >
-      {{ kpis?.unpriced_models.length }} model(s) without pricing:
-      <span class="font-mono">{{ kpis?.unpriced_models.join(", ") }}</span>
-      ·
-      <router-link
-        :to="{ path: '/dashboard', query: { tab: 'datatable/llm-pricing' } }"
-        class="text-primary hover:underline"
-      >
-        Configure
-      </router-link>
     </div>
   </div>
 </template>
