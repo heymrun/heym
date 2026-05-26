@@ -71,6 +71,36 @@ class SyncFromHeliconeTests(unittest.IsolatedAsyncioTestCase):
         db.execute.assert_not_awaited()
         db.commit.assert_not_awaited()
 
+    async def test_skips_negative_sentinel_costs(self):
+        payload = {
+            "data": [
+                {
+                    "provider": "OPENROUTER",
+                    "model": "openrouter/auto",
+                    "operator": "equals",
+                    "input_cost_per_1m": -1000000,
+                    "output_cost_per_1m": -1000000,
+                },
+                {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o",
+                    "operator": "equals",
+                    "input_cost_per_1m": 5.0,
+                    "output_cost_per_1m": 15.0,
+                },
+            ],
+        }
+        db = AsyncMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+        with patch("httpx.AsyncClient") as client_cls:
+            instance = client_cls.return_value.__aenter__.return_value
+            instance.get = AsyncMock(side_effect=_mock_httpx_get(payload=payload))
+            inserted = await sync_pricing_from_helicone(db)
+        # Only the gpt-4o row should have been upserted; the sentinel row skipped.
+        self.assertEqual(inserted, 1)
+        self.assertEqual(db.execute.await_count, 1)
+
     async def test_bad_payload_handled(self):
         db = AsyncMock()
         db.execute = AsyncMock()

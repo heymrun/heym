@@ -52,6 +52,19 @@ async def sync_pricing_from_helicone(db: AsyncSession) -> int:
             logger.debug("Skipping invalid Helicone entry %r: %s", entry, exc)
             continue
 
+        # Helicone uses negative values (e.g. -1000000) as sentinels for
+        # dynamic/unknown pricing. Skip those — they're not real prices and
+        # would overflow our Numeric(12, 6) column.
+        if input_cost < 0 or output_cost < 0:
+            logger.debug(
+                "Skipping Helicone entry with sentinel pricing: %s/%s in=%s out=%s",
+                provider,
+                model,
+                input_cost,
+                output_cost,
+            )
+            continue
+
         stmt = pg_insert(LLMPricing).values(
             provider=provider,
             model=model,
