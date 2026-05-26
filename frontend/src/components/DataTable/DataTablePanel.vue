@@ -65,7 +65,9 @@ const searchQuery = ref("");
 const selectedTable = ref<DataTable | null>(null);
 const rows = ref<DataTableRow[]>([]);
 const rowsLoading = ref(false);
-const detailLoading = ref(Boolean(props.initialTableId));
+const detailLoading = ref(
+  Boolean(props.initialTableId) && props.initialTableId !== LLM_PRICING_ROUTE_ID,
+);
 const rowPage = ref(0);
 const rowPageSize = ref<RowPageSize>(25);
 const rowTotal = ref(0);
