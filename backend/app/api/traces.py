@@ -55,6 +55,7 @@ async def list_traces(
     status_filter: str | None = Query(None, alias="status"),
     search: str | None = Query(None),
     order: str = Query("desc", pattern="^(asc|desc)$"),
+    range: str | None = Query(None, description="Optional time window: 1h|24h|7d|30d|all"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LLMTraceListResponse:
@@ -70,6 +71,10 @@ async def list_traces(
         filters.append(LLMTrace.error.is_not(None))
     elif status_filter == "success":
         filters.append(LLMTrace.error.is_(None))
+    if range is not None:
+        start_dt, _, _ = _resolve_range(range)
+        if start_dt is not None:
+            filters.append(LLMTrace.created_at >= start_dt)
 
     base_query = (
         select(LLMTrace, Credential.name, Workflow.name)
