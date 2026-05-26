@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Coins,
   Copy,
   Download,
   Pencil,
@@ -34,6 +35,9 @@ import { dataTablesApi } from "@/services/api";
 import DataTableShareDialog from "./DataTableShareDialog.vue";
 import DataTableColumnEditor from "./DataTableColumnEditor.vue";
 import DataTableImportDialog from "./DataTableImportDialog.vue";
+import LLMPricingPanel from "./LLMPricingPanel.vue";
+
+const LLM_PRICING_ROUTE_ID = "llm-pricing";
 
 const props = defineProps<{ initialTableId?: string | null }>();
 const emit = defineEmits<{ navigate: [id: string | null] }>();
@@ -509,6 +513,11 @@ const dataGridMinWidth = computed(
   () => `${sortedColumns.value.length * DATA_GRID_COLUMN_WIDTH_REM + DATA_GRID_META_WIDTH_REM}rem`,
 );
 
+const isLLMPricingSelected = computed(() => {
+  const parsed = parseDataTableRoute(route.query.tab);
+  return parsed.kind === "detail" && parsed.id === LLM_PRICING_ROUTE_ID;
+});
+
 watch(
   () => route.query.tab,
   async (tab) => {
@@ -520,6 +529,13 @@ watch(
         editingCell.value = null;
         addingRow.value = false;
       }
+      return;
+    }
+    if (parsed.id === LLM_PRICING_ROUTE_ID) {
+      selectedTable.value = null;
+      rows.value = [];
+      editingCell.value = null;
+      addingRow.value = false;
       return;
     }
     if (selectedTable.value?.id === parsed.id) {
@@ -540,7 +556,7 @@ watch(
 
 onMounted(async () => {
   const tablesPromise = loadTables();
-  if (props.initialTableId) {
+  if (props.initialTableId && props.initialTableId !== LLM_PRICING_ROUTE_ID) {
     detailLoading.value = true;
     try {
       await Promise.all([tablesPromise, openTable(props.initialTableId)]);
@@ -572,6 +588,10 @@ onMounted(async () => {
     <!-- ════════ LIST VIEW ════════ -->
     <template v-if="detailLoading" />
 
+    <template v-else-if="isLLMPricingSelected">
+      <LLMPricingPanel />
+    </template>
+
     <template v-else-if="!selectedTable">
       <div class="flex items-center justify-between gap-3">
         <div class="relative flex-1">
@@ -598,6 +618,28 @@ onMounted(async () => {
             :class="{ 'animate-spin': loading }"
           />
         </Button>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs uppercase tracking-wide text-muted-foreground">
+          System tables
+        </div>
+        <div
+          class="group relative cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
+          @click="$router.push({ query: { ...$route.query, tab: 'datatable/llm-pricing' } })"
+        >
+          <div class="flex items-start gap-3">
+            <Coins class="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <div class="font-medium">
+                LLM Cost Table
+              </div>
+              <div class="text-xs text-muted-foreground">
+                Per-model pricing used by the Traces cost charts
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Loading -->
