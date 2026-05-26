@@ -588,7 +588,7 @@ See also [Agent Architecture](./agent-architecture.md), [Agent Node](../nodes/ag
 
 ### [Traces](../tabs/traces-tab.md)
 
-The Traces tab shows [LLM](../nodes/llm-node.md) execution traces. View a paginated list filtered by credential or source; open a trace to see request and response payloads, timing breakdown (llm_ms, tools_ms, mcp_list_ms), tool calls (name, arguments, result), and skills included. Use it to debug [Agent Node](../nodes/agent-node.md) and [LLM](../nodes/llm-node.md) behavior and to copy or export payloads.
+The Traces tab shows [LLM](../nodes/llm-node.md) execution traces. A stats header above the list summarizes the selected time range with KPI cards (Calls, Tokens, Cost, Avg Latency, Error %) and three charts — Tokens by Model, Cost by Model, and Calls Over Time (stacked success vs error). A single **Time range** selector (1h / 24h / 7d / 30d / All; default 7 days) filters both the charts and the list together. Cost is computed from the per-user [LLM Cost Table](../tabs/datatable-tab.md#llm-cost-table-system-table); models without pricing surface as an inline warning that links to it. Open any trace to see request and response payloads, timing breakdown (llm_ms, tools_ms, mcp_list_ms), tool calls (name, arguments, result), and skills included. Use it to debug [Agent Node](../nodes/agent-node.md) and [LLM](../nodes/llm-node.md) behavior and to copy or export payloads.
 
 See also [Execution History](./execution-history.md), [Agent Node](../nodes/agent-node.md), and [LLM](../nodes/llm-node.md).
 
@@ -642,9 +642,9 @@ See also [Execution History](./execution-history.md), [Traces](../tabs/traces-ta
 
 ### [DataTable](../tabs/datatable-tab.md)
 
-The DataTable tab lets you create and manage structured data tables within Heym. Define typed columns (string, number, boolean, date, JSON), manage rows with inline double-click editing, import/export CSV, and share tables with users or [teams](./teams.md) with read/write permissions. Use the [DataTable node](../nodes/datatable-node.md) to access tables programmatically in workflows.
+The DataTable tab lets you create and manage structured data tables within Heym. Define typed columns (string, number, boolean, date, JSON), manage rows with inline double-click editing, import/export CSV, and share tables with users or [teams](./teams.md) with read/write permissions. Use the [DataTable node](../nodes/datatable-node.md) to access tables programmatically in workflows. A pinned **System tables** section at the top hosts the **LLM Cost Table**: a fixed-schema view of per-model pricing seeded from Helicone in the background (24-hour TTL, manual Refresh), where each user can override prices or add custom rows for models Helicone does not list. These pricing rules drive the cost KPI and the per-model cost chart on the [Traces](../tabs/traces-tab.md) tab.
 
-See also [DataTable node](../nodes/datatable-node.md), [Workflow Structure](./workflow-structure.md), and [Teams](./teams.md).
+See also [DataTable node](../nodes/datatable-node.md), [Traces](../tabs/traces-tab.md), [Workflow Structure](./workflow-structure.md), and [Teams](./teams.md).
 
 <video src="/features/showcase/datatable.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/datatable.webm">▶ Watch DataTable demo</a></p>
