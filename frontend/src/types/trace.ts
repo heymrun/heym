@@ -30,3 +30,50 @@ export interface LLMTraceListResponse {
   limit: number;
   offset: number;
 }
+
+export type TraceTimeRange = "1h" | "24h" | "7d" | "30d" | "all";
+
+export interface TraceStatsRangeMeta {
+  start: string | null;
+  end: string;
+  bucket_seconds: number;
+}
+
+export interface TraceStatsKpis {
+  total_calls: number;
+  success_calls: number;
+  error_calls: number;
+  error_pct: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  total_cost_usd: string;
+  avg_latency_ms: number;
+  unpriced_models: string[];
+}
+
+export interface TraceStatsByModel {
+  model: string;
+  provider: string | null;
+  calls: number;
+  total_tokens: number;
+  cost_usd: string;
+  is_priced: boolean;
+  is_other?: boolean;
+}
+
+export interface TraceStatsByTime {
+  bucket_start: string;
+  calls: number;
+  success: number;
+  error: number;
+  total_tokens: number;
+  cost_usd: string;
+}
+
+export interface TraceStatsResponse {
+  range: TraceStatsRangeMeta;
+  kpis: TraceStatsKpis;
+  by_model: TraceStatsByModel[];
+  by_time: TraceStatsByTime[];
+}
