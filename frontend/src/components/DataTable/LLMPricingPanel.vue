@@ -20,6 +20,15 @@ const clearing = ref(false);
 const error = ref("");
 const search = ref("");
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollGeneration = 0;
+
+function fmtPrice(value: string | number | null | undefined): string {
+  const n = typeof value === "number" ? value : parseFloat(String(value ?? ""));
+  if (!Number.isFinite(n)) return "—";
+  // Max 4 decimals, strip trailing zeros (e.g. 5 → "5", 0.15 → "0.15", 0.000150 → "0.0002").
+  const fixed = n.toFixed(4);
+  return fixed.replace(/\.?0+$/, "") || "0";
+}
 
 const editingId = ref<string | null>(null);
 const editInput = ref({ input: "", output: "" });
@@ -39,6 +48,7 @@ const filteredRows = computed(() => {
 });
 
 function stopPolling(): void {
+  pollGeneration += 1;
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -48,37 +58,53 @@ function stopPolling(): void {
 /**
  * Watch sync-status in the background and refetch the row list when the
  * sync task completes (last_synced_at changes or total_rows grows).
- * Self-stops after `timeoutMs` or when a change is detected.
+ * Self-stops after `timeoutMs` or when a change is detected. The
+ * generation token means any in-flight tick whose poll was cancelled
+ * (e.g. by component unmount) will exit before scheduling another timer.
  */
 function pollUntilSyncSettles(timeoutMs = 30_000, intervalMs = 1_500): void {
   stopPolling();
+  const myGen = ++pollGeneration;
   const initialSyncedAt = syncStatus.value?.last_synced_at ?? null;
   const initialTotal = syncStatus.value?.total_rows ?? 0;
   const deadline = Date.now() + timeoutMs;
 
   const tick = async (): Promise<void> => {
+    if (myGen !== pollGeneration) return;
     try {
       const status = await llmPricingApi.syncStatus();
+      if (myGen !== pollGeneration) return;
       const changed =
-        status.last_synced_at !== initialSyncedAt ||
-        status.total_rows > initialTotal;
+        status.last_synced_at !== initialSyncedAt || status.total_rows > initialTotal;
       if (changed) {
         syncStatus.value = status;
         rows.value = await llmPricingApi.list();
-        stopPolling();
         return;
       }
     } catch {
-      // ignore; we'll keep polling until timeout
+      // ignore; will retry until timeout
     }
+    if (myGen !== pollGeneration) return;
     if (Date.now() < deadline) {
       pollTimer = setTimeout(tick, intervalMs);
-    } else {
-      stopPolling();
     }
   };
 
   pollTimer = setTimeout(tick, intervalMs);
+}
+
+/**
+ * Only worth polling when there's evidence a sync is in flight:
+ * the table is empty, never synced, or synced very recently (likely
+ * mid-flight, since `ensure_pricing_synced` is async).
+ */
+function shouldStartMountPoll(status: LLMPricingSyncStatus | null): boolean {
+  if (!status) return false;
+  if (status.total_rows === 0) return true;
+  if (status.last_synced_at === null) return true;
+  const syncedAt = Date.parse(status.last_synced_at);
+  if (!Number.isFinite(syncedAt)) return false;
+  return Date.now() - syncedAt < 30_000;
 }
 
 async function loadAll(opts: { startPoll?: boolean } = {}): Promise<void> {
@@ -96,7 +122,7 @@ async function loadAll(opts: { startPoll?: boolean } = {}): Promise<void> {
   } finally {
     loading.value = false;
   }
-  if (opts.startPoll) {
+  if (opts.startPoll && shouldStartMountPoll(syncStatus.value)) {
     pollUntilSyncSettles();
   }
 }
@@ -341,7 +367,7 @@ onBeforeUnmount(() => {
                 v-model="editInput.input"
                 class="h-7 w-24"
               />
-              <span v-else>${{ row.input_per_1m_usd }}</span>
+              <span v-else>${{ fmtPrice(row.input_per_1m_usd) }}</span>
             </td>
             <td class="px-3 py-2">
               <Input
@@ -349,7 +375,7 @@ onBeforeUnmount(() => {
                 v-model="editInput.output"
                 class="h-7 w-24"
               />
-              <span v-else>${{ row.output_per_1m_usd }}</span>
+              <span v-else>${{ fmtPrice(row.output_per_1m_usd) }}</span>
             </td>
             <td class="px-3 py-2 text-xs text-muted-foreground">
               {{ row.source }}
