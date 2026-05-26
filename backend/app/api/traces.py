@@ -130,58 +130,6 @@ async def list_traces(
     return LLMTraceListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{trace_id}", response_model=LLMTraceDetailResponse)
-async def get_trace(
-    trace_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> LLMTraceDetailResponse:
-    """Fetch a single trace scoped to the current user."""
-    result = await db.execute(
-        select(LLMTrace, Credential.name, Workflow.name)
-        .outerjoin(Credential, LLMTrace.credential_id == Credential.id)
-        .outerjoin(Workflow, LLMTrace.workflow_id == Workflow.id)
-        .where(LLMTrace.id == trace_id, LLMTrace.user_id == current_user.id)
-    )
-    row = result.first()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trace not found")
-    trace, credential_name, workflow_name = row
-
-    return LLMTraceDetailResponse(
-        id=trace.id,
-        created_at=trace.created_at,
-        source=trace.source,
-        request_type=trace.request_type,
-        provider=trace.provider,
-        model=trace.model,
-        credential_id=trace.credential_id,
-        credential_name=credential_name,
-        workflow_id=trace.workflow_id,
-        workflow_name=workflow_name,
-        node_id=trace.node_id,
-        node_label=trace.node_label,
-        status="error" if trace.error else "success",
-        elapsed_ms=trace.elapsed_ms,
-        prompt_tokens=trace.prompt_tokens,
-        completion_tokens=trace.completion_tokens,
-        total_tokens=trace.total_tokens,
-        request=trace.request,
-        response=trace.response,
-        error=trace.error,
-    )
-
-
-@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def clear_traces(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """Delete all LLM traces for the current user."""
-    await db.execute(delete(LLMTrace).where(LLMTrace.user_id == current_user.id))
-    await db.commit()
-
-
 @router.get("/stats", response_model=TraceStatsResponse)
 async def get_trace_stats(
     range: str = Query("7d", description="1h | 24h | 7d | 30d | all"),
@@ -388,3 +336,55 @@ async def get_trace_stats(
         by_model=by_model,
         by_time=by_time,
     )
+
+
+@router.get("/{trace_id}", response_model=LLMTraceDetailResponse)
+async def get_trace(
+    trace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LLMTraceDetailResponse:
+    """Fetch a single trace scoped to the current user."""
+    result = await db.execute(
+        select(LLMTrace, Credential.name, Workflow.name)
+        .outerjoin(Credential, LLMTrace.credential_id == Credential.id)
+        .outerjoin(Workflow, LLMTrace.workflow_id == Workflow.id)
+        .where(LLMTrace.id == trace_id, LLMTrace.user_id == current_user.id)
+    )
+    row = result.first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trace not found")
+    trace, credential_name, workflow_name = row
+
+    return LLMTraceDetailResponse(
+        id=trace.id,
+        created_at=trace.created_at,
+        source=trace.source,
+        request_type=trace.request_type,
+        provider=trace.provider,
+        model=trace.model,
+        credential_id=trace.credential_id,
+        credential_name=credential_name,
+        workflow_id=trace.workflow_id,
+        workflow_name=workflow_name,
+        node_id=trace.node_id,
+        node_label=trace.node_label,
+        status="error" if trace.error else "success",
+        elapsed_ms=trace.elapsed_ms,
+        prompt_tokens=trace.prompt_tokens,
+        completion_tokens=trace.completion_tokens,
+        total_tokens=trace.total_tokens,
+        request=trace.request,
+        response=trace.response,
+        error=trace.error,
+    )
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_traces(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete all LLM traces for the current user."""
+    await db.execute(delete(LLMTrace).where(LLMTrace.user_id == current_user.id))
+    await db.commit()

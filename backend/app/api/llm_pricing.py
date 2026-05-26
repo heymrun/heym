@@ -99,7 +99,18 @@ async def list_pricing(
             continue
         rows.append(_custom_to_row(o))
 
-    rows.sort(key=lambda r: ((r.provider or "ZZZ"), r.model))
+    # Sort: user-added customs first, then customized overrides, then defaults.
+    # Within each group, by provider then model so the table feels stable.
+    def _sort_key(r: LLMPricingRow) -> tuple[int, str, str]:
+        if r.is_custom:
+            group = 0
+        elif r.is_override:
+            group = 1
+        else:
+            group = 2
+        return (group, r.provider or "ZZZ", r.model)
+
+    rows.sort(key=_sort_key)
     return rows
 
 
