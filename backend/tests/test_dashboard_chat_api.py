@@ -942,3 +942,39 @@ class DashboardChatToolEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"id": "tc_abc"', joined)
         self.assertIn('"type": "tool_end"', joined)
         self.assertNotIn('"type": "step"', joined)
+
+
+class DashboardChatContextEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_emits_context_event_with_prompt_tokens(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        final_msg = MagicMock()
+        final_msg.content = "ok"
+        final_msg.tool_calls = None
+        response = MagicMock()
+        response.choices = [MagicMock(message=final_msg)]
+        response.usage = MagicMock(prompt_tokens=42, completion_tokens=3, total_tokens=45)
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = response
+
+        with patch("app.api.ai_assistant.record_run_history"):
+            chunks = _normalize_chunks(
+                [
+                    chunk
+                    async for chunk in stream_dashboard_chat(
+                        fake_client,
+                        "gpt-4o-mini",
+                        "system",
+                        [{"role": "user", "content": "hi"}],
+                        AsyncMock(),
+                        user,
+                        "OpenAI",
+                        "http://localhost",
+                    )
+                ]
+            )
+
+        joined = "".join(chunks)
+        self.assertIn('"type": "context"', joined)
+        self.assertIn('"used": 42', joined)
+        self.assertIn('"limit": 128000', joined)

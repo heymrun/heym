@@ -229,6 +229,7 @@ async def _process_chat(
                 cancel_event,
                 attachment,
                 credential,
+                system_prompt_parts=parts,
             ):
                 if chunk.startswith("data: "):
                     try:

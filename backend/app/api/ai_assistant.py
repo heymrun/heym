@@ -2061,6 +2061,42 @@ async def stream_dashboard_chat(
     last_user_message = messages[-1].get("content", "") if messages else ""
     last_trace_request: dict[str, Any] | None = None
 
+    from app.services.context_compressor import _estimate_tokens, get_context_limit
+
+    _context_limit = get_context_limit(model, client)
+
+    def _emit_context(used_tokens: int) -> str:
+        if system_prompt_parts is None:
+            breakdown = {
+                "system": _estimate_tokens([{"role": "system", "content": system_prompt}]),
+                "agents_md": 0,
+                "workflows": 0,
+                "user_rules": 0,
+                "history": _estimate_tokens(messages_to_use),
+                "attachment": 0,
+            }
+        else:
+            breakdown = _context_breakdown(
+                base_system_prompt=system_prompt_parts.base_system_prompt,
+                agents_md=system_prompt_parts.agents_md,
+                workflows_block=system_prompt_parts.workflows_block,
+                user_rules=system_prompt_parts.user_rules,
+                history=messages_to_use,
+                attachment_content=attachment.content if attachment else None,
+            )
+        return (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "context",
+                    "used": int(used_tokens),
+                    "limit": int(_context_limit),
+                    "breakdown": breakdown,
+                }
+            )
+            + "\n\n"
+        )
+
     def _record_dashboard_run(status: str, elapsed_ms: float) -> None:
         record_run_history(
             user_id=user_id,
@@ -2089,6 +2125,15 @@ async def stream_dashboard_chat(
             round_start = time.time()
             response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
             round_elapsed_ms = (time.time() - round_start) * 1000
+            usage = getattr(response, "usage", None)
+            used_tokens = (
+                usage.prompt_tokens
+                if usage and getattr(usage, "prompt_tokens", None) is not None
+                else _estimate_tokens(
+                    [{"role": "system", "content": system_prompt}] + messages_to_use
+                )
+            )
+            yield _emit_context(used_tokens)
             choice = response.choices[0] if response.choices else None
             if not choice:
                 elapsed_ms = (time.time() - start_time) * 1000
