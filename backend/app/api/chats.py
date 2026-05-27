@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from threading import Event
 
 import sqlalchemy as sa
@@ -74,6 +75,59 @@ MAX_PROMPT_LENGTH = 200
 def _build_hidden_workflow_context_marker(workflow_id: str, workflow_name: str) -> str:
     safe_name = workflow_name.replace("--", "").strip()
     return f"\n<!-- heym-workflow-id:{workflow_id} heym-workflow-name:{safe_name} -->"
+
+
+@dataclass(frozen=True)
+class SystemPromptParts:
+    full_system_prompt: str
+    base_system_prompt: str
+    agents_md: str
+    workflows_block: str
+    user_rules: str
+
+
+async def _assemble_system_prompt_parts(
+    user: User,
+    db: AsyncSession,
+    *,
+    include_attachment_instructions: bool,
+) -> SystemPromptParts:
+    workflows = await get_workflows_for_user_with_inputs(db, user.id)
+    workflows_block = _format_workflows_for_prompt(workflows)
+    agents_md = _load_agents_md_content() or ""
+    user_rules = (user.user_rules or "").strip()
+
+    system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
+    if agents_md:
+        system_prompt = (
+            "## Heym Platform Context\n\n"
+            "Use the following Heym platform documentation to answer questions about the platform, structure, commands, code style, and conventions:\n\n"
+            + agents_md
+            + "\n\n---\n\n"
+            + system_prompt
+        )
+    if workflows_block:
+        system_prompt = (
+            system_prompt
+            + "\n\nAvailable workflows (always check these first when user asks for information):\n"
+            + workflows_block
+        )
+    if user_rules:
+        system_prompt = (
+            system_prompt
+            + "\n\nUser preferences / custom instructions (follow these when relevant):\n"
+            + user_rules
+        )
+    if include_attachment_instructions:
+        system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
+
+    return SystemPromptParts(
+        full_system_prompt=system_prompt,
+        base_system_prompt=DASHBOARD_CHAT_SYSTEM_PROMPT,
+        agents_md=agents_md,
+        workflows_block=workflows_block,
+        user_rules=user_rules,
+    )
 
 
 async def _get_conversation_or_404(
@@ -152,32 +206,10 @@ async def _process_chat(
                 node_label="Dashboard Chat",
                 source="dashboard_chat",
             )
-            workflows = await get_workflows_for_user_with_inputs(db, user_id)
-            workflows_block = _format_workflows_for_prompt(workflows)
-            agents_md = _load_agents_md_content()
-            system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
-            if agents_md:
-                system_prompt = (
-                    "## Heym Platform Context\n\n"
-                    "Use the following Heym platform documentation to answer questions about the platform, structure, commands, code style, and conventions:\n\n"
-                    + agents_md
-                    + "\n\n---\n\n"
-                    + system_prompt
-                )
-            if workflows_block:
-                system_prompt = (
-                    system_prompt
-                    + "\n\nAvailable workflows (always check these first when user asks for information):\n"
-                    + workflows_block
-                )
-            if user.user_rules and user.user_rules.strip():
-                system_prompt = (
-                    system_prompt
-                    + "\n\nUser preferences / custom instructions (follow these when relevant):\n"
-                    + user.user_rules.strip()
-                )
-            if attachment_data:
-                system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
+            parts = await _assemble_system_prompt_parts(
+                user, db, include_attachment_instructions=attachment_data is not None
+            )
+            system_prompt = parts.full_system_prompt
 
             cancel_event = Event()
             assistant_chunks: list[str] = []
