@@ -978,3 +978,57 @@ class DashboardChatContextEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"type": "context"', joined)
         self.assertIn('"used": 42', joined)
         self.assertIn('"limit": 128000', joined)
+
+
+class DashboardChatCompressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_emits_compressed_when_compression_runs(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        final_msg = MagicMock()
+        final_msg.content = "ok"
+        final_msg.tool_calls = None
+        response = MagicMock()
+        response.choices = [MagicMock(message=final_msg)]
+        response.usage = MagicMock(prompt_tokens=10, completion_tokens=3, total_tokens=13)
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = response
+
+        fake_compressed = [
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "summary"},
+        ]
+        fake_info = {
+            "messages_compressed": 18,
+            "messages_before_count": 22,
+            "messages_after_count": 4,
+            "tokens_before": 98_000,
+            "tokens_after": 12_000,
+            "elapsed_ms": 412.0,
+        }
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch(
+                "app.services.context_compressor.maybe_compress_messages",
+                new=AsyncMock(return_value=(fake_compressed, fake_info)),
+            ),
+        ):
+            chunks = _normalize_chunks(
+                [
+                    chunk
+                    async for chunk in stream_dashboard_chat(
+                        fake_client,
+                        "gpt-4o-mini",
+                        "system",
+                        [{"role": "user", "content": "hi"}],
+                        AsyncMock(),
+                        user,
+                        "OpenAI",
+                        "http://localhost",
+                    )
+                ]
+            )
+
+        joined = "".join(chunks)
+        self.assertIn('"type": "compressed"', joined)
+        self.assertIn('"messages_compressed": 18', joined)
+        self.assertIn('"tokens_before": 98000', joined)

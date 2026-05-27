@@ -2117,6 +2117,30 @@ async def stream_dashboard_chat(
                 _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                 return
             rounds += 1
+            from app.services.context_compressor import maybe_compress_messages
+
+            messages_for_call = [{"role": "system", "content": system_prompt}] + messages_to_use
+            compressed, comp_info = await maybe_compress_messages(
+                messages_for_call,
+                model=model,
+                client=client,
+                context_limit_tokens=_context_limit,
+            )
+            if comp_info is not None:
+                messages_to_use = [m for m in compressed if m.get("role") != "system"]
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "compressed",
+                            "messages_compressed": comp_info["messages_compressed"],
+                            "tokens_before": comp_info["tokens_before"],
+                            "tokens_after": comp_info["tokens_after"],
+                            "elapsed_ms": comp_info["elapsed_ms"],
+                        }
+                    )
+                    + "\n\n"
+                )
             kwargs = {
                 **base_kwargs,
                 "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
