@@ -1032,3 +1032,77 @@ class DashboardChatCompressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"type": "compressed"', joined)
         self.assertIn('"messages_compressed": 18', joined)
         self.assertIn('"tokens_before": 98000', joined)
+
+
+class ContextSummaryEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_context_summary_returns_breakdown(self) -> None:
+        from app.api.chats import SystemPromptParts, get_context_summary
+        from app.models.chat_schemas import ContextSummaryResponse
+
+        conv_id = uuid.uuid4()
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        user.user_rules = ""
+
+        conversation = MagicMock()
+        conversation.id = conv_id
+        conversation.user_id = user.id
+
+        mock_db = AsyncMock()
+        scalar_result = MagicMock()
+        scalar_result.scalar_one_or_none = MagicMock(return_value=conversation)
+        scalars_result = MagicMock()
+        scalars_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(side_effect=[scalar_result, scalars_result])
+
+        fake_credential = MagicMock()
+        fake_credential.encrypted_config = "{}"
+        fake_credential.type = "openai"
+
+        fake_parts = SystemPromptParts(
+            full_system_prompt="sys",
+            base_system_prompt="sys",
+            agents_md="",
+            workflows_block="",
+            user_rules="",
+        )
+
+        with (
+            patch(
+                "app.api.chats.get_accessible_credential",
+                new=AsyncMock(return_value=fake_credential),
+            ),
+            patch("app.api.chats.decrypt_config", return_value={"api_key": "x"}),
+            patch("app.api.chats.get_openai_client", return_value=(MagicMock(), "OpenAI")),
+            patch(
+                "app.api.chats._assemble_system_prompt_parts",
+                new=AsyncMock(return_value=fake_parts),
+            ),
+            patch(
+                "app.api.ai_assistant._context_breakdown",
+                return_value={
+                    "system": 1,
+                    "agents_md": 0,
+                    "workflows": 0,
+                    "user_rules": 0,
+                    "history": 0,
+                    "attachment": 0,
+                },
+            ),
+            patch(
+                "app.services.context_compressor.get_context_limit",
+                return_value=128_000,
+            ),
+        ):
+            result = await get_context_summary(
+                conversation_id=conv_id,
+                credential_id=uuid.uuid4(),
+                model="gpt-4o-mini",
+                current_user=user,
+                db=mock_db,
+            )
+
+        self.assertIsInstance(result, ContextSummaryResponse)
+        self.assertEqual(result.limit, 128_000)
+        self.assertEqual(result.used, 1)
+        self.assertEqual(result.breakdown.system, 1)

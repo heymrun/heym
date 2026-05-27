@@ -37,6 +37,7 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker
 from app.models.chat_schemas import (
+    ContextSummaryResponse,
     ConversationCreate,
     ConversationDetailResponse,
     ConversationListResponse,
@@ -669,3 +670,48 @@ async def mark_conversation_read(
     conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
     conversation.has_unread = False
     await db.commit()
+
+
+@router.get("/{conversation_id}/context-summary", response_model=ContextSummaryResponse)
+async def get_context_summary(
+    conversation_id: uuid.UUID,
+    credential_id: uuid.UUID,
+    model: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ContextSummaryResponse:
+    """Compute the static (idle-state) context usage for a conversation."""
+    from app.api.ai_assistant import _context_breakdown
+    from app.services.context_compressor import get_context_limit
+
+    conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
+    msg_result = await db.execute(
+        select(DashboardMessage)
+        .where(DashboardMessage.conversation_id == conversation.id)
+        .order_by(DashboardMessage.created_at)
+    )
+    all_messages = msg_result.scalars().all()
+    history = [{"role": m.role, "content": m.content} for m in all_messages]
+    if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
+        history = history[-MAX_DASHBOARD_CHAT_HISTORY:]
+
+    credential = await get_accessible_credential(db, credential_id, current_user.id)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    config = decrypt_config(credential.encrypted_config)
+    client, _provider = get_openai_client(credential.type, config)
+
+    parts = await _assemble_system_prompt_parts(
+        current_user, db, include_attachment_instructions=False
+    )
+    breakdown = _context_breakdown(
+        base_system_prompt=parts.base_system_prompt,
+        agents_md=parts.agents_md,
+        workflows_block=parts.workflows_block,
+        user_rules=parts.user_rules,
+        history=history,
+        attachment_content=None,
+    )
+    used = sum(breakdown.values())
+    limit = get_context_limit(model, client)
+    return ContextSummaryResponse(used=used, limit=limit, breakdown=breakdown)
