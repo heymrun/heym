@@ -79,8 +79,11 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 ]
             )
 
+        # Filter out the new `context` SSE events for this assertion; they carry
+        # token-usage metadata orthogonal to what this test verifies.
+        non_context_chunks = [c for c in chunks if '"type": "context"' not in c]
         self.assertEqual(
-            chunks,
+            non_context_chunks,
             [
                 'data: {"type": "content", "text": "Done"}\n\n',
                 'data: {"type": "done"}\n\n',
