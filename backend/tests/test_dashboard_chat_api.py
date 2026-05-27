@@ -881,3 +881,64 @@ class DashboardChatBreakdownTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(breakdown["user_rules"], 0)
         self.assertEqual(breakdown["history"], 0)
         self.assertEqual(breakdown["attachment"], 0)
+
+
+class DashboardChatToolEventsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_emits_tool_start_and_tool_end(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+
+        tool_call_msg = MagicMock()
+        tool_call_msg.content = None
+        tc = MagicMock()
+        tc.id = "tc_abc"
+        tc.function.name = "list_workflows"
+        tc.function.arguments = "{}"
+        tool_call_msg.tool_calls = [tc]
+
+        final_msg = MagicMock()
+        final_msg.content = "Here are your workflows."
+        final_msg.tool_calls = None
+
+        response_with_tools = MagicMock()
+        response_with_tools.choices = [MagicMock(message=tool_call_msg)]
+        response_with_tools.usage = MagicMock(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15
+        )
+
+        response_final = MagicMock()
+        response_final.choices = [MagicMock(message=final_msg)]
+        response_final.usage = MagicMock(prompt_tokens=20, completion_tokens=8, total_tokens=28)
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = [response_with_tools, response_final]
+
+        db_mock = AsyncMock()
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            chunks = _normalize_chunks(
+                [
+                    chunk
+                    async for chunk in stream_dashboard_chat(
+                        fake_client,
+                        "gpt-4o-mini",
+                        "system",
+                        [{"role": "user", "content": "list workflows"}],
+                        db_mock,
+                        user,
+                        "OpenAI",
+                        "http://localhost",
+                    )
+                ]
+            )
+
+        joined = "".join(chunks)
+        self.assertIn('"type": "tool_start"', joined)
+        self.assertIn('"id": "tc_abc"', joined)
+        self.assertIn('"type": "tool_end"', joined)
+        self.assertNotIn('"type": "step"', joined)

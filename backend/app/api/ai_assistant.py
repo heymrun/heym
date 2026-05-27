@@ -1985,6 +1985,22 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
+def _tool_end_yield(tc_id: str, summary: str, ms: float, status: str = "success") -> str:
+    return (
+        "data: "
+        + json.dumps(
+            {
+                "type": "tool_end",
+                "id": tc_id,
+                "response_summary": summary,
+                "elapsed_ms": ms,
+                "status": status,
+            }
+        )
+        + "\n\n"
+    )
+
+
 def _context_breakdown(
     base_system_prompt: str,
     agents_md: str,
@@ -2166,7 +2182,19 @@ async def stream_dashboard_chat(
                     args = {}
                 if name == "list_workflows":
                     step_label = "Listing workflows..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     workflows = await get_workflows_for_user_with_inputs(db, user_id)
                     result = json.dumps({"count": len(workflows), "workflows": workflows})
@@ -2180,6 +2208,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "execute_workflow":
                     workflow_id_str = args.get("workflow_id", "") or ""
                     step_label = "Running workflow..."
@@ -2191,7 +2224,19 @@ async def stream_dashboard_chat(
                             step_label = f'Running workflow "{w.name}"...'
                     except (ValueError, TypeError):
                         pass
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     inputs = dict(args.get("inputs") or {})
                     # Auto-inject attachment content into the matching workflow input field.
@@ -2226,6 +2271,11 @@ async def stream_dashboard_chat(
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
                     )
                     pending_review = _extract_pending_hitl_review_payload(result)
                     try:
@@ -2284,6 +2334,19 @@ async def stream_dashboard_chat(
                                 "error": "No selected LLM credential is available",
                             }
                         )
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_start",
+                                    "id": tc.id,
+                                    "name": name,
+                                    "label": "Building and running a new workflow...",
+                                    "args": args,
+                                }
+                            )
+                            + "\n\n"
+                        )
                         run_steps.append(
                             {
                                 "label": "Building and running a new workflow...",
@@ -2293,11 +2356,29 @@ async def stream_dashboard_chat(
                                 "execution_time_ms": 0,
                             }
                         )
+                        yield _tool_end_yield(
+                            tc.id,
+                            run_steps[-1]["response_summary"],
+                            run_steps[-1]["execution_time_ms"],
+                            status="error",
+                        )
                     else:
                         goal = str(args.get("goal") or "").strip() or last_user_message
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
                         step_label = "Building and running a new workflow..."
-                        yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_start",
+                                    "id": tc.id,
+                                    "name": name,
+                                    "label": step_label,
+                                    "args": args,
+                                }
+                            )
+                            + "\n\n"
+                        )
                         step_start = time.time()
                         workflows = await get_workflows_for_user_with_inputs(db, user_id)
                         result = await create_and_run_generated_workflow_tool(
@@ -2327,6 +2408,11 @@ async def stream_dashboard_chat(
                                 "response_summary": _summarize_tool_result(name, result),
                                 "execution_time_ms": step_ms,
                             }
+                        )
+                        yield _tool_end_yield(
+                            tc.id,
+                            run_steps[-1]["response_summary"],
+                            run_steps[-1]["execution_time_ms"],
                         )
                     try:
                         workflow_created_payload = json.loads(result)
@@ -2385,6 +2471,19 @@ async def stream_dashboard_chat(
                                 "error": "No selected LLM credential is available",
                             }
                         )
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_start",
+                                    "id": tc.id,
+                                    "name": name,
+                                    "label": "Editing and running workflow...",
+                                    "args": args,
+                                }
+                            )
+                            + "\n\n"
+                        )
                         run_steps.append(
                             {
                                 "label": "Editing and running workflow...",
@@ -2393,6 +2492,12 @@ async def stream_dashboard_chat(
                                 "response_summary": _summarize_tool_result(name, result),
                                 "execution_time_ms": 0,
                             }
+                        )
+                        yield _tool_end_yield(
+                            tc.id,
+                            run_steps[-1]["response_summary"],
+                            run_steps[-1]["execution_time_ms"],
+                            status="error",
                         )
                     else:
                         workflow_id_str = str(args.get("workflow_id") or "").strip()
@@ -2408,7 +2513,19 @@ async def stream_dashboard_chat(
                                 step_label = f'Editing workflow "{w.name}"...'
                         except (ValueError, TypeError):
                             pass
-                        yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_start",
+                                    "id": tc.id,
+                                    "name": name,
+                                    "label": step_label,
+                                    "args": args,
+                                }
+                            )
+                            + "\n\n"
+                        )
                         step_start = time.time()
                         workflows = await get_workflows_for_user_with_inputs(db, user_id)
                         result = await edit_and_run_generated_workflow_tool(
@@ -2443,6 +2560,11 @@ async def stream_dashboard_chat(
                                 "response_summary": _summarize_tool_result(name, result),
                                 "execution_time_ms": step_ms,
                             }
+                        )
+                        yield _tool_end_yield(
+                            tc.id,
+                            run_steps[-1]["response_summary"],
+                            run_steps[-1]["execution_time_ms"],
                         )
                     try:
                         workflow_created_payload = json.loads(result)
@@ -2495,7 +2617,19 @@ async def stream_dashboard_chat(
                         pass
                 elif name == "resolve_hitl_review":
                     step_label = "Resolving human review..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = await resolve_hitl_review_tool(
                         db,
@@ -2516,6 +2650,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "wait_for_execution_update":
                     execution_history_id = str(args.get("execution_history_id") or "").strip()
                     interval_seconds_raw = args.get("interval_seconds")
@@ -2525,7 +2664,19 @@ async def stream_dashboard_chat(
                     )
                     max_checks = max_checks_raw if isinstance(max_checks_raw, int) else 5
                     step_label = "Waiting for workflow update..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = await wait_for_execution_update_tool(
                         db,
@@ -2548,6 +2699,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "get_workflow_definition":
                     workflow_id_str = args.get("workflow_id", "") or ""
                     full_details = bool(args.get("full_details", False))
@@ -2559,7 +2715,19 @@ async def stream_dashboard_chat(
                             step_label = f'Reading "{w.name}" content...'
                     except (ValueError, TypeError):
                         pass
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = await get_workflow_definition_tool(
                         db, user_id, workflow_id_str, full_details=full_details
@@ -2577,6 +2745,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "get_analytics_stats":
                     workflow_id_str = args.get("workflow_id") or ""
                     time_range = args.get("time_range") or "24h"
@@ -2587,7 +2760,19 @@ async def stream_dashboard_chat(
                         except (ValueError, TypeError):
                             wid = None
                     step_label = "Fetching analytics..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     stats = await compute_analytics_stats(db, user_id, wid, time_range)
                     result = json.dumps(stats.model_dump(), default=str)
@@ -2604,6 +2789,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "get_recent_executions":
                     time_range = args.get("time_range") or "24h"
                     limit_raw = args.get("limit")
@@ -2613,7 +2803,19 @@ async def stream_dashboard_chat(
                     since_hours_map = {"24h": 24, "7d": 168, "30d": 720, "all": None}
                     since_hours = since_hours_map.get(time_range, 24)
                     step_label = "Listing recent executions..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     executions = await get_recent_executions_for_user(
                         db, user_id, limit=limit, since_hours=since_hours
@@ -2629,12 +2831,29 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "search_documentation":
                     query = args.get("query", "") or ""
                     step_label = "Searching documentation..."
                     if query:
                         step_label = f'Searching docs for "{query[:40]}{"..." if len(query) > 40 else ""}"...'
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     try:
                         from app.services.doc_index import DocIndexService
@@ -2655,6 +2874,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "get_global_variables":
                     var_name = args.get("name") or None
                     if isinstance(var_name, str) and not var_name.strip():
@@ -2662,7 +2886,19 @@ async def stream_dashboard_chat(
                     step_label = "Querying global variables..."
                     if var_name:
                         step_label = f'Getting variable "{var_name}"...'
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = await get_global_variables_tool(db, user_id, name=var_name)
                     step_ms = round((time.time() - step_start) * 1000, 2)
@@ -2675,6 +2911,11 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 elif name == "get_teams":
                     team_name_filter = args.get("team_name") or None
                     if isinstance(team_name_filter, str) and not team_name_filter.strip():
@@ -2682,7 +2923,19 @@ async def stream_dashboard_chat(
                     step_label = "Listing teams..."
                     if team_name_filter:
                         step_label = f'Searching teams for "{team_name_filter[:30]}..."'
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = await get_teams_tool(db, user_id, team_name=team_name_filter)
                     step_ms = round((time.time() - step_start) * 1000, 2)
@@ -2696,6 +2949,11 @@ async def stream_dashboard_chat(
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
                     )
                 elif name == "get_schedule_events":
                     view_window = args.get("view_window")
@@ -2714,7 +2972,19 @@ async def stream_dashboard_chat(
                     else:
                         include_shared = True
                     step_label = "Loading scheduled runs..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     try:
                         tz = get_configured_timezone()
@@ -2760,9 +3030,26 @@ async def stream_dashboard_chat(
                             "execution_time_ms": step_ms,
                         }
                     )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
                 else:
                     step_label = f"Running {name}..."
-                    yield f"data: {json.dumps({'type': 'step', 'label': step_label})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
                     step_start = time.time()
                     result = json.dumps({"error": f"Unknown tool: {name}"})
                     step_ms = round((time.time() - step_start) * 1000, 2)
@@ -2774,6 +3061,11 @@ async def stream_dashboard_chat(
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
                     )
                 content_for_llm = _sanitize_tool_result_for_llm(result, name)
                 messages_to_use.append(
