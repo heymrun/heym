@@ -77,6 +77,45 @@ def _build_hidden_workflow_context_marker(workflow_id: str, workflow_name: str) 
     return f"\n<!-- heym-workflow-id:{workflow_id} heym-workflow-name:{safe_name} -->"
 
 
+def _ingest_tool_event(tool_calls_for_message: list[dict], payload: dict) -> None:
+    """Update tool_calls_for_message in place from a parsed SSE payload."""
+    ptype = payload.get("type")
+    if ptype == "tool_start":
+        tool_calls_for_message.append(
+            {
+                "id": str(payload.get("id") or ""),
+                "name": str(payload.get("name") or ""),
+                "label": str(payload.get("label") or ""),
+                "args": payload.get("args") or {},
+                "status": "running",
+            }
+        )
+    elif ptype == "tool_end":
+        tc_id = str(payload.get("id") or "")
+        for entry in tool_calls_for_message:
+            if entry.get("id") == tc_id:
+                entry["response_summary"] = str(payload.get("response_summary") or "")
+                entry["elapsed_ms"] = payload.get("elapsed_ms")
+                entry["status"] = str(payload.get("status") or "success")
+                break
+    elif ptype == "compressed":
+        tokens_before = int(payload.get("tokens_before") or 0)
+        tokens_after = int(payload.get("tokens_after") or 0)
+        tool_calls_for_message.append(
+            {
+                "id": f"cmp_{len(tool_calls_for_message)}",
+                "name": "_context_compression",
+                "label": "Context compressed",
+                "args": {"messages_compressed": int(payload.get("messages_compressed") or 0)},
+                "response_summary": (
+                    f"~{tokens_before // 1000}k → ~{tokens_after // 1000}k tokens"
+                ),
+                "elapsed_ms": payload.get("elapsed_ms"),
+                "status": "compressed",
+            }
+        )
+
+
 @dataclass(frozen=True)
 class SystemPromptParts:
     full_system_prompt: str
@@ -215,6 +254,7 @@ async def _process_chat(
             assistant_chunks: list[str] = []
             workflow_context_markers: list[str] = []
             workflow_note_ids: set[str] = set()
+            tool_calls_for_message: list[dict] = []
 
             async for chunk in stream_dashboard_chat(
                 client,
@@ -236,9 +276,10 @@ async def _process_chat(
                         payload = json.loads(chunk[6:].strip())
                     except json.JSONDecodeError:
                         payload = {}
-                    if payload.get("type") == "content":
+                    ptype = payload.get("type")
+                    if ptype == "content":
                         assistant_chunks.append(str(payload.get("text") or ""))
-                    elif payload.get("type") == "workflow_created":
+                    elif ptype == "workflow_created":
                         w_id = str(payload.get("workflow_id") or "").strip()
                         w_name = str(payload.get("workflow_name") or "").strip()
                         if w_id and w_id not in workflow_note_ids:
@@ -246,18 +287,21 @@ async def _process_chat(
                             workflow_context_markers.append(
                                 _build_hidden_workflow_context_marker(w_id, w_name or "Workflow")
                             )
+                    elif ptype in ("tool_start", "tool_end", "compressed"):
+                        _ingest_tool_event(tool_calls_for_message, payload)
                 await registry.publish(conv_id, chunk)
 
             assistant_content = "".join(assistant_chunks)
             for marker in workflow_context_markers:
                 if marker and marker not in assistant_content:
                     assistant_content += marker
-            if assistant_content:
+            if assistant_content or tool_calls_for_message:
                 db.add(
                     DashboardMessage(
                         conversation_id=uuid.UUID(conv_id),
                         role="assistant",
                         content=assistant_content,
+                        tool_calls=tool_calls_for_message or None,
                     )
                 )
 

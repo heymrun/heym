@@ -477,3 +477,70 @@ class TestGenerateConversationTitle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.title, "Manual Title")
         self.assertEqual(conv.title, "Manual Title")
         mock_db.commit.assert_not_awaited()
+
+
+class IngestToolEventTests(unittest.TestCase):
+    def test_tool_start_appends_running_entry(self) -> None:
+        from app.api.chats import _ingest_tool_event
+
+        bucket: list[dict] = []
+        _ingest_tool_event(
+            bucket,
+            {
+                "type": "tool_start",
+                "id": "tc_1",
+                "name": "list_workflows",
+                "label": "Listing workflows...",
+                "args": {"k": "v"},
+            },
+        )
+        self.assertEqual(len(bucket), 1)
+        self.assertEqual(bucket[0]["id"], "tc_1")
+        self.assertEqual(bucket[0]["status"], "running")
+        self.assertEqual(bucket[0]["args"], {"k": "v"})
+
+    def test_tool_end_updates_matching_entry(self) -> None:
+        from app.api.chats import _ingest_tool_event
+
+        bucket: list[dict] = [
+            {
+                "id": "tc_1",
+                "name": "list_workflows",
+                "label": "Listing...",
+                "args": {},
+                "status": "running",
+            }
+        ]
+        _ingest_tool_event(
+            bucket,
+            {
+                "type": "tool_end",
+                "id": "tc_1",
+                "response_summary": "3 workflows",
+                "elapsed_ms": 42.0,
+                "status": "success",
+            },
+        )
+        self.assertEqual(bucket[0]["status"], "success")
+        self.assertEqual(bucket[0]["response_summary"], "3 workflows")
+        self.assertEqual(bucket[0]["elapsed_ms"], 42.0)
+
+    def test_compressed_appends_compression_entry(self) -> None:
+        from app.api.chats import _ingest_tool_event
+
+        bucket: list[dict] = []
+        _ingest_tool_event(
+            bucket,
+            {
+                "type": "compressed",
+                "messages_compressed": 18,
+                "tokens_before": 98_000,
+                "tokens_after": 12_000,
+                "elapsed_ms": 412.0,
+            },
+        )
+        self.assertEqual(len(bucket), 1)
+        self.assertEqual(bucket[0]["name"], "_context_compression")
+        self.assertEqual(bucket[0]["status"], "compressed")
+        self.assertEqual(bucket[0]["args"], {"messages_compressed": 18})
+        self.assertEqual(bucket[0]["response_summary"], "~98k → ~12k tokens")
