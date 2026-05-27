@@ -9,6 +9,31 @@ export interface WorkflowPreview {
   edges: WorkflowEdge[]
 }
 
+export interface ToolCall {
+  id: string
+  name: string
+  label: string
+  args: Record<string, unknown>
+  response_summary?: string
+  elapsed_ms?: number
+  status: 'running' | 'success' | 'error' | 'compressed'
+}
+
+export interface ContextBreakdown {
+  system: number
+  agents_md: number
+  workflows: number
+  user_rules: number
+  history: number
+  attachment: number
+}
+
+export interface ContextUsage {
+  used: number
+  limit: number
+  breakdown: ContextBreakdown
+}
+
 export interface Conversation {
   id: string
   title: string
@@ -26,6 +51,7 @@ export interface Message {
   images?: string[]
   attachmentName?: string
   workflowPreview?: WorkflowPreview
+  tool_calls?: ToolCall[]
   created_at: string
 }
 
@@ -52,7 +78,10 @@ export interface MessageCreate {
 
 export type SSEChunk =
   | { type: 'content'; text: string }
-  | { type: 'step'; label: string }
+  | { type: 'tool_start'; id: string; name: string; label: string; args: Record<string, unknown> }
+  | { type: 'tool_end'; id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error' }
+  | { type: 'compressed'; messages_compressed: number; tokens_before: number; tokens_after: number; elapsed_ms: number }
+  | { type: 'context'; used: number; limit: number; breakdown: ContextBreakdown }
   | { type: 'tool_output'; images: string[] }
   | { type: 'workflow_created'; workflow: WorkflowPreview }
   | { type: 'title'; title: string }

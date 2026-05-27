@@ -58,6 +58,7 @@ export interface LLMModel {
   is_reasoning: boolean;
   supports_batch: boolean;
   batch_support_reason?: string | null;
+  context_window?: number | null;
 }
 
 export interface CredentialConfigOpenAI {
