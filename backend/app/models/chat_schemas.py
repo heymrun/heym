@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConversationCreate(BaseModel):
@@ -32,11 +32,22 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationResponse]
 
 
+class ToolCallRecord(BaseModel):
+    id: str
+    name: str
+    label: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    response_summary: str | None = None
+    elapsed_ms: float | None = None
+    status: Literal["running", "success", "error", "compressed"]
+
+
 class MessageResponse(BaseModel):
     id: uuid.UUID
     role: str
     content: str
     created_at: datetime
+    tool_calls: list[ToolCallRecord] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -84,3 +95,18 @@ class QuickPromptsResponse(BaseModel):
 
 class QuickPromptsUpdate(BaseModel):
     prompts: list[str]
+
+
+class ContextBreakdown(BaseModel):
+    system: int
+    agents_md: int
+    workflows: int
+    user_rules: int
+    history: int
+    attachment: int
+
+
+class ContextSummaryResponse(BaseModel):
+    used: int
+    limit: int
+    breakdown: ContextBreakdown
