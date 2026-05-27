@@ -838,3 +838,46 @@ class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(last_msg["content"], str)
         self.assertIn("[ATTACHED FILE: data.csv]", last_msg["content"])
         self.assertIn("a,b\n1,2", last_msg["content"])
+
+
+class DashboardChatBreakdownTests(unittest.IsolatedAsyncioTestCase):
+    def test_context_breakdown_keys_and_values(self) -> None:
+        from app.api.ai_assistant import _context_breakdown
+        from app.services.context_compressor import _estimate_tokens
+
+        history = [{"role": "user", "content": "hello"}]
+        breakdown = _context_breakdown(
+            base_system_prompt="sys",
+            agents_md="agents",
+            workflows_block="wf",
+            user_rules="rules",
+            history=history,
+            attachment_content=None,
+        )
+
+        self.assertIn("system", breakdown)
+        self.assertIn("agents_md", breakdown)
+        self.assertIn("workflows", breakdown)
+        self.assertIn("user_rules", breakdown)
+        self.assertIn("history", breakdown)
+        self.assertIn("attachment", breakdown)
+        self.assertEqual(breakdown["attachment"], 0)
+        self.assertEqual(breakdown["history"], _estimate_tokens(history))
+
+    def test_context_breakdown_empty_inputs_return_zero(self) -> None:
+        from app.api.ai_assistant import _context_breakdown
+
+        breakdown = _context_breakdown(
+            base_system_prompt="",
+            agents_md="",
+            workflows_block="",
+            user_rules="",
+            history=[],
+            attachment_content=None,
+        )
+        self.assertEqual(breakdown["system"], 0)
+        self.assertEqual(breakdown["agents_md"], 0)
+        self.assertEqual(breakdown["workflows"], 0)
+        self.assertEqual(breakdown["user_rules"], 0)
+        self.assertEqual(breakdown["history"], 0)
+        self.assertEqual(breakdown["attachment"], 0)

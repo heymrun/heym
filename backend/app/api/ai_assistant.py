@@ -1985,6 +1985,31 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
+def _context_breakdown(
+    base_system_prompt: str,
+    agents_md: str,
+    workflows_block: str,
+    user_rules: str,
+    history: list[dict],
+    attachment_content: str | None,
+) -> dict[str, int]:
+    from app.services.context_compressor import _estimate_tokens
+
+    def _tok(text: str) -> int:
+        if not text:
+            return 0
+        return _estimate_tokens([{"role": "system", "content": text}])
+
+    return {
+        "system": _tok(base_system_prompt),
+        "agents_md": _tok(agents_md),
+        "workflows": _tok(workflows_block),
+        "user_rules": _tok(user_rules),
+        "history": _estimate_tokens(history),
+        "attachment": _tok(attachment_content or ""),
+    }
+
+
 async def stream_dashboard_chat(
     client: OpenAI,
     model: str,
@@ -1998,6 +2023,8 @@ async def stream_dashboard_chat(
     cancel_event: Event | None = None,
     attachment: FileAttachment | None = None,
     selected_credential: Credential | None = None,
+    *,
+    system_prompt_parts: Any | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content."""
     user_id = user.id
