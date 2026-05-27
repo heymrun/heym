@@ -21,7 +21,7 @@ const themeStore = useThemeStore();
 const versionStore = useVersionStore();
 const showSettingsDialog = ref(false);
 
-const appVersion = computed(() => {
+const appVersion = computed((): string => {
   return versionStore.displayVersion;
 });
 
@@ -47,12 +47,12 @@ async function handleLogout(): Promise<void> {
         <div class="logo-link flex items-center gap-3 font-semibold group">
           <router-link
             to="/"
-            class="logo-icon flex items-center justify-center w-10 h-10 cursor-pointer"
+            class="logo-icon flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden cursor-pointer"
           >
             <img
               src="/fav.svg"
               alt="Heym"
-              class="w-10 h-10"
+              class="block w-10 h-10"
             >
           </router-link>
           <div class="flex flex-col">
@@ -76,12 +76,14 @@ async function handleLogout(): Promise<void> {
                 <ExternalLink class="h-2.5 w-2.5" />
               </span>
             </a>
-            <span
+            <router-link
               v-else
-              class="text-xs text-muted-foreground hidden md:block"
+              to="/"
+              :title="versionStore.updateTitle"
+              class="text-xs text-muted-foreground hover:text-foreground hidden md:block transition-colors"
             >
               {{ appVersion }}
-            </span>
+            </router-link>
           </div>
         </div>
       </div>
@@ -173,6 +175,7 @@ async function handleLogout(): Promise<void> {
 }
 
 .logo-icon {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   box-shadow: 0 4px 12px hsl(var(--primary) / 0.2);
   transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
