@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import type { Conversation, ConversationDetail, Message, WorkflowPreview } from "@/types/chat";
+import type { Conversation, ConversationDetail, ContextUsage, Message, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -36,18 +36,21 @@ export const useChatStore = defineStore("chat", () => {
   interface StreamState {
     content: string;
     images: string[];
-    steps: string[];
+    toolCalls: ToolCall[];
+    contextUsage: ContextUsage | null;
     workflowPreview: WorkflowPreview | null;
     isStreaming: boolean;
   }
   const EMPTY_STREAM_STATE: StreamState = Object.freeze({
     content: "",
     images: [],
-    steps: [],
+    toolCalls: [],
+    contextUsage: null,
     workflowPreview: null,
     isStreaming: false,
   }) as StreamState;
   const streamStatesByConv = ref<Record<string, StreamState>>({});
+  const contextUsageByConv = ref<Record<string, ContextUsage>>({});
   const activeControllersByConv = new Map<string, AbortController>();
   const quickPrompts = ref<string[]>([]);
   let latestConversationLoadId: string | null = null;
@@ -63,7 +66,8 @@ export const useChatStore = defineStore("chat", () => {
     const current = streamStatesByConv.value[conversationId] ?? {
       content: "",
       images: [],
-      steps: [],
+      toolCalls: [],
+      contextUsage: null,
       workflowPreview: null,
       isStreaming: false,
     };
@@ -142,10 +146,13 @@ export const useChatStore = defineStore("chat", () => {
           backgroundSubscribedConvIds.delete(conversationId);
           _patchConversationFlag(conversationId, "is_running", false);
         },
-        undefined,
-        undefined,
+        undefined, // onToolStart
+        undefined, // onToolEnd
+        undefined, // onToolOutput
         (title) => { _patchConversationTitle(conversationId, title); },
-        undefined,
+        undefined, // onWorkflowCreated
+        undefined, // onCompressed
+        undefined, // onContext
         controller.signal,
       );
     } catch {
@@ -300,7 +307,8 @@ export const useChatStore = defineStore("chat", () => {
     _setStreamState(conversationId, {
       content: "",
       images: [],
-      steps: [],
+      toolCalls: [],
+      contextUsage: null,
       workflowPreview: null,
       isStreaming: true,
     });
@@ -329,7 +337,8 @@ export const useChatStore = defineStore("chat", () => {
     _setStreamState(conversationId, {
       content: "",
       images: [],
-      steps: [],
+      toolCalls: [],
+      contextUsage: null,
       workflowPreview: null,
       isStreaming: true,
     });
@@ -350,7 +359,8 @@ export const useChatStore = defineStore("chat", () => {
           const hasContent =
             final.content.length > 0 ||
             final.images.length > 0 ||
-            final.workflowPreview !== null;
+            final.workflowPreview !== null ||
+            final.toolCalls.length > 0;
           if (hasContent && activeConversation.value?.id === conversationId) {
             const assistantMessage: Message = {
               id: crypto.randomUUID(),
@@ -358,6 +368,7 @@ export const useChatStore = defineStore("chat", () => {
               content: final.content,
               ...(final.images.length > 0 ? { images: [...final.images] } : {}),
               ...(final.workflowPreview ? { workflowPreview: final.workflowPreview } : {}),
+              ...(final.toolCalls.length > 0 ? { tool_calls: [...final.toolCalls] } : {}),
               created_at: new Date().toISOString(),
             };
             activeConversation.value = {
@@ -378,9 +389,35 @@ export const useChatStore = defineStore("chat", () => {
           clearStreamingFlag();
           _patchConversationFlag(conversationId, "is_running", false);
         },
-        (label) => {
+        (payload) => {
           const current = getStreamState(conversationId);
-          _setStreamState(conversationId, { steps: [...current.steps, label] });
+          _setStreamState(conversationId, {
+            toolCalls: [
+              ...current.toolCalls,
+              {
+                id: payload.id,
+                name: payload.name,
+                label: payload.label,
+                args: payload.args,
+                status: "running",
+              },
+            ],
+          });
+        },
+        (payload) => {
+          const current = getStreamState(conversationId);
+          _setStreamState(conversationId, {
+            toolCalls: current.toolCalls.map((tc) =>
+              tc.id === payload.id
+                ? {
+                    ...tc,
+                    response_summary: payload.response_summary,
+                    elapsed_ms: payload.elapsed_ms,
+                    status: payload.status,
+                  }
+                : tc,
+            ),
+          });
         },
         (images) => {
           const current = getStreamState(conversationId);
@@ -391,6 +428,23 @@ export const useChatStore = defineStore("chat", () => {
         },
         (workflow) => {
           _setStreamState(conversationId, { workflowPreview: workflow });
+        },
+        (payload) => {
+          const current = getStreamState(conversationId);
+          const synthetic: ToolCall = {
+            id: `cmp_${Date.now()}`,
+            name: "_context_compression",
+            label: "Context compressed",
+            args: { messages_compressed: payload.messages_compressed },
+            response_summary: `~${Math.floor(payload.tokens_before / 1000)}k → ~${Math.floor(payload.tokens_after / 1000)}k tokens`,
+            elapsed_ms: payload.elapsed_ms,
+            status: "compressed",
+          };
+          _setStreamState(conversationId, { toolCalls: [...current.toolCalls, synthetic] });
+        },
+        (payload) => {
+          _setStreamState(conversationId, { contextUsage: payload });
+          contextUsageByConv.value = { ...contextUsageByConv.value, [conversationId]: payload };
         },
         controller.signal,
       );
@@ -423,6 +477,19 @@ export const useChatStore = defineStore("chat", () => {
   async function saveQuickPrompts(prompts: string[]): Promise<void> {
     const saved = await chatApi.saveQuickPrompts(prompts);
     quickPrompts.value = saved;
+  }
+
+  async function loadContextSummary(
+    conversationId: string,
+    credentialId: string,
+    model: string,
+  ): Promise<void> {
+    try {
+      const usage = await chatApi.getContextSummary(conversationId, credentialId, model);
+      contextUsageByConv.value = { ...contextUsageByConv.value, [conversationId]: usage };
+    } catch {
+      // best-effort; UI falls back to hiding the badge
+    }
   }
 
   function cancelStreaming(conversationId: string): void {
@@ -668,6 +735,7 @@ export const useChatStore = defineStore("chat", () => {
     isLoadingConversations,
     isLoadingMessages,
     streamStatesByConv,
+    contextUsageByConv,
     getStreamState,
     quickPrompts,
     toggleSidebar,
@@ -685,5 +753,6 @@ export const useChatStore = defineStore("chat", () => {
     markConversationRead,
     loadQuickPrompts,
     saveQuickPrompts,
+    loadContextSummary,
   };
 });
