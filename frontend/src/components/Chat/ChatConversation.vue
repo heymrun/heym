@@ -22,9 +22,12 @@ import DOMPurify from "dompurify";
 
 import type { Message, WorkflowPreview } from "@/types/chat";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
+import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
+import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import { estimateTokens } from "@/lib/contextEstimator";
 import { aiApi, credentialsApi } from "@/services/api";
 import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
@@ -166,6 +169,12 @@ const conversationTitle = computed(() =>
 const canSendMessage = computed(() => isShowingConversation.value && !isConversationTransitioning.value);
 const streamState = computed(() => chatStore.getStreamState(props.conversationId));
 const isThisConvStreaming = computed(() => streamState.value.isStreaming);
+const draftTokens = computed(() => estimateTokens(input.value));
+const contextUsageForBadge = computed(() => {
+  const live = streamState.value.contextUsage;
+  if (live) return live;
+  return chatStore.contextUsageByConv[props.conversationId] ?? null;
+});
 const canFocusInput = computed(
   () =>
     canSendMessage.value &&
@@ -239,6 +248,10 @@ watch(
     focusInputWhenReady();
   },
 );
+
+watch(selectedModel, () => {
+  void _maybeLoadContextSummary();
+});
 
 function scrollToBottom(): void {
   messagesEndRef.value?.scrollIntoView({ behavior: "smooth" });
@@ -607,7 +620,17 @@ async function loadModels(credId: string, preferredModelId?: string): Promise<vo
   } finally {
     isLoadingModels.value = false;
     focusInputWhenReady();
+    void _maybeLoadContextSummary();
   }
+}
+
+async function _maybeLoadContextSummary(): Promise<void> {
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  await chatStore.loadContextSummary(
+    props.conversationId,
+    selectedCredentialId.value,
+    selectedModel.value,
+  );
 }
 
 async function onCredentialChange(): Promise<void> {
@@ -882,6 +905,16 @@ onUnmounted(() => {
                 class="w-3.5 h-3.5"
               />
             </button>
+            <div
+              v-if="msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0"
+              class="mb-2 flex flex-col gap-1.5"
+            >
+              <ChatToolCall
+                v-for="tc in msg.tool_calls"
+                :key="tc.id"
+                :tool-call="tc"
+              />
+            </div>
             <!-- eslint-disable vue/no-v-html -->
             <div
               class="chat-markdown"
@@ -980,26 +1013,14 @@ onUnmounted(() => {
             ]"
           >
             <div
-              v-if="streamState.steps.length > 0"
-              class="mb-3 space-y-1.5"
+              v-if="streamState.toolCalls.length > 0"
+              class="mb-3 flex flex-col gap-1.5"
             >
-              <div
-                v-for="(step, index) in streamState.steps"
-                :key="`${step}-${index}`"
-                class="flex items-center gap-2 text-xs text-muted-foreground"
-              >
-                <Loader2
-                  v-if="index === streamState.steps.length - 1 && !streamState.content"
-                  class="w-3.5 h-3.5 shrink-0 animate-spin"
-                />
-                <span
-                  v-else
-                  class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary/20"
-                >
-                  <span class="text-[10px] text-primary">✓</span>
-                </span>
-                <span>{{ step }}</span>
-              </div>
+              <ChatToolCall
+                v-for="tc in streamState.toolCalls"
+                :key="tc.id"
+                :tool-call="tc"
+              />
             </div>
             <!-- eslint-disable vue/no-v-html -->
             <div
@@ -1013,7 +1034,7 @@ onUnmounted(() => {
               v-if="!streamState.content && streamState.images.length === 0"
               class="flex items-center gap-2 text-muted-foreground"
             >
-              <span>{{ streamState.steps.length > 0 ? "Preparing response..." : "Heyming..." }}</span>
+              <span>{{ streamState.toolCalls.length > 0 ? "Preparing response..." : "Heyming..." }}</span>
             </div>
             <div
               v-if="streamState.images.length > 0"
@@ -1114,32 +1135,35 @@ onUnmounted(() => {
         class="hidden"
         @change="handleFileInputChange"
       >
-      <div
-        v-if="attachedFile || attachmentError"
-        class="flex items-center gap-2 mb-2 px-1"
-      >
-        <div
-          v-if="attachedFile"
-          class="flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border/40 px-2.5 py-1 text-xs text-foreground max-w-xs"
-        >
-          <Paperclip class="w-3 h-3 shrink-0 text-muted-foreground" />
-          <span class="truncate">{{ attachedFile.name }}</span>
-          <span class="text-muted-foreground shrink-0">· {{ attachedFile.sizeKb }} KB</span>
-          <button
-            type="button"
-            class="shrink-0 ml-0.5 rounded hover:bg-muted/80 p-0.5"
-            aria-label="Remove attachment"
-            @click="clearAttachment"
+      <div class="flex items-center justify-between gap-2 mb-1.5 px-1">
+        <ChatContextBadge
+          :context-usage="contextUsageForBadge"
+          :draft-tokens="draftTokens"
+        />
+        <div class="flex items-center gap-2 min-w-0">
+          <div
+            v-if="attachedFile"
+            class="flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border/40 px-2.5 py-1 text-xs text-foreground max-w-xs"
           >
-            <X class="w-3 h-3" />
-          </button>
+            <Paperclip class="w-3 h-3 shrink-0 text-muted-foreground" />
+            <span class="truncate">{{ attachedFile.name }}</span>
+            <span class="text-muted-foreground shrink-0">· {{ attachedFile.sizeKb }} KB</span>
+            <button
+              type="button"
+              class="shrink-0 ml-0.5 rounded hover:bg-muted/80 p-0.5"
+              aria-label="Remove attachment"
+              @click="clearAttachment"
+            >
+              <X class="w-3 h-3" />
+            </button>
+          </div>
+          <p
+            v-if="attachmentError"
+            class="text-xs text-destructive"
+          >
+            {{ attachmentError }}
+          </p>
         </div>
-        <p
-          v-if="attachmentError"
-          class="text-xs text-destructive"
-        >
-          {{ attachmentError }}
-        </p>
       </div>
       <form
         class="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/40 px-3 py-2 min-h-[52px] focus-within:border-primary/30 focus-within:bg-muted/50 transition-colors"
