@@ -52,3 +52,11 @@ This is best for requests where you want the work done as a reusable automation,
 - [Execution History](../reference/execution-history.md) – View past runs (History button in header)
 - [Scheduled Tab](./scheduled-tab.md) – Calendar of upcoming cron runs (same data Chat can summarize)
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact in-app orientation for this page
+
+## Tool calls and context size
+
+Each time the assistant invokes a tool (running a workflow, listing executions, building a new workflow), a collapsible card appears in the conversation. The card auto-expands while the tool runs, showing the exact arguments. When the tool finishes, the card collapses to a one-line summary with the elapsed time. Click any card to re-expand the arguments and the response summary.
+
+A small ring badge below the input shows the current context usage as a percentage of the model's window (e.g. `12% · ~9.2k`). Hover the badge to see a breakdown: system prompt, AGENTS.md, workflows block, user rules, history, and your draft input. When usage crosses 80% the ring turns amber; at 95% it turns red.
+
+If usage gets close to the limit, Heym automatically compresses older messages into a short summary using the same mechanism agent nodes use. A "Context compressed" card appears inline to show what happened.
