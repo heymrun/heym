@@ -657,9 +657,16 @@ async def get_credential_models(
 
     config = decrypt_config(credential.encrypted_config)
 
+    from app.services.context_compressor import KNOWN_LIMITS
     from app.services.llm_provider import fetch_models
 
     models = await fetch_models(credential.type, config)
+    for m in models:
+        model_lower = m.id.lower()
+        for key, limit in KNOWN_LIMITS.items():
+            if key in model_lower:
+                m.context_window = limit
+                break
     return models
 
 

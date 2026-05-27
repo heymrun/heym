@@ -603,6 +603,7 @@ class LLMModel(BaseModel):
     is_reasoning: bool = False
     supports_batch: bool = False
     batch_support_reason: str | None = None
+    context_window: int | None = None
 
 
 class FolderCreate(BaseModel):
