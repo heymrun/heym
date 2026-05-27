@@ -105,6 +105,7 @@ import type {
   ConversationCreate,
   ConversationDetail,
   ConversationUpdate,
+  ContextUsage,
   WorkflowPreview,
 } from "@/types/chat";
 
@@ -1815,7 +1816,7 @@ export const aiApi = {
                 onContent(data.text);
               } else if (data.type === "done") {
                 onDone();
-              } else if (data.type === "step" && onStep && data.label) {
+              } else if (data.type === "tool_start" && onStep && data.label) {
                 onStep(data.label);
               } else if (
                 data.type === "tool_output" &&
@@ -2475,10 +2476,13 @@ export const chatApi = {
     onChunk: (text: string) => void,
     onDone: () => void,
     onError: (msg: string) => void,
-    onStep?: (label: string) => void,
+    onToolStart?: (payload: { id: string; name: string; label: string; args: Record<string, unknown> }) => void,
+    onToolEnd?: (payload: { id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error' }) => void,
     onToolOutput?: (images: string[]) => void,
     onTitle?: (title: string) => void,
     onWorkflowCreated?: (workflow: WorkflowPreview) => void,
+    onCompressed?: (payload: { messages_compressed: number; tokens_before: number; tokens_after: number; elapsed_ms: number }) => void,
+    onContext?: (payload: ContextUsage) => void,
     signal?: AbortSignal,
   ): Promise<void> => {
     const base = import.meta.env.VITE_API_URL || "";
@@ -2515,8 +2519,40 @@ export const chatApi = {
           if (parsed.type === "content") onChunk(parsed.text);
           else if (parsed.type === "done") { onDone(); reading = false; break; }
           else if (parsed.type === "error") onError(parsed.text);
-          else if (parsed.type === "step" && typeof parsed.label === "string") {
-            onStep?.(parsed.label);
+          else if (parsed.type === "tool_start" && typeof parsed.id === "string") {
+            onToolStart?.({
+              id: parsed.id,
+              name: typeof parsed.name === "string" ? parsed.name : "",
+              label: typeof parsed.label === "string" ? parsed.label : "",
+              args: (parsed.args && typeof parsed.args === "object") ? parsed.args : {},
+            });
+          } else if (parsed.type === "tool_end" && typeof parsed.id === "string") {
+            onToolEnd?.({
+              id: parsed.id,
+              response_summary:
+                typeof parsed.response_summary === "string" ? parsed.response_summary : "",
+              elapsed_ms: typeof parsed.elapsed_ms === "number" ? parsed.elapsed_ms : 0,
+              status: parsed.status === "error" ? "error" : "success",
+            });
+          } else if (parsed.type === "compressed") {
+            onCompressed?.({
+              messages_compressed:
+                typeof parsed.messages_compressed === "number" ? parsed.messages_compressed : 0,
+              tokens_before:
+                typeof parsed.tokens_before === "number" ? parsed.tokens_before : 0,
+              tokens_after:
+                typeof parsed.tokens_after === "number" ? parsed.tokens_after : 0,
+              elapsed_ms: typeof parsed.elapsed_ms === "number" ? parsed.elapsed_ms : 0,
+            });
+          } else if (parsed.type === "context") {
+            onContext?.({
+              used: typeof parsed.used === "number" ? parsed.used : 0,
+              limit: typeof parsed.limit === "number" ? parsed.limit : 0,
+              breakdown: parsed.breakdown ?? {
+                system: 0, agents_md: 0, workflows: 0,
+                user_rules: 0, history: 0, attachment: 0,
+              },
+            });
           } else if (
             parsed.type === "tool_output" &&
             Array.isArray(parsed.images) &&
@@ -2563,6 +2599,18 @@ export const chatApi = {
   saveQuickPrompts: async (prompts: string[]): Promise<string[]> => {
     const response = await api.put<{ prompts: string[] }>("/chats/quick-prompts", { prompts });
     return response.data.prompts;
+  },
+
+  getContextSummary: async (
+    conversationId: string,
+    credentialId: string,
+    model: string,
+  ): Promise<ContextUsage> => {
+    const response = await api.get<ContextUsage>(
+      `/chats/${conversationId}/context-summary`,
+      { params: { credential_id: credentialId, model } },
+    );
+    return response.data;
   },
 };
 
