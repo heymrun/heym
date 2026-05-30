@@ -669,6 +669,14 @@ async function handleSave(): Promise<void> {
             />
           </button>
         </div>
+        <p
+          v-if="type === 'elevenlabs'"
+          class="text-xs text-muted-foreground"
+        >
+          Grant this API key the <strong>Text to Speech</strong>,
+          <strong>Speech to Text</strong>, and <strong>Voices</strong> permissions in your
+          ElevenLabs account.
+        </p>
       </div>
 
       <template v-if="type === 'custom'">
