@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Mic, MicOff, X } from "lucide-vue-next";
 
 import type { Message } from "@/types/chat";
@@ -34,10 +34,25 @@ const stateLabel: Record<VoiceState, string> = {
   speaking: "Speaking…",
 };
 
+// Orb reacts to the live mic level while listening, otherwise rests/pulses.
+const orbScale = computed(() => {
+  if (voice.state.value === "listening") return 1 + voice.level.value * 0.7;
+  if (voice.state.value === "speaking") return 1.1;
+  if (voice.state.value === "idle") return 0.9;
+  return 1;
+});
+
+// Strip markdown so the spoken text does not include symbols like * _ # ` or
+// link syntax, which makes playback cleaner.
 function stripMarkdown(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return (div.textContent || "").trim();
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_~#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function waitForPlaybackEnd(): Promise<void> {
@@ -73,6 +88,13 @@ watch(
   },
 );
 
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
+
 watch(
   () => props.open,
   async (open) => {
@@ -80,8 +102,10 @@ watch(
       lastUserText.value = "";
       lastAssistantText.value = "";
       spokenForMessageId = null;
+      window.addEventListener("keydown", onKeydown);
       await voice.start();
     } else {
+      window.removeEventListener("keydown", onKeydown);
       voice.teardown();
       tts.stop();
     }
@@ -89,12 +113,11 @@ watch(
 );
 
 function close(): void {
-  voice.teardown();
-  tts.stop();
   emit("close");
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
   voice.teardown();
   tts.stop();
 });
@@ -118,15 +141,12 @@ onBeforeUnmount(() => {
       <div
         class="relative flex h-40 w-40 items-center justify-center rounded-full bg-primary/10 sm:h-52 sm:w-52"
         :class="{
-          'animate-pulse': voice.state.value === 'listening' || voice.state.value === 'speaking',
+          'animate-pulse': voice.state.value === 'speaking',
         }"
       >
         <div
-          class="h-24 w-24 rounded-full bg-primary/30 transition-transform duration-300 sm:h-32 sm:w-32"
-          :class="{
-            'scale-110': voice.state.value === 'speaking',
-            'scale-90': voice.state.value === 'idle',
-          }"
+          class="h-24 w-24 rounded-full bg-primary/30 transition-transform duration-100 ease-out sm:h-32 sm:w-32"
+          :style="{ transform: `scale(${orbScale})` }"
         />
       </div>
       <p class="text-sm font-medium text-muted-foreground">

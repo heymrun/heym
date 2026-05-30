@@ -11,6 +11,7 @@ interface UseInteractiveVoice {
   state: Ref<VoiceState>;
   muted: Ref<boolean>;
   error: Ref<string | null>;
+  level: Ref<number>;
   start: () => Promise<void>;
   stopListening: () => void;
   toggleMute: () => void;
@@ -18,10 +19,25 @@ interface UseInteractiveVoice {
   teardown: () => void;
 }
 
+// Strip ElevenLabs audio-event tags and bracketed noise, e.g. "(şıh sesi)",
+// "(laughs)", "[music]", that should not be sent as a chat message.
+function cleanTranscript(raw: string): string {
+  return raw
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isMeaningful(text: string): boolean {
+  return text.length >= 2 && /[\p{L}\p{N}]/u.test(text);
+}
+
 export function useInteractiveVoice(onUtterance: (text: string) => void): UseInteractiveVoice {
   const state = ref<VoiceState>("idle");
   const muted = ref(false);
   const error = ref<string | null>(null);
+  const level = ref(0);
 
   let stream: MediaStream | null = null;
   let audioCtx: AudioContext | null = null;
@@ -66,10 +82,11 @@ export function useInteractiveVoice(onUtterance: (text: string) => void): UseInt
     setState("transcribing");
     try {
       const result = await voiceApi.stt(blob);
-      const text = result.text.trim();
-      if (text) {
+      const text = cleanTranscript(result.text);
+      if (isMeaningful(text)) {
         onUtterance(text);
       } else if (!muted.value) {
+        // Nothing meaningful was said (silence or noise); keep listening.
         listen();
       }
     } catch {
@@ -82,10 +99,15 @@ export function useInteractiveVoice(onUtterance: (text: string) => void): UseInt
     if (!analyser) return;
     const data = new Float32Array(analyser.fftSize);
     const tick = (): void => {
-      if (!analyser || muted.value || recorder?.state !== "recording") return;
+      if (!analyser || muted.value || recorder?.state !== "recording") {
+        level.value = 0;
+        return;
+      }
       analyser.getFloatTimeDomainData(data);
-      const level = rms(data);
-      if (level > SPEECH_RMS) {
+      const rmsValue = rms(data);
+      // Smoothed 0..1 level for the orb animation (speech rms is ~0.02-0.1).
+      level.value = level.value * 0.6 + Math.min(1, rmsValue * 6) * 0.4;
+      if (rmsValue > SPEECH_RMS) {
         speechStarted = true;
         if (silenceTimer) {
           window.clearTimeout(silenceTimer);
@@ -136,6 +158,7 @@ export function useInteractiveVoice(onUtterance: (text: string) => void): UseInt
       window.cancelAnimationFrame(rafId);
       rafId = null;
     }
+    level.value = 0;
     if (recorder?.state === "recording") {
       recorder.onstop = null;
       recorder.stop();
@@ -163,5 +186,5 @@ export function useInteractiveVoice(onUtterance: (text: string) => void): UseInt
     setState("idle");
   }
 
-  return { state, muted, error, start, stopListening, toggleMute, setState, teardown };
+  return { state, muted, error, level, start, stopListening, toggleMute, setState, teardown };
 }

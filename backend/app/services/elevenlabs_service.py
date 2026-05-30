@@ -75,7 +75,9 @@ async def speech_to_text(
             response = await client.post(
                 f"{_BASE_URL}/v1/speech-to-text",
                 headers=_headers(api_key),
-                data={"model_id": _STT_MODEL_ID},
+                # tag_audio_events=false keeps non-speech sounds (laughs, clicks,
+                # lip smacks) out of the transcript so they are not sent as chat.
+                data={"model_id": _STT_MODEL_ID, "tag_audio_events": "false"},
                 files={"file": (filename, audio, content_type)},
             )
             response.raise_for_status()
