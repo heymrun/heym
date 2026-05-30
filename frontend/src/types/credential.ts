@@ -16,7 +16,8 @@ export type CredentialType =
   | "cohere"
   | "flaresolverr"
   | "google_sheets"
-  | "bigquery";
+  | "bigquery"
+  | "elevenlabs";
 
 export interface Credential {
   id: string;
@@ -66,6 +67,10 @@ export interface CredentialConfigOpenAI {
 }
 
 export interface CredentialConfigGoogle {
+  api_key: string;
+}
+
+export interface CredentialConfigElevenLabs {
   api_key: string;
 }
 
@@ -173,7 +178,8 @@ export type CredentialConfig =
   | CredentialConfigRabbitmq
   | CredentialConfigCohere
   | CredentialConfigFlaresolverr
-  | CredentialConfigGoogleSheets;
+  | CredentialConfigGoogleSheets
+  | CredentialConfigElevenLabs;
 
 export interface CreateCredentialRequest {
   name: string;
@@ -205,6 +211,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   flaresolverr: "FlareSolverr",
   google_sheets: "Google Sheets (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
+  elevenlabs: "ElevenLabs (Voice)",
 };
 
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
@@ -226,4 +233,5 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   flaresolverr: "Connect to FlareSolverr for web scraping with browser automation",
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
+  elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
 };

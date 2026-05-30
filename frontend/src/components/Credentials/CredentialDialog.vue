@@ -22,6 +22,7 @@ import {
 interface Props {
   open: boolean;
   credential?: Credential | null;
+  presetType?: CredentialType;
 }
 
 const props = defineProps<Props>();
@@ -89,6 +90,7 @@ const error = ref("");
 const typeOptions = [
   { value: "openai", label: CREDENTIAL_TYPE_LABELS.openai },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
+  { value: "elevenlabs", label: CREDENTIAL_TYPE_LABELS.elevenlabs },
   { value: "custom", label: CREDENTIAL_TYPE_LABELS.custom },
   { value: "bearer", label: CREDENTIAL_TYPE_LABELS.bearer },
   { value: "header", label: CREDENTIAL_TYPE_LABELS.header },
@@ -161,7 +163,7 @@ watch(
         bqConnectedCredential.value = null;
       } else {
         name.value = "";
-        type.value = "openai";
+        type.value = props.presetType ?? "openai";
         apiKey.value = "";
         baseUrl.value = "";
         bearerToken.value = "";
@@ -216,7 +218,7 @@ watch(
 const isValid = computed(() => {
   if (!name.value.trim()) return false;
 
-  if (type.value === "openai" || type.value === "google") {
+  if (type.value === "openai" || type.value === "google" || type.value === "elevenlabs") {
     return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "custom") {
     return (!!apiKey.value.trim() && !!baseUrl.value.trim()) || isEditing.value;
@@ -283,6 +285,8 @@ function buildConfig(): CredentialConfig {
   if (type.value === "openai") {
     return { api_key: apiKey.value };
   } else if (type.value === "google") {
+    return { api_key: apiKey.value };
+  } else if (type.value === "elevenlabs") {
     return { api_key: apiKey.value };
   } else if (type.value === "custom") {
     return { base_url: baseUrl.value, api_key: apiKey.value };
@@ -637,7 +641,7 @@ async function handleSave(): Promise<void> {
       </div>
 
       <div
-        v-if="type === 'openai' || type === 'google'"
+        v-if="type === 'openai' || type === 'google' || type === 'elevenlabs'"
         class="space-y-2"
       >
         <Label for="cred-api-key">API Key</Label>
