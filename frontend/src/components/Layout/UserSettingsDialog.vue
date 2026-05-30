@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 
+import type { Credential, CredentialListItem } from "@/types/credential";
+
+import CredentialDialog from "@/components/Credentials/CredentialDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { credentialsApi, voiceApi, type VoiceInfo } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 
 const props = defineProps<{
   open: boolean;
+  initialTab?: "profile" | "security" | "voice";
 }>();
 
 const emit = defineEmits<{
@@ -18,13 +24,76 @@ const emit = defineEmits<{
 
 const authStore = useAuthStore();
 
-const activeTab = ref<"profile" | "security">("profile");
+const activeTab = ref<"profile" | "security" | "voice">("profile");
 
 const savingProfile = ref(false);
 const savingPassword = ref(false);
 
 const name = ref("");
 const userRules = ref("");
+
+const elevenlabsCredentials = ref<CredentialListItem[]>([]);
+const voices = ref<VoiceInfo[]>([]);
+const selectedTtsCredentialId = ref<string>("");
+const selectedVoiceId = ref<string>("");
+const loadingVoices = ref(false);
+const voiceError = ref<string | null>(null);
+const savingVoice = ref(false);
+const showAddCredential = ref(false);
+
+const credentialOptions = computed(() => [
+  { value: "", label: "Select a credential" },
+  ...elevenlabsCredentials.value.map((c) => ({ value: c.id, label: c.name })),
+]);
+const voiceOptions = computed(() => [
+  { value: "", label: "Select a voice" },
+  ...voices.value.map((v) => ({ value: v.voice_id, label: v.name })),
+]);
+
+async function loadElevenLabsCredentials(): Promise<void> {
+  elevenlabsCredentials.value = await credentialsApi.listByType("elevenlabs");
+}
+
+async function loadVoices(): Promise<void> {
+  if (!selectedTtsCredentialId.value) {
+    voices.value = [];
+    return;
+  }
+  loadingVoices.value = true;
+  voiceError.value = null;
+  try {
+    voices.value = await voiceApi.listVoices(selectedTtsCredentialId.value);
+  } catch {
+    voiceError.value = "Could not load voices. Check the credential.";
+    voices.value = [];
+  } finally {
+    loadingVoices.value = false;
+  }
+}
+
+watch(selectedTtsCredentialId, () => {
+  void loadVoices();
+});
+
+function onCredentialAdded(credential: Credential): void {
+  showAddCredential.value = false;
+  void loadElevenLabsCredentials().then(() => {
+    selectedTtsCredentialId.value = credential.id;
+  });
+}
+
+async function handleSaveVoice(): Promise<void> {
+  savingVoice.value = true;
+  try {
+    await authStore.updateUser({
+      tts_credential_id: selectedTtsCredentialId.value || null,
+      tts_voice_id: selectedVoiceId.value || null,
+    });
+    emit("close");
+  } finally {
+    savingVoice.value = false;
+  }
+}
 
 const currentPassword = ref("");
 const newPassword = ref("");
@@ -38,12 +107,15 @@ watch(
     if (isOpen && authStore.user) {
       name.value = authStore.user.name;
       userRules.value = authStore.user.user_rules || "";
-      activeTab.value = "profile";
+      activeTab.value = props.initialTab ?? "profile";
       currentPassword.value = "";
       newPassword.value = "";
       confirmNewPassword.value = "";
       passwordError.value = null;
       passwordSuccess.value = null;
+      selectedTtsCredentialId.value = authStore.user.tts_credential_id ?? "";
+      selectedVoiceId.value = authStore.user.tts_voice_id ?? "";
+      void loadElevenLabsCredentials().then(loadVoices);
     }
   },
   { immediate: true },
@@ -149,6 +221,14 @@ async function handleChangePassword(): Promise<void> {
         >
           Security
         </button>
+        <button
+          type="button"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          :class="activeTab === 'voice' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+          @click="activeTab = 'voice'"
+        >
+          Voice
+        </button>
       </div>
 
       <form
@@ -199,7 +279,7 @@ async function handleChangePassword(): Promise<void> {
       </form>
 
       <form
-        v-else
+        v-else-if="activeTab === 'security'"
         class="space-y-5"
         @submit.prevent="handleChangePassword"
       >
@@ -268,6 +348,70 @@ async function handleChangePassword(): Promise<void> {
           </Button>
         </div>
       </form>
+
+      <div
+        v-else
+        class="space-y-5"
+      >
+        <div class="space-y-2">
+          <Label>ElevenLabs Credential</Label>
+          <p class="text-xs text-muted-foreground">
+            Used to read messages aloud and power interactive voice mode in chat.
+          </p>
+          <Select
+            v-model="selectedTtsCredentialId"
+            :options="credentialOptions"
+          />
+          <Button
+            variant="outline"
+            type="button"
+            class="mt-1"
+            @click="showAddCredential = true"
+          >
+            Add credential
+          </Button>
+        </div>
+
+        <div class="space-y-2">
+          <Label>Voice</Label>
+          <Select
+            v-model="selectedVoiceId"
+            :options="voiceOptions"
+            :disabled="!selectedTtsCredentialId || loadingVoices"
+          />
+          <p
+            v-if="voiceError"
+            class="text-xs text-destructive"
+          >
+            {{ voiceError }}
+          </p>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <Button
+            variant="outline"
+            type="button"
+            @click="emit('close')"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            :loading="savingVoice"
+            :disabled="!selectedTtsCredentialId || !selectedVoiceId"
+            @click="handleSaveVoice"
+          >
+            Save Voice Settings
+          </Button>
+        </div>
+      </div>
+
+      <CredentialDialog
+        :open="showAddCredential"
+        preset-type="elevenlabs"
+        @close="showAddCredential = false"
+        @saved="onCredentialAdded"
+      />
     </div>
   </Dialog>
 </template>
