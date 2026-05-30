@@ -1089,6 +1089,14 @@ export interface SttResult {
 }
 
 export const voiceApi = {
+  // Same-origin GET URL for an <audio> element to stream TTS progressively.
+  // Auth is carried by the access-token cookie sent with the media request.
+  streamUrl: (text: string, opts?: { voiceId?: string; credentialId?: string }): string => {
+    const params = new URLSearchParams({ text });
+    if (opts?.voiceId) params.set("voice_id", opts.voiceId);
+    if (opts?.credentialId) params.set("credential_id", opts.credentialId);
+    return `${API_URL}/api/voice/tts/stream?${params.toString()}`;
+  },
   listVoices: async (credentialId?: string): Promise<VoiceInfo[]> => {
     const response = await api.get<VoiceInfo[]>("/voice/voices", {
       params: credentialId ? { credential_id: credentialId } : undefined,
