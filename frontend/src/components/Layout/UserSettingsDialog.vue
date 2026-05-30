@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
-import type { Credential, CredentialListItem } from "@/types/credential";
+import type { CredentialListItem } from "@/types/credential";
 
-import CredentialDialog from "@/components/Credentials/CredentialDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -23,6 +23,7 @@ const emit = defineEmits<{
 }>();
 
 const authStore = useAuthStore();
+const router = useRouter();
 
 const activeTab = ref<"profile" | "security" | "voice">("profile");
 
@@ -39,7 +40,6 @@ const selectedVoiceId = ref<string>("");
 const loadingVoices = ref(false);
 const voiceError = ref<string | null>(null);
 const savingVoice = ref(false);
-const showAddCredential = ref(false);
 
 const credentialOptions = computed(() => [
   { value: "", label: "Select a credential" },
@@ -75,11 +75,9 @@ watch(selectedTtsCredentialId, () => {
   void loadVoices();
 });
 
-function onCredentialAdded(credential: Credential): void {
-  showAddCredential.value = false;
-  void loadElevenLabsCredentials().then(() => {
-    selectedTtsCredentialId.value = credential.id;
-  });
+function goToCredentialsTab(): void {
+  emit("close");
+  void router.push({ name: "dashboard", query: { tab: "credentials" } });
 }
 
 async function handleSaveVoice(): Promise<void> {
@@ -366,7 +364,7 @@ async function handleChangePassword(): Promise<void> {
             variant="outline"
             type="button"
             class="mt-1"
-            @click="showAddCredential = true"
+            @click="goToCredentialsTab"
           >
             Add credential
           </Button>
@@ -405,13 +403,6 @@ async function handleChangePassword(): Promise<void> {
           </Button>
         </div>
       </div>
-
-      <CredentialDialog
-        :open="showAddCredential"
-        preset-type="elevenlabs"
-        @close="showAddCredential = false"
-        @saved="onCredentialAdded"
-      />
     </div>
   </Dialog>
 </template>
