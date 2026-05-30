@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_client_ip, get_current_user
 from app.config import settings
-from app.db.models import User
+from app.db.models import CredentialType, User
 from app.db.session import get_db
 from app.models.schemas import (
     PasswordChangeRequest,
@@ -26,6 +26,7 @@ from app.services.auth import (
     verify_refresh_token,
 )
 from app.services.auth_rate_limiter import login_limiter, register_limiter
+from app.services.credential_access import get_accessible_credential
 
 router = APIRouter()
 
@@ -222,6 +223,23 @@ async def update_me(
         current_user.name = user_data.name
     if user_data.user_rules is not None:
         current_user.user_rules = user_data.user_rules
+    if user_data.tts_credential_id is not None:
+        credential = await get_accessible_credential(
+            db, user_data.tts_credential_id, current_user.id
+        )
+        if credential is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Credential not found",
+            )
+        if credential.type != CredentialType.elevenlabs:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TTS credential must be an ElevenLabs credential",
+            )
+        current_user.tts_credential_id = user_data.tts_credential_id
+    if user_data.tts_voice_id is not None:
+        current_user.tts_voice_id = user_data.tts_voice_id or None
 
     await db.flush()
     await db.refresh(current_user)
