@@ -87,7 +87,10 @@ class User(Base):
         "WorkflowShare", back_populates="user", cascade="all, delete-orphan"
     )
     credentials: Mapped[list["Credential"]] = relationship(
-        "Credential", back_populates="owner", cascade="all, delete-orphan"
+        "Credential",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        foreign_keys="Credential.owner_id",
     )
     folders: Mapped[list["Folder"]] = relationship(
         "Folder", back_populates="owner", cascade="all, delete-orphan"
@@ -683,7 +686,9 @@ class Credential(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    owner: Mapped["User"] = relationship("User", back_populates="credentials")
+    owner: Mapped["User"] = relationship(
+        "User", back_populates="credentials", foreign_keys="Credential.owner_id"
+    )
     shares: Mapped[list["CredentialShare"]] = relationship(
         "CredentialShare", back_populates="credential", cascade="all, delete-orphan"
     )
