@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Mic, MicOff, X } from "lucide-vue-next";
 
 import type { Message } from "@/types/chat";
+import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useInteractiveVoice, type VoiceState } from "@/composables/useInteractiveVoice";
 import { useTextToSpeech } from "@/composables/useTextToSpeech";
 
@@ -88,12 +89,9 @@ watch(
   },
 );
 
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === "Escape") {
-    e.preventDefault();
-    close();
-  }
-}
+// The global overlay back handler (useOverlayBackHandler) owns Escape and the
+// mobile back button; it dispatches a dismiss event we subscribe to here.
+let unsubscribeDismiss: (() => void) | null = null;
 
 watch(
   () => props.open,
@@ -102,10 +100,11 @@ watch(
       lastUserText.value = "";
       lastAssistantText.value = "";
       spokenForMessageId = null;
-      window.addEventListener("keydown", onKeydown);
+      unsubscribeDismiss = onDismissOverlays(() => close());
       await voice.start();
     } else {
-      window.removeEventListener("keydown", onKeydown);
+      unsubscribeDismiss?.();
+      unsubscribeDismiss = null;
       voice.teardown();
       tts.stop();
     }
@@ -117,7 +116,7 @@ function close(): void {
 }
 
 onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onKeydown);
+  unsubscribeDismiss?.();
   voice.teardown();
   tts.stop();
 });
@@ -126,7 +125,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex flex-col items-center justify-between bg-background/95 backdrop-blur-md px-6 py-10 sm:py-16"
+    class="fixed inset-0 z-50 flex flex-col items-center justify-between bg-background px-6 py-10 sm:py-16"
   >
     <button
       type="button"
