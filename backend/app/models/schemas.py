@@ -455,6 +455,7 @@ class CredentialType(str, Enum):
     flaresolverr = "flaresolverr"
     google_sheets = "google_sheets"
     bigquery = "bigquery"
+    elevenlabs = "elevenlabs"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -462,6 +463,10 @@ class CredentialConfigOpenAI(BaseModel):
 
 
 class CredentialConfigGoogle(BaseModel):
+    api_key: str
+
+
+class CredentialConfigElevenLabs(BaseModel):
     api_key: str
 
 

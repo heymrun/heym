@@ -54,7 +54,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         if imap_host:
             return imap_host
         return None
-    elif credential_type in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    elif credential_type in (
+        CredentialType.openai,
+        CredentialType.google,
+        CredentialType.custom,
+        CredentialType.elevenlabs,
+    ):
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
     elif credential_type == CredentialType.qdrant:
@@ -693,6 +698,12 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Custom credential requires base_url",
+            )
+    elif credential_type == CredentialType.elevenlabs:
+        if "api_key" not in config or not config["api_key"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ElevenLabs credential requires api_key",
             )
     elif credential_type == CredentialType.header:
         if "header_value" not in config or not config["header_value"]:
