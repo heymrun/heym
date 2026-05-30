@@ -16,6 +16,7 @@ import {
   Paperclip,
   Pencil,
   TriangleAlert,
+  Volume2,
   X,
 } from "lucide-vue-next";
 import { marked } from "marked";
@@ -39,6 +40,8 @@ import {
 } from "@/features/showcase/showcaseChatDraft";
 import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
+import { useVoiceStore } from "@/stores/voice";
+import { useTextToSpeech } from "@/composables/useTextToSpeech";
 
 interface Props {
   conversationId: string;
@@ -497,6 +500,28 @@ async function copyMessage(msg: Message): Promise<void> {
   }
 }
 
+const tts = useTextToSpeech();
+const voiceStore = useVoiceStore();
+
+function plainTextFromMarkdown(markdown: string): string {
+  const div = document.createElement("div");
+  div.innerHTML = renderMarkdown(markdown);
+  return (div.textContent || div.innerText || "").trim();
+}
+
+async function readMessageAloud(msg: Message): Promise<void> {
+  if (!tts.isConfigured.value) {
+    voiceStore.requestVoiceSettings();
+    return;
+  }
+  try {
+    await tts.speak(msg.id, plainTextFromMarkdown(msg.content));
+  } catch {
+    // playback/synthesis failure is non-fatal; reset playback state
+    tts.stop();
+  }
+}
+
 function openFilePicker(): void {
   fileInputRef.value?.click();
 }
@@ -893,7 +918,7 @@ onUnmounted(() => {
 
           <div
             :class="[
-              'group/message relative rounded-2xl px-4 py-2.5 pr-10 text-sm leading-relaxed break-words',
+              'group/message relative rounded-2xl px-4 py-2.5 pr-[4.25rem] text-sm leading-relaxed break-words',
               msg.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[72%]',
               msg.role === 'user'
                 ? 'bg-primary text-primary-foreground rounded-tr-sm'
@@ -912,6 +937,22 @@ onUnmounted(() => {
                 class="w-3.5 h-3.5"
               />
               <Copy
+                v-else
+                class="w-3.5 h-3.5"
+              />
+            </button>
+            <button
+              type="button"
+              class="absolute right-9 top-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 sm:opacity-0 sm:group-hover/message:opacity-70 hover:opacity-100"
+              :title="tts.playingId.value === msg.id ? 'Stop' : 'Read aloud'"
+              :aria-label="tts.playingId.value === msg.id ? 'Stop reading' : 'Read message aloud'"
+              @click="readMessageAloud(msg)"
+            >
+              <Square
+                v-if="tts.playingId.value === msg.id"
+                class="w-3.5 h-3.5"
+              />
+              <Volume2
                 v-else
                 class="w-3.5 h-3.5"
               />
