@@ -4,7 +4,7 @@ The User Settings dialog lets you manage your profile, set persistent AI instruc
 
 ## Opening the Dialog
 
-Click your **name/avatar badge** in the top-right of the header. The dialog opens with two tabs: **Profile** and **Security**.
+Click your **name/avatar badge** in the top-right of the header. The dialog opens with three tabs: **Profile**, **Security**, and **Voice**.
 
 ## Profile Tab
 
@@ -62,6 +62,10 @@ The password must also differ from your current password. These rules are enforc
 
 If the current password is incorrect, an inline error message is shown. On success, a confirmation message appears and the form resets automatically.
 
+## Voice Tab
+
+The Voice tab configures spoken voice for the [Chat tab](../tabs/chat-tab.md): pick an **ElevenLabs credential** (or add one inline), choose a **Voice** from your ElevenLabs account, and **Save Voice Settings**. This enables per-message read-aloud and interactive voice mode. See [Chat Voice (TTS & STT)](./chat-voice.md) for the full flow.
+
 ## What Is Not in This Dialog
 
 | Feature | Where to Find It |
@@ -74,6 +78,7 @@ If the current password is incorrect, an inline error message is shown. On succe
 
 - [AI Assistant](./ai-assistant.md) – Workflow builder chat that uses User Rules
 - [Chat Tab](../tabs/chat-tab.md) – Dashboard chat that uses User Rules
+- [Chat Voice (TTS & STT)](./chat-voice.md) – ElevenLabs voice configured in the Voice tab
 - [MCP Tab](../tabs/mcp-tab.md) – MCP server API key and workflow tool exposure
 - [Credentials Tab](../tabs/credentials-tab.md) – API keys for AI nodes and integrations
 - [Security](./security.md) – Session management, rate limiting, credential encryption

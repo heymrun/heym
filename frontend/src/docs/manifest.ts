@@ -80,6 +80,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "keyboard-shortcuts", title: "Keyboard Shortcuts" },
       { slug: "ai-assistant", title: "AI Assistant" },
       { slug: "chat-with-docs", title: "Chat with Docs" },
+      { slug: "chat-voice", title: "Chat Voice (TTS & STT)" },
       { slug: "workflow-organization", title: "Workflow Organization" },
       { slug: "quick-drawer", title: "Quick Drawer" },
       { slug: "contextual-showcase", title: "Contextual Showcase" },

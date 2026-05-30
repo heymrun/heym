@@ -52,6 +52,7 @@ This is best for requests where you want the work done as a reusable automation,
 - [Execution History](../reference/execution-history.md) – View past runs (History button in header)
 - [Scheduled Tab](./scheduled-tab.md) – Calendar of upcoming cron runs (same data Chat can summarize)
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact in-app orientation for this page
+- [Chat Voice (TTS & STT)](../reference/chat-voice.md) – Read messages aloud and talk hands-free with ElevenLabs
 
 ## Tool calls and context size
 
