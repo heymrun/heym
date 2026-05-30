@@ -4,7 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
-from app.api.voice import TtsRequest, _resolve_credential, synthesize, transcribe
+from app.api.voice import (
+    TtsRequest,
+    _resolve_credential,
+    synthesize,
+    synthesize_stream,
+    transcribe,
+)
 from app.db.models import CredentialType
 
 
@@ -78,6 +84,41 @@ class VoiceApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as ctx:
                 await synthesize(TtsRequest(text="hi"), current_user=user, db=db)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_synthesize_stream_returns_audio_stream(self) -> None:
+        user = _user(cred_id=uuid.uuid4(), voice_id="v1")
+        db = AsyncMock()
+
+        async def fake_stream(*_args, **_kwargs):
+            yield b"a"
+            yield b"b"
+
+        with (
+            patch(
+                "app.api.voice._resolve_credential",
+                AsyncMock(return_value=("sk", _credential())),
+            ),
+            patch("app.api.voice.stream_text_to_speech", fake_stream),
+        ):
+            response = await synthesize_stream(
+                text="hi", voice_id=None, credential_id=None, current_user=user, db=db
+            )
+        self.assertEqual(response.media_type, "audio/mpeg")
+        chunks = [chunk async for chunk in response.body_iterator]
+        self.assertEqual(chunks, [b"a", b"b"])
+
+    async def test_synthesize_stream_400_when_no_voice(self) -> None:
+        user = _user(cred_id=uuid.uuid4(), voice_id=None)
+        db = AsyncMock()
+        with patch(
+            "app.api.voice._resolve_credential",
+            AsyncMock(return_value=("sk", _credential())),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await synthesize_stream(
+                    text="hi", voice_id=None, credential_id=None, current_user=user, db=db
+                )
         self.assertEqual(ctx.exception.status_code, 400)
 
     async def test_transcribe_returns_text(self) -> None:

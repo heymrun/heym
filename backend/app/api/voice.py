@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from app.services.elevenlabs_service import (
     ElevenLabsError,
     list_voices,
     speech_to_text,
+    stream_text_to_speech,
     text_to_speech,
 )
 from app.services.encryption import decrypt_config
@@ -89,6 +91,32 @@ async def synthesize(
     except ElevenLabsError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return Response(content=audio, media_type="audio/mpeg")
+
+
+@router.get("/tts/stream")
+async def synthesize_stream(
+    text: str,
+    voice_id: str | None = None,
+    credential_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Stream synthesized audio so playback can start before the full clip is ready.
+
+    Served as GET so a browser ``<audio>`` element can play it progressively;
+    auth is resolved from the access-token cookie like every other endpoint.
+    """
+    cleaned = text.strip()
+    if not cleaned:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="text is required")
+    api_key, _ = await _resolve_credential(db, current_user, credential_id)
+    resolved_voice = voice_id or current_user.tts_voice_id
+    if not resolved_voice:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No voice selected")
+    return StreamingResponse(
+        stream_text_to_speech(api_key, cleaned, resolved_voice),
+        media_type="audio/mpeg",
+    )
 
 
 @router.post("/stt", response_model=SttResponse)

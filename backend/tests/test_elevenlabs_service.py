@@ -5,8 +5,39 @@ from app.services.elevenlabs_service import (
     ElevenLabsError,
     list_voices,
     speech_to_text,
+    stream_text_to_speech,
     text_to_speech,
 )
+
+
+def _fake_stream_client(*, chunks=(), status_code=200):
+    response = MagicMock()
+    response.status_code = status_code
+
+    def raise_for_status() -> None:
+        if status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError("err", request=MagicMock(), response=response)
+
+    response.raise_for_status = MagicMock(side_effect=raise_for_status)
+
+    async def aiter_bytes():
+        for c in chunks:
+            yield c
+
+    response.aiter_bytes = aiter_bytes
+
+    stream_ctx = MagicMock()
+    stream_ctx.__aenter__ = AsyncMock(return_value=response)
+    stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    client = MagicMock()
+    client.stream = MagicMock(return_value=stream_ctx)
+    client_ctx = MagicMock()
+    client_ctx.__aenter__ = AsyncMock(return_value=client)
+    client_ctx.__aexit__ = AsyncMock(return_value=False)
+    return client_ctx
 
 
 def _fake_client(*, json_data=None, content=None, status_code=200):
@@ -59,3 +90,16 @@ class ElevenLabsServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.elevenlabs_service.httpx.AsyncClient", return_value=ctx):
             with self.assertRaises(ElevenLabsError):
                 await list_voices("sk_bad")
+
+    async def test_stream_text_to_speech_yields_chunks(self) -> None:
+        ctx = _fake_stream_client(chunks=[b"a", b"b", b"c"])
+        with patch("app.services.elevenlabs_service.httpx.AsyncClient", return_value=ctx):
+            out = [chunk async for chunk in stream_text_to_speech("sk", "hi", "v1")]
+        self.assertEqual(out, [b"a", b"b", b"c"])
+
+    async def test_stream_raises_on_upstream_error(self) -> None:
+        ctx = _fake_stream_client(chunks=[], status_code=401)
+        with patch("app.services.elevenlabs_service.httpx.AsyncClient", return_value=ctx):
+            with self.assertRaises(ElevenLabsError):
+                async for _ in stream_text_to_speech("sk", "hi", "v1"):
+                    pass

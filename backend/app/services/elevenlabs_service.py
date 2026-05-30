@@ -1,5 +1,7 @@
 """Async client helpers for the ElevenLabs API (voices, TTS, STT)."""
 
+from collections.abc import AsyncIterator
+
 import httpx
 
 _BASE_URL = "https://api.elevenlabs.io"
@@ -43,6 +45,25 @@ async def text_to_speech(
             return response.content
     except httpx.HTTPError as exc:
         raise ElevenLabsError(f"Failed to synthesize speech: {exc}") from exc
+
+
+async def stream_text_to_speech(
+    api_key: str, text: str, voice_id: str, model_id: str = _TTS_MODEL_ID
+) -> AsyncIterator[bytes]:
+    """Yield MP3 chunks from the ElevenLabs streaming endpoint as they arrive."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{_BASE_URL}/v1/text-to-speech/{voice_id}/stream",
+                headers={**_headers(api_key), "Accept": "audio/mpeg"},
+                json={"text": text, "model_id": model_id},
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+    except httpx.HTTPError as exc:
+        raise ElevenLabsError(f"Failed to stream speech: {exc}") from exc
 
 
 async def speech_to_text(
