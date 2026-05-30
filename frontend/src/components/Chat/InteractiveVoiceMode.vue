@@ -123,65 +123,70 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="fixed inset-0 z-50 flex flex-col items-center justify-between bg-background px-6 py-10 sm:py-16"
-  >
-    <button
-      type="button"
-      class="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-      aria-label="Close voice mode"
-      @click="close"
+  <!-- Teleport to body so the overlay escapes WorkspaceShell's transformed
+       (stacking-context) content wrapper; otherwise the Quick Workflows drawer
+       and showcase buttons paint on top of it. -->
+  <Teleport to="body">
+    <div
+      v-if="open"
+      class="fixed inset-0 z-[60] flex flex-col items-center justify-between bg-background px-6 py-10 sm:py-16"
     >
-      <X class="h-5 w-5" />
-    </button>
-
-    <div class="flex flex-1 flex-col items-center justify-center gap-8">
-      <div
-        class="relative flex h-40 w-40 items-center justify-center rounded-full bg-primary/10 sm:h-52 sm:w-52"
-        :class="{
-          'animate-pulse': voice.state.value === 'speaking',
-        }"
-      >
-        <div
-          class="h-24 w-24 rounded-full bg-primary/30 transition-transform duration-100 ease-out sm:h-32 sm:w-32"
-          :style="{ transform: `scale(${orbScale})` }"
-        />
-      </div>
-      <p class="text-sm font-medium text-muted-foreground">
-        {{ stateLabel[voice.state.value] }}
-      </p>
-      <p
-        v-if="lastUserText"
-        class="max-w-md text-center text-sm text-foreground/80"
-      >
-        “{{ lastUserText }}”
-      </p>
-      <p
-        v-if="voice.error.value"
-        class="text-xs text-destructive"
-      >
-        {{ voice.error.value }}
-      </p>
-    </div>
-
-    <div class="flex items-center gap-6">
       <button
         type="button"
-        class="flex h-16 w-16 items-center justify-center rounded-full border border-border transition-colors"
-        :class="voice.muted.value ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'"
-        :aria-label="voice.muted.value ? 'Unmute microphone' : 'Mute microphone'"
-        @click="voice.toggleMute()"
+        class="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label="Close voice mode"
+        @click="close"
       >
-        <MicOff
-          v-if="voice.muted.value"
-          class="h-6 w-6"
-        />
-        <Mic
-          v-else
-          class="h-6 w-6"
-        />
+        <X class="h-5 w-5" />
       </button>
+
+      <div class="flex flex-1 flex-col items-center justify-center gap-8">
+        <div
+          class="relative flex h-40 w-40 items-center justify-center rounded-full bg-primary/10 sm:h-52 sm:w-52"
+          :class="{
+            'animate-pulse': voice.state.value === 'speaking',
+          }"
+        >
+          <div
+            class="h-24 w-24 rounded-full bg-primary/30 transition-transform duration-100 ease-out sm:h-32 sm:w-32"
+            :style="{ transform: `scale(${orbScale})` }"
+          />
+        </div>
+        <p class="text-sm font-medium text-muted-foreground">
+          {{ stateLabel[voice.state.value] }}
+        </p>
+        <p
+          v-if="lastUserText"
+          class="max-w-md text-center text-sm text-foreground/80"
+        >
+          “{{ lastUserText }}”
+        </p>
+        <p
+          v-if="voice.error.value"
+          class="text-xs text-destructive"
+        >
+          {{ voice.error.value }}
+        </p>
+      </div>
+
+      <div class="flex items-center gap-6">
+        <button
+          type="button"
+          class="flex h-16 w-16 items-center justify-center rounded-full border border-border transition-colors"
+          :class="voice.muted.value ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'"
+          :aria-label="voice.muted.value ? 'Unmute microphone' : 'Mute microphone'"
+          @click="voice.toggleMute()"
+        >
+          <MicOff
+            v-if="voice.muted.value"
+            class="h-6 w-6"
+          />
+          <Mic
+            v-else
+            class="h-6 w-6"
+          />
+        </button>
+      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
