@@ -43,6 +43,7 @@ from app.api import (
     templates,
     traces,
     vector_stores,
+    voice,
     workflows,
 )
 from app.api.deps import get_client_ip
@@ -231,6 +232,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"]
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(evals.router, prefix="/api/evals", tags=["Evals"])
 app.include_router(chats.router, prefix="/api/chats", tags=["Chats"])
+app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
 app.include_router(expressions.router, prefix="/api/expressions", tags=["Expressions"])
 app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
 app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
