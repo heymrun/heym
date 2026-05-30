@@ -17,6 +17,7 @@ import {
   Pencil,
   TriangleAlert,
   Volume2,
+  AudioLines,
   X,
 } from "lucide-vue-next";
 import { marked } from "marked";
@@ -42,6 +43,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 import { useVoiceStore } from "@/stores/voice";
 import { useTextToSpeech } from "@/composables/useTextToSpeech";
+import InteractiveVoiceMode from "@/components/Chat/InteractiveVoiceMode.vue";
 
 interface Props {
   conversationId: string;
@@ -520,6 +522,26 @@ async function readMessageAloud(msg: Message): Promise<void> {
     // playback/synthesis failure is non-fatal; reset playback state
     tts.stop();
   }
+}
+
+const interactiveVoiceOpen = ref(false);
+
+function openInteractiveVoice(): void {
+  if (!tts.isConfigured.value) {
+    voiceStore.requestVoiceSettings();
+    return;
+  }
+  interactiveVoiceOpen.value = true;
+}
+
+async function sendVoiceText(text: string): Promise<void> {
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  await chatStore.sendMessage(
+    props.conversationId,
+    text,
+    selectedCredentialId.value,
+    selectedModel.value,
+  );
 }
 
 function openFilePicker(): void {
@@ -1196,6 +1218,14 @@ onUnmounted(() => {
       @close="imageLightboxSrc = null"
     />
 
+    <InteractiveVoiceMode
+      :open="interactiveVoiceOpen"
+      :messages="messages"
+      :is-streaming="isThisConvStreaming"
+      :on-send="sendVoiceText"
+      @close="interactiveVoiceOpen = false"
+    />
+
     <div class="chat-input-area shrink-0 px-3 sm:px-4 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <input
         ref="fileInputRef"
@@ -1265,6 +1295,16 @@ onUnmounted(() => {
           @keydown="onKeydown"
           @input="resizeChatInput"
         />
+        <button
+          type="button"
+          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+          :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+          title="Interactive voice mode"
+          aria-label="Open interactive voice mode"
+          @click="openInteractiveVoice"
+        >
+          <AudioLines class="w-4 h-4" />
+        </button>
         <button
           v-if="isSpeechSupported"
           type="button"
