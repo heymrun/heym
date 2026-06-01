@@ -275,7 +275,7 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
 
 
 async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[str, str]:
-    from app.db.models import CredentialShare
+    from app.db.models import CredentialShare, CredentialTeamShare, TeamMember
 
     owned_result = await db.execute(select(Credential).where(Credential.owner_id == user_id))
     owned_credentials = owned_result.scalars().all()
@@ -287,7 +287,17 @@ async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID)
     )
     shared_credentials = shared_result.scalars().all()
 
-    all_credentials = list(owned_credentials) + list(shared_credentials)
+    team_shared_result = await db.execute(
+        select(Credential)
+        .join(CredentialTeamShare, CredentialTeamShare.credential_id == Credential.id)
+        .join(TeamMember, TeamMember.team_id == CredentialTeamShare.team_id)
+        .where(TeamMember.user_id == user_id)
+    )
+    team_shared_credentials = team_shared_result.scalars().all()
+
+    all_credentials = (
+        list(owned_credentials) + list(shared_credentials) + list(team_shared_credentials)
+    )
 
     context: dict[str, str] = {}
     for cred in all_credentials:
@@ -321,6 +331,41 @@ def _json_compatible(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_json_compatible(item) for item in value]
     return value
+
+
+def _resolve_mcp_fetch_credentials(value: Any, credentials_context: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _resolve_mcp_fetch_credentials(item, credentials_context)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_resolve_mcp_fetch_credentials(item, credentials_context) for item in value]
+    if not isinstance(value, str):
+        return value
+    prefix = "$credentials."
+    if not value.startswith(prefix):
+        return value
+    credential_name = value[len(prefix) :].strip()
+    if credential_name not in credentials_context:
+        return value
+    return credentials_context.get(credential_name, "")
+
+
+def _redact_mcp_error(message: str, credentials_context: dict[str, str]) -> str:
+    redacted = message
+    for secret in credentials_context.values():
+        if secret:
+            redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
+def _connection_has_unresolved_credential_reference(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_connection_has_unresolved_credential_reference(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_connection_has_unresolved_credential_reference(item) for item in value)
+    return isinstance(value, str) and value.startswith("$credentials.")
 
 
 def _add_mcp_workflow_trace(
@@ -505,6 +550,7 @@ async def list_mcp_tools(
 async def fetch_mcp_tools(
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> MCPFetchToolsResponse:
     """
     Connect to an MCP server (stdio or SSE) and return its tool names and descriptions.
@@ -518,6 +564,13 @@ async def fetch_mcp_tools(
 
     conn = dict(connection)
     conn.setdefault("id", conn.get("label", "default"))
+    credentials_context = await get_credentials_context_for_user(db, current_user.id)
+    conn = _resolve_mcp_fetch_credentials(conn, credentials_context)
+    if _connection_has_unresolved_credential_reference(conn):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Credential reference could not be resolved. Check the credential name and access.",
+        )
 
     # Cap the hard timeout so a silent auth failure (e.g. 401 in a background
     # SSE task) doesn't leave the frontend spinner running for the full
@@ -537,7 +590,7 @@ async def fetch_mcp_tools(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
+            detail=_redact_mcp_error(str(e), credentials_context),
         ) from e
 
     tools = [

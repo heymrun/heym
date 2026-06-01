@@ -45,6 +45,7 @@ class CredentialType(str, PyEnum):
     google_sheets = "google_sheets"
     bigquery = "bigquery"
     elevenlabs = "elevenlabs"
+    jungle_grid = "jungle_grid"
 
 
 class WorkflowAuthType(str, PyEnum):

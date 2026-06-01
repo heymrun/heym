@@ -1,0 +1,73 @@
+{
+  "name": "Jungle Grid GPU Job With Approval",
+  "description": "Estimate, approve, submit, monitor, and retrieve artifacts from a Jungle Grid GPU workload through MCP.",
+  "nodes": [
+    {
+      "id": "input-user-request",
+      "type": "textInput",
+      "position": { "x": 80, "y": 180 },
+      "data": {
+        "label": "userRequest",
+        "value": "",
+        "inputFields": [{ "key": "text" }]
+      }
+    },
+    {
+      "id": "agent-jungle-grid",
+      "type": "agent",
+      "position": { "x": 420, "y": 160 },
+      "data": {
+        "label": "jungleGridAgent",
+        "credentialId": "",
+        "model": "",
+        "temperature": 0.2,
+        "systemInstruction": "You orchestrate GPU workloads through Jungle Grid MCP. Always call estimate_job first. Summarize estimated cost, likely GPU tier, queue/runtime range, and the exact workload payload. Ask for human approval before submit_job, cancel_job, or any action that spends credits or starts execution. After approval, call submit_job, monitor with stream_job_logs or get_job polling, retrieve logs and artifacts with list_job_artifacts and get_artifact_download_url, then return the final result or artifact URL. Never ask the user to paste API keys into chat.",
+        "userMessage": "$input.text",
+        "tools": [],
+        "mcpConnections": [
+          {
+            "id": "jungle-grid-mcp",
+            "transport": "stdio",
+            "label": "Jungle Grid",
+            "timeoutSeconds": 120,
+            "command": "npx",
+            "args": ["-y", "@jungle-grid/mcp"],
+            "env": {
+              "JUNGLE_GRID_API_KEY": "$credentials.jungle_grid"
+            }
+          }
+        ],
+        "toolTimeoutSeconds": 120,
+        "maxToolIterations": 30,
+        "isOrchestrator": false,
+        "subAgentLabels": [],
+        "hitlEnabled": true,
+        "hitlSummary": "Require approval before submit_job, cancel_job, or any Jungle Grid MCP tool call that starts execution or spends credits. estimate_job, get_job, list_jobs, get_job_logs, stream_job_logs, list_job_artifacts, and get_artifact_download_url may run without approval.",
+        "jsonOutputEnabled": false,
+        "jsonOutputSchema": ""
+      }
+    },
+    {
+      "id": "output-response",
+      "type": "output",
+      "position": { "x": 780, "y": 180 },
+      "data": {
+        "label": "response",
+        "message": "$input.text",
+        "allowDownstream": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-input-agent",
+      "source": "input-user-request",
+      "target": "agent-jungle-grid"
+    },
+    {
+      "id": "edge-agent-output",
+      "source": "agent-jungle-grid",
+      "target": "output-response"
+    }
+  ]
+}

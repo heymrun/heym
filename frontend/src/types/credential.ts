@@ -17,7 +17,8 @@ export type CredentialType =
   | "flaresolverr"
   | "google_sheets"
   | "bigquery"
-  | "elevenlabs";
+  | "elevenlabs"
+  | "jungle_grid";
 
 export interface Credential {
   id: string;
@@ -71,6 +72,10 @@ export interface CredentialConfigGoogle {
 }
 
 export interface CredentialConfigElevenLabs {
+  api_key: string;
+}
+
+export interface CredentialConfigJungleGrid {
   api_key: string;
 }
 
@@ -179,7 +184,8 @@ export type CredentialConfig =
   | CredentialConfigCohere
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
-  | CredentialConfigElevenLabs;
+  | CredentialConfigElevenLabs
+  | CredentialConfigJungleGrid;
 
 export interface CreateCredentialRequest {
   name: string;
@@ -212,6 +218,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_sheets: "Google Sheets (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   elevenlabs: "ElevenLabs (Voice)",
+  jungle_grid: "Jungle Grid",
 };
 
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
@@ -234,4 +241,5 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
+  jungle_grid: "Run GPU inference, training, image generation, and batch workloads through Jungle Grid MCP",
 };

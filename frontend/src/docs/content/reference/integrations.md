@@ -354,6 +354,16 @@ Both types can also be referenced via `$credentials.CredentialName` in the [Expr
 
 ---
 
+## Jungle Grid
+
+Use [Jungle Grid](./jungle-grid.md) when an AI workflow needs managed GPU execution for inference, training, image generation, or batch jobs. Heym connects through the Agent node's MCP preset using `@jungle-grid/mcp`; store the API key as a **Jungle Grid** credential and reference it as `$credentials.jungle_grid`.
+
+### Used By
+
+- [Agent node](../nodes/agent-node.md)
+
+---
+
 ## LLM Providers (OpenAI, Google, Custom, Cohere)
 
 These credentials power AI nodes.

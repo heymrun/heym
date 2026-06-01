@@ -81,6 +81,7 @@ Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamab
 
 - [Why Heym](../getting-started/why-heym.md) – MCP as a first-class primitive in Heym
 - [Agent Node](../nodes/agent-node.md) – Agent node with MCP tool support
+- [Jungle Grid](../reference/jungle-grid.md) – Run GPU workloads from Agent nodes through an MCP preset
 - [Agent Architecture](../reference/agent-architecture.md) – MCP client, tool dispatch, orchestrator
 - [Triggers](../reference/triggers.md) – MCP as a workflow entry point
 - [Workflows Tab](./workflows-tab.md) – Create and manage workflows

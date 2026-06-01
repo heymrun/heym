@@ -91,6 +91,7 @@ const typeOptions = [
   { value: "openai", label: CREDENTIAL_TYPE_LABELS.openai },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
   { value: "elevenlabs", label: CREDENTIAL_TYPE_LABELS.elevenlabs },
+  { value: "jungle_grid", label: CREDENTIAL_TYPE_LABELS.jungle_grid },
   { value: "custom", label: CREDENTIAL_TYPE_LABELS.custom },
   { value: "bearer", label: CREDENTIAL_TYPE_LABELS.bearer },
   { value: "header", label: CREDENTIAL_TYPE_LABELS.header },
@@ -218,7 +219,12 @@ watch(
 const isValid = computed(() => {
   if (!name.value.trim()) return false;
 
-  if (type.value === "openai" || type.value === "google" || type.value === "elevenlabs") {
+  if (
+    type.value === "openai" ||
+    type.value === "google" ||
+    type.value === "elevenlabs" ||
+    type.value === "jungle_grid"
+  ) {
     return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "custom") {
     return (!!apiKey.value.trim() && !!baseUrl.value.trim()) || isEditing.value;
@@ -287,6 +293,8 @@ function buildConfig(): CredentialConfig {
   } else if (type.value === "google") {
     return { api_key: apiKey.value };
   } else if (type.value === "elevenlabs") {
+    return { api_key: apiKey.value };
+  } else if (type.value === "jungle_grid") {
     return { api_key: apiKey.value };
   } else if (type.value === "custom") {
     return { base_url: baseUrl.value, api_key: apiKey.value };
@@ -563,7 +571,8 @@ async function handleSave(): Promise<void> {
           rabbitmqPassword.value.trim() ||
           rabbitmqVhost.value.trim() ||
           cohereApiKey.value.trim() ||
-          flaresolverrUrl.value.trim());
+          flaresolverrUrl.value.trim() ||
+          (type.value === "jungle_grid" && apiKey.value.trim()));
 
       if (hasConfigChange) {
         updateData.config = buildConfig();
@@ -641,7 +650,7 @@ async function handleSave(): Promise<void> {
       </div>
 
       <div
-        v-if="type === 'openai' || type === 'google' || type === 'elevenlabs'"
+        v-if="type === 'openai' || type === 'google' || type === 'elevenlabs' || type === 'jungle_grid'"
         class="space-y-2"
       >
         <Label for="cred-api-key">API Key</Label>
@@ -650,7 +659,7 @@ async function handleSave(): Promise<void> {
             id="cred-api-key"
             v-model="apiKey"
             :type="showApiKey ? 'text' : 'password'"
-            :placeholder="isEditing ? '••••••• (re-enter to update)' : 'sk-...'"
+            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'jungle_grid' ? 'Jungle Grid API key' : 'sk-...')"
             :disabled="saving"
             class="pr-10"
           />
@@ -676,6 +685,13 @@ async function handleSave(): Promise<void> {
           Grant this API key the <strong>Text to Speech</strong>,
           <strong>Speech to Text</strong>, and <strong>Voices</strong> permissions in your
           ElevenLabs account.
+        </p>
+        <p
+          v-if="type === 'jungle_grid'"
+          class="text-xs text-muted-foreground"
+        >
+          Stored server-side and referenced from MCP env as
+          <code class="bg-muted px-1 rounded">${{ `credentials.${name || 'jungle_grid'}` }}</code>.
         </p>
       </div>
 

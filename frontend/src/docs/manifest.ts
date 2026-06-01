@@ -104,6 +104,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "drive", title: "Drive" },
       { slug: "security", title: "Security" },
       { slug: "integrations", title: "Third-Party Integrations" },
+      { slug: "jungle-grid", title: "Jungle Grid" },
       { slug: "guardrails", title: "Guardrails" },
       { slug: "enterprise", title: "Enterprise" },
     ],

@@ -175,6 +175,8 @@ def count_characters(text: str) -> int:
 
 Connect to [Model Context Protocol](https://modelcontextprotocol.io/) servers to expose their tools to the agent.
 
+For GPU workloads, the **Jungle Grid** preset adds `npx -y @jungle-grid/mcp` and references a Heym credential as `$credentials.jungle_grid` so the API key is not stored in workflow JSON. See [Jungle Grid](../reference/jungle-grid.md) for the estimate -> approval -> submit -> monitor -> artifact pattern.
+
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `transport` | `"stdio"` \| `"sse"` \| `"streamable_http"` | Connection type |

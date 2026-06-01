@@ -460,6 +460,7 @@ class CredentialType(str, Enum):
     google_sheets = "google_sheets"
     bigquery = "bigquery"
     elevenlabs = "elevenlabs"
+    jungle_grid = "jungle_grid"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -471,6 +472,10 @@ class CredentialConfigGoogle(BaseModel):
 
 
 class CredentialConfigElevenLabs(BaseModel):
+    api_key: str
+
+
+class CredentialConfigJungleGrid(BaseModel):
     api_key: str
 
 

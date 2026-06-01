@@ -363,6 +363,7 @@ const bigqueryCredentials = ref<CredentialListItem[]>([]);
 const rabbitmqCredentials = ref<CredentialListItem[]>([]);
 const cohereCredentials = ref<CredentialListItem[]>([]);
 const crawlerCredentials = ref<CredentialListItem[]>([]);
+const jungleGridCredentials = ref<CredentialListItem[]>([]);
 const dataTables = ref<DataTableListItem[]>([]);
 const driveFiles = ref<GeneratedFile[]>([]);
 
@@ -592,6 +593,14 @@ watch(
             loadPlaywrightAiStepModels(step.credentialId);
           }
         }
+      }
+    }
+
+    if (type === "agent") {
+      try {
+        jungleGridCredentials.value = await credentialsApi.listByType("jungle_grid");
+      } catch {
+        jungleGridCredentials.value = [];
       }
     }
 
@@ -4297,6 +4306,74 @@ function addAgentMCPConnection(): void {
   ]);
 }
 
+function addJungleGridMCPConnection(): void {
+  if (!selectedNode.value) return;
+  const current = selectedNode.value.data.mcpConnections || [];
+  const credentialName = jungleGridCredentials.value[0]?.name || "jungle_grid";
+  const id = crypto.randomUUID();
+  updateNodeData("mcpConnections", [
+    ...current,
+    {
+      id,
+      transport: "stdio" as MCPTransportType,
+      label: "Jungle Grid",
+      timeoutSeconds: 120,
+      command: "npx",
+      args: ["-y", "@jungle-grid/mcp"],
+      env: {
+        JUNGLE_GRID_API_KEY: `$credentials.${credentialName}`,
+      },
+    },
+  ]);
+}
+
+function updateJungleGridMCPCredential(index: number, credentialName: string | undefined): void {
+  const env = {
+    ...jungleGridMCPEnv(index),
+    JUNGLE_GRID_API_KEY: credentialName ? `$credentials.${credentialName}` : "",
+  };
+  updateAgentMCPConnection(index, "env", env);
+}
+
+function updateJungleGridMCPApiUrl(index: number, apiUrl: string): void {
+  const env = { ...jungleGridMCPEnv(index) };
+  const trimmed = apiUrl.trim();
+  if (trimmed) {
+    env.JUNGLE_GRID_API_URL = trimmed;
+  } else {
+    delete env.JUNGLE_GRID_API_URL;
+  }
+  updateAgentMCPConnection(index, "env", env);
+}
+
+function jungleGridMCPEnv(index: number): Record<string, string> {
+  const conn = selectedNode.value?.data.mcpConnections?.[index];
+  const env = conn?.env;
+  if (env && typeof env === "object" && !Array.isArray(env)) {
+    return { ...env } as Record<string, string>;
+  }
+  return {};
+}
+
+function jungleGridMCPCredentialName(index: number): string {
+  const value = jungleGridMCPEnv(index).JUNGLE_GRID_API_KEY || "";
+  const prefix = "$credentials.";
+  return value.startsWith(prefix) ? value.slice(prefix.length) : "";
+}
+
+function jungleGridMCPApiUrl(index: number): string {
+  return jungleGridMCPEnv(index).JUNGLE_GRID_API_URL || "";
+}
+
+function isJungleGridMCPConnection(conn: AgentMCPConnection): boolean {
+  const args = Array.isArray(conn.args) ? conn.args : [];
+  return (
+    conn.transport === "stdio" &&
+    conn.command === "npx" &&
+    args.includes("@jungle-grid/mcp")
+  );
+}
+
 function removeAgentMCPConnection(index: number): void {
   if (!selectedNode.value) return;
   const current = [...(selectedNode.value.data.mcpConnections || [])];
@@ -6703,15 +6780,26 @@ onUnmounted(() => {
                   <Server class="w-3.5 h-3.5" />
                   MCP Connections
                 </Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="gap-1"
-                  @click="addAgentMCPConnection"
-                >
-                  <Plus class="w-3.5 h-3.5" />
-                  Add MCP
-                </Button>
+                <div class="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="gap-1"
+                    @click="addJungleGridMCPConnection"
+                  >
+                    <Zap class="w-3.5 h-3.5" />
+                    Jungle Grid
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="gap-1"
+                    @click="addAgentMCPConnection"
+                  >
+                    <Plus class="w-3.5 h-3.5" />
+                    Add MCP
+                  </Button>
+                </div>
               </div>
               <div
                 v-for="(conn, idx) in (selectedNode.data.mcpConnections || [])"
@@ -6765,6 +6853,46 @@ onUnmounted(() => {
                     />
                   </div>
                   <template v-if="conn.transport === 'stdio'">
+                    <div
+                      v-if="isJungleGridMCPConnection(conn)"
+                      class="rounded border border-primary/20 bg-primary/5 p-3 space-y-2"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <p class="text-xs font-medium text-foreground">
+                          Jungle Grid MCP preset
+                        </p>
+                        <a
+                          href="/docs/reference/jungle-grid"
+                          target="_blank"
+                          rel="noreferrer"
+                          class="text-xs text-primary hover:underline"
+                        >
+                          Setup guide
+                        </a>
+                      </div>
+                      <div>
+                        <Label class="text-xs">Jungle Grid credential</Label>
+                        <Select
+                          :model-value="jungleGridMCPCredentialName(idx)"
+                          :options="[
+                            { value: '', label: 'Select Jungle Grid credential...' },
+                            ...jungleGridCredentials.map((cred) => ({ value: cred.name, label: cred.name })),
+                          ]"
+                          @update:model-value="updateJungleGridMCPCredential(idx, $event)"
+                        />
+                        <p class="mt-1 text-xs text-muted-foreground">
+                          Stores only <code>$credentials.Name</code> in the workflow; the API key stays in encrypted credentials.
+                        </p>
+                      </div>
+                      <div>
+                        <Label class="text-xs">API URL override (optional)</Label>
+                        <Input
+                          :model-value="jungleGridMCPApiUrl(idx)"
+                          placeholder="https://api.junglegrid.dev"
+                          @update:model-value="updateJungleGridMCPApiUrl(idx, $event)"
+                        />
+                      </div>
+                    </div>
                     <div>
                       <Label class="text-xs">Command</Label>
                       <Input

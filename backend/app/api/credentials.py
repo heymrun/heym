@@ -59,6 +59,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.google,
         CredentialType.custom,
         CredentialType.elevenlabs,
+        CredentialType.jungle_grid,
     ):
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)

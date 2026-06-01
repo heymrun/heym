@@ -68,6 +68,23 @@ class NormalizeConnectionTests(unittest.TestCase):
         _normalize_connection(original)
         self.assertEqual(original["args"], '["-y"]')
 
+    def test_jungle_grid_preset_args_and_env_are_preserved(self) -> None:
+        conn = _normalize_connection(
+            {
+                "transport": "stdio",
+                "command": "npx",
+                "args": '["-y", "@jungle-grid/mcp"]',
+                "env": (
+                    '{"JUNGLE_GRID_API_KEY":"$credentials.jungle_grid",'
+                    '"JUNGLE_GRID_API_URL":"https://orchestrator.example.com"}'
+                ),
+            }
+        )
+
+        self.assertEqual(conn["args"], ["-y", "@jungle-grid/mcp"])
+        self.assertEqual(conn["env"]["JUNGLE_GRID_API_KEY"], "$credentials.jungle_grid")
+        self.assertEqual(conn["env"]["JUNGLE_GRID_API_URL"], "https://orchestrator.example.com")
+
 
 class ExtractToolResultTests(unittest.TestCase):
     def _text_result(self, text: str, is_error: bool = False) -> types.CallToolResult:
