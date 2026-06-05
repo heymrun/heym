@@ -63,6 +63,7 @@ import type { WebSocketTriggerEventName } from "@/types/workflow";
 
 const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   textInput: Type,
+  webhookTrigger: Globe,
   cron: CalendarClock,
   websocketTrigger: Radio,
   llm: Brain,
@@ -105,6 +106,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
 
 const nodeColorMap: Record<NodeType, string> = {
   textInput: "node-input",
+  webhookTrigger: "node-http",
   cron: "node-cron",
   websocketTrigger: "node-websocket",
   llm: "node-llm",
@@ -147,6 +149,7 @@ const nodeColorMap: Record<NodeType, string> = {
 
 const nodeDocSlugMap: Record<NodeType, string> = {
   textInput: "input-node",
+  webhookTrigger: "webhook-trigger-node",
   cron: "cron-node",
   websocketTrigger: "websocket-trigger-node",
   llm: "llm-node",
@@ -207,6 +210,14 @@ const runInputValues = computed(() => workflowStore.runInputValues);
 const runInputJson = computed(() => workflowStore.runInputJson);
 const allInputFields = computed(() => workflowStore.allInputFields);
 const isGenericWebhookBodyMode = computed(() => workflowStore.webhookBodyMode === "generic");
+const apiBaseUrl = computed((): string => {
+  return (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
+});
+
+const webhookTriggerUrl = computed((): string => {
+  if (!selectedNode.value || selectedNode.value.type !== "webhookTrigger") return "";
+  return `${apiBaseUrl.value}/api/webhooks/${selectedNode.value.id}`;
+});
 
 const slackTriggerWebhookUrl = computed((): string => {
   if (!selectedNode.value || selectedNode.value.type !== "slackTrigger") return "";
@@ -220,6 +231,10 @@ const telegramTriggerWebhookUrl = computed((): string => {
 
 function copySlackWebhookUrl(): void {
   navigator.clipboard.writeText(slackTriggerWebhookUrl.value);
+}
+
+function copyWebhookTriggerUrl(): void {
+  navigator.clipboard.writeText(webhookTriggerUrl.value);
 }
 
 function copyTelegramWebhookUrl(): void {
@@ -5525,6 +5540,42 @@ onUnmounted(() => {
               <p class="text-xs text-muted-foreground">
                 Use standard cron format to define the schedule.
               </p>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'webhookTrigger'">
+            <div class="space-y-4">
+              <div class="space-y-2">
+                <Label>Webhook URL</Label>
+                <div class="flex gap-2">
+                  <Input
+                    :model-value="webhookTriggerUrl"
+                    readonly
+                    class="font-mono text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="copyWebhookTriggerUrl"
+                  >
+                    Copy
+                  </Button>
+                </div>
+                <p class="text-xs text-muted-foreground">
+                  Send HTTP requests to this URL to start the workflow. The workflow authentication settings still apply.
+                </p>
+              </div>
+
+              <div class="space-y-2 pt-2 border-t">
+                <Label class="text-xs text-muted-foreground">Available output fields</Label>
+                <div class="text-xs text-muted-foreground space-y-1 font-mono">
+                  <div>${{ selectedNode.data.label }}.body — request JSON body</div>
+                  <div>${{ selectedNode.data.label }}.headers — sanitized request headers</div>
+                  <div>${{ selectedNode.data.label }}.query — query parameters</div>
+                  <div>${{ selectedNode.data.label }}.method — HTTP method</div>
+                  <div>${{ selectedNode.data.label }}.triggered_at — ISO timestamp</div>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -11545,7 +11596,7 @@ onUnmounted(() => {
           </template>
 
           <div
-            v-if="!['textInput', 'cron', 'sticky', 'errorHandler', 'output', 'throwError', 'telegramTrigger', 'websocketTrigger', 'slackTrigger', 'imapTrigger'].includes(selectedNode.type) && !(selectedNode.type === 'rabbitmq' && selectedNode.data.rabbitmqOperation === 'receive')"
+            v-if="!['textInput', 'webhookTrigger', 'cron', 'sticky', 'errorHandler', 'output', 'throwError', 'telegramTrigger', 'websocketTrigger', 'slackTrigger', 'imapTrigger'].includes(selectedNode.type) && !(selectedNode.type === 'rabbitmq' && selectedNode.data.rabbitmqOperation === 'receive')"
             class="space-y-4 pt-4 border-t"
           >
             <Label class="text-muted-foreground">Error Handling</Label>

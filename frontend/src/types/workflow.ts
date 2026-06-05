@@ -124,6 +124,7 @@ export interface AgentSkill {
 
 export type NodeType =
   | "textInput"
+  | "webhookTrigger"
   | "cron"
   | "telegramTrigger"
   | "websocketTrigger"

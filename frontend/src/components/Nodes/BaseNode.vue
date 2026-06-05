@@ -23,6 +23,7 @@ const emit = defineEmits<{
 
 const icons = {
   textInput: Type,
+  webhookTrigger: Globe,
   cron: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
@@ -65,6 +66,7 @@ const icons = {
 
 const nodeColorMap = {
   textInput: "node-input",
+  webhookTrigger: "node-http",
   cron: "node-cron",
   telegramTrigger: "node-telegram",
   websocketTrigger: "node-websocket",
@@ -118,6 +120,7 @@ const hasInput = computed(
   () => !isToolNode.value
     && !isSubAgentNode.value
     && props.type !== "textInput"
+    && props.type !== "webhookTrigger"
     && props.type !== "cron"
     && props.type !== "sticky"
     && props.type !== "merge"
@@ -157,6 +160,7 @@ const hasErrorOutput = computed(() => {
   if (isSubAgentNode.value) return false;
   const excludedTypes = [
     "textInput",
+    "webhookTrigger",
     "cron",
     "sticky",
     "errorHandler",

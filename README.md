@@ -389,7 +389,7 @@ cp .env.example .env
 
 | Category | Nodes |
 |----------|-------|
-| **Triggers** | Input (Webhook), Cron, RabbitMQ Receive, Error Handler |
+| **Triggers** | Input, Webhook Trigger, Cron, RabbitMQ Receive, Error Handler |
 | **AI** | LLM, AI Agent, Qdrant RAG |
 | **Logic** | Condition, Switch, Loop, Merge |
 | **Data** | Set, Variable, DataTable, Execute (sub-workflow) |

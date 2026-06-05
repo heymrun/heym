@@ -2081,7 +2081,10 @@ async def get_grist_columns(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def parse_execute_body(request: Request) -> tuple[object, bool, str | None, bool]:
+async def parse_execute_body(
+    request: Request,
+    default_trigger_source: str = "API",
+) -> tuple[object, bool, str | None, bool]:
     raw_body: object = {}
     test_run = _coerce_bool(request.query_params.get("test_run"))
     trigger_source = str(request.query_params.get("trigger_source") or "").strip() or None
@@ -2101,7 +2104,7 @@ async def parse_execute_body(request: Request) -> tuple[object, bool, str | None
                     raw_body = raw_body.get("inputs", {})
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
-    return raw_body, test_run, trigger_source or "API", simple_response
+    return raw_body, test_run, trigger_source or default_trigger_source, simple_response
 
 
 @router.post("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
@@ -2112,7 +2115,27 @@ async def execute_workflow_endpoint(
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ) -> WorkflowExecuteResponse:
-    raw_body, test_run, trigger_source, simple_response = await parse_execute_body(request)
+    return await execute_workflow_request(
+        workflow_id=workflow_id,
+        request=request,
+        background_tasks=background_tasks,
+        current_user=current_user,
+        db=db,
+    )
+
+
+async def execute_workflow_request(
+    workflow_id: uuid.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks | None,
+    current_user: User | None,
+    db: AsyncSession,
+    default_trigger_source: str = "API",
+) -> WorkflowExecuteResponse:
+    raw_body, test_run, trigger_source, simple_response = await parse_execute_body(
+        request,
+        default_trigger_source=default_trigger_source,
+    )
 
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
     workflow = result.scalar_one_or_none()
@@ -2129,6 +2152,8 @@ async def execute_workflow_endpoint(
         "headers": _sanitize_headers(dict(request.headers)),
         "query": dict(request.query_params),
         "body": raw_body,
+        "method": request.method,
+        "triggered_at": datetime.now(timezone.utc).isoformat(),
     }
 
     client_ip = get_client_ip(request)
@@ -2678,6 +2703,8 @@ async def execute_workflow_stream(
         "headers": _sanitize_headers(dict(request.headers)),
         "query": dict(request.query_params),
         "body": raw_body,
+        "method": request.method,
+        "triggered_at": datetime.now(timezone.utc).isoformat(),
     }
 
     client_ip = get_client_ip(request)

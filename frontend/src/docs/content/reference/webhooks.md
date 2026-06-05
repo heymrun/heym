@@ -8,6 +8,14 @@ Workflows can be triggered via HTTP webhooks. The standard execute endpoint retu
 
 Replace `{workflow_id}` with the workflow UUID. The base URL is your Heym instance (e.g. `https://app.heym.ai`).
 
+## Webhook Trigger Endpoint
+
+Webhook Trigger nodes also expose a node-specific URL:
+
+`/api/webhooks/{node_id}`
+
+Use this when an external system should call a dedicated trigger URL from the canvas. The request still runs the owning workflow and uses the same workflow authentication, rate limiting, response caching, execution history, and response behavior as `/execute`. The trigger node exposes `body`, sanitized `headers`, `query`, `method`, and `triggered_at`.
+
 ## Streaming Endpoint
 
 `POST /api/workflows/{workflow_id}/execute/stream`
@@ -183,7 +191,7 @@ curl -X POST \
 
 The **Copy cURL** button in the editor dialog includes `X-Trigger-Source: API` automatically. You can replace `API` with anything meaningful — `scheduler`, `rabbitmq`, `github-actions`, etc.
 
-If the header is not sent, `trigger_source` defaults to `"API"` and the run is labelled **API** in history. Override it with any value meaningful to your system — `scheduler`, `github-actions`, `rabbitmq`, etc.
+If the header is not sent, `trigger_source` defaults to `"API"` for `/execute` and `"webhook"` for Webhook Trigger URLs. Override it with any value meaningful to your system — `scheduler`, `github-actions`, `rabbitmq`, etc.
 
 ## Related
 

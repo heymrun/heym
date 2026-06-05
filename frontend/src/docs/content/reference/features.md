@@ -48,6 +48,12 @@ The Input node is the entry point for workflows that receive data from the user 
 
 Pairs naturally with [Condition](../nodes/condition-node.md), [LLM](../nodes/llm-node.md), and [Output](../nodes/output-node.md). For payload references and field access, see [Expression DSL](./expression-dsl.md) and [Webhooks](./webhooks.md).
 
+#### [Webhook Trigger](../nodes/webhook-trigger-node.md)
+
+The Webhook Trigger node receives generic HTTP webhook requests at a node-specific URL and starts the workflow immediately. It exposes the request body, sanitized headers, query parameters, HTTP method, and trigger timestamp for downstream routing and processing.
+
+Pairs naturally with [Condition](../nodes/condition-node.md), [Set](../nodes/set-node.md), [LLM](../nodes/llm-node.md), and [JSON output mapper](../nodes/json-output-mapper-node.md) for event-driven API workflows.
+
 #### [Cron](../nodes/cron-node.md)
 
 The Cron node triggers a workflow on a schedule using a standard five-field cron expression. No user input is required—the workflow runs automatically at the specified times (e.g. hourly, daily, every 15 minutes). Output is a trigger event with no payload.

@@ -6224,6 +6224,15 @@ class WorkflowExecutor:
                     "event": trigger_inputs.get("event", {}),
                     "headers": trigger_inputs.get("headers", {}),
                 }
+            elif node_type == "webhookTrigger":
+                trigger_inputs = node_data.get("_initial_inputs", {})
+                output = {
+                    "body": trigger_inputs.get("body", {}),
+                    "headers": trigger_inputs.get("headers", {}),
+                    "query": trigger_inputs.get("query", {}),
+                    "method": trigger_inputs.get("method"),
+                    "triggered_at": trigger_inputs.get("triggered_at"),
+                }
             elif node_type == "telegramTrigger":
                 trigger_inputs = node_data.get("_initial_inputs", {})
                 output = {
@@ -9515,6 +9524,9 @@ class WorkflowExecutor:
             elif node.get("type") == "slackTrigger":
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "webhookTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
             elif node.get("type") == "telegramTrigger":
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
@@ -10955,6 +10967,9 @@ def execute_workflow_streaming(
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
         elif node.get("type") == "slackTrigger":
+            node["data"] = node.get("data", {})
+            node["data"]["_initial_inputs"] = inputs
+        elif node.get("type") == "webhookTrigger":
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
         elif node.get("type") == "telegramTrigger":

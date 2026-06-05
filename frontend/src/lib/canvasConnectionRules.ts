@@ -18,6 +18,7 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
   "errorHandler",
   "cron",
   "textInput",
+  "webhookTrigger",
   "telegramTrigger",
   "websocketTrigger",
   "slackTrigger",
@@ -27,6 +28,7 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
 
 export const NO_REGULAR_INPUT_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "textInput",
+  "webhookTrigger",
   "cron",
   "sticky",
   "merge",

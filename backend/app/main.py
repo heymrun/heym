@@ -44,6 +44,7 @@ from app.api import (
     traces,
     vector_stores,
     voice,
+    webhooks,
     workflows,
 )
 from app.api.deps import get_client_ip
@@ -240,6 +241,7 @@ app.include_router(expressions.router, prefix="/api/expressions", tags=["Express
 app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
 app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
 app.include_router(data_tables.router, prefix="/api/data-tables", tags=["Data Tables"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])

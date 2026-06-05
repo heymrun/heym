@@ -202,6 +202,28 @@ In workflow expressions:
 - `$userInput.query.source` → query parameter value
 - `$userInput.headers.authorization` → header value
 
+### 1b. webhookTrigger (Generic HTTP Webhook Trigger)
+- **Purpose**: Receive generic HTTP webhook requests at a node-specific URL and trigger the workflow
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When an external app should call a dedicated webhook URL to start the workflow, similar to n8n/Make webhook triggers
+- **Data fields**:
+  - `label`: Node identifier (e.g., "webhook")
+- **Output fields available downstream**:
+  - `$<label>.body` — request JSON body
+  - `$<label>.headers` — sanitized request headers
+  - `$<label>.query` — query parameters
+  - `$<label>.method` — HTTP method
+  - `$<label>.triggered_at` — ISO timestamp
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "webhookTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "webhook"}}
+```
+
+**Example downstream expressions:**
+- Condition: `$webhook.body.event == "created"`
+- LLM user message: `"Process this payload: $webhook.body"`
+
 ### 2. cron (Scheduled Trigger)
 - **Purpose**: Trigger workflow on a schedule
 - **Inputs**: 0 | **Outputs**: 1

@@ -39,6 +39,7 @@ import type { NodeType } from "@/types/workflow";
 
 export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   textInput: Type,
+  webhookTrigger: Globe,
   cron: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
@@ -82,6 +83,7 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
 /** Tailwind text-* classes aligned with canvas node header tints (BaseNode). */
 export const nodeIconColorClass: Record<NodeType, string> = {
   textInput: "text-node-input",
+  webhookTrigger: "text-node-http",
   cron: "text-node-cron",
   telegramTrigger: "text-node-telegram",
   websocketTrigger: "text-node-websocket",

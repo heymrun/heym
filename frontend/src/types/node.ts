@@ -30,6 +30,18 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       inputFields: [{ key: "text" }],
     },
   },
+  webhookTrigger: {
+    type: "webhookTrigger",
+    label: "Webhook Trigger",
+    description: "Receive generic HTTP webhook requests",
+    color: "node-http",
+    icon: "Globe",
+    inputs: 0,
+    outputs: 1,
+    defaultData: {
+      label: "webhook",
+    },
+  },
   cron: {
     type: "cron",
     label: "Cron",

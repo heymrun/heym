@@ -9,6 +9,7 @@ Start nodes (no incoming edges) that initiate execution:
 | Node Type | Description |
 |-----------|-------------|
 | [Input](../nodes/input-node.md) (textInput) | HTTP entry point. Receives `body`, `headers`, `query` from requests. |
+| [Webhook Trigger](../nodes/webhook-trigger-node.md) | Node-specific HTTP webhook URL. Receives `body`, `headers`, `query`, `method`, and `triggered_at`. |
 | [Cron](../nodes/cron-node.md) | Runs on a schedule (cron expression, e.g. `0 * * * *` for hourly). |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
@@ -21,6 +22,7 @@ Start nodes (no incoming edges) that initiate execution:
 | Trigger | Endpoint / Source | Auth |
 |---------|-------------------|------|
 | **Webhook/API** | `POST /api/workflows/{id}/execute` | `anonymous` / `jwt` / `header_auth` |
+| **Webhook Trigger** | `/api/webhooks/{node_id}` | Workflow auth (`anonymous` / `jwt` / `header_auth`) |
 | **MCP** | `POST /api/mcp/tools/call`, `/message`, `/sse` | `X-MCP-Key` header or Bearer token |
 | **Portal** | `POST /api/portal/{slug}/execute` | Portal session token |
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
@@ -39,6 +41,10 @@ Start nodes (no incoming edges) that initiate execution:
 - **Auth**: Configured per workflow (`auth_type`, `allow_anonymous`)
 
 See [Webhooks](./webhooks.md) for details on TTL, cache, rate limiting, and auth.
+
+### Webhook Trigger
+
+Webhook Trigger nodes expose a dedicated URL at `/api/webhooks/{node_id}`. Requests run the owning workflow and pass `body`, sanitized `headers`, `query`, HTTP `method`, and `triggered_at` to the trigger node. Workflow authentication, response caching, rate limiting, execution history, and output response behavior match the standard Webhook/API endpoint.
 
 ### MCP
 
@@ -75,6 +81,7 @@ Execution history records `trigger_source` for every entry point:
 | Value | When |
 |-------|------|
 | `"API"` | Webhook / API call with no explicit header (default) |
+| `"webhook"` | Webhook Trigger call with no explicit header (default) |
 | `"Canvas"` | Run from the workflow editor canvas |
 | `"Quick Drawer"` | Run from the editor quick-drawer panel |
 | `"cron"` | Cron scheduler |
@@ -92,6 +99,7 @@ Execution history records `trigger_source` for every entry point:
 ## Inputs by Trigger
 
 - **HTTP/Webhook**: `body`, `headers`, `query` from the request
+- **Webhook Trigger**: `body`, `headers`, `query`, `method`, `triggered_at` from the request
 - **Cron**: `{"triggered_by": "cron"}`
 - **Telegram**: `update` + `message` + optional `callback_query` + sanitized `headers` + `triggered_by: "telegram"`
 - **IMAP**: `email` + `triggered_by: "imap"` + `triggered_at`

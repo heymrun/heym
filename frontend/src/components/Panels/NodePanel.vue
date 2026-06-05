@@ -144,6 +144,7 @@ function scrollToSelectedNode(): void {
 
 const icons = {
   textInput: Type,
+  webhookTrigger: Globe,
   cron: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,

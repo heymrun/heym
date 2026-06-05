@@ -22,6 +22,7 @@ const prevNext = computed(() => getPrevNextDoc(props.path));
 
 const NODE_TYPES_FOR_PREVIEW: NodeType[] = [
   "textInput",
+  "webhookTrigger",
   "cron",
   "telegramTrigger",
   "websocketTrigger",

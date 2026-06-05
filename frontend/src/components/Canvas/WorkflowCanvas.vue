@@ -819,6 +819,7 @@ function handleDragLeave(event: DragEvent): void {
 function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
   const defaults: Record<NodeType, WorkflowNode["data"]> = {
     textInput: { label: "start", value: "", inputFields: [{ key: "text" }] },
+    webhookTrigger: { label: "webhook" },
     cron: { label: "cron", cronExpression: "0 * * * *" },
     websocketTrigger: {
       label: "websocketTrigger",

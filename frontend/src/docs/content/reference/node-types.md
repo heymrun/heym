@@ -7,6 +7,7 @@ Heym provides a variety of node types for building workflows. Use [expressions](
 | Node | Description | Outputs |
 |------|-------------|---------|
 | [Input](../nodes/input-node.md) | Text entry point for the workflow (HTTP/[webhook](./webhooks.md)) | 1 |
+| [Webhook Trigger](../nodes/webhook-trigger-node.md) | Trigger from a node-specific HTTP webhook URL | 1 |
 | [Cron](../nodes/cron-node.md) | Trigger on a schedule (cron expression) | 1 |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Trigger when a Telegram bot webhook update arrives | 1 |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Trigger when a new email arrives in an IMAP mailbox | 1 |
