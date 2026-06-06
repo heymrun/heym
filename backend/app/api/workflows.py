@@ -11,7 +11,6 @@ from sqlalchemy import String, case, cast, func, literal, or_, select, text, uni
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
 from app.db.models import (
     Credential,
@@ -68,19 +67,33 @@ from app.services.execution_cancellation import (
     register_execution,
     request_persisted_execution_cancel,
 )
+from app.services.execution_persistence import (
+    persist_execution_result,
+    persist_workflow_execution_analytics,
+    persist_workflow_execution_record,
+    update_execution_history_and_persist_artifacts,
+)
 from app.services.global_variables_service import (
     get_global_variables_context,
-    upsert_global_variable,
+    persist_global_variables_from_execution,
 )
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
 )
+from app.services.workflow_access import (
+    accessible_workflow_filter,
+    accessible_workflow_ids_subquery,
+    collect_referenced_workflows,
+    get_credentials_context,
+    get_workflow_for_user,
+    list_accessible_workflows,
+    user_has_workflow_access,
+)
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
     _serialize_sub_workflow_executions,
-    _to_json_compatible,
     execute_workflow,
     execute_workflow_streaming,
 )
@@ -137,44 +150,6 @@ def _build_workflow_response(workflow: Workflow) -> WorkflowResponse:
     response.edges = _sanitize_invalid_unicode(response.edges)
     response.sse_node_config = _sanitize_invalid_unicode(response.sse_node_config or {})
     return response
-
-
-async def _persist_global_variables_from_execution(
-    db: AsyncSession,
-    owner_id: uuid.UUID,
-    workflow_nodes: list[dict],
-    workflow_cache: dict[str, dict],
-    node_results: list[dict],
-    sub_workflow_executions: list,
-) -> None:
-    """Extract isGlobal variable node outputs and upsert to global variables."""
-
-    async def _upsert_from_results(nodes: list[dict], results: list[dict]) -> None:
-        nodes_by_id = {n.get("id"): n for n in nodes if n.get("id")}
-        for nr in results:
-            if not isinstance(nr, dict) or nr.get("node_type") != "variable":
-                continue
-            node_id = nr.get("node_id")
-            node = nodes_by_id.get(node_id) if node_id else None
-            if not node or not node.get("data", {}).get("isGlobal"):
-                continue
-            output = nr.get("output") or {}
-            name = output.get("name")
-            value = output.get("value")
-            value_type = output.get("type", "string")
-            if name is not None:
-                await upsert_global_variable(db, owner_id, name, value, value_type)
-
-    await _upsert_from_results(workflow_nodes, node_results)
-
-    for sub in sub_workflow_executions:
-        sub_node_results = (
-            sub.node_results if hasattr(sub, "node_results") else sub.get("node_results", [])
-        )
-        sub_wf_id = sub.workflow_id if hasattr(sub, "workflow_id") else sub.get("workflow_id", "")
-        sub_wf = workflow_cache.get(str(sub_wf_id), {})
-        sub_nodes = sub_wf.get("nodes", [])
-        await _upsert_from_results(sub_nodes, sub_node_results)
 
 
 def _persist_playwright_save_steps(
@@ -250,49 +225,24 @@ async def _finalize_allow_downstream_history(
                 select(ExecutionHistory).where(ExecutionHistory.id == history_entry_id)
             )
             history_entry = history_result.scalar_one_or_none()
-            if history_entry is not None:
-                history_entry.outputs = _to_json_compatible(execution_result.outputs)
-                history_entry.node_results = _to_json_compatible(execution_result.node_results)
-                history_entry.status = execution_result.status
-                history_entry.execution_time_ms = execution_result.execution_time_ms
-                flag_modified(history_entry, "outputs")
-                flag_modified(history_entry, "node_results")
+            if history_entry is None:
+                return
 
-            for sub_exec in execution_result.sub_workflow_executions:
-                sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=_to_json_compatible(sub_exec.inputs),
-                    outputs=_to_json_compatible(sub_exec.outputs),
-                    node_results=_to_json_compatible(sub_exec.node_results),
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
-                )
-                bg_db.add(sub_history)
-                await upsert_workflow_analytics_snapshot(
-                    bg_db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                )
-
-            await _persist_global_variables_from_execution(
+            await update_execution_history_and_persist_artifacts(
                 bg_db,
-                credentials_owner_id,
-                workflow_nodes,
-                workflow_cache,
-                _to_json_compatible(execution_result.node_results),
-                execution_result.sub_workflow_executions,
-            )
-            await upsert_workflow_analytics_snapshot(
-                bg_db,
+                history_entry,
                 workflow_id=workflow_id,
+                workflow_name=workflow_name,
                 owner_id=owner_id,
-                workflow_name_snapshot=workflow_name,
+                outputs=execution_result.outputs,
+                node_results=execution_result.node_results,
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
+                workflow_nodes=workflow_nodes,
+                workflow_cache=workflow_cache,
+                sub_workflow_executions=execution_result.sub_workflow_executions,
+                credentials_owner_id=credentials_owner_id,
+                json_compatible=True,
             )
             await bg_db.commit()
     except Exception:
@@ -300,55 +250,6 @@ async def _finalize_allow_downstream_history(
 
 
 router = APIRouter()
-
-
-async def get_workflow_for_user(
-    db: AsyncSession, workflow_id: uuid.UUID, user_id: uuid.UUID
-) -> Workflow | None:
-    result = await db.execute(
-        select(Workflow).where(
-            Workflow.id == workflow_id,
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-                        )
-                    )
-                ),
-            ),
-        )
-    )
-    return result.scalar_one_or_none()
-
-
-async def user_has_workflow_access(
-    db: AsyncSession, workflow: Workflow, user_id: uuid.UUID
-) -> bool:
-    if workflow.owner_id == user_id:
-        return True
-    share_result = await db.execute(
-        select(WorkflowShare).where(
-            WorkflowShare.workflow_id == workflow.id,
-            WorkflowShare.user_id == user_id,
-        )
-    )
-    if share_result.scalar_one_or_none() is not None:
-        return True
-
-    team_share_result = await db.execute(
-        select(WorkflowTeamShare)
-        .join(TeamMember, TeamMember.team_id == WorkflowTeamShare.team_id)
-        .where(
-            WorkflowTeamShare.workflow_id == workflow.id,
-            TeamMember.user_id == user_id,
-        )
-    )
-    return team_share_result.scalar_one_or_none() is not None
 
 
 def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSchema]:
@@ -521,28 +422,9 @@ async def list_workflows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[WorkflowListResponse]:
-    result = await db.execute(
-        select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-                        )
-                    )
-                ),
-            )
-        )
-        .order_by(Workflow.updated_at.desc())
+    workflows = await list_accessible_workflows(
+        db, current_user.id, order_by=Workflow.updated_at.desc()
     )
-    workflows = result.scalars().all()
 
     shares_result = await db.execute(
         select(WorkflowShare).where(WorkflowShare.user_id == current_user.id)
@@ -579,28 +461,9 @@ async def list_workflows_with_inputs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[WorkflowListWithInputsResponse]:
-    result = await db.execute(
-        select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-                        )
-                    )
-                ),
-            )
-        )
-        .order_by(Workflow.updated_at.desc())
+    workflows = await list_accessible_workflows(
+        db, current_user.id, order_by=Workflow.updated_at.desc()
     )
-    workflows = result.scalars().all()
 
     return [
         WorkflowListWithInputsResponse(
@@ -685,14 +548,7 @@ async def get_recent_executions_for_user(
     exec_query = (
         select(ExecutionHistory, Workflow)
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-            )
-        )
+        .where(accessible_workflow_filter(user_id, include_team_shares=False))
         .order_by(ExecutionHistory.started_at.desc())
         .limit(limit)
     )
@@ -762,16 +618,7 @@ async def get_execution_history_entry(
         select(ExecutionHistory, Workflow)
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
         .where(ExecutionHistory.id == entry_id)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            )
-        )
+        .where(accessible_workflow_filter(current_user.id, include_team_shares=False))
     )
     row = exec_result.first()
     if row:
@@ -841,16 +688,7 @@ async def list_all_execution_history(
             ExecutionHistory.trigger_source,
         )
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            )
-        )
+        .where(accessible_workflow_filter(current_user.id, include_team_shares=False))
     )
     if workflow_id:
         exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)
@@ -933,13 +771,8 @@ async def clear_all_execution_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    accessible_workflows = select(Workflow.id).where(
-        or_(
-            Workflow.owner_id == current_user.id,
-            Workflow.id.in_(
-                select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == current_user.id)
-            ),
-        )
+    accessible_workflows = accessible_workflow_ids_subquery(
+        current_user.id, include_team_shares=False
     )
     await db.execute(
         ExecutionHistory.__table__.delete().where(
@@ -976,14 +809,7 @@ async def list_active_workflow_executions(
         result = await db.execute(
             select(Workflow).where(
                 Workflow.id.in_(workflow_ids),
-                or_(
-                    Workflow.owner_id == current_user.id,
-                    Workflow.id.in_(
-                        select(WorkflowShare.workflow_id).where(
-                            WorkflowShare.user_id == current_user.id
-                        )
-                    ),
-                ),
+                accessible_workflow_filter(current_user.id, include_team_shares=False),
             )
         )
         accessible: dict[uuid.UUID, str] = {w.id: w.name for w in result.scalars().all()}
@@ -1792,45 +1618,6 @@ async def remove_workflow_team_share(
     await db.commit()
 
 
-async def get_credentials_context(
-    db: AsyncSession, user_id: uuid.UUID, include_shared: bool = True
-) -> dict[str, str]:
-    from app.db.models import CredentialShare
-
-    owned_result = await db.execute(select(Credential).where(Credential.owner_id == user_id))
-    owned_credentials = owned_result.scalars().all()
-
-    shared_credentials = []
-    if include_shared:
-        shared_result = await db.execute(
-            select(Credential)
-            .join(CredentialShare, CredentialShare.credential_id == Credential.id)
-            .where(CredentialShare.user_id == user_id)
-        )
-        shared_credentials = shared_result.scalars().all()
-
-    all_credentials = list(owned_credentials) + list(shared_credentials)
-
-    context: dict[str, str] = {}
-    for cred in all_credentials:
-        try:
-            config = decrypt_config(cred.encrypted_config)
-            if cred.type == CredentialType.bearer:
-                token = config.get("bearer_token", "")
-                context[cred.name] = f"Bearer {token}" if token else ""
-            elif cred.type == CredentialType.header:
-                header_key = config.get("header_key", "")
-                header_value = config.get("header_value", "")
-                context[cred.name] = f"{header_key}: {header_value}" if header_key else header_value
-            elif cred.type == CredentialType.slack:
-                context[cred.name] = config.get("webhook_url", "")
-            else:
-                context[cred.name] = config.get("api_key", "")
-        except Exception:
-            pass
-    return context
-
-
 @router.post("/{workflow_id}/execution-tokens", response_model=ExecutionTokenResponse)
 async def create_execution_token_endpoint(
     workflow_id: uuid.UUID,
@@ -1967,71 +1754,6 @@ async def validate_workflow_auth(
         return
 
 
-async def _add_referenced_workflow_to_cache(
-    db: AsyncSession,
-    target_id: str,
-    collected: dict[str, dict],
-    actor_user_id: uuid.UUID | None,
-) -> None:
-    if not target_id or target_id in collected:
-        return
-
-    try:
-        target_uuid = uuid.UUID(target_id)
-    except ValueError:
-        return
-
-    result = await db.execute(select(Workflow).where(Workflow.id == target_uuid))
-    target_workflow = result.scalar_one_or_none()
-    if not target_workflow or not target_workflow.nodes:
-        return
-
-    if actor_user_id is not None and not await user_has_workflow_access(
-        db,
-        target_workflow,
-        actor_user_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Referenced workflow access denied",
-        )
-
-    input_fields = extract_input_fields_from_workflow(target_workflow)
-    collected[target_id] = {
-        "nodes": target_workflow.nodes,
-        "edges": target_workflow.edges,
-        "name": target_workflow.name or "",
-        "input_fields": [f.model_dump(by_alias=True) for f in input_fields],
-    }
-    await collect_referenced_workflows(
-        db,
-        target_workflow.nodes,
-        collected,
-        actor_user_id=actor_user_id,
-    )
-
-
-async def collect_referenced_workflows(
-    db: AsyncSession,
-    nodes: list[dict],
-    collected: dict[str, dict] | None = None,
-    actor_user_id: uuid.UUID | None = None,
-) -> dict[str, dict]:
-    if collected is None:
-        collected = {}
-
-    for node in nodes:
-        if node.get("type") == "execute":
-            target_id = node.get("data", {}).get("executeWorkflowId", "")
-            await _add_referenced_workflow_to_cache(db, target_id, collected, actor_user_id)
-
-        if node.get("type") == "agent":
-            for target_id in node.get("data", {}).get("subWorkflowIds") or []:
-                await _add_referenced_workflow_to_cache(db, target_id, collected, actor_user_id)
-
-    return collected
-
-
 @router.get("/grist/columns")
 async def get_grist_columns(
     doc_id: str,
@@ -2158,11 +1880,11 @@ async def execute_workflow_endpoint(
                     trigger_source=trigger_source,
                 )
                 db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_workflow_execution_analytics(
                     db,
                     workflow_id=workflow.id,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
+                    workflow_name=workflow.name,
                     status="rate_limited",
                     execution_time_ms=0.0,
                 )
@@ -2194,11 +1916,11 @@ async def execute_workflow_endpoint(
                     trigger_source=trigger_source,
                 )
                 db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_workflow_execution_analytics(
                     db,
                     workflow_id=workflow.id,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
+                    workflow_name=workflow.name,
                     status="cached",
                     execution_time_ms=0.0,
                 )
@@ -2257,11 +1979,11 @@ async def execute_workflow_endpoint(
                 trigger_source=trigger_source,
             )
             db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
+            await persist_workflow_execution_analytics(
                 db,
                 workflow_id=workflow.id,
                 owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
+                workflow_name=workflow.name,
                 status="cancelled",
                 execution_time_ms=0.0,
             )
@@ -2285,11 +2007,11 @@ async def execute_workflow_endpoint(
             trace_user_id=trace_user_id,
             public_base_url=build_public_base_url(request),
         )
-        await upsert_workflow_analytics_snapshot(
+        await persist_workflow_execution_analytics(
             db,
             workflow_id=workflow.id,
             owner_id=workflow.owner_id,
-            workflow_name_snapshot=workflow.name,
+            workflow_name=workflow.name,
             status=execution_result.status,
             execution_time_ms=execution_result.execution_time_ms,
         )
@@ -2321,26 +2043,26 @@ async def execute_workflow_endpoint(
 
     history_entry: ExecutionHistory | None = None
     if not test_run:
-        history_entry = ExecutionHistory(
-            workflow_id=workflow.id,
-            inputs=enriched_inputs,
-            outputs=execution_result.outputs,
-            node_results=execution_result.node_results,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-            trigger_source=trigger_source,
-        )
-        db.add(history_entry)
-        await upsert_workflow_analytics_snapshot(
-            db,
-            workflow_id=workflow.id,
-            owner_id=workflow.owner_id,
-            workflow_name_snapshot=workflow.name,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-        )
-        await db.flush()
         if execution_result.allow_downstream_pending:
+            history_entry = await persist_workflow_execution_record(
+                db,
+                workflow_id=workflow.id,
+                workflow_name=workflow.name,
+                owner_id=workflow.owner_id,
+                inputs=enriched_inputs,
+                outputs=execution_result.outputs,
+                node_results=execution_result.node_results,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+                trigger_source=trigger_source,
+                workflow_nodes=workflow.nodes,
+                workflow_cache=workflow_cache,
+                sub_workflow_executions=execution_result.sub_workflow_executions,
+                credentials_owner_id=credentials_owner_id,
+                persist_sub_workflows=False,
+                persist_global_variables=False,
+            )
+            await db.flush()
             if background_tasks is None:
                 background_tasks = BackgroundTasks()
             background_tasks.add_task(
@@ -2370,34 +2092,27 @@ async def execute_workflow_endpoint(
                 execution_history_id=history_entry.id,
             )
 
-        for sub_exec in execution_result.sub_workflow_executions:
-            sub_history = ExecutionHistory(
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                inputs=sub_exec.inputs,
-                outputs=sub_exec.outputs,
-                node_results=sub_exec.node_results,
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
-                trigger_source=sub_exec.trigger_source,
-            )
-            db.add(sub_history)
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                owner_id=None,
-                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
-            )
-
-    await _persist_global_variables_from_execution(
-        db,
-        credentials_owner_id,
-        workflow.nodes,
-        workflow_cache,
-        execution_result.node_results,
-        execution_result.sub_workflow_executions,
-    )
+        history_entry = await persist_execution_result(
+            db,
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            owner_id=workflow.owner_id,
+            inputs=enriched_inputs,
+            result=execution_result,
+            trigger_source=trigger_source,
+            workflow_nodes=workflow.nodes,
+            workflow_cache=workflow_cache,
+            credentials_owner_id=credentials_owner_id,
+        )
+    else:
+        await persist_global_variables_from_execution(
+            db,
+            credentials_owner_id,
+            workflow.nodes,
+            workflow_cache,
+            execution_result.node_results,
+            execution_result.sub_workflow_executions,
+        )
     await db.flush()
 
     if execution_result.status == "error":
@@ -2706,11 +2421,11 @@ async def execute_workflow_stream(
                     execution_time_ms=0,
                 )
                 db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_workflow_execution_analytics(
                     db,
                     workflow_id=workflow.id,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
+                    workflow_name=workflow.name,
                     status="rate_limited",
                     execution_time_ms=0.0,
                 )
@@ -2742,11 +2457,11 @@ async def execute_workflow_stream(
                     trigger_source=trigger_source,
                 )
                 db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_workflow_execution_analytics(
                     db,
                     workflow_id=workflow.id,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
+                    workflow_name=workflow.name,
                     status="cached",
                     execution_time_ms=0.0,
                 )
@@ -2890,11 +2605,11 @@ async def execute_workflow_stream(
                             trace_user_id=trace_user_id,
                             public_base_url=public_base_url,
                         )
-                        await upsert_workflow_analytics_snapshot(
+                        await persist_workflow_execution_analytics(
                             db,
                             workflow_id=workflow.id,
                             owner_id=workflow.owner_id,
-                            workflow_name_snapshot=workflow.name,
+                            workflow_name=workflow.name,
                             status="pending",
                             execution_time_ms=pending_result.execution_time_ms,
                         )
@@ -2943,11 +2658,11 @@ async def execute_workflow_stream(
                                     trace_user_id=trace_user_id,
                                     public_base_url=public_base_url,
                                 )
-                                await upsert_workflow_analytics_snapshot(
+                                await persist_workflow_execution_analytics(
                                     db,
                                     workflow_id=workflow.id,
                                     owner_id=workflow.owner_id,
-                                    workflow_name_snapshot=workflow.name,
+                                    workflow_name=workflow.name,
                                     status="pending",
                                     execution_time_ms=pending_result.execution_time_ms,
                                 )
@@ -2983,11 +2698,11 @@ async def execute_workflow_stream(
                     trigger_source=trigger_source,
                 )
                 db.add(cancelled_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_workflow_execution_analytics(
                     db,
                     workflow_id=workflow.id,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
+                    workflow_name=workflow.name,
                     status="cancelled",
                     execution_time_ms=0.0,
                 )
@@ -3012,53 +2727,22 @@ async def execute_workflow_stream(
                         workflow, final_result.get("node_results", []), db
                     )
 
-                await _persist_global_variables_from_execution(
+                await persist_workflow_execution_record(
                     db,
-                    credentials_owner_id,
-                    workflow.nodes,
-                    workflow_cache,
-                    final_result.get("node_results", []),
-                    final_result.get("sub_workflow_executions", []),
-                )
-                history_entry = ExecutionHistory(
                     workflow_id=workflow.id,
+                    workflow_name=workflow.name,
+                    owner_id=workflow.owner_id,
                     inputs=enriched_inputs,
                     outputs=final_result.get("outputs", {}),
                     node_results=final_result.get("node_results", []),
                     status=final_result.get("status", "error"),
-                    execution_time_ms=final_result.get("execution_time_ms", 0),
-                    trigger_source=trigger_source,
-                )
-                db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=workflow.id,
-                    owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
-                    status=final_result.get("status", "error"),
                     execution_time_ms=float(final_result.get("execution_time_ms", 0)),
+                    trigger_source=trigger_source,
+                    workflow_nodes=workflow.nodes,
+                    workflow_cache=workflow_cache,
+                    sub_workflow_executions=final_result.get("sub_workflow_executions", []),
+                    credentials_owner_id=credentials_owner_id,
                 )
-
-                for sub_exec in final_result.get("sub_workflow_executions", []):
-                    sub_history = ExecutionHistory(
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        inputs=sub_exec["inputs"],
-                        outputs=sub_exec["outputs"],
-                        node_results=sub_exec.get("node_results", []),
-                        status=sub_exec["status"],
-                        execution_time_ms=sub_exec["execution_time_ms"],
-                        trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
-                    )
-                    db.add(sub_history)
-                    await upsert_workflow_analytics_snapshot(
-                        db,
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        owner_id=None,
-                        workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
-                        status=sub_exec["status"],
-                        execution_time_ms=float(sub_exec["execution_time_ms"]),
-                    )
-
                 await db.flush()
 
     return StreamingResponse(

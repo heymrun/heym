@@ -10,12 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.models import (
     ExecutionHistory,
-    TeamMember,
     User,
     Workflow,
     WorkflowAnalyticsSnapshot,
-    WorkflowShare,
-    WorkflowTeamShare,
 )
 from app.db.session import get_db
 from app.models.schemas import (
@@ -24,29 +21,9 @@ from app.models.schemas import (
     WorkflowBreakdownItem,
     WorkflowBreakdownResponse,
 )
+from app.services.workflow_access import get_accessible_workflow_ids
 
 router = APIRouter()
-
-
-async def get_accessible_workflow_ids(db: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
-    result = await db.execute(
-        select(Workflow.id).where(
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-                        )
-                    )
-                ),
-            )
-        )
-    )
-    return [row[0] for row in result.all()]
 
 
 def _empty_analytics_stats() -> AnalyticsStatsResponse:

@@ -278,8 +278,8 @@ async def persist_pending_hitl_execution(
         execution_result.outputs.get(execution_result.resume_snapshot["paused_node_label"]) or {}
     )
 
-    from app.api.workflows import get_credentials_context
     from app.services.global_variables_service import get_global_variables_context
+    from app.services.workflow_access import get_credentials_context
 
     credentials_context = await get_credentials_context(db, credentials_owner_id)
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
@@ -359,11 +359,11 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
         hitl_request.resolved_output = copy.deepcopy(resolved_output)
         hitl_request.resume_error = None
 
-        from app.api.workflows import (
-            _persist_global_variables_from_execution,
-            get_credentials_context,
+        from app.services.execution_persistence import (
+            update_execution_history_and_persist_artifacts,
         )
         from app.services.global_variables_service import get_global_variables_context
+        from app.services.workflow_access import get_credentials_context
 
         credentials_context = await get_credentials_context(db, credentials_owner_id)
         global_variables_context = await get_global_variables_context(db, credentials_owner_id)
@@ -400,18 +400,20 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             await db.commit()
             return
 
-        history_entry.status = resumed_result.status
-        history_entry.outputs = copy.deepcopy(resumed_result.outputs)
-        history_entry.node_results = copy.deepcopy(resumed_result.node_results)
-        history_entry.execution_time_ms = resumed_result.execution_time_ms
-
-        await _persist_global_variables_from_execution(
+        await update_execution_history_and_persist_artifacts(
             db,
-            credentials_owner_id,
-            snapshot.get("nodes") or [],
-            snapshot.get("workflow_cache") or {},
-            resumed_result.node_results,
-            resumed_result.sub_workflow_executions,
+            history_entry,
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            owner_id=workflow.owner_id,
+            outputs=copy.deepcopy(resumed_result.outputs),
+            node_results=copy.deepcopy(resumed_result.node_results),
+            status=resumed_result.status,
+            execution_time_ms=resumed_result.execution_time_ms,
+            workflow_nodes=snapshot.get("nodes") or [],
+            workflow_cache=snapshot.get("workflow_cache") or {},
+            sub_workflow_executions=resumed_result.sub_workflow_executions,
+            credentials_owner_id=credentials_owner_id,
         )
         await db.commit()
 

@@ -8,21 +8,13 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_current_user
-from app.api.workflows import (
-    _persist_global_variables_from_execution,
-    collect_referenced_workflows,
-    extract_input_fields_from_workflow,
-)
+from app.api.workflows import extract_input_fields_from_workflow
 from app.config import settings
 from app.db.models import (
-    Credential,
-    CredentialType,
-    ExecutionHistory,
     LLMTrace,
     OAuthAccessToken,
     User,
@@ -46,15 +38,21 @@ from app.models.schemas import (
     MCPToolsListResponse,
     MCPWorkflowItem,
 )
-from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
 )
 from app.services.execution_cancellation import (
     register_execution,
 )
+from app.services.execution_persistence import persist_execution_result
 from app.services.global_variables_service import get_global_variables_context
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
+from app.services.workflow_access import (
+    accessible_workflow_filter,
+    collect_referenced_workflows,
+    get_credentials_context,
+    list_accessible_workflows,
+)
 from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
@@ -232,19 +230,12 @@ async def get_user_mcp_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[W
 
 
 async def get_all_user_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[Workflow]:
-    result = await db.execute(
-        select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-            )
-        )
-        .order_by(Workflow.name.asc())
+    return await list_accessible_workflows(
+        db,
+        user_id,
+        include_team_shares=False,
+        order_by=Workflow.name.asc(),
     )
-    return list(result.scalars().all())
 
 
 def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
@@ -275,38 +266,8 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
 
 
 async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[str, str]:
-    from app.db.models import CredentialShare
-
-    owned_result = await db.execute(select(Credential).where(Credential.owner_id == user_id))
-    owned_credentials = owned_result.scalars().all()
-
-    shared_result = await db.execute(
-        select(Credential)
-        .join(CredentialShare, CredentialShare.credential_id == Credential.id)
-        .where(CredentialShare.user_id == user_id)
-    )
-    shared_credentials = shared_result.scalars().all()
-
-    all_credentials = list(owned_credentials) + list(shared_credentials)
-
-    context: dict[str, str] = {}
-    for cred in all_credentials:
-        try:
-            config = decrypt_config(cred.encrypted_config)
-            if cred.type == CredentialType.bearer:
-                token = config.get("bearer_token", "")
-                context[cred.name] = f"Bearer {token}" if token else ""
-            elif cred.type == CredentialType.header:
-                header_key = config.get("header_key", "")
-                header_value = config.get("header_value", "")
-                context[cred.name] = f"{header_key}: {header_value}" if header_key else header_value
-            elif cred.type == CredentialType.slack:
-                context[cred.name] = config.get("webhook_url", "")
-            else:
-                context[cred.name] = config.get("api_key", "")
-        except Exception:
-            pass
-    return context
+    """Backward-compatible alias for workflow credential context loading."""
+    return await get_credentials_context(db, user_id)
 
 
 def _json_compatible(value: Any) -> Any:
@@ -442,14 +403,7 @@ async def toggle_workflow_mcp(
     result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            ),
+            accessible_workflow_filter(current_user.id, include_team_shares=False),
         )
     )
     workflow = result.scalar_one_or_none()
@@ -613,53 +567,17 @@ async def call_mcp_tool(
             cancel_event=cancel_event,
         )
 
-        # Save execution history with MCP trigger source
-        history_entry = ExecutionHistory(
-            workflow_id=target_workflow.id,
-            inputs=enriched_inputs,
-            outputs=execution_result.outputs,
-            node_results=execution_result.node_results,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-            trigger_source="MCP",
-        )
-        db.add(history_entry)
-        await upsert_workflow_analytics_snapshot(
+        await persist_execution_result(
             db,
             workflow_id=target_workflow.id,
+            workflow_name=target_workflow.name,
             owner_id=target_workflow.owner_id,
-            workflow_name_snapshot=target_workflow.name,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-        )
-
-        for sub_exec in execution_result.sub_workflow_executions:
-            sub_history = ExecutionHistory(
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                inputs=sub_exec.inputs,
-                outputs=sub_exec.outputs,
-                node_results=sub_exec.node_results,
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
-                trigger_source=sub_exec.trigger_source,
-            )
-            db.add(sub_history)
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                owner_id=None,
-                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
-            )
-
-        await _persist_global_variables_from_execution(
-            db,
-            mcp_user.id,
-            target_workflow.nodes,
-            workflow_cache,
-            execution_result.node_results,
-            execution_result.sub_workflow_executions,
+            inputs=enriched_inputs,
+            result=execution_result,
+            trigger_source="MCP",
+            workflow_nodes=target_workflow.nodes,
+            workflow_cache=workflow_cache,
+            credentials_owner_id=mcp_user.id,
         )
 
         _add_mcp_workflow_trace(
@@ -782,45 +700,18 @@ async def _dispatch_mcp_jsonrpc(
                 cancel_event=cancel_event,
             )
 
-            # Save execution history with MCP trigger source
-            history_entry = ExecutionHistory(
-                workflow_id=target_workflow.id,
-                inputs=enriched_inputs,
-                outputs=execution_result.outputs,
-                node_results=execution_result.node_results,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-                trigger_source="MCP",
-            )
-            db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
+            await persist_execution_result(
                 db,
                 workflow_id=target_workflow.id,
+                workflow_name=target_workflow.name,
                 owner_id=target_workflow.owner_id,
-                workflow_name_snapshot=target_workflow.name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
+                inputs=enriched_inputs,
+                result=execution_result,
+                trigger_source="MCP",
+                workflow_nodes=target_workflow.nodes,
+                workflow_cache=workflow_cache,
+                credentials_owner_id=mcp_user.id,
             )
-
-            for sub_exec in execution_result.sub_workflow_executions:
-                sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
-                )
-                db.add(sub_history)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                )
 
             _add_mcp_workflow_trace(
                 db,

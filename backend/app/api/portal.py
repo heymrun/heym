@@ -9,17 +9,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user
 from app.api.workflows import (
-    _persist_global_variables_from_execution,
     _sanitize_headers,
-    collect_referenced_workflows,
     extract_input_fields_from_workflow,
-    get_credentials_context,
-    get_workflow_for_user,
 )
-from app.db.models import ExecutionHistory, PortalSession, User, Workflow, WorkflowPortalUser
+from app.db.models import PortalSession, User, Workflow, WorkflowPortalUser
 from app.db.session import get_db
 from app.models.schemas import (
     PortalExecuteRequest,
@@ -43,10 +38,19 @@ from app.services.execution_cancellation import (
     register_execution,
     request_persisted_execution_cancel,
 )
+from app.services.execution_persistence import (
+    persist_execution_result,
+    persist_workflow_execution_record,
+)
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url, persist_pending_hitl_execution
 from app.services.portal_progress import PortalProgressTracker
 from app.services.portal_rate_limiter import portal_login_limiter
+from app.services.workflow_access import (
+    collect_referenced_workflows,
+    get_credentials_context,
+    get_workflow_for_user,
+)
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -287,52 +291,16 @@ async def portal_execute(
             execution_time_ms=execution_result.execution_time_ms,
             execution_history_id=history_entry.id,
         )
-    history_entry = ExecutionHistory(
-        workflow_id=workflow.id,
-        inputs=enriched_inputs,
-        outputs=execution_result.outputs,
-        node_results=execution_result.node_results,
-        status=execution_result.status,
-        execution_time_ms=execution_result.execution_time_ms,
-        trigger_source="portal",
-    )
-    db.add(history_entry)
-    await upsert_workflow_analytics_snapshot(
+    history_entry = await persist_execution_result(
         db,
         workflow_id=workflow.id,
+        workflow_name=workflow.name,
         owner_id=workflow.owner_id,
-        workflow_name_snapshot=workflow.name,
-        status=execution_result.status,
-        execution_time_ms=execution_result.execution_time_ms,
-    )
-
-    for sub_exec in execution_result.sub_workflow_executions:
-        sub_history = ExecutionHistory(
-            workflow_id=uuid.UUID(sub_exec.workflow_id),
-            inputs=sub_exec.inputs,
-            outputs=sub_exec.outputs,
-            node_results=sub_exec.node_results,
-            status=sub_exec.status,
-            execution_time_ms=sub_exec.execution_time_ms,
-            trigger_source=sub_exec.trigger_source,
-        )
-        db.add(sub_history)
-        await upsert_workflow_analytics_snapshot(
-            db,
-            workflow_id=uuid.UUID(sub_exec.workflow_id),
-            owner_id=None,
-            workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-            status=sub_exec.status,
-            execution_time_ms=sub_exec.execution_time_ms,
-        )
-
-    await _persist_global_variables_from_execution(
-        db,
-        workflow.owner_id,
-        workflow.nodes,
-        workflow_cache,
-        execution_result.node_results,
-        execution_result.sub_workflow_executions,
+        inputs=enriched_inputs,
+        result=execution_result,
+        trigger_source="portal",
+        workflow_nodes=workflow.nodes,
+        workflow_cache=workflow_cache,
     )
     await db.flush()
 
@@ -561,53 +529,21 @@ async def portal_execute_stream(
                     break
 
             if final_result and final_result.get("status") != "pending":
-                await _persist_global_variables_from_execution(
+                await persist_workflow_execution_record(
                     db,
-                    workflow.owner_id,
-                    workflow.nodes,
-                    workflow_cache,
-                    final_result.get("node_results", []),
-                    final_result.get("sub_workflow_executions", []),
-                )
-                history_entry = ExecutionHistory(
                     workflow_id=workflow.id,
+                    workflow_name=workflow.name,
+                    owner_id=workflow.owner_id,
                     inputs=enriched_inputs,
                     outputs=final_result.get("outputs", {}),
                     node_results=final_result.get("node_results", []),
                     status=final_result.get("status", "error"),
-                    execution_time_ms=final_result.get("execution_time_ms", 0),
-                    trigger_source="portal",
-                )
-                db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=workflow.id,
-                    owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
-                    status=final_result.get("status", "error"),
                     execution_time_ms=float(final_result.get("execution_time_ms", 0)),
+                    trigger_source="portal",
+                    workflow_nodes=workflow.nodes,
+                    workflow_cache=workflow_cache,
+                    sub_workflow_executions=final_result.get("sub_workflow_executions", []),
                 )
-
-                for sub_exec in final_result.get("sub_workflow_executions", []):
-                    sub_history = ExecutionHistory(
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        inputs=sub_exec["inputs"],
-                        outputs=sub_exec["outputs"],
-                        node_results=sub_exec.get("node_results", []),
-                        status=sub_exec["status"],
-                        execution_time_ms=sub_exec["execution_time_ms"],
-                        trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
-                    )
-                    db.add(sub_history)
-                    await upsert_workflow_analytics_snapshot(
-                        db,
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        owner_id=None,
-                        workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
-                        status=sub_exec["status"],
-                        execution_time_ms=float(sub_exec["execution_time_ms"]),
-                    )
-
                 await db.flush()
 
     return StreamingResponse(

@@ -13,13 +13,13 @@ from fastapi import HTTPException, Request
 from app.api.ai_assistant import run_execute_workflow_tool
 from app.api.portal import portal_cancel_execution, portal_execute_stream
 from app.api.workflows import (
-    collect_referenced_workflows,
     execute_workflow_endpoint,
     execute_workflow_stream,
     parse_execute_body,
 )
 from app.db.models import DataTable, DataTableRow
 from app.models.schemas import PortalExecuteRequest
+from app.services.workflow_access import collect_referenced_workflows
 from app.services.workflow_executor import (
     ExecutionResult,
     SubWorkflowExecution,
@@ -390,8 +390,7 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.portal.register_execution", return_value=Event()),
             patch("app.api.portal.clear_active_execution"),
             patch("app.api.portal.execute_workflow_streaming", fake_streaming_executor),
-            patch("app.api.portal._persist_global_variables_from_execution", AsyncMock()),
-            patch("app.api.portal.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.portal.persist_workflow_execution_record", AsyncMock()),
             patch("app.api.portal.PORTAL_SSE_HEARTBEAT_SECONDS", 0.001),
         ):
             response = await portal_execute_stream(
@@ -793,9 +792,11 @@ class SubWorkflowTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.register_execution", return_value=Event()),
             patch("app.api.workflows.clear_active_execution"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
             patch("app.api.workflows.asyncio.to_thread", AsyncMock(return_value=execution_result)),
-            patch("app.api.workflows.ExecutionHistory", side_effect=capture_history),
+            patch(
+                "app.services.execution_persistence.ExecutionHistory", side_effect=capture_history
+            ),
         ):
             await execute_workflow_endpoint(
                 workflow_id=workflow.id,
@@ -835,9 +836,12 @@ class SubWorkflowTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.register_execution", return_value=Event()),
             patch("app.api.workflows.clear_active_execution"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
             patch("app.api.workflows.asyncio.to_thread", AsyncMock(return_value=execution_result)),
-            patch("app.api.workflows.ExecutionHistory", side_effect=capture_trigger_source),
+            patch(
+                "app.services.execution_persistence.ExecutionHistory",
+                side_effect=capture_trigger_source,
+            ),
         ):
             # Trigger the workflow as if from an internal Canvas run.
             await execute_workflow_endpoint(
@@ -892,10 +896,10 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.register_execution", return_value=Event()),
             patch("app.api.workflows.clear_active_execution"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
+            patch("app.api.workflows.persist_global_variables_from_execution", AsyncMock()),
             patch("app.api.workflows.asyncio.to_thread", AsyncMock(return_value=execution_result)),
-            patch("app.api.workflows.ExecutionHistory", execution_history_ctor),
+            patch("app.services.execution_persistence.ExecutionHistory", execution_history_ctor),
         ):
             await execute_workflow_endpoint(
                 workflow_id=workflow.id,
@@ -939,10 +943,10 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.register_execution", return_value=Event()),
             patch("app.api.workflows.clear_active_execution"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
+            patch("app.api.workflows.persist_global_variables_from_execution", AsyncMock()),
             patch("app.api.workflows.asyncio.to_thread", AsyncMock(return_value=execution_result)),
-            patch("app.api.workflows.ExecutionHistory", execution_history_ctor),
+            patch("app.services.execution_persistence.ExecutionHistory", execution_history_ctor),
         ):
             await execute_workflow_endpoint(
                 workflow_id=workflow.id,
@@ -969,12 +973,12 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.register_execution", return_value=Event()),
             patch("app.api.workflows.clear_active_execution"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
             patch(
                 "app.api.workflows.asyncio.to_thread",
                 AsyncMock(side_effect=WorkflowCancelledError("cancelled")),
             ),
-            patch("app.api.workflows.ExecutionHistory", execution_history_ctor),
+            patch("app.services.execution_persistence.ExecutionHistory", execution_history_ctor),
         ):
             with self.assertRaises(HTTPException) as ctx:
                 await execute_workflow_endpoint(

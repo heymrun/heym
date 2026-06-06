@@ -71,11 +71,11 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.services.cron_scheduler.execute_workflow", return_value=execution_result),
             patch(
-                "app.services.cron_scheduler.upsert_workflow_analytics_snapshot",
+                "app.services.execution_persistence.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
             ),
             patch(
-                "app.services.cron_scheduler._persist_global_variables_from_execution",
+                "app.services.execution_persistence.persist_global_variables_from_execution",
                 AsyncMock(),
             ),
         ):
@@ -157,11 +157,11 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.services.cron_scheduler.execute_workflow", return_value=execution_result),
             patch(
-                "app.services.cron_scheduler.upsert_workflow_analytics_snapshot",
+                "app.services.execution_persistence.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
             ),
             patch(
-                "app.services.cron_scheduler._persist_global_variables_from_execution",
+                "app.services.execution_persistence.persist_global_variables_from_execution",
                 AsyncMock(),
             ),
         ):
@@ -257,11 +257,11 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 return_value="https://app.example.com",
             ),
             patch(
-                "app.services.cron_scheduler.upsert_workflow_analytics_snapshot",
+                "app.services.execution_persistence.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
             ),
             patch(
-                "app.services.cron_scheduler._persist_global_variables_from_execution",
+                "app.services.execution_persistence.persist_global_variables_from_execution",
                 AsyncMock(),
             ),
         ):

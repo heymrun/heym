@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.api.workflows import get_workflow_for_user
 from app.db.models import AgentMemoryEdge, AgentMemoryNode, User
 from app.models.agent_memory_schemas import (
     EdgeCreateRequest,
@@ -26,6 +25,7 @@ from app.services.agent_memory_service import (
     prune_isolated_nodes_sync,
     remove_conflicting_outgoing_edges_sync,
 )
+from app.services.workflow_access import get_workflow_for_user
 
 router = APIRouter()
 

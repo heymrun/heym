@@ -74,3 +74,41 @@ async def upsert_global_variable(
             value_type=value_type,
         )
         db.add(new_var)
+
+
+async def persist_global_variables_from_execution(
+    db: AsyncSession,
+    owner_id: uuid.UUID,
+    workflow_nodes: list[dict],
+    workflow_cache: dict[str, dict],
+    node_results: list[dict],
+    sub_workflow_executions: list,
+) -> None:
+    """Extract isGlobal variable node outputs and upsert to global variables."""
+
+    async def _upsert_from_results(nodes: list[dict], results: list[dict]) -> None:
+        nodes_by_id = {n.get("id"): n for n in nodes if n.get("id")}
+        for nr in results:
+            if not isinstance(nr, dict) or nr.get("node_type") != "variable":
+                continue
+            node_id = nr.get("node_id")
+            node = nodes_by_id.get(node_id) if node_id else None
+            if not node or not node.get("data", {}).get("isGlobal"):
+                continue
+            output = nr.get("output") or {}
+            name = output.get("name")
+            value = output.get("value")
+            value_type = output.get("type", "string")
+            if name is not None:
+                await upsert_global_variable(db, owner_id, name, value, value_type)
+
+    await _upsert_from_results(workflow_nodes, node_results)
+
+    for sub in sub_workflow_executions:
+        sub_node_results = (
+            sub.node_results if hasattr(sub, "node_results") else sub.get("node_results", [])
+        )
+        sub_wf_id = sub.workflow_id if hasattr(sub, "workflow_id") else sub.get("workflow_id", "")
+        sub_wf = workflow_cache.get(str(sub_wf_id), {})
+        sub_nodes = sub_wf.get("nodes", [])
+        await _upsert_from_results(sub_nodes, sub_node_results)

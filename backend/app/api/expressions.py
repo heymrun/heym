@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.api.workflows import get_credentials_context, get_workflow_for_user
 from app.db.models import CredentialType, User, Workflow
 from app.db.session import get_db
 from app.services.credential_access import get_accessible_credential
@@ -28,6 +27,7 @@ from app.services.expression_evaluator import (
 from app.services.global_variables_service import get_global_variables_context
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.workflow_access import get_credentials_context, get_workflow_for_user
 from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
 
 router = APIRouter()

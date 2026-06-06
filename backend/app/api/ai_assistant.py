@@ -16,19 +16,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import compute_analytics_stats, upsert_workflow_analytics_snapshot
+from app.api.analytics import compute_analytics_stats
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
 from app.api.workflows import (
-    collect_referenced_workflows,
     extract_input_fields_from_workflow,
     extract_output_node_from_workflow,
-    get_credentials_context,
     get_recent_executions_for_user,
-    get_workflow_for_user,
 )
 from app.db.models import (
     Credential,
@@ -41,13 +38,15 @@ from app.db.models import (
     TeamMember,
     User,
     Workflow,
-    WorkflowShare,
-    WorkflowTeamShare,
     WorkflowVersion,
 )
 from app.db.session import get_db
 from app.services import template_service
 from app.services.encryption import decrypt_config
+from app.services.execution_persistence import (
+    persist_execution_result,
+    persist_workflow_execution_analytics,
+)
 from app.services.hitl_service import (
     build_hitl_resolved_output,
     build_public_base_url,
@@ -61,6 +60,12 @@ from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
 from app.services.timezone_utils import get_configured_timezone
+from app.services.workflow_access import (
+    collect_referenced_workflows,
+    get_credentials_context,
+    get_workflow_for_user,
+    list_accessible_workflows,
+)
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 from app.services.workflow_executor import WorkflowCancelledError, execute_workflow
 
@@ -586,25 +591,7 @@ async def get_workflows_for_user_with_inputs(
     db: AsyncSession, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
     """Return list of workflows with id, name, description, input_fields, output_node for dashboard chat."""
-    team_shared_ids = (
-        select(WorkflowTeamShare.workflow_id)
-        .join(TeamMember, TeamMember.team_id == WorkflowTeamShare.team_id)
-        .where(TeamMember.user_id == user_id)
-    )
-    result = await db.execute(
-        select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-                Workflow.id.in_(team_shared_ids),
-            )
-        )
-        .order_by(Workflow.updated_at.desc())
-    )
-    workflows = result.scalars().all()
+    workflows = await list_accessible_workflows(db, user_id, order_by=Workflow.updated_at.desc())
     out: list[dict[str, Any]] = []
     for w in workflows:
         input_fields = extract_input_fields_from_workflow(w)
@@ -1303,52 +1290,27 @@ async def run_execute_workflow_tool(
                 public_base_url=public_base_url,
             )
             history_entry_id = str(history_entry.id)
-            await upsert_workflow_analytics_snapshot(
+            await persist_workflow_execution_analytics(
                 db,
                 workflow_id=workflow.id,
                 owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
+                workflow_name=workflow.name,
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
             )
         else:
-            history_entry = ExecutionHistory(
-                workflow_id=workflow.id,
-                inputs=enriched_inputs,
-                outputs=execution_result.outputs,
-                node_results=execution_result.node_results,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-                trigger_source="dashboard_chat",
-            )
-            db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
+            history_entry = await persist_execution_result(
                 db,
                 workflow_id=workflow.id,
+                workflow_name=workflow.name,
                 owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
+                inputs=enriched_inputs,
+                result=execution_result,
+                trigger_source="dashboard_chat",
+                workflow_nodes=workflow.nodes,
+                workflow_cache=workflow_cache,
+                credentials_owner_id=user_id,
             )
-            for sub_exec in execution_result.sub_workflow_executions:
-                sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
-                )
-                db.add(sub_history)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                )
             await db.flush()
             history_entry_id = str(history_entry.id)
 

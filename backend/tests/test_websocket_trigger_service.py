@@ -143,11 +143,11 @@ class WebSocketTriggerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 return_value=execution_result,
             ),
             patch(
-                "app.services.websocket_trigger_service.upsert_workflow_analytics_snapshot",
+                "app.services.execution_persistence.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
             ),
             patch(
-                "app.services.websocket_trigger_service._persist_global_variables_from_execution",
+                "app.services.execution_persistence.persist_global_variables_from_execution",
                 AsyncMock(),
             ),
         ):

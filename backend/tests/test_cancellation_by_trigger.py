@@ -161,8 +161,7 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.mcp.get_credentials_context_for_user", AsyncMock(return_value={})),
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.mcp.persist_execution_result", AsyncMock()),
             patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=fake_execute)),
         ):
             user = MagicMock()
@@ -187,8 +186,7 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.mcp.get_credentials_context_for_user", AsyncMock(return_value={})),
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.mcp.persist_execution_result", AsyncMock()),
             patch(
                 "app.api.mcp.asyncio.to_thread",
                 AsyncMock(return_value=_make_execution_result()),
@@ -253,8 +251,7 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.mcp.get_credentials_context_for_user", AsyncMock(return_value={})),
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.mcp.persist_execution_result", AsyncMock()),
             patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=capture_event)),
         ):
             user = MagicMock()
@@ -323,7 +320,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
             patch(
                 "app.api.workflows.asyncio.to_thread",
                 AsyncMock(side_effect=WorkflowCancelledError("cancelled")),
@@ -388,7 +385,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.workflows.asyncio.to_thread", AsyncMock(side_effect=fake_execute)),
             patch("app.api.workflows.build_public_base_url", return_value="http://localhost"),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
         ):
             current_user = MagicMock()
             current_user.id = uuid.uuid4()
@@ -438,7 +435,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.persist_workflow_execution_analytics", AsyncMock()),
             patch(
                 "app.api.workflows.asyncio.to_thread",
                 AsyncMock(side_effect=WorkflowCancelledError("cancelled")),

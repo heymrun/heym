@@ -9,17 +9,13 @@ from aio_pika.abc import AbstractIncomingMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
-from app.api.workflows import (
-    _persist_global_variables_from_execution,
-    collect_referenced_workflows,
-    get_credentials_context,
-)
-from app.db.models import Credential, ExecutionHistory, Workflow
+from app.db.models import Credential, Workflow
 from app.db.session import async_session_maker
 from app.services.distributed_lock import lock_service
 from app.services.encryption import decrypt_config
+from app.services.execution_persistence import persist_execution_result
 from app.services.global_variables_service import get_global_variables_context
+from app.services.workflow_access import collect_referenced_workflows, get_credentials_context
 from app.services.workflow_executor import execute_workflow
 
 logger = logging.getLogger("rabbitmq_consumer")
@@ -344,51 +340,16 @@ class RabbitMQConsumerManager:
                     trace_user_id=workflow.owner_id,
                 )
 
-                history_entry = ExecutionHistory(
-                    workflow_id=workflow.id,
-                    inputs=inputs,
-                    outputs=result.outputs,
-                    node_results=result.node_results,
-                    status=result.status,
-                    execution_time_ms=result.execution_time_ms,
-                )
-                db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
+                await persist_execution_result(
                     db,
                     workflow_id=workflow.id,
+                    workflow_name=workflow.name,
                     owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
-                    status=result.status,
-                    execution_time_ms=result.execution_time_ms,
-                )
-
-                for sub_exec in result.sub_workflow_executions:
-                    sub_history = ExecutionHistory(
-                        workflow_id=uuid.UUID(sub_exec.workflow_id),
-                        inputs=sub_exec.inputs,
-                        outputs=sub_exec.outputs,
-                        node_results=sub_exec.node_results,
-                        status=sub_exec.status,
-                        execution_time_ms=sub_exec.execution_time_ms,
-                        trigger_source=sub_exec.trigger_source,
-                    )
-                    db.add(sub_history)
-                    await upsert_workflow_analytics_snapshot(
-                        db,
-                        workflow_id=uuid.UUID(sub_exec.workflow_id),
-                        owner_id=None,
-                        workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                        status=sub_exec.status,
-                        execution_time_ms=sub_exec.execution_time_ms,
-                    )
-
-                await _persist_global_variables_from_execution(
-                    db,
-                    workflow.owner_id,
-                    workflow.nodes,
-                    workflow_cache,
-                    result.node_results,
-                    result.sub_workflow_executions,
+                    inputs=inputs,
+                    result=result,
+                    trigger_source="rabbitmq",
+                    workflow_nodes=workflow.nodes,
+                    workflow_cache=workflow_cache,
                 )
 
                 await db.commit()

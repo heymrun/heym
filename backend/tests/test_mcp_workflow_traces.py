@@ -70,8 +70,7 @@ class McpWorkflowTraceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.get_credentials_context_for_user", AsyncMock(return_value={})),
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.mcp.execute_workflow", return_value=execution_result) as execute_mock,
-            patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.mcp.persist_execution_result", AsyncMock()),
         ):
             response = await call_mcp_tool(
                 request=make_request({"name": "daily_report", "arguments": {"date": "2026-05-02"}}),
