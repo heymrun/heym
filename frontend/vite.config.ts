@@ -1,28 +1,38 @@
 import vue from "@vitejs/plugin-vue";
+import fs from "node:fs";
+import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
-import fs from "fs";
-import path from "path";
+import { defineConfig, type ProxyOptions } from "vite";
 
 const apiTarget = process.env.VITE_API_TARGET || "http://localhost:10105";
 
 const getVersion = (): string => {
-  try {
-    const versionPath = path.resolve(process.cwd(), "VERSION");
-    return fs.readFileSync(versionPath, "utf-8").trim();
-  } catch {
-    return "0.1.0";
+  const versionCandidates = [
+    path.resolve(process.cwd(), "VERSION"),
+    path.resolve(process.cwd(), "../VERSION"),
+    path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../VERSION"),
+  ];
+
+  for (const versionPath of versionCandidates) {
+    try {
+      return fs.readFileSync(versionPath, "utf-8").trim();
+    } catch {
+      continue;
+    }
   }
+
+  return "0.1.0";
 };
 
 const APP_VERSION = process.env.APP_VERSION || getVersion();
 
-const apiProxyOptions = {
+const apiProxyOptions: ProxyOptions = {
   target: apiTarget,
   changeOrigin: true,
   ws: true,
-  configure: (proxy: any) => {
-    proxy.on("proxyReq", (proxyReq: any, req: any) => {
+  configure: (proxy) => {
+    proxy.on("proxyReq", (proxyReq: ClientRequest, req: IncomingMessage) => {
       if (req.headers["cf-connecting-ip"]) {
         proxyReq.setHeader("CF-Connecting-IP", req.headers["cf-connecting-ip"]);
       }
@@ -30,13 +40,13 @@ const apiProxyOptions = {
         proxyReq.setHeader("X-Forwarded-For", req.headers["x-forwarded-for"]);
       }
     });
-    proxy.on("proxyRes", (proxyRes: any) => {
+    proxy.on("proxyRes", (proxyRes: IncomingMessage, _req: IncomingMessage, _res: ServerResponse) => {
       delete proxyRes.headers["transfer-encoding"];
     });
   },
 };
 
-const proxyConfig = {
+const proxyConfig: Record<string, ProxyOptions> = {
   "/api": apiProxyOptions,
   "/.well-known/oauth-authorization-server": apiProxyOptions,
   "/authorize": apiProxyOptions,
