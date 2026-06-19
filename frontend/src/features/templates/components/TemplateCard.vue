@@ -69,6 +69,7 @@ const thumbnailMaxZoom = computed((): number => {
 <template>
   <div
     ref="cardRef"
+    :data-testid="`template-card-${template.id}`"
     class="group relative flex flex-col rounded-2xl border border-border/40 bg-card/80 shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 overflow-hidden cursor-pointer"
     @click="emit('preview')"
   >

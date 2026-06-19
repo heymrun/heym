@@ -1638,6 +1638,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                           <Button
                             variant="ghost"
                             size="icon"
+                            :data-testid="`workflow-delete-${workflow.id}`"
                             class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
                             title="Delete workflow"
                             @click="deleteWorkflow(workflow.id, $event)"
@@ -1795,6 +1796,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                         <Button
                           variant="ghost"
                           size="icon"
+                          :data-testid="`workflow-delete-${workflow.id}`"
                           class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
                           title="Delete workflow"
                           @click="deleteWorkflow(workflow.id, $event)"

@@ -9,6 +9,7 @@ export default defineConfigWithVueTs(
       "e2e/.auth/**",
       "playwright-report/**",
       "test-results/**",
+      ".e2e-artifacts/**",
       "vite.config.ts",
     ],
   },

@@ -15,7 +15,11 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     throw new Error("Playwright baseURL is required for E2E setup");
   }
 
-  const authStatePath = path.resolve("e2e/.auth/user.json");
+  const storageState = config.projects[0]?.use.storageState;
+  if (typeof storageState !== "string") {
+    throw new Error("Playwright storageState path is required for E2E setup");
+  }
+  const authStatePath = storageState;
   await fs.mkdir(path.dirname(authStatePath), { recursive: true });
 
   const context = await request.newContext({ baseURL });

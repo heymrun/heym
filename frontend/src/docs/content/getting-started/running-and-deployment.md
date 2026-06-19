@@ -95,17 +95,28 @@ isolated PostgreSQL database:
 ./run_e2e.sh
 ```
 
-The script starts a temporary PostgreSQL 16 container on port `6544`, applies Alembic migrations,
-installs the Playwright Chromium browser when needed, starts the backend on port `10106` and the
-frontend on port `4018`, and removes the database container when the run finishes.
+The suite is a key-path smoke and regression suite, not exhaustive product coverage. It covers
+authentication, core workflow lifecycle and execution, selected dashboard resources, public
+routes, and a mocked HITL review UI. Provider integrations, every node type, sharing/permission
+matrices, and full HITL resume execution remain covered primarily by backend tests or require
+dedicated integration environments.
+
+Each run gets its own temporary PostgreSQL 16 container, random available database/backend/frontend
+ports, authentication state, test results, and HTML report. This allows multiple `run_e2e.sh`
+processes to run concurrently without sharing state or overwriting artifacts. The script removes
+its database container when the run finishes and prints the artifact directory and report path.
 
 Useful commands:
 
 ```bash
+./run_e2e.sh --ui         # Interactive Playwright runner with an isolated database
 cd frontend
-bun run test:e2e:ui       # Interactive Playwright runner; requires a compatible test stack
-bun run test:e2e:report   # Open the latest HTML report
+bun run test:e2e:report   # Open the most recently completed local run
 ```
+
+Direct `bun run test:e2e` and `bun run test:e2e:ui` runs require an explicit `DATABASE_URL` so they
+cannot silently start against the local development database. Use `./run_e2e.sh` for normal local
+runs.
 
 `./check.sh` includes the E2E suite. Set `SKIP_E2E=1` only when Docker is unavailable and you need
 to run the remaining lint, typecheck, formatting, and backend tests locally. Pull requests always

@@ -3,9 +3,32 @@
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-POSTGRES_PORT="${E2E_POSTGRES_PORT:-6544}"
+RUN_ID="${E2E_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 CONTAINER_NAME="heym-e2e-postgres-$$"
-DATABASE_URL="postgresql+asyncpg://postgres:postgres@127.0.0.1:${POSTGRES_PORT}/heym_e2e"
+ARTIFACT_DIR="${E2E_ARTIFACT_DIR:-.e2e-artifacts/${RUN_ID}}"
+
+find_free_port() {
+    start_port="$1"
+    python3 - "$start_port" <<'PY'
+import socket
+import sys
+
+start = int(sys.argv[1])
+for port in range(start, min(start + 1000, 65536)):
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+    print(port)
+    break
+else:
+    raise SystemExit(f"No free port found from {start}")
+PY
+}
+
+FRONTEND_PORT="${E2E_FRONTEND_PORT:-$(find_free_port "$((20000 + ($$ % 10000)))")}"
+BACKEND_PORT="${E2E_BACKEND_PORT:-$(find_free_port "$((30000 + ($$ % 10000)))")}"
 
 cleanup() {
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
@@ -17,14 +40,36 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Starting isolated E2E PostgreSQL on port ${POSTGRES_PORT}..."
-docker run --rm -d \
-    --name "$CONTAINER_NAME" \
-    -e POSTGRES_USER=postgres \
-    -e POSTGRES_PASSWORD=postgres \
-    -e POSTGRES_DB=heym_e2e \
-    -p "${POSTGRES_PORT}:5432" \
-    postgres:16 >/dev/null
+if [ -n "${E2E_POSTGRES_PORT:-}" ]; then
+    echo "Starting isolated E2E PostgreSQL on port ${E2E_POSTGRES_PORT}..."
+    docker run --rm -d \
+        --name "$CONTAINER_NAME" \
+        -e POSTGRES_USER=postgres \
+        -e POSTGRES_PASSWORD=postgres \
+        -e POSTGRES_DB=heym_e2e \
+        -p "127.0.0.1:${E2E_POSTGRES_PORT}:5432" \
+        postgres:16 >/dev/null
+    POSTGRES_PORT="$E2E_POSTGRES_PORT"
+else
+    echo "Starting isolated E2E PostgreSQL on a random host port..."
+    docker run --rm -d \
+        --name "$CONTAINER_NAME" \
+        -e POSTGRES_USER=postgres \
+        -e POSTGRES_PASSWORD=postgres \
+        -e POSTGRES_DB=heym_e2e \
+        -p "127.0.0.1::5432" \
+        postgres:16 >/dev/null
+    POSTGRES_PORT="$(docker port "$CONTAINER_NAME" 5432/tcp | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p' | head -1)"
+fi
+
+if [ -z "$POSTGRES_PORT" ]; then
+    echo "Unable to determine the E2E PostgreSQL host port"
+    exit 1
+fi
+
+DATABASE_URL="postgresql+asyncpg://postgres:postgres@127.0.0.1:${POSTGRES_PORT}/heym_e2e"
+echo "E2E run ${RUN_ID}: postgres=${POSTGRES_PORT}, backend=${BACKEND_PORT}, frontend=${FRONTEND_PORT}"
+echo "Artifacts: frontend/${ARTIFACT_DIR}"
 
 attempt=0
 until docker exec "$CONTAINER_NAME" pg_isready -U postgres -d heym_e2e >/dev/null 2>&1; do
@@ -57,4 +102,16 @@ cd "$REPO_ROOT/frontend"
 bunx playwright install chromium
 
 echo "Running frontend E2E tests..."
-DATABASE_URL="$DATABASE_URL" bun run test:e2e "$@"
+set +e
+DATABASE_URL="$DATABASE_URL" \
+E2E_FRONTEND_PORT="$FRONTEND_PORT" \
+E2E_BACKEND_PORT="$BACKEND_PORT" \
+E2E_ARTIFACT_DIR="$ARTIFACT_DIR" \
+bun run test:e2e "$@"
+TEST_STATUS=$?
+set -e
+
+mkdir -p .e2e-artifacts
+ln -sfn "$(cd "$ARTIFACT_DIR" && pwd)" .e2e-artifacts/latest
+echo "Playwright report: frontend/${ARTIFACT_DIR}/playwright-report"
+exit "$TEST_STATUS"

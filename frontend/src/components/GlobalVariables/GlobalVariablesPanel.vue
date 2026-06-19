@@ -389,6 +389,7 @@ async function removeVariableTeamShare(teamId: string): Promise<void> {
             <tr
               v-for="v in variables"
               :key="v.id"
+              :data-testid="`global-variable-${v.name}`"
               class="border-b border-border/50 transition-colors hover:bg-muted/30 cursor-pointer"
               @click="openEditDialog(v)"
             >

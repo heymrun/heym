@@ -74,6 +74,7 @@ function handleSelect(): void {
 
 <template>
   <div
+    :data-testid="`chat-list-item-${conversation.id}`"
     :class="cn(
       'group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors overflow-hidden',
       isActive

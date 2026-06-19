@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { E2E_USER, prepareAuthenticatedPage } from "./support";
+import { prepareAuthenticatedPage } from "./support";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 test.beforeEach(async ({ page }) => {
@@ -25,14 +25,25 @@ test("shows an error for invalid credentials", async ({ page }) => {
 });
 
 test("logs in and logs out through the UI", async ({ page }) => {
-  await page.goto("/login");
-  await page.getByLabel("Email address").fill(E2E_USER.email);
-  await page.getByLabel("Password").fill(E2E_USER.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  const email = `logout-${Date.now()}@heym.example.com`;
+  const password = "LogoutTest123";
 
+  // Use a dedicated user so logout does not revoke the shared E2E user's refresh token.
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Logout Test User");
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL("/");
-  await page.getByRole("button", { name: "Logout" }).click();
+
+  await page.getByRole("button", { name: "Logout", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
+
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL("/");
 });
 
 test("validates registration before sending the request", async ({ page }) => {

@@ -3,11 +3,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontendDir = fileURLToPath(new URL(".", import.meta.url));
-const authStatePath = path.join(frontendDir, "e2e/.auth/user.json");
+const artifactDir = path.resolve(
+  frontendDir,
+  process.env.E2E_ARTIFACT_DIR || path.join(".e2e-artifacts", `run-${process.pid}`),
+);
+const authStatePath = path.join(artifactDir, "auth/user.json");
+const testResultsDir = path.join(artifactDir, "test-results");
+const reportDir = path.join(artifactDir, "playwright-report");
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT || "4018");
 const backendPort = Number(process.env.E2E_BACKEND_PORT || "10106");
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
+
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL is required for Playwright E2E tests. Run ./run_e2e.sh from the repository root.",
+  );
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -15,9 +27,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
+  outputDir: testResultsDir,
   reporter: process.env.CI
-    ? [["line"], ["html", { open: "never" }]]
-    : [["list"], ["html", { open: "never" }]],
+    ? [["line"], ["html", { open: "never", outputFolder: reportDir }]]
+    : [["list"], ["html", { open: "never", outputFolder: reportDir }]],
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   expect: {
@@ -26,6 +39,7 @@ export default defineConfig({
   use: {
     baseURL: frontendUrl,
     storageState: authStatePath,
+    timezoneId: "UTC",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -44,9 +58,12 @@ export default defineConfig({
         "ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         `FRONTEND_URL=${frontendUrl}`,
         `CORS_ORIGINS=${frontendUrl}`,
+        "TIMEZONE=UTC",
+        "TZ=UTC",
         "ALLOW_REGISTER=true",
         "PLAYWRIGHT_INSTALL_AT_STARTUP=false",
         "HEYM_PYTHON_TOOL_SANDBOX=subprocess",
+        "HEYM_LLM_PRICING_SYNC_ENABLED=false",
         `uv run uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       ].join(" "),
       url: `${backendUrl}/api/health`,

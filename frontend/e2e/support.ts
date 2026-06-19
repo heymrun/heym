@@ -85,3 +85,20 @@ export async function deleteWorkflow(page: Page, workflowId: string): Promise<vo
 export async function expectOk(response: APIResponse): Promise<void> {
   expect(response.ok(), await response.text()).toBeTruthy();
 }
+
+export async function acceptNextDialog(
+  page: Page,
+  action: () => Promise<void>,
+  expectedMessage: string | RegExp,
+): Promise<void> {
+  const dialogPromise = page.waitForEvent("dialog");
+  const actionPromise = action();
+  const dialog = await dialogPromise;
+  if (typeof expectedMessage === "string") {
+    expect(dialog.message()).toBe(expectedMessage);
+  } else {
+    expect(dialog.message()).toMatch(expectedMessage);
+  }
+  await dialog.accept();
+  await actionPromise;
+}

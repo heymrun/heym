@@ -30,7 +30,9 @@ test("opens an enabled Chat Portal", async ({ page }) => {
   await deleteWorkflow(page, workflow.id);
 });
 
-test("opens HITL Review and accepts a pending request", async ({ page }) => {
+test("renders HITL Review and submits acceptance with a mocked API", {
+  tag: "@smoke",
+}, async ({ page }) => {
   const token = "e2e-hitl-token";
   await page.route(`**/api/hitl/${token}**`, async (route) => {
     if (route.request().method() === "POST") {

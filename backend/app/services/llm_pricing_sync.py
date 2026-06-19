@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.models import LLMPricing
 from app.db.session import async_session_maker
 
@@ -101,6 +102,9 @@ async def ensure_pricing_synced(db: AsyncSession, *, force: bool = False) -> boo
     """If pricing is stale (or `force`), schedule a background sync.
     Returns True if a sync task was scheduled.
     """
+    if not settings.llm_pricing_sync_enabled:
+        return False
+
     if not force:
         result = await db.execute(select(func.max(LLMPricing.last_synced_at)))
         last_synced = result.scalar_one_or_none()
