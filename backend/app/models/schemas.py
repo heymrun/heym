@@ -464,6 +464,7 @@ class CredentialType(str, Enum):
     google_sheets = "google_sheets"
     bigquery = "bigquery"
     supabase = "supabase"
+    notion = "notion"
     s3 = "s3"
     elevenlabs = "elevenlabs"
 
@@ -529,6 +530,10 @@ class CredentialConfigSupabase(BaseModel):
     supabase_schema: str | None = "public"
 
 
+class CredentialConfigNotion(BaseModel):
+    api_token: str
+
+
 class CredentialCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: CredentialType
@@ -558,6 +563,17 @@ class SupabaseTablesResponse(BaseModel):
 
 class SupabaseColumnsResponse(BaseModel):
     columns: list[str]
+    success: bool = True
+
+
+class NotionDataSourceItem(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+
+
+class NotionDataSourcesResponse(BaseModel):
+    data_sources: list[NotionDataSourceItem]
     success: bool = True
 
 

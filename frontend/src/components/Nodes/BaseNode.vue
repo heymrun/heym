@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -58,6 +58,7 @@ const icons = {
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
+  notion: FileText,
   throwError: XCircle,
   rabbitmq: Rabbit,
   crawler: Bug,
@@ -106,6 +107,7 @@ const nodeColorMap = {
   googleSheets: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
+  notion: "node-notion",
   dataTable: "node-datatable",
   throwError: "node-throw-error",
   rabbitmq: "node-rabbitmq",

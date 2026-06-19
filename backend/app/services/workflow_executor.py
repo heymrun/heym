@@ -9667,6 +9667,144 @@ class WorkflowExecutor:
                 finally:
                     service.close()
 
+            elif node_type == "notion":
+                from app.db.session import SessionLocal
+                from app.services.encryption import decrypt_config
+                from app.services.notion_service import NotionService
+
+                credential_id = node_data.get("credentialId")
+                if not credential_id:
+                    raise ValueError("Notion node requires a credential")
+
+                notion_config: dict = {}
+                with SessionLocal() as db:
+                    cred = self._get_accessible_credential(db, credential_id)
+                    if cred:
+                        from app.db.models import CredentialType
+
+                        if cred.type != CredentialType.notion:
+                            raise ValueError("Credential type must be notion")
+                        notion_config = decrypt_config(cred.encrypted_config)
+                if not notion_config:
+                    raise ValueError("Notion credential not found or invalid")
+
+                operation = str(node_data.get("notionOperation", "") or "").strip()
+                if not operation:
+                    raise ValueError("Notion node requires an operation")
+
+                service = NotionService(notion_config)
+
+                def _notion_text(field_name: str, default: str = "") -> str:
+                    return self.evaluate_message_template(
+                        str(node_data.get(field_name, default) or default),
+                        inputs,
+                        node_id,
+                    ).strip()
+
+                def _notion_object(field_name: str, default: str = "{}") -> dict[str, Any]:
+                    return NotionService.parse_json_object(
+                        self.evaluate_message_template(
+                            str(node_data.get(field_name, default) or default),
+                            inputs,
+                            node_id,
+                        ),
+                        field_name,
+                    )
+
+                def _notion_array(field_name: str, default: str = "[]") -> list[Any]:
+                    return NotionService.parse_json_array(
+                        self.evaluate_message_template(
+                            str(node_data.get(field_name, default) or default),
+                            inputs,
+                            node_id,
+                        ),
+                        field_name,
+                    )
+
+                def _notion_page_size() -> tuple[int, bool]:
+                    raw_value = _notion_text("notionPageSize", "100")
+                    try:
+                        value = int(float(raw_value or "100"))
+                    except (TypeError, ValueError):
+                        value = 100
+                    return (100 if value == 0 else value, value == 0)
+
+                if operation == "search":
+                    page_size, fetch_all = _notion_page_size()
+                    filter_object = _notion_object("notionFilter")
+                    sort = _notion_object("notionSort")
+                    output = service.search(
+                        query=_notion_text("notionQuery"),
+                        filter_object=filter_object or None,
+                        sort=sort or None,
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "getPage":
+                    output = service.retrieve_page(_notion_text("notionPageId"))
+                elif operation == "createPage":
+                    properties = _notion_object("notionProperties")
+                    if not properties:
+                        raise ValueError("Notion createPage requires properties")
+                    icon = _notion_object("notionIcon")
+                    cover = _notion_object("notionCover")
+                    output = service.create_page(
+                        properties=properties,
+                        data_source_id=_notion_text("notionDataSourceId"),
+                        parent_page_id=_notion_text("notionParentPageId"),
+                        children=_notion_array("notionChildren"),
+                        icon=icon or None,
+                        cover=cover or None,
+                    )
+                elif operation == "updatePage":
+                    properties = _notion_object("notionProperties")
+                    icon = _notion_object("notionIcon")
+                    cover = _notion_object("notionCover")
+                    output = service.update_page(
+                        _notion_text("notionPageId"),
+                        properties=properties or None,
+                        icon=icon or None,
+                        cover=cover or None,
+                    )
+                elif operation == "trashPage":
+                    output = service.update_page(
+                        _notion_text("notionPageId"),
+                        in_trash=True,
+                    )
+                elif operation == "restorePage":
+                    output = service.update_page(
+                        _notion_text("notionPageId"),
+                        in_trash=False,
+                    )
+                elif operation == "queryDataSource":
+                    page_size, fetch_all = _notion_page_size()
+                    output = service.query_data_source(
+                        _notion_text("notionDataSourceId"),
+                        filter_object=_notion_object("notionFilter") or None,
+                        sorts=_notion_array("notionSorts") or None,
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "getBlockChildren":
+                    page_size, fetch_all = _notion_page_size()
+                    output = service.retrieve_block_children(
+                        _notion_text("notionBlockId"),
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "appendBlocks":
+                    output = service.append_block_children(
+                        _notion_text("notionBlockId"),
+                        _notion_array("notionChildren"),
+                        after=_notion_text("notionAfterBlockId") or None,
+                    )
+                else:
+                    raise ValueError(f"Unknown Notion operation: {operation}")
+                output["operation"] = operation
+
             elif node_type == "supabase":
                 from app.db.session import SessionLocal
                 from app.services.encryption import decrypt_config

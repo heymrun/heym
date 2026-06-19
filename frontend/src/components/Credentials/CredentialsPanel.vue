@@ -73,6 +73,7 @@ function getTypeIcon(type: CredentialType): typeof Brain {
     case "slack":
       return MessageSquare;
     case "supabase":
+    case "notion":
       return Database;
     default:
       return Key;
@@ -102,6 +103,8 @@ function getTypeColor(type: CredentialType): string {
       return "bg-emerald-500/10 text-emerald-500";
     case "supabase":
       return "bg-lime-500/10 text-lime-600";
+    case "notion":
+      return "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300";
     default:
       return "bg-muted text-muted-foreground";
   }

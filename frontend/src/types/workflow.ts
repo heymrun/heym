@@ -156,6 +156,7 @@ export type NodeType =
   | "googleSheets"
   | "bigquery"
   | "supabase"
+  | "notion"
   | "throwError"
   | "rabbitmq"
   | "imapTrigger"
@@ -600,6 +601,31 @@ export interface NodeData {
   supabaseRows?: string;
   supabaseOnConflict?: string;
   supabaseData?: string;
+  notionOperation?:
+    | "search"
+    | "getPage"
+    | "createPage"
+    | "updatePage"
+    | "trashPage"
+    | "restorePage"
+    | "queryDataSource"
+    | "getBlockChildren"
+    | "appendBlocks";
+  notionQuery?: string;
+  notionPageId?: string;
+  notionDataSourceId?: string;
+  notionParentPageId?: string;
+  notionBlockId?: string;
+  notionProperties?: string;
+  notionChildren?: string;
+  notionFilter?: string;
+  notionSort?: string;
+  notionSorts?: string;
+  notionIcon?: string;
+  notionCover?: string;
+  notionPageSize?: string;
+  notionStartCursor?: string;
+  notionAfterBlockId?: string;
   gsOperation?: string;
   gsSpreadsheetId?: string;
   gsSheetName?: string;

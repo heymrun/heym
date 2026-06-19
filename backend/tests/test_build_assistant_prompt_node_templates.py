@@ -92,6 +92,14 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn("githubWorkflowInputs", prompt)
         self.assertIn("githubFilePath", prompt)
 
+    def test_includes_notion_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 24B. notion", prompt)
+        self.assertIn('"type": "notion"', prompt)
+        self.assertIn("notionDataSourceId", prompt)
+        self.assertIn("queryDataSource", prompt)
+
     def test_includes_filter_map_nested_reference_guidance(self) -> None:
         prompt = build_assistant_prompt()
 

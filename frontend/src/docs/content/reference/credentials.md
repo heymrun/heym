@@ -27,6 +27,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Google Sheets](../nodes/google-sheets-node.md) | Google Sheets (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [BigQuery](../nodes/bigquery-node.md) | BigQuery (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [Supabase](../nodes/supabase-node.md) | Supabase | Project URL + API key (+ optional default schema) |
+| [Notion](../nodes/notion-node.md) | Notion | Internal integration token |
 | [Amazon S3](../nodes/amazon-s3-node.md) | Amazon S3 | Access key, secret key, region |
 | [RabbitMQ](../nodes/rabbitmq-node.md) | RabbitMQ | AMQP URL |
 
@@ -45,6 +46,7 @@ Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md)
 
 - [Credentials Tab](../tabs/credentials-tab.md) – Add, edit, delete credentials
 - [GitHub Node](../nodes/github-node.md) – Native GitHub REST operations
+- [Notion Node](../nodes/notion-node.md) – Search and manage Notion content
 - [Credentials Sharing](./credentials-sharing.md) – Share with users and teams
 - [Third-Party Integrations](./integrations.md) – Setup guide per credential type
 - [Expression DSL](./expression-dsl.md) – `$credentials` in expressions

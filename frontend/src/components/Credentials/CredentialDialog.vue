@@ -91,6 +91,10 @@ const supabaseSchema = ref("public");
 const supabaseTesting = ref(false);
 const supabaseTestSuccess = ref<boolean | null>(null);
 const supabaseTestMessage = ref("");
+const notionToken = ref("");
+const notionTesting = ref(false);
+const notionTestSuccess = ref<boolean | null>(null);
+const notionTestMessage = ref("");
 const s3AccessKeyId = ref("");
 const s3SecretAccessKey = ref("");
 const s3Region = ref("us-east-1");
@@ -169,6 +173,7 @@ const typeOptions = [
   { value: "google_sheets", label: CREDENTIAL_TYPE_LABELS.google_sheets },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
+  { value: "notion", label: CREDENTIAL_TYPE_LABELS.notion },
   { value: "s3", label: CREDENTIAL_TYPE_LABELS.s3 },
 ];
 
@@ -238,6 +243,7 @@ watch(
           props.credential.type === "supabase"
             ? props.credential.public_fields?.supabase_schema ?? "public"
             : "public";
+        notionToken.value = "";
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value =
@@ -296,6 +302,7 @@ watch(
         supabaseUrl.value = "";
         supabaseKey.value = "";
         supabaseSchema.value = "public";
+        notionToken.value = "";
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value = "us-east-1";
@@ -306,6 +313,9 @@ watch(
       supabaseTesting.value = false;
       supabaseTestSuccess.value = null;
       supabaseTestMessage.value = "";
+      notionTesting.value = false;
+      notionTestSuccess.value = null;
+      notionTestMessage.value = "";
     }
   }
 );
@@ -386,6 +396,8 @@ const isValid = computed(() => {
       return !!supabaseUrl.value.trim();
     }
     return !!supabaseUrl.value.trim() && !!supabaseKey.value.trim();
+  } else if (type.value === "notion") {
+    return !!notionToken.value.trim() || isEditing.value;
   } else if (type.value === "s3") {
     if (isEditing.value) {
       return !hasS3CredentialConfigChange.value || (
@@ -504,6 +516,8 @@ function buildConfig(): CredentialConfig {
       supabase_key: supabaseKey.value.trim(),
       supabase_schema: supabaseSchema.value.trim() || "public",
     };
+  } else if (type.value === "notion") {
+    return { api_token: notionToken.value.trim() };
   } else if (type.value === "s3") {
     return {
       aws_access_key_id: s3AccessKeyId.value.trim(),
@@ -709,6 +723,36 @@ async function testSupabaseConnection(): Promise<void> {
   }
 }
 
+async function testNotionConnection(): Promise<void> {
+  if (!notionToken.value.trim() && !isEditing.value) {
+    error.value = "Enter an integration token to test the connection.";
+    return;
+  }
+  notionTesting.value = true;
+  notionTestSuccess.value = null;
+  notionTestMessage.value = "";
+  error.value = "";
+  try {
+    const result = await credentialsApi.testConnection({
+      type: "notion",
+      config: { api_token: notionToken.value.trim() },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    notionTestSuccess.value = result.success;
+    notionTestMessage.value = result.message;
+    if (!result.success) {
+      error.value = result.message;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection test failed";
+    notionTestSuccess.value = false;
+    notionTestMessage.value = message;
+    error.value = message;
+  } finally {
+    notionTesting.value = false;
+  }
+}
+
 async function handleSave(): Promise<void> {
   if (!isValid.value) return;
 
@@ -767,6 +811,7 @@ async function handleSave(): Promise<void> {
           rabbitmqVhost.value.trim() ||
           (type.value === "s3" && hasS3CredentialConfigChange.value) ||
           (type.value === "supabase" && hasSupabaseCredentialConfigChange.value) ||
+          notionToken.value.trim() ||
           cohereApiKey.value.trim() ||
           flaresolverrUrl.value.trim());
 
@@ -1888,6 +1933,59 @@ async function handleSave(): Promise<void> {
             :class="supabaseTestSuccess ? 'text-emerald-600' : 'text-destructive'"
           >
             {{ supabaseTestMessage }}
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'notion'">
+        <div class="space-y-2">
+          <Label for="cred-notion-token">Internal Integration Token</Label>
+          <div class="relative">
+            <Input
+              id="cred-notion-token"
+              v-model="notionToken"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'ntn_...'"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Create an internal integration in Notion, then share the required pages and data sources with it.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            :loading="notionTesting"
+            :disabled="saving || notionTesting || (!notionToken.trim() && !isEditing)"
+            @click="testNotionConnection"
+          >
+            Test Connection
+          </Button>
+          <p
+            v-if="notionTestMessage"
+            class="text-xs"
+            :class="notionTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ notionTestMessage }}
           </p>
         </div>
       </template>

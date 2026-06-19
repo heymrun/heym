@@ -322,6 +322,8 @@ async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID)
                 context[cred.name] = config.get("webhook_url", "")
             elif cred.type == CredentialType.slack:
                 context[cred.name] = config.get("webhook_url", "")
+            elif cred.type == CredentialType.notion:
+                context[cred.name] = config.get("api_token", "")
             else:
                 context[cred.name] = config.get("api_key", "")
         except Exception:

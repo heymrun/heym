@@ -27,6 +27,7 @@ from app.models.schemas import (
     CredentialTestResponse,
     CredentialUpdate,
     LLMModel,
+    NotionDataSourcesResponse,
     SupabaseColumnsResponse,
     SupabaseTablesResponse,
     TeamShareRequest,
@@ -43,6 +44,13 @@ def merge_credential_config_for_update(
     incoming_config: dict,
 ) -> dict:
     """Merge update payload into an existing credential config when needed."""
+    if credential_type == CredentialType.notion:
+        merged_config = dict(existing_config)
+        incoming_token = str(incoming_config.get("api_token", "") or "").strip()
+        if incoming_token:
+            merged_config["api_token"] = incoming_token
+        return merged_config
+
     if credential_type != CredentialType.github:
         return incoming_config
 
@@ -122,6 +130,8 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         if supabase_url:
             return f"{supabase_url} ({supabase_schema})"
         return None
+    elif credential_type == CredentialType.notion:
+        return mask_api_key(str(config.get("api_token", "")).strip())
     elif credential_type == CredentialType.s3:
         access_key = str(config.get("aws_access_key_id", "")).strip()
         region = str(config.get("aws_region", "")).strip()
@@ -618,7 +628,7 @@ async def run_credential_connection_test(
     db: AsyncSession = Depends(get_db),
 ) -> CredentialTestResponse:
     """Test whether a credential configuration can reach the external service."""
-    if test_data.type != CredentialType.supabase:
+    if test_data.type not in {CredentialType.supabase, CredentialType.notion}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Connection test is not supported for this credential type",
@@ -632,24 +642,64 @@ async def run_credential_connection_test(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Credential not found",
             )
-        if credential.type != CredentialType.supabase:
+        if credential.type != test_data.type:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Credential type does not match the requested test",
             )
         stored_config = decrypt_config(credential.encrypted_config)
-        config = _merge_supabase_test_config(config, stored_config)
+        if test_data.type == CredentialType.supabase:
+            config = _merge_supabase_test_config(config, stored_config)
+        elif not str(config.get("api_token", "")).strip():
+            config["api_token"] = stored_config.get("api_token", "")
 
-    validate_credential_config(CredentialType.supabase, config)
-
-    from app.services.supabase_service import SupabaseService
+    validate_credential_config(test_data.type, config)
 
     try:
-        SupabaseService(config).test_connection()
+        if test_data.type == CredentialType.supabase:
+            from app.services.supabase_service import SupabaseService
+
+            SupabaseService(config).test_connection()
+        else:
+            from app.services.notion_service import NotionService
+
+            NotionService(config).test_connection()
     except ValueError as exc:
         return CredentialTestResponse(success=False, message=str(exc))
 
     return CredentialTestResponse(success=True, message="Connection successful")
+
+
+@router.get(
+    "/{credential_id}/notion/data-sources",
+    response_model=NotionDataSourcesResponse,
+)
+async def list_notion_data_sources(
+    credential_id: uuid.UUID,
+    query: str = "",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotionDataSourcesResponse:
+    """List Notion data sources available to an accessible credential."""
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.notion:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential type does not support Notion data source discovery",
+        )
+
+    from app.services.notion_service import NotionService
+
+    try:
+        result = NotionService(decrypt_config(credential.encrypted_config)).list_data_sources(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return NotionDataSourcesResponse(**result)
 
 
 @router.get("/{credential_id}/supabase/tables", response_model=SupabaseTablesResponse)
@@ -1094,6 +1144,12 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Supabase credential requires supabase_key",
+            )
+    elif credential_type == CredentialType.notion:
+        if "api_token" not in config or not str(config["api_token"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Notion credential requires api_token",
             )
     elif credential_type == CredentialType.s3:
         if "aws_access_key_id" not in config or not str(config["aws_access_key_id"]).strip():

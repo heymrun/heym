@@ -20,6 +20,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
+| **Notion** | [Notion node](../nodes/notion-node.md) | `api_token` |
 | **Amazon S3** | [Amazon S3 node](../nodes/amazon-s3-node.md) | `aws_access_key_id`, `aws_secret_access_key`, `aws_region` |
 | **SMTP** | [Send Email](../nodes/send-email-node.md) | `host`, `port`, `email`, `password` |
 | **IMAP** | [IMAP Trigger node](../nodes/imap-trigger-node.md) | `imap_host`, `imap_port`, `imap_username`, `imap_password` |
@@ -211,6 +212,15 @@ The Supabase credential connects Heym to a Supabase project's PostgREST API so w
 ### Used By
 
 - [Supabase node](../nodes/supabase-node.md)
+
+## Notion
+
+The Notion credential stores an internal integration token. Create the integration in Notion, copy
+the token into Heym, and explicitly share every page or data source that the workflow needs with the
+integration. The [Notion node](../nodes/notion-node.md) uses API version `2026-03-11`, including the
+current data source query endpoints.
+
+- [Notion node](../nodes/notion-node.md)
 
 ---
 

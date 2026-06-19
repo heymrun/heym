@@ -67,6 +67,7 @@
     --node-github: 222 47% 25%;
     --node-google-sheets: 153 82% 33%;
     --node-datatable: 190 95% 39%;
+    --node-notion: 0 0% 18%;
     --node-drive: 215 85% 50%;
     --node-throw-error: 0 84% 50%;
     --node-rabbitmq: 25 95% 53%;
@@ -136,6 +137,7 @@
     --node-github: 210 30% 78%;
     --node-google-sheets: 153 82% 42%;
     --node-datatable: 190 95% 49%;
+    --node-notion: 0 0% 88%;
     --node-drive: 215 85% 60%;
     --node-throw-error: 0 84% 55%;
     --node-rabbitmq: 25 88% 55%;

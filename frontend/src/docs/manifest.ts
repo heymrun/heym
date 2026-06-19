@@ -57,6 +57,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "google-sheets-node", title: "Google Sheets" },
       { slug: "bigquery-node", title: "BigQuery" },
       { slug: "supabase-node", title: "Supabase" },
+      { slug: "notion-node", title: "Notion" },
       { slug: "amazon-s3-node", title: "Amazon S3" },
       { slug: "drive-node", title: "Drive" },
       { slug: "datatable-node", title: "DataTable" },

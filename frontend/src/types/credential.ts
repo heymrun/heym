@@ -21,6 +21,7 @@ export type CredentialType =
   | "google_sheets"
   | "bigquery"
   | "supabase"
+  | "notion"
   | "s3"
   | "elevenlabs";
 
@@ -193,6 +194,10 @@ export interface CredentialConfigSupabase {
   supabase_schema?: string;
 }
 
+export interface CredentialConfigNotion {
+  api_token: string;
+}
+
 export type CredentialConfig =
   | CredentialConfigOpenAI
   | CredentialConfigGoogle
@@ -215,6 +220,7 @@ export type CredentialConfig =
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
   | CredentialConfigSupabase
+  | CredentialConfigNotion
   | CredentialConfigS3
   | CredentialConfigElevenLabs;
 
@@ -250,6 +256,17 @@ export interface SupabaseColumnsResponse {
   success: boolean;
 }
 
+export interface NotionDataSourceItem {
+  id: string;
+  title: string;
+  url?: string | null;
+}
+
+export interface NotionDataSourcesResponse {
+  data_sources: NotionDataSourceItem[];
+  success: boolean;
+}
+
 export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   openai: "OpenAI",
   google: "Google AI",
@@ -273,6 +290,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_sheets: "Google Sheets (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
+  notion: "Notion",
   s3: "Amazon S3",
   elevenlabs: "ElevenLabs (Voice)",
 };
@@ -300,6 +318,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
+  notion: "Connect to Notion — search, query data sources, and manage pages and blocks",
   s3: "Connect to Amazon S3 — manage buckets, folders, and objects",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
 };

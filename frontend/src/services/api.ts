@@ -18,6 +18,7 @@ import type {
   CredentialTestRequest,
   CredentialTestResponse,
   LLMModel,
+  NotionDataSourcesResponse,
   SupabaseColumnsResponse,
   SupabaseTablesResponse,
   UpdateCredentialRequest,
@@ -1101,6 +1102,17 @@ export const credentialsApi = {
     const response = await api.get<SupabaseColumnsResponse>(
       `/credentials/${id}/supabase/columns`,
       { params: { table, ...(schema ? { schema } : {}) } },
+    );
+    return response.data;
+  },
+
+  listNotionDataSources: async (
+    id: string,
+    query?: string,
+  ): Promise<NotionDataSourcesResponse> => {
+    const response = await api.get<NotionDataSourcesResponse>(
+      `/credentials/${id}/notion/data-sources`,
+      { params: query ? { query } : undefined },
     );
     return response.data;
   },
