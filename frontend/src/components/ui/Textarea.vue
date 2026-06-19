@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,14 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
 }>();
 
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
+
+defineExpose({
+  focus: (): void => {
+    textareaRef.value?.focus();
+  },
+});
+
 const classes = computed(() =>
   cn(
     "flex min-h-[80px] w-full rounded-xl border border-border bg-background px-4 py-3 text-sm",
@@ -43,6 +51,7 @@ function handleInput(event: Event): void {
 
 <template>
   <textarea
+    ref="textareaRef"
     :value="modelValue"
     :placeholder="placeholder"
     :disabled="disabled"

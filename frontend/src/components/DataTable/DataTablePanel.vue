@@ -90,6 +90,7 @@ const showCreateDialog = ref(false);
 const newName = ref("");
 const newDescription = ref("");
 const creating = ref(false);
+const createNameInputRef = ref<InstanceType<typeof Input> | null>(null);
 
 // ── Share dialog ──
 const showShareDialog = ref(false);
@@ -596,6 +597,18 @@ watch(
     }
   },
 );
+
+function focusCreateNameInput(): void {
+  nextTick(() => {
+    nextTick(() => createNameInputRef.value?.focus());
+  });
+}
+
+watch(showCreateDialog, (open) => {
+  if (open) {
+    focusCreateNameInput();
+  }
+});
 
 onMounted(async () => {
   const tablesPromise = loadTables();
@@ -1240,6 +1253,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
         <div>
           <Label>Name</Label>
           <Input
+            ref="createNameInputRef"
             v-model="newName"
             placeholder="My Table"
             class="mt-1"

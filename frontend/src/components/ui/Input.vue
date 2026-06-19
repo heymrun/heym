@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useAttrs } from "vue";
+import { computed, ref, useAttrs } from "vue";
 
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,14 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
 }>();
+
+const inputRef = ref<HTMLInputElement | null>(null);
+
+defineExpose({
+  focus: (): void => {
+    inputRef.value?.focus();
+  },
+});
 
 const attrs = useAttrs();
 
@@ -58,6 +66,7 @@ function handleInput(event: Event): void {
 
 <template>
   <input
+    ref="inputRef"
     v-bind="filteredAttrs"
     :type="type"
     :value="modelValue"

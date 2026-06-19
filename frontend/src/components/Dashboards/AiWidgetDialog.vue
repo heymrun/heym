@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Loader2, Sparkles, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
@@ -26,6 +26,7 @@ const emit = defineEmits<{
 }>();
 
 const prompt = ref("");
+const promptInputRef = ref<HTMLTextAreaElement | null>(null);
 const credentials = ref<CredentialListItem[]>([]);
 const models = ref<LLMModel[]>([]);
 const selectedCredentialId = ref("");
@@ -82,8 +83,15 @@ function onKeydown(event: KeyboardEvent): void {
 // stopPropagation (several exist in the dashboard view) and swallow the event.
 onUnmounted(() => window.removeEventListener("keydown", onKeydown, true));
 
+function focusPromptInput(): void {
+  nextTick(() => {
+    promptInputRef.value?.focus();
+  });
+}
+
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown, true);
+  focusPromptInput();
   try {
     credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0) {
@@ -127,6 +135,7 @@ onMounted(async () => {
           <div class="space-y-1">
             <label class="text-sm font-medium">What should this widget show?</label>
             <textarea
+              ref="promptInputRef"
               v-model="prompt"
               rows="3"
               class="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import { ChevronDown, Plus, Sparkles, Trash2 } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
@@ -22,6 +22,7 @@ const COLUMN_TYPES: DataTableColumn["type"][] = ["string", "number", "boolean", 
 
 const phase = ref<"input" | "review">("input");
 const prompt = ref("");
+const promptInputRef = ref<InstanceType<typeof Textarea> | null>(null);
 const credentialId = ref("");
 const modelName = ref("");
 const credentials = ref<CredentialListItem[]>([]);
@@ -43,8 +44,23 @@ function handleEscape(event: KeyboardEvent): void {
     emit("close");
   }
 }
-onMounted(() => window.addEventListener("keydown", handleEscape, true));
+onMounted(() => {
+  window.addEventListener("keydown", handleEscape, true);
+  focusPromptInput();
+});
 onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape, true));
+
+function focusPromptInput(): void {
+  nextTick(() => {
+    nextTick(() => promptInputRef.value?.focus());
+  });
+}
+
+watch(phase, (nextPhase) => {
+  if (nextPhase === "input") {
+    focusPromptInput();
+  }
+});
 
 const canGenerate = computed(
   () => prompt.value.trim().length > 0 && credentialId.value !== "" && modelName.value !== "",
@@ -206,6 +222,7 @@ async function handleSave(): Promise<void> {
         <div>
           <Label>Describe your table, or paste JSON</Label>
           <Textarea
+            ref="promptInputRef"
             v-model="prompt"
             placeholder="e.g. A table of books with title, author, page count and whether I've read it"
             class="mt-1"
