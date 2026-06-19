@@ -152,6 +152,7 @@ export type NodeType =
   | "redis"
   | "rag"
   | "grist"
+  | "github"
   | "googleSheets"
   | "bigquery"
   | "supabase"
@@ -421,6 +422,87 @@ export interface NodeData {
   gristRecordDataInputMode?: "raw" | "selective";
   gristFilterInputMode?: "raw" | "selective";
   gristColumns?: Array<{ id: string; name: string; type: string }>;
+  githubOperation?:
+    | "getRepository"
+    | "getRepositoryLicense"
+    | "getRepositoryProfile"
+    | "listPopularPaths"
+    | "listReferrers"
+    | "listOrganizationRepositories"
+    | "listUserRepositories"
+    | "getUserRepositories"
+    | "getUserIssues"
+    | "inviteUser"
+    | "getIssue"
+    | "listIssues"
+    | "getRepositoryIssues"
+    | "createComment"
+    | "createIssue"
+    | "updateIssue"
+    | "lockIssue"
+    | "listPullRequests"
+    | "getRepositoryPullRequests"
+    | "createPullRequest"
+    | "createReview"
+    | "getReview"
+    | "listReviews"
+    | "updateReview"
+    | "listReleases"
+    | "getRelease"
+    | "createRelease"
+    | "updateRelease"
+    | "deleteRelease"
+    | "listWorkflows"
+    | "getWorkflow"
+    | "enableWorkflow"
+    | "disableWorkflow"
+    | "getWorkflowUsage"
+    | "dispatchWorkflow"
+    | "dispatchWorkflowAndWait"
+    | "getFile"
+    | "listFiles"
+    | "upsertFile"
+    | "deleteFile";
+  githubOwner?: string;
+  githubRepo?: string;
+  githubOrganization?: string;
+  githubInviteEmail?: string;
+  githubIssueNumber?: string;
+  githubTitle?: string;
+  githubBody?: string;
+  githubCommentBody?: string;
+  githubState?: string;
+  githubStateReason?: string;
+  githubAssignee?: string;
+  githubCreator?: string;
+  githubMentioned?: string;
+  githubLabelsFilter?: string;
+  githubSince?: string;
+  githubSort?: string;
+  githubDirection?: string;
+  githubLabels?: string;
+  githubAssignees?: string;
+  githubLockReason?: string;
+  githubHead?: string;
+  githubBase?: string;
+  githubPullRequestNumber?: string;
+  githubReviewId?: string;
+  githubReviewEvent?: "APPROVE" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+  githubReviewBody?: string;
+  githubCommitId?: string;
+  githubDraft?: boolean;
+  githubPrerelease?: boolean;
+  githubFilePath?: string;
+  githubFileContent?: string;
+  githubCommitMessage?: string;
+  githubBranch?: string;
+  githubPerPage?: string;
+  githubTagName?: string;
+  githubReleaseId?: string;
+  githubWorkflowId?: string;
+  githubWorkflowInputs?: string;
+  githubWaitTimeoutSeconds?: string;
+  githubPollIntervalSeconds?: string;
   errorMessage?: string;
   httpStatusCode?: number;
   retryEnabled?: boolean;

@@ -1,6 +1,7 @@
 export type CredentialType =
   | "openai"
   | "google"
+  | "github"
   | "custom"
   | "bearer"
   | "header"
@@ -73,6 +74,11 @@ export interface CredentialConfigOpenAI {
 
 export interface CredentialConfigGoogle {
   api_key: string;
+}
+
+export interface CredentialConfigGitHub {
+  api_key: string;
+  base_url?: string;
 }
 
 export interface CredentialConfigElevenLabs {
@@ -190,6 +196,7 @@ export interface CredentialConfigSupabase {
 export type CredentialConfig =
   | CredentialConfigOpenAI
   | CredentialConfigGoogle
+  | CredentialConfigGitHub
   | CredentialConfigCustom
   | CredentialConfigBearer
   | CredentialConfigHeader
@@ -246,6 +253,7 @@ export interface SupabaseColumnsResponse {
 export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   openai: "OpenAI",
   google: "Google AI",
+  github: "GitHub",
   custom: "Custom (OpenAI Compatible)",
   bearer: "Authorization Bearer Token",
   header: "Header Authorization",
@@ -272,6 +280,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   openai: "Connect to OpenAI API for GPT models",
   google: "Connect to Google AI for Gemini models",
+  github: "Store a GitHub personal access token for GitHub API, MCP, and agent workflows",
   custom: "Connect to any OpenAI-compatible API endpoint",
   bearer: "Store a Bearer token for Authorization header",
   header: "Store custom HTTP headers (key:value)",

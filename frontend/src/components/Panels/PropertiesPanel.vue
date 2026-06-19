@@ -9,7 +9,67 @@ import {
   type ComponentPublicInstance,
 } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BarChart3, BookOpen, Bot, Braces, Brain, Bug, CalendarClock, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Database, ExternalLink, FileArchive, FileJson, GitBranch, GitMerge, Globe, HardDrive, Inbox, Loader2, Mail, Maximize2, MessageSquare, Minus, Minimize2, MonitorPlay, MousePointerClick, Play, Plug, Plus, Power, Rabbit, Radio, Repeat, Search, Send, Server, Settings, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Trash2, Type, Variable, X, XCircle, Zap } from "lucide-vue-next";
+import {
+  AlertTriangle,
+  Ban,
+  BarChart3,
+  BookOpen,
+  Bot,
+  Braces,
+  Brain,
+  Bug,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Copy,
+  Database,
+  ExternalLink,
+  FileArchive,
+  FileJson,
+  GitBranch,
+  GitMerge,
+  Github,
+  Globe,
+  HardDrive,
+  Inbox,
+  Loader2,
+  Mail,
+  Maximize2,
+  MessageSquare,
+  Minus,
+  Minimize2,
+  MonitorPlay,
+  MousePointerClick,
+  Play,
+  Plug,
+  Plus,
+  Power,
+  Rabbit,
+  Radio,
+  Repeat,
+  Search,
+  Send,
+  Server,
+  Settings,
+  Settings2,
+  Sheet,
+  ShieldAlert,
+  Shuffle,
+  Sparkles,
+  StickyNote,
+  Table2,
+  Terminal,
+  Trash2,
+  Type,
+  Variable,
+  X,
+  XCircle,
+  Zap,
+} from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -50,6 +110,10 @@ import {
   mapNodeResultsToEnclosingLoopIterations,
   selectedLoopIterationIndexForNode,
 } from "@/lib/loopNodeDisplay";
+import {
+  getGitHubExpressionFields,
+  type GitHubExpressionFieldKey,
+} from "@/lib/githubExpressionFields";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { cn } from "@/lib/utils";
 import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
@@ -100,6 +164,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   redis: Database,
   rag: Search,
   grist: Table2,
+  github: Github,
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
@@ -147,6 +212,7 @@ const nodeColorMap: Record<NodeType, string> = {
   redis: "node-redis",
   rag: "node-rag",
   grist: "node-grist",
+  github: "node-github",
   googleSheets: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
@@ -194,6 +260,7 @@ const nodeDocSlugMap: Record<NodeType, string> = {
   redis: "redis-node",
   rag: "rag-node",
   grist: "grist-node",
+  github: "github-node",
   googleSheets: "google-sheets-node",
   bigquery: "bigquery-node",
   supabase: "supabase-node",
@@ -393,6 +460,7 @@ const imapTriggerCredentials = ref<CredentialListItem[]>([]);
 const smtpCredentials = ref<CredentialListItem[]>([]);
 const redisCredentials = ref<CredentialListItem[]>([]);
 const gristCredentials = ref<CredentialListItem[]>([]);
+const githubCredentials = ref<CredentialListItem[]>([]);
 const googleSheetsCredentials = ref<CredentialListItem[]>([]);
 const bigqueryCredentials = ref<CredentialListItem[]>([]);
 const supabaseCredentials = ref<CredentialListItem[]>([]);
@@ -465,6 +533,36 @@ const gristSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | n
 const gristRecordDataJsonInputRef = ref<InstanceType<typeof JsonInputPanel> | null>(null);
 const gristFilterJsonInputRef = ref<InstanceType<typeof JsonInputPanel> | null>(null);
 const currentGristExpressionFieldIndex = ref(0);
+const githubOwnerExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubRepoExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubOrganizationExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubInviteEmailExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubIssueNumberExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubAssigneeExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubCreatorExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubMentionedExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubLabelsFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubSinceExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubTitleExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubCommentBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubLabelsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubAssigneesExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubHeadExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubBaseExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubPullRequestNumberExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubReviewIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubReviewBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubCommitIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubFilePathExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubFileContentExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubCommitMessageExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubBranchExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubTagNameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubReleaseIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubWorkflowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const githubWorkflowInputsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const currentGitHubExpressionFieldIndex = ref(0);
 const googleSheetsSpreadsheetIdExpressionInputRef = ref<InstanceType<
   typeof ExpressionInput
 > | null>(null);
@@ -748,6 +846,14 @@ watch(
         gristCredentials.value = await credentialsApi.listByType("grist");
       } catch {
         gristCredentials.value = [];
+      }
+    }
+
+    if (type === "github") {
+      try {
+        githubCredentials.value = await credentialsApi.listByType("github");
+      } catch {
+        githubCredentials.value = [];
       }
     }
 
@@ -1670,6 +1776,7 @@ function closeAllExpressionExpandDialogs(): void {
   closeS3ExpressionDialogs();
   closeMCPCallExpressionDialogs();
   closeChartOutputExpressionDialogs();
+  closeGitHubExpressionDialogs();
 }
 
 /** Opens the primary expression evaluate dialog for whichever node is currently selected. */
@@ -1896,6 +2003,28 @@ function openPrimaryExpandDialogForSelectedNode(): void {
         nextTick(() => ragQueryInputRef.value?.openExpandDialog());
       } else if (ragDocumentInputRef.value) {
         nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
+      } else {
+        setTimeout(() => tryOpenDialog(attempts + 1), 100);
+      }
+    };
+    nextTick(() => tryOpenDialog());
+  } else if (nodeType === "github") {
+    const startIndex = resolveGitHubExpressionStartIndex();
+    currentGitHubExpressionFieldIndex.value = startIndex;
+    const tryOpenDialog = (attempts = 0): void => {
+      if (attempts > 20) {
+        return;
+      }
+      const n = workflowStore.selectedNode;
+      if (!n || n.type !== "github") {
+        return;
+      }
+      if (githubExpressionFieldCount.value === 0) {
+        return;
+      }
+      const field = githubExpressionFields.value[startIndex];
+      if (field && githubExpressionInputRefForKey(field.key)) {
+        nextTick(() => openGitHubExpressionFieldAtIndex(startIndex));
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -2161,6 +2290,7 @@ function selectedNodeHasPrimaryEvaluateExpandTarget(): boolean {
     case "variable":
     case "redis":
     case "rag":
+    case "github":
     case "throwError":
     case "crawler":
     case "consoleLog":
@@ -2442,6 +2572,7 @@ watch(
     currentS3ExpressionFieldIndex.value = 0;
     currentPlaywrightExpressionFieldIndex.value = 0;
     currentMCPCallExpressionFieldIndex.value = 0;
+    currentGitHubExpressionFieldIndex.value = 0;
     playwrightExprRefsBySlotKey.value = {};
     currentOutputExpressionFieldIndex.value = 0;
   },
@@ -2861,6 +2992,191 @@ function handleSupabaseExpressionFieldNavigate(direction: "prev" | "next"): void
 
 function onSupabaseRegisterExpressionFieldIndex(index: number): void {
   currentSupabaseExpressionFieldIndex.value = index;
+}
+
+const githubExpressionFields = computed(() => {
+  const n = workflowStore.selectedNode;
+  if (!n || n.type !== "github") {
+    return [];
+  }
+  const operation = (n.data.githubOperation as string | undefined) || "getRepository";
+  return getGitHubExpressionFields(operation);
+});
+
+const githubExpressionFieldCount = computed((): number => githubExpressionFields.value.length);
+
+function githubExpressionFieldIndex(key: GitHubExpressionFieldKey): number {
+  const index = githubExpressionFields.value.findIndex((field) => field.key === key);
+  return index >= 0 ? index : -1;
+}
+
+function githubExpressionFieldLabel(key: GitHubExpressionFieldKey): string {
+  return githubExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+}
+
+function githubExpressionNavBindings(key: GitHubExpressionFieldKey): {
+  navigationEnabled: boolean;
+  navigationIndex: number;
+  navigationTotal: number;
+  dialogNodeLabel: string;
+  dialogKeyLabel: string;
+} {
+  const index = githubExpressionFieldIndex(key);
+  return {
+    navigationEnabled: githubExpressionFieldCount.value > 1 && index >= 0,
+    navigationIndex: index >= 0 ? index : 0,
+    navigationTotal: githubExpressionFieldCount.value,
+    dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+    dialogKeyLabel: githubExpressionFieldLabel(key),
+  };
+}
+
+function githubExpressionInputRefForKey(
+  key: GitHubExpressionFieldKey,
+): InstanceType<typeof ExpressionInput> | null {
+  switch (key) {
+    case "githubOwner":
+      return githubOwnerExpressionInputRef.value;
+    case "githubRepo":
+      return githubRepoExpressionInputRef.value;
+    case "githubOrganization":
+      return githubOrganizationExpressionInputRef.value;
+    case "githubInviteEmail":
+      return githubInviteEmailExpressionInputRef.value;
+    case "githubIssueNumber":
+      return githubIssueNumberExpressionInputRef.value;
+    case "githubAssignee":
+      return githubAssigneeExpressionInputRef.value;
+    case "githubCreator":
+      return githubCreatorExpressionInputRef.value;
+    case "githubMentioned":
+      return githubMentionedExpressionInputRef.value;
+    case "githubLabelsFilter":
+      return githubLabelsFilterExpressionInputRef.value;
+    case "githubSince":
+      return githubSinceExpressionInputRef.value;
+    case "githubTitle":
+      return githubTitleExpressionInputRef.value;
+    case "githubBody":
+      return githubBodyExpressionInputRef.value;
+    case "githubCommentBody":
+      return githubCommentBodyExpressionInputRef.value;
+    case "githubLabels":
+      return githubLabelsExpressionInputRef.value;
+    case "githubAssignees":
+      return githubAssigneesExpressionInputRef.value;
+    case "githubHead":
+      return githubHeadExpressionInputRef.value;
+    case "githubBase":
+      return githubBaseExpressionInputRef.value;
+    case "githubPullRequestNumber":
+      return githubPullRequestNumberExpressionInputRef.value;
+    case "githubReviewId":
+      return githubReviewIdExpressionInputRef.value;
+    case "githubReviewBody":
+      return githubReviewBodyExpressionInputRef.value;
+    case "githubCommitId":
+      return githubCommitIdExpressionInputRef.value;
+    case "githubReleaseId":
+      return githubReleaseIdExpressionInputRef.value;
+    case "githubTagName":
+      return githubTagNameExpressionInputRef.value;
+    case "githubBranch":
+      return githubBranchExpressionInputRef.value;
+    case "githubWorkflowId":
+      return githubWorkflowIdExpressionInputRef.value;
+    case "githubWorkflowInputs":
+      return githubWorkflowInputsExpressionInputRef.value;
+    case "githubFilePath":
+      return githubFilePathExpressionInputRef.value;
+    case "githubCommitMessage":
+      return githubCommitMessageExpressionInputRef.value;
+    case "githubFileContent":
+      return githubFileContentExpressionInputRef.value;
+    default:
+      return null;
+  }
+}
+
+function resolveGitHubExpressionStartIndex(): number {
+  const focusField = workflowStore.focusField;
+  if (focusField) {
+    const index = githubExpressionFieldIndex(focusField as GitHubExpressionFieldKey);
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function openGitHubExpressionFieldAtIndex(index: number): boolean {
+  const n = selectedNode.value;
+  if (!n || n.type !== "github") {
+    return false;
+  }
+  const field = githubExpressionFields.value[index];
+  if (!field) {
+    return false;
+  }
+  currentGitHubExpressionFieldIndex.value = index;
+  const input = githubExpressionInputRefForKey(field.key);
+  if (!input) {
+    return false;
+  }
+  input.openExpandDialog();
+  return true;
+}
+
+function closeGitHubExpressionDialogs(): void {
+  githubOwnerExpressionInputRef.value?.closeExpandDialog();
+  githubRepoExpressionInputRef.value?.closeExpandDialog();
+  githubOrganizationExpressionInputRef.value?.closeExpandDialog();
+  githubInviteEmailExpressionInputRef.value?.closeExpandDialog();
+  githubIssueNumberExpressionInputRef.value?.closeExpandDialog();
+  githubAssigneeExpressionInputRef.value?.closeExpandDialog();
+  githubCreatorExpressionInputRef.value?.closeExpandDialog();
+  githubMentionedExpressionInputRef.value?.closeExpandDialog();
+  githubLabelsFilterExpressionInputRef.value?.closeExpandDialog();
+  githubSinceExpressionInputRef.value?.closeExpandDialog();
+  githubTitleExpressionInputRef.value?.closeExpandDialog();
+  githubBodyExpressionInputRef.value?.closeExpandDialog();
+  githubCommentBodyExpressionInputRef.value?.closeExpandDialog();
+  githubLabelsExpressionInputRef.value?.closeExpandDialog();
+  githubAssigneesExpressionInputRef.value?.closeExpandDialog();
+  githubHeadExpressionInputRef.value?.closeExpandDialog();
+  githubBaseExpressionInputRef.value?.closeExpandDialog();
+  githubPullRequestNumberExpressionInputRef.value?.closeExpandDialog();
+  githubReviewIdExpressionInputRef.value?.closeExpandDialog();
+  githubReviewBodyExpressionInputRef.value?.closeExpandDialog();
+  githubCommitIdExpressionInputRef.value?.closeExpandDialog();
+  githubReleaseIdExpressionInputRef.value?.closeExpandDialog();
+  githubTagNameExpressionInputRef.value?.closeExpandDialog();
+  githubBranchExpressionInputRef.value?.closeExpandDialog();
+  githubWorkflowIdExpressionInputRef.value?.closeExpandDialog();
+  githubWorkflowInputsExpressionInputRef.value?.closeExpandDialog();
+  githubFilePathExpressionInputRef.value?.closeExpandDialog();
+  githubCommitMessageExpressionInputRef.value?.closeExpandDialog();
+  githubFileContentExpressionInputRef.value?.closeExpandDialog();
+}
+
+function handleGitHubExpressionFieldNavigate(direction: "prev" | "next"): void {
+  const total = githubExpressionFieldCount.value;
+  const newIndex =
+    direction === "prev"
+      ? currentGitHubExpressionFieldIndex.value - 1
+      : currentGitHubExpressionFieldIndex.value + 1;
+  if (newIndex < 0 || newIndex >= total) {
+    return;
+  }
+  closeGitHubExpressionDialogs();
+  currentGitHubExpressionFieldIndex.value = newIndex;
+  nextTick(() => {
+    openGitHubExpressionFieldAtIndex(newIndex);
+  });
+}
+
+function onGitHubRegisterExpressionFieldIndex(index: number): void {
+  currentGitHubExpressionFieldIndex.value = index;
 }
 
 function bqMappingInputRef(index: number, el: InstanceType<typeof ExpressionInput> | null): void {
@@ -3689,6 +4005,156 @@ const gristCredentialOptions = computed(() => {
     "Shared Grist credential (from owner)",
   );
 });
+
+const githubCredentialOptions = computed(() => {
+  const node = selectedNode.value;
+  const selectedCredentialId =
+    node && node.type === "github"
+      ? (node.data.credentialId as string | undefined)
+      : undefined;
+
+  return buildCredentialOptions(
+    githubCredentials.value,
+    selectedCredentialId,
+    "Select GitHub credential...",
+    "Shared GitHub credential (from owner)",
+  );
+});
+
+const githubOperationOptions = [
+  { value: "getRepository", label: "Get Repository" },
+  { value: "getRepositoryLicense", label: "Get Repository License" },
+  { value: "getRepositoryProfile", label: "Get Repository Profile" },
+  { value: "listPopularPaths", label: "List Popular Paths for Repository" },
+  { value: "listReferrers", label: "List Top Referrers for Repository" },
+  { value: "listOrganizationRepositories", label: "List Organization Repositories" },
+  { value: "listUserRepositories", label: "List User Repositories" },
+  { value: "getUserRepositories", label: "Get User Repositories" },
+  { value: "getUserIssues", label: "Get User Issues" },
+  { value: "inviteUser", label: "Invite User" },
+  { value: "createIssue", label: "Create Issue" },
+  { value: "getIssue", label: "Get Issue" },
+  { value: "listIssues", label: "List Issues" },
+  { value: "getRepositoryIssues", label: "Get Repository Issues" },
+  { value: "lockIssue", label: "Lock Issue" },
+  { value: "updateIssue", label: "Edit Issue" },
+  { value: "createComment", label: "Create Comment" },
+  { value: "createPullRequest", label: "Create Pull Request" },
+  { value: "listPullRequests", label: "List Pull Requests" },
+  { value: "getRepositoryPullRequests", label: "Get Repository Pull Requests" },
+  { value: "createReview", label: "Create Review" },
+  { value: "getReview", label: "Get Review" },
+  { value: "listReviews", label: "List Reviews" },
+  { value: "updateReview", label: "Update Review" },
+  { value: "createRelease", label: "Create Release" },
+  { value: "deleteRelease", label: "Delete Release" },
+  { value: "getRelease", label: "Get Release" },
+  { value: "listReleases", label: "List Releases" },
+  { value: "updateRelease", label: "Update Release" },
+  { value: "dispatchWorkflow", label: "Dispatch Workflow" },
+  { value: "dispatchWorkflowAndWait", label: "Dispatch Workflow and Wait" },
+  { value: "disableWorkflow", label: "Disable Workflow" },
+  { value: "enableWorkflow", label: "Enable Workflow" },
+  { value: "getWorkflow", label: "Get Workflow" },
+  { value: "getWorkflowUsage", label: "Get Workflow Usage" },
+  { value: "listWorkflows", label: "List Workflows" },
+  { value: "upsertFile", label: "Create or Update File" },
+  { value: "deleteFile", label: "Delete File" },
+  { value: "getFile", label: "Get File" },
+  { value: "listFiles", label: "List Files" },
+];
+
+const githubStateOptions = [
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+  { value: "all", label: "All" },
+];
+
+const githubIssueSortOptions = [
+  { value: "", label: "Default" },
+  { value: "created", label: "Created" },
+  { value: "updated", label: "Updated" },
+  { value: "comments", label: "Comments" },
+];
+
+const githubPullRequestSortOptions = [
+  { value: "", label: "Default" },
+  { value: "created", label: "Created" },
+  { value: "updated", label: "Updated" },
+  { value: "popularity", label: "Popularity" },
+  { value: "long-running", label: "Long-running" },
+];
+
+const githubDirectionOptions = [
+  { value: "", label: "Default" },
+  { value: "asc", label: "Ascending" },
+  { value: "desc", label: "Descending" },
+];
+
+const githubUpdateIssueStateOptions = [
+  { value: "", label: "Don't change" },
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+];
+
+const githubIssueStateReasonOptions = [
+  { value: "", label: "Don't change" },
+  { value: "completed", label: "Completed" },
+  { value: "not_planned", label: "Not Planned" },
+  { value: "duplicate", label: "Duplicate" },
+  { value: "reopened", label: "Reopened" },
+];
+
+const githubLockReasonOptions = [
+  { value: "", label: "No reason" },
+  { value: "off-topic", label: "Off-topic" },
+  { value: "too heated", label: "Too heated" },
+  { value: "resolved", label: "Resolved" },
+  { value: "spam", label: "Spam" },
+];
+
+const githubReviewEventOptions = [
+  { value: "APPROVE", label: "Approve" },
+  { value: "REQUEST_CHANGES", label: "Request Changes" },
+  { value: "COMMENT", label: "Comment" },
+  { value: "PENDING", label: "Pending" },
+];
+
+const githubRepoOptionalOperations = new Set([
+  "listOrganizationRepositories",
+  "listUserRepositories",
+  "getUserRepositories",
+  "getUserIssues",
+  "inviteUser",
+]);
+
+const githubOwnerOptionalOperations = new Set(["getUserIssues", "inviteUser"]);
+
+const githubPerPageOperations = new Set([
+  "listIssues",
+  "getRepositoryIssues",
+  "getUserIssues",
+  "listPullRequests",
+  "getRepositoryPullRequests",
+  "listReviews",
+  "listReleases",
+  "listWorkflows",
+  "listOrganizationRepositories",
+  "listUserRepositories",
+  "getUserRepositories",
+]);
+
+function isGitHubRepoRequired(operation: string | undefined): boolean {
+  return !githubRepoOptionalOperations.has(operation || "");
+}
+
+function isGitHubOwnerRequired(operation: string | undefined): boolean {
+  return !githubOwnerOptionalOperations.has(operation || "");
+}
+
+function usesGitHubPerPage(operation: string | undefined): boolean {
+  return githubPerPageOperations.has(operation || "");
+}
 
 const googleSheetsCredentialOptions = computed(() => {
   const node = selectedNode.value;
@@ -10272,6 +10738,967 @@ onUnmounted(() => {
                   <div>${{ selectedNode.data.label }}.success - Boolean</div>
                   <div>${{ selectedNode.data.label }}.deleted - Array of deleted IDs</div>
                   <div>${{ selectedNode.data.label }}.count - Number deleted</div>
+                </template>
+                <template v-else>
+                  <div>Select an operation to see output fields</div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'github'">
+            <div class="space-y-2">
+              <Label>GitHub Credential</Label>
+              <Select
+                :model-value="selectedNode.data.credentialId || ''"
+                :options="githubCredentialOptions"
+                @update:model-value="updateNodeData('credentialId', $event)"
+              />
+              <div v-if="!selectedNode.data.credentialId">
+                <p class="text-xs text-amber-500 flex items-center gap-1">
+                  <AlertTriangle class="h-3 w-3" />
+                  Credential is required.
+                </p>
+                <p class="text-xs text-muted-foreground mt-1">
+                  <a
+                    href="/?tab=credentials"
+                    class="text-primary hover:underline"
+                    @click.prevent="$router.push('/?tab=credentials')"
+                  >Add credentials</a> in Dashboard
+                </p>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <Label>Operation</Label>
+              <Select
+                :model-value="selectedNode.data.githubOperation || 'getRepository'"
+                :options="githubOperationOptions"
+                @update:model-value="updateNodeData('githubOperation', $event)"
+              />
+            </div>
+
+            <div
+              class="grid gap-3"
+              :class="isGitHubRepoRequired(selectedNode.data.githubOperation) ? 'grid-cols-2' : 'grid-cols-1'"
+            >
+              <div
+                v-if="isGitHubOwnerRequired(selectedNode.data.githubOperation)"
+                class="space-y-2"
+              >
+                <Label>
+                  {{ selectedNode.data.githubOperation === 'listOrganizationRepositories' ? 'Organization' : 'Owner' }}
+                </Label>
+                <ExpressionInput
+                  ref="githubOwnerExpressionInputRef"
+                  :model-value="selectedNode.data.githubOwner || ''"
+                  placeholder="octocat"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubOwner')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubOwner', $event)"
+                />
+              </div>
+              <div
+                v-if="isGitHubRepoRequired(selectedNode.data.githubOperation)"
+                class="space-y-2"
+              >
+                <Label>Repository</Label>
+                <ExpressionInput
+                  ref="githubRepoExpressionInputRef"
+                  :model-value="selectedNode.data.githubRepo || ''"
+                  placeholder="hello-world"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubRepo')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubRepo', $event)"
+                />
+              </div>
+            </div>
+
+            <template v-if="selectedNode.data.githubOperation === 'inviteUser'">
+              <div class="space-y-2">
+                <Label>Organization</Label>
+                <ExpressionInput
+                  ref="githubOrganizationExpressionInputRef"
+                  :model-value="selectedNode.data.githubOrganization || ''"
+                  placeholder="octo-org"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubOrganization')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubOrganization', $event)"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label>Email</Label>
+                <ExpressionInput
+                  ref="githubInviteEmailExpressionInputRef"
+                  :model-value="selectedNode.data.githubInviteEmail || ''"
+                  placeholder="user@example.com"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubInviteEmail')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubInviteEmail', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'getIssue' || selectedNode.data.githubOperation === 'updateIssue' || selectedNode.data.githubOperation === 'createComment' || selectedNode.data.githubOperation === 'lockIssue'">
+              <div class="space-y-2">
+                <Label>Issue Number</Label>
+                <ExpressionInput
+                  ref="githubIssueNumberExpressionInputRef"
+                  :model-value="selectedNode.data.githubIssueNumber || ''"
+                  placeholder="123"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubIssueNumber')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubIssueNumber', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'listIssues' || selectedNode.data.githubOperation === 'getRepositoryIssues' || selectedNode.data.githubOperation === 'getUserIssues' || selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests' || selectedNode.data.githubOperation === 'updateIssue'">
+              <div
+                class="grid gap-3"
+                :class="usesGitHubPerPage(selectedNode.data.githubOperation) ? 'grid-cols-2' : 'grid-cols-1'"
+              >
+                <div class="space-y-2">
+                  <Label>State</Label>
+                  <Select
+                    :model-value="selectedNode.data.githubOperation === 'updateIssue' ? (selectedNode.data.githubState ?? '') : (selectedNode.data.githubState || 'open')"
+                    :options="selectedNode.data.githubOperation === 'updateIssue' ? githubUpdateIssueStateOptions : githubStateOptions"
+                    @update:model-value="updateNodeData('githubState', $event)"
+                  />
+                </div>
+                <div
+                  v-if="usesGitHubPerPage(selectedNode.data.githubOperation)"
+                  class="space-y-2"
+                >
+                  <Label>Per Page</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    max="100"
+                    :model-value="selectedNode.data.githubPerPage || '30'"
+                    placeholder="30"
+                    @update:model-value="updateNodeData('githubPerPage', $event)"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'listIssues' || selectedNode.data.githubOperation === 'getRepositoryIssues' || selectedNode.data.githubOperation === 'getUserIssues'">
+              <div class="grid grid-cols-2 gap-3">
+                <div
+                  v-if="selectedNode.data.githubOperation !== 'getUserIssues'"
+                  class="space-y-2"
+                >
+                  <Label>Assignee</Label>
+                  <ExpressionInput
+                    ref="githubAssigneeExpressionInputRef"
+                    :model-value="selectedNode.data.githubAssignee || ''"
+                    placeholder="octocat"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubAssignee')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubAssignee', $event)"
+                  />
+                </div>
+                <div
+                  v-if="selectedNode.data.githubOperation !== 'getUserIssues'"
+                  class="space-y-2"
+                >
+                  <Label>Creator</Label>
+                  <ExpressionInput
+                    ref="githubCreatorExpressionInputRef"
+                    :model-value="selectedNode.data.githubCreator || ''"
+                    placeholder="octocat"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubCreator')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubCreator', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>
+                    {{ selectedNode.data.githubOperation === 'getUserIssues' ? 'Mentioned Filter' : 'Mentioned User' }}
+                  </Label>
+                  <ExpressionInput
+                    ref="githubMentionedExpressionInputRef"
+                    :model-value="selectedNode.data.githubMentioned || ''"
+                    :placeholder="selectedNode.data.githubOperation === 'getUserIssues' ? 'true' : 'octocat'"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubMentioned')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubMentioned', $event)"
+                  />
+                  <p
+                    v-if="selectedNode.data.githubOperation === 'getUserIssues'"
+                    class="text-xs text-muted-foreground"
+                  >
+                    Set any non-empty value to return issues mentioning the authenticated user
+                    instead of issues assigned to them.
+                  </p>
+                </div>
+                <div class="space-y-2">
+                  <Label>Labels</Label>
+                  <ExpressionInput
+                    ref="githubLabelsFilterExpressionInputRef"
+                    :model-value="selectedNode.data.githubLabelsFilter || ''"
+                    placeholder="bug,backend"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubLabelsFilter')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubLabelsFilter', $event)"
+                  />
+                </div>
+              </div>
+              <div class="space-y-2">
+                <Label>Updated Since</Label>
+                <ExpressionInput
+                  ref="githubSinceExpressionInputRef"
+                  :model-value="selectedNode.data.githubSince || ''"
+                  placeholder="2026-01-01T00:00:00Z"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubSince')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubSince', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'listIssues' || selectedNode.data.githubOperation === 'getRepositoryIssues' || selectedNode.data.githubOperation === 'getUserIssues' || selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <Label>Sort</Label>
+                  <Select
+                    :model-value="selectedNode.data.githubSort || ''"
+                    :options="selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests' ? githubPullRequestSortOptions : githubIssueSortOptions"
+                    @update:model-value="updateNodeData('githubSort', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>Direction</Label>
+                  <Select
+                    :model-value="selectedNode.data.githubDirection || ''"
+                    :options="githubDirectionOptions"
+                    @update:model-value="updateNodeData('githubDirection', $event)"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'updateIssue'">
+              <div class="space-y-2">
+                <Label>State Reason</Label>
+                <Select
+                  :model-value="selectedNode.data.githubStateReason ?? ''"
+                  :options="githubIssueStateReasonOptions"
+                  @update:model-value="updateNodeData('githubStateReason', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="usesGitHubPerPage(selectedNode.data.githubOperation) && selectedNode.data.githubOperation !== 'listIssues' && selectedNode.data.githubOperation !== 'listPullRequests'">
+              <div class="space-y-2">
+                <Label>Per Page</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  :model-value="selectedNode.data.githubPerPage || '30'"
+                  placeholder="30"
+                  @update:model-value="updateNodeData('githubPerPage', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createIssue' || selectedNode.data.githubOperation === 'updateIssue' || selectedNode.data.githubOperation === 'createPullRequest' || selectedNode.data.githubOperation === 'createRelease' || selectedNode.data.githubOperation === 'updateRelease'">
+              <div class="space-y-2">
+                <Label>{{ selectedNode.data.githubOperation === 'createRelease' || selectedNode.data.githubOperation === 'updateRelease' ? 'Name / Title' : 'Title' }}</Label>
+                <ExpressionInput
+                  ref="githubTitleExpressionInputRef"
+                  :model-value="selectedNode.data.githubTitle || ''"
+                  placeholder="Fix flaky workflow run"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubTitle')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubTitle', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createIssue' || selectedNode.data.githubOperation === 'updateIssue' || selectedNode.data.githubOperation === 'createPullRequest' || selectedNode.data.githubOperation === 'createRelease' || selectedNode.data.githubOperation === 'updateRelease'">
+              <div class="space-y-2">
+                <Label>Body</Label>
+                <ExpressionInput
+                  ref="githubBodyExpressionInputRef"
+                  :model-value="selectedNode.data.githubBody || ''"
+                  placeholder="$input.text"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubBody')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubBody', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createComment'">
+              <div class="space-y-2">
+                <Label>Comment Body</Label>
+                <ExpressionInput
+                  ref="githubCommentBodyExpressionInputRef"
+                  :model-value="selectedNode.data.githubCommentBody || '$input.text'"
+                  placeholder="$input.text"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubCommentBody')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubCommentBody', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createIssue' || selectedNode.data.githubOperation === 'updateIssue'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <Label>Labels (JSON Array)</Label>
+                  <ExpressionInput
+                    ref="githubLabelsExpressionInputRef"
+                    :model-value="selectedNode.data.githubLabels ?? ''"
+                    placeholder="[&quot;bug&quot;, &quot;backend&quot;]"
+                    :rows="2"
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubLabels')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubLabels', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>Assignees (JSON Array)</Label>
+                  <ExpressionInput
+                    ref="githubAssigneesExpressionInputRef"
+                    :model-value="selectedNode.data.githubAssignees ?? ''"
+                    placeholder="[&quot;octocat&quot;]"
+                    :rows="2"
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubAssignees')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubAssignees', $event)"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'lockIssue'">
+              <div class="space-y-2">
+                <Label>Lock Reason</Label>
+                <Select
+                  :model-value="selectedNode.data.githubLockReason ?? ''"
+                  :options="githubLockReasonOptions"
+                  @update:model-value="updateNodeData('githubLockReason', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createPullRequest'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <Label>Head Branch</Label>
+                  <ExpressionInput
+                    ref="githubHeadExpressionInputRef"
+                    :model-value="selectedNode.data.githubHead || ''"
+                    placeholder="feature/my-branch"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubHead')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubHead', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>Base Branch</Label>
+                  <ExpressionInput
+                    ref="githubBaseExpressionInputRef"
+                    :model-value="selectedNode.data.githubBase || 'main'"
+                    placeholder="main"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubBase')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubBase', $event)"
+                  />
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  id="github-draft-pr"
+                  type="checkbox"
+                  :checked="selectedNode.data.githubDraft === true"
+                  class="rounded border-border"
+                  @change="updateNodeData('githubDraft', ($event.target as HTMLInputElement).checked)"
+                >
+                <label
+                  for="github-draft-pr"
+                  class="text-sm cursor-pointer select-none"
+                >Create as draft pull request</label>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createReview' || selectedNode.data.githubOperation === 'getReview' || selectedNode.data.githubOperation === 'listReviews' || selectedNode.data.githubOperation === 'updateReview'">
+              <div class="space-y-2">
+                <Label>Pull Request Number</Label>
+                <ExpressionInput
+                  ref="githubPullRequestNumberExpressionInputRef"
+                  :model-value="selectedNode.data.githubPullRequestNumber || ''"
+                  placeholder="123"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubPullRequestNumber')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubPullRequestNumber', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'getReview' || selectedNode.data.githubOperation === 'updateReview'">
+              <div class="space-y-2">
+                <Label>Review ID</Label>
+                <ExpressionInput
+                  ref="githubReviewIdExpressionInputRef"
+                  :model-value="selectedNode.data.githubReviewId || ''"
+                  placeholder="987654"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubReviewId')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubReviewId', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createReview'">
+              <div class="space-y-2">
+                <Label>Review Event</Label>
+                <Select
+                  :model-value="selectedNode.data.githubReviewEvent || 'APPROVE'"
+                  :options="githubReviewEventOptions"
+                  @update:model-value="updateNodeData('githubReviewEvent', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createReview' || selectedNode.data.githubOperation === 'updateReview'">
+              <div class="space-y-2">
+                <Label>Review Body</Label>
+                <ExpressionInput
+                  ref="githubReviewBodyExpressionInputRef"
+                  :model-value="selectedNode.data.githubReviewBody || ''"
+                  placeholder="Looks good to me"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubReviewBody')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubReviewBody', $event)"
+                />
+                <p
+                  v-if="selectedNode.data.githubOperation === 'createReview'"
+                  class="text-xs text-muted-foreground"
+                >
+                  Required for Comment and Request Changes events.
+                </p>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createReview'">
+              <div class="space-y-2">
+                <Label>Commit ID <span class="text-muted-foreground font-normal">(optional)</span></Label>
+                <ExpressionInput
+                  ref="githubCommitIdExpressionInputRef"
+                  :model-value="selectedNode.data.githubCommitId || ''"
+                  placeholder="Latest PR commit when empty"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubCommitId')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubCommitId', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'getRelease' || selectedNode.data.githubOperation === 'updateRelease' || selectedNode.data.githubOperation === 'deleteRelease'">
+              <div class="space-y-2">
+                <Label>Release ID</Label>
+                <ExpressionInput
+                  ref="githubReleaseIdExpressionInputRef"
+                  :model-value="selectedNode.data.githubReleaseId || ''"
+                  placeholder="123456"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubReleaseId')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubReleaseId', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'createRelease' || selectedNode.data.githubOperation === 'updateRelease'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <Label>Tag Name</Label>
+                  <ExpressionInput
+                    ref="githubTagNameExpressionInputRef"
+                    :model-value="selectedNode.data.githubTagName || ''"
+                    placeholder="v1.2.3"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubTagName')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubTagName', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>Target Commitish / Branch</Label>
+                  <ExpressionInput
+                    ref="githubBranchExpressionInputRef"
+                    :model-value="selectedNode.data.githubBranch || ''"
+                    placeholder="main"
+                    single-line
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    v-bind="githubExpressionNavBindings('githubBranch')"
+                    @navigate="handleGitHubExpressionFieldNavigate"
+                    @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                    @update:model-value="updateNodeData('githubBranch', $event)"
+                  />
+                </div>
+              </div>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    id="github-release-draft"
+                    type="checkbox"
+                    :checked="selectedNode.data.githubDraft === true"
+                    class="rounded border-border"
+                    @change="updateNodeData('githubDraft', ($event.target as HTMLInputElement).checked)"
+                  >
+                  <span>Draft release</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    id="github-release-prerelease"
+                    type="checkbox"
+                    :checked="selectedNode.data.githubPrerelease === true"
+                    class="rounded border-border"
+                    @change="updateNodeData('githubPrerelease', ($event.target as HTMLInputElement).checked)"
+                  >
+                  <span>Prerelease</span>
+                </label>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'getWorkflow' || selectedNode.data.githubOperation === 'dispatchWorkflow' || selectedNode.data.githubOperation === 'dispatchWorkflowAndWait' || selectedNode.data.githubOperation === 'enableWorkflow' || selectedNode.data.githubOperation === 'disableWorkflow' || selectedNode.data.githubOperation === 'getWorkflowUsage'">
+              <div class="space-y-2">
+                <Label>Workflow ID or File Name</Label>
+                <ExpressionInput
+                  ref="githubWorkflowIdExpressionInputRef"
+                  :model-value="selectedNode.data.githubWorkflowId || ''"
+                  placeholder="build.yml"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubWorkflowId')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubWorkflowId', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'dispatchWorkflow' || selectedNode.data.githubOperation === 'dispatchWorkflowAndWait'">
+              <div class="space-y-2">
+                <Label>Ref or Branch</Label>
+                <ExpressionInput
+                  ref="githubBranchExpressionInputRef"
+                  :model-value="selectedNode.data.githubBranch || ''"
+                  placeholder="main"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubBranch')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubBranch', $event)"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label>Workflow Inputs (JSON Object)</Label>
+                <ExpressionInput
+                  ref="githubWorkflowInputsExpressionInputRef"
+                  :model-value="selectedNode.data.githubWorkflowInputs ?? ''"
+                  placeholder="{&quot;environment&quot;:&quot;prod&quot;}"
+                  :rows="3"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubWorkflowInputs')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubWorkflowInputs', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'dispatchWorkflowAndWait'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <Label>Wait Timeout (seconds)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    :model-value="selectedNode.data.githubWaitTimeoutSeconds || '600'"
+                    @update:model-value="updateNodeData('githubWaitTimeoutSeconds', $event)"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label>Poll Interval (seconds)</Label>
+                  <Input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    :model-value="selectedNode.data.githubPollIntervalSeconds || '5'"
+                    @update:model-value="updateNodeData('githubPollIntervalSeconds', $event)"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'getFile' || selectedNode.data.githubOperation === 'listFiles' || selectedNode.data.githubOperation === 'upsertFile' || selectedNode.data.githubOperation === 'deleteFile'">
+              <div class="space-y-2">
+                <Label>{{ selectedNode.data.githubOperation === 'listFiles' ? 'Directory Path' : 'File Path' }}</Label>
+                <ExpressionInput
+                  ref="githubFilePathExpressionInputRef"
+                  :model-value="selectedNode.data.githubFilePath || ''"
+                  placeholder="docs/README.md"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubFilePath')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubFilePath', $event)"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label>{{ selectedNode.data.githubOperation === 'getFile' || selectedNode.data.githubOperation === 'listFiles' ? 'Ref or Branch' : 'Target Branch' }}</Label>
+                <ExpressionInput
+                  ref="githubBranchExpressionInputRef"
+                  :model-value="selectedNode.data.githubBranch || ''"
+                  placeholder="main"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubBranch')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubBranch', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'upsertFile' || selectedNode.data.githubOperation === 'deleteFile'">
+              <div class="space-y-2">
+                <Label>Commit Message</Label>
+                <ExpressionInput
+                  ref="githubCommitMessageExpressionInputRef"
+                  :model-value="selectedNode.data.githubCommitMessage || ''"
+                  placeholder="Update generated report"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubCommitMessage')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubCommitMessage', $event)"
+                />
+              </div>
+            </template>
+
+            <template v-if="selectedNode.data.githubOperation === 'upsertFile'">
+              <div class="space-y-2">
+                <Label>File Content</Label>
+                <ExpressionInput
+                  ref="githubFileContentExpressionInputRef"
+                  :model-value="selectedNode.data.githubFileContent || '$input.text'"
+                  placeholder="$input.text"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  v-bind="githubExpressionNavBindings('githubFileContent')"
+                  @navigate="handleGitHubExpressionFieldNavigate"
+                  @register-field-index="onGitHubRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('githubFileContent', $event)"
+                />
+              </div>
+            </template>
+
+            <div class="space-y-2 pt-2 border-t">
+              <Label class="text-muted-foreground">Output</Label>
+              <div class="text-xs font-mono space-y-1 text-muted-foreground">
+                <template v-if="selectedNode.data.githubOperation === 'getRepository'">
+                  <div>${{ selectedNode.data.label }}.repository - Repository payload</div>
+                  <div>${{ selectedNode.data.label }}.full_name - owner/repo</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getRepositoryLicense'">
+                  <div>${{ selectedNode.data.label }}.license - License payload</div>
+                  <div>${{ selectedNode.data.label }}.spdx_id - SPDX identifier</div>
+                  <div>${{ selectedNode.data.label }}.content - Decoded license content</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getRepositoryProfile'">
+                  <div>${{ selectedNode.data.label }}.profile - Community profile payload</div>
+                  <div>${{ selectedNode.data.label }}.health_percentage - Health score</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listPopularPaths'">
+                  <div>${{ selectedNode.data.label }}.paths - Popular path array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of paths</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listReferrers'">
+                  <div>${{ selectedNode.data.label }}.referrers - Referrer array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of referrers</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listOrganizationRepositories' || selectedNode.data.githubOperation === 'listUserRepositories' || selectedNode.data.githubOperation === 'getUserRepositories'">
+                  <div>${{ selectedNode.data.label }}.repositories - Repository array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of repositories</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'inviteUser'">
+                  <div>${{ selectedNode.data.label }}.invitation - Invitation payload</div>
+                  <div>${{ selectedNode.data.label }}.id - Invitation ID</div>
+                  <div>${{ selectedNode.data.label }}.email - Invited email</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getIssue' || selectedNode.data.githubOperation === 'createIssue' || selectedNode.data.githubOperation === 'updateIssue'">
+                  <div>${{ selectedNode.data.label }}.issue - Issue payload</div>
+                  <div>${{ selectedNode.data.label }}.number - Issue number</div>
+                  <div>${{ selectedNode.data.label }}.url - GitHub URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'createComment'">
+                  <div>${{ selectedNode.data.label }}.comment - Comment payload</div>
+                  <div>${{ selectedNode.data.label }}.id - Comment ID</div>
+                  <div>${{ selectedNode.data.label }}.url - Comment URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'lockIssue'">
+                  <div>${{ selectedNode.data.label }}.locked - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.issue_number - Locked issue number</div>
+                  <div>${{ selectedNode.data.label }}.lock_reason - Lock reason if provided</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listIssues' || selectedNode.data.githubOperation === 'getRepositoryIssues' || selectedNode.data.githubOperation === 'getUserIssues'">
+                  <div>${{ selectedNode.data.label }}.issues - Issue array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of issues</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests'">
+                  <div>${{ selectedNode.data.label }}.pull_requests - PR array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of pull requests</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'createPullRequest'">
+                  <div>${{ selectedNode.data.label }}.pull_request - PR payload</div>
+                  <div>${{ selectedNode.data.label }}.number - Pull request number</div>
+                  <div>${{ selectedNode.data.label }}.url - Pull request URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getReview' || selectedNode.data.githubOperation === 'createReview' || selectedNode.data.githubOperation === 'updateReview'">
+                  <div>${{ selectedNode.data.label }}.review - Review payload</div>
+                  <div>${{ selectedNode.data.label }}.id - Review ID</div>
+                  <div>${{ selectedNode.data.label }}.state - Review state</div>
+                  <div>${{ selectedNode.data.label }}.url - Review URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listReviews'">
+                  <div>${{ selectedNode.data.label }}.reviews - Review array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of reviews</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listReleases'">
+                  <div>${{ selectedNode.data.label }}.releases - Release array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of releases</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getRelease' || selectedNode.data.githubOperation === 'createRelease' || selectedNode.data.githubOperation === 'updateRelease'">
+                  <div>${{ selectedNode.data.label }}.release - Release payload</div>
+                  <div>${{ selectedNode.data.label }}.id - Release ID</div>
+                  <div>${{ selectedNode.data.label }}.tag_name - Tag name</div>
+                  <div>${{ selectedNode.data.label }}.url - Release URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'deleteRelease'">
+                  <div>${{ selectedNode.data.label }}.deleted - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.release_id - Deleted release ID</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listWorkflows'">
+                  <div>${{ selectedNode.data.label }}.workflows - Workflow array</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of workflows</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getWorkflow'">
+                  <div>${{ selectedNode.data.label }}.workflow - Workflow payload</div>
+                  <div>${{ selectedNode.data.label }}.id - Workflow ID</div>
+                  <div>${{ selectedNode.data.label }}.path - Workflow file path</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'enableWorkflow'">
+                  <div>${{ selectedNode.data.label }}.enabled - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.workflow_id - Workflow target</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'disableWorkflow'">
+                  <div>${{ selectedNode.data.label }}.disabled - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.workflow_id - Workflow target</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getWorkflowUsage'">
+                  <div>${{ selectedNode.data.label }}.usage - Workflow usage payload</div>
+                  <div>${{ selectedNode.data.label }}.billable - Usage by runner OS</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'dispatchWorkflow'">
+                  <div>${{ selectedNode.data.label }}.dispatched - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.workflow_id - Workflow target</div>
+                  <div>${{ selectedNode.data.label }}.ref - Workflow ref</div>
+                  <div>${{ selectedNode.data.label }}.inputs - Dispatch inputs object</div>
+                  <div>${{ selectedNode.data.label }}.workflow_run_id - Run ID when returned</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'dispatchWorkflowAndWait'">
+                  <div>${{ selectedNode.data.label }}.completed - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.workflow_run - Completed run payload</div>
+                  <div>${{ selectedNode.data.label }}.conclusion - Run conclusion</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'listFiles'">
+                  <div>${{ selectedNode.data.label }}.path - Directory path</div>
+                  <div>${{ selectedNode.data.label }}.items - Directory entries</div>
+                  <div>${{ selectedNode.data.label }}.count - Number of items</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'getFile'">
+                  <div>${{ selectedNode.data.label }}.file - File payload</div>
+                  <div>${{ selectedNode.data.label }}.path - Repository path</div>
+                  <div>${{ selectedNode.data.label }}.sha - File SHA</div>
+                  <div>${{ selectedNode.data.label }}.content - Decoded text content</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'upsertFile'">
+                  <div>${{ selectedNode.data.label }}.file - File payload</div>
+                  <div>${{ selectedNode.data.label }}.path - Repository path</div>
+                  <div>${{ selectedNode.data.label }}.sha - File SHA</div>
+                  <div>${{ selectedNode.data.label }}.commit_sha - Commit SHA</div>
+                  <div>${{ selectedNode.data.label }}.created - True when file was newly created</div>
+                </template>
+                <template v-else-if="selectedNode.data.githubOperation === 'deleteFile'">
+                  <div>${{ selectedNode.data.label }}.deleted - Boolean</div>
+                  <div>${{ selectedNode.data.label }}.path - Deleted repository path</div>
+                  <div>${{ selectedNode.data.label }}.sha - Deleted file SHA</div>
+                  <div>${{ selectedNode.data.label }}.commit_sha - Deletion commit SHA</div>
                 </template>
                 <template v-else>
                   <div>Select an operation to see output fields</div>

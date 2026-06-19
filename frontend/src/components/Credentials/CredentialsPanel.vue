@@ -57,6 +57,8 @@ function getTypeIcon(type: CredentialType): typeof Brain {
       return Brain;
     case "google":
       return Brain;
+    case "github":
+      return Key;
     case "custom":
       return Globe;
     case "bearer":
@@ -83,6 +85,8 @@ function getTypeColor(type: CredentialType): string {
       return "bg-green-500/10 text-green-500";
     case "google":
       return "bg-blue-500/10 text-blue-500";
+    case "github":
+      return "bg-slate-500/10 text-slate-500";
     case "custom":
       return "bg-purple-500/10 text-purple-500";
     case "bearer":

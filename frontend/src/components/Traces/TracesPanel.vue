@@ -29,6 +29,8 @@ interface SelectOption {
 const TRACE_SOURCE_LABELS: Record<string, string> = {
   workflow: "Workflow LLM",
   assistant: "AI Assistant",
+  ai_ask: "Execution Log Ask AI",
+  ai_builder: "Workflow AI Builder",
   dashboard_chat: "Dashboard Chat / Docs",
   skill_builder: "Skill Builder",
   evals: "Evals",
@@ -38,8 +40,14 @@ const TRACE_SOURCE_LABELS: Record<string, string> = {
   mcp: "MCP",
 };
 
-function formatTraceSourceLabel(source: string): string {
-  return TRACE_SOURCE_LABELS[source] ?? source;
+function formatTraceSourceLabel(trace: Pick<LLMTraceListItem, "source" | "node_label">): string {
+  if (trace.source === "assistant" && trace.node_label === "AI Ask") {
+    return TRACE_SOURCE_LABELS.ai_ask;
+  }
+  if (trace.source === "assistant" && trace.node_label === "AI Builder") {
+    return TRACE_SOURCE_LABELS.ai_builder;
+  }
+  return TRACE_SOURCE_LABELS[trace.source] ?? trace.source;
 }
 
 const traces = ref<LLMTraceListItem[]>([]);
@@ -300,6 +308,8 @@ const sourceOptions = computed<SelectOption[]>(() => [
   { value: "all", label: "All Sources" },
   { value: "workflow", label: TRACE_SOURCE_LABELS.workflow },
   { value: "assistant", label: TRACE_SOURCE_LABELS.assistant },
+  { value: "ai_ask", label: TRACE_SOURCE_LABELS.ai_ask },
+  { value: "ai_builder", label: TRACE_SOURCE_LABELS.ai_builder },
   { value: "expression_builder", label: TRACE_SOURCE_LABELS.expression_builder },
   { value: "dashboard_chat", label: TRACE_SOURCE_LABELS.dashboard_chat },
   { value: "skill_builder", label: TRACE_SOURCE_LABELS.skill_builder },
@@ -788,7 +798,7 @@ onMounted(async () => {
                 <span>{{ formatDate(trace.created_at) }}</span>
               </div>
               <span class="text-xs uppercase tracking-wide text-muted-foreground">
-                {{ formatTraceSourceLabel(trace.source) }}
+                {{ formatTraceSourceLabel(trace) }}
               </span>
               <span
                 v-if="traceModelListLabel(trace)"

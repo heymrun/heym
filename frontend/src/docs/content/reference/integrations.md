@@ -12,6 +12,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 |------|---------|------------|
 | **OpenAI** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md) | `api_key` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
+| **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Cohere** | Embeddings | `api_key` |
 | **Qdrant** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -32,6 +33,44 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Bearer** | [HTTP node](../nodes/http-node.md) | `token` |
 | **Header** | [HTTP node](../nodes/http-node.md) | `header_key`, `header_value` |
 | **FlareSolverr** | [Crawler node](../nodes/crawler-node.md) | `flaresolverr_url` |
+
+---
+
+## GitHub
+
+The GitHub credential stores a GitHub personal access token (PAT) so workflows can call the GitHub REST API through the [GitHub node](../nodes/github-node.md), pass the token into MCP servers such as `@modelcontextprotocol/server-github`, or use it from the [HTTP node](../nodes/http-node.md) for custom REST calls.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `api_key` | GitHub personal access token (`github_pat_...` fine-grained PAT or classic `ghp_...` PAT) |
+
+### Optional Fields
+
+| Field | Description |
+|-------|-------------|
+| `base_url` | GitHub API base URL for GitHub Enterprise Server (for example `https://github.example.com/api/v3`) |
+
+### Notes
+
+- Fine-grained personal access tokens are recommended when possible because you can scope them to specific repositories and permissions.
+- Leave `base_url` empty for GitHub.com. For GitHub Enterprise Server, use the full REST API
+  endpoint including `/api/v3` (for example `https://github.example.com/api/v3`), not the
+  server's web UI root such as `https://github.example.com`.
+- This credential currently models PAT-based auth only. To access organization repositories, use a PAT that has been granted the required organization/repository permissions.
+- GitHub App installation tokens and GitHub App setup flows are not first-class in the Heym UI today.
+- Prefer the [GitHub node](../nodes/github-node.md) for native repository, user, issue, pull request, review, release, Actions workflow, traffic, and file operations. Use the [HTTP node](../nodes/http-node.md) only when you need endpoints or payloads the GitHub node does not cover.
+- Use the [Agent node](../nodes/agent-node.md) with MCP by passing `$credentials.YourGitHubCredential` into an MCP connection environment variable such as `GITHUB_PERSONAL_ACCESS_TOKEN`.
+- GitHub's REST API commonly expects `Authorization: Bearer <token>` plus `Accept: application/vnd.github+json`.
+- When editing a GitHub credential, leaving the GitHub Enterprise `base_url` empty preserves the
+  existing endpoint. Enter a new URL only when you want to change that endpoint.
+
+### Used By
+
+- [GitHub node](../nodes/github-node.md)
+- [Agent node](../nodes/agent-node.md)
+- [HTTP node](../nodes/http-node.md)
 
 ---
 

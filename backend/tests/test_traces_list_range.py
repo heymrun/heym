@@ -134,3 +134,29 @@ class SourceFilterTests(unittest.TestCase):
         )
         self.assertIn("workflow", compiled)
         self.assertNotIn("expression_builder", compiled)
+
+    def test_ai_ask_filter_matches_assistant_execution_log_traces(self) -> None:
+        filters: list = []
+        _apply_source_filter(filters, "ai_ask")
+        self.assertEqual(len(filters), 1)
+        compiled = str(
+            filters[0].compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("assistant", compiled)
+        self.assertIn("AI Ask", compiled)
+
+    def test_ai_builder_filter_matches_assistant_builder_traces(self) -> None:
+        filters: list = []
+        _apply_source_filter(filters, "ai_builder")
+        self.assertEqual(len(filters), 1)
+        compiled = str(
+            filters[0].compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("assistant", compiled)
+        self.assertIn("AI Builder", compiled)

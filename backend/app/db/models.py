@@ -28,6 +28,7 @@ class Base(DeclarativeBase):
 class CredentialType(str, PyEnum):
     openai = "openai"
     google = "google"
+    github = "github"
     custom = "custom"
     bearer = "bearer"
     header = "header"

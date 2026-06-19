@@ -64,6 +64,7 @@
     --node-redis: 0 85% 52%;
     --node-rag: 252 87% 62%;
     --node-grist: 162 94% 35%;
+    --node-github: 222 47% 25%;
     --node-google-sheets: 153 82% 33%;
     --node-datatable: 190 95% 39%;
     --node-drive: 215 85% 50%;
@@ -132,6 +133,7 @@
     --node-redis: 0 83% 58%;
     --node-rag: 252 87% 67%;
     --node-grist: 162 94% 45%;
+    --node-github: 210 30% 78%;
     --node-google-sheets: 153 82% 42%;
     --node-datatable: 190 95% 49%;
     --node-drive: 215 85% 60%;

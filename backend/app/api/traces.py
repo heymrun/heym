@@ -54,6 +54,14 @@ def _apply_source_filter(filters: list, source: str) -> None:
                 (LLMTrace.source == "assistant") & (LLMTrace.node_label == "Expression Builder"),
             )
         )
+    elif source == "ai_ask":
+        filters.append(
+            (LLMTrace.source == "assistant") & (LLMTrace.node_label == "AI Ask"),
+        )
+    elif source == "ai_builder":
+        filters.append(
+            (LLMTrace.source == "assistant") & (LLMTrace.node_label == "AI Builder"),
+        )
     else:
         filters.append(LLMTrace.source == source)
 

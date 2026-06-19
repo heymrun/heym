@@ -3687,6 +3687,79 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 33. github (GitHub REST Operations)
+- **Type**: `github`
+- **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
+  workflows, traffic insights, and repository files
+- **Inputs**: 1 | **Outputs**: 1
+- **Required setup**: `credentialId` must point to an owned GitHub credential
+- **Common data fields**:
+  - `label`: Node identifier
+  - `credentialId`: UUID of the GitHub credential
+  - `githubOperation`: One of `getRepository`, `getRepositoryLicense`,
+    `getRepositoryProfile`, `getRepositoryIssues`, `getRepositoryPullRequests`,
+    `listPopularPaths`, `listReferrers`, `listOrganizationRepositories`,
+    `listUserRepositories`, `getUserRepositories`, `getUserIssues`, `inviteUser`,
+    `createIssue`, `getIssue`, `listIssues`, `updateIssue`, `lockIssue`,
+    `createComment`, `createPullRequest`, `listPullRequests`, `createReview`,
+    `getReview`, `listReviews`, `updateReview`, `createRelease`, `getRelease`,
+    `listReleases`, `updateRelease`, `deleteRelease`, `listWorkflows`, `getWorkflow`,
+    `enableWorkflow`, `disableWorkflow`, `getWorkflowUsage`, `dispatchWorkflow`,
+    `dispatchWorkflowAndWait`, `getFile`, `listFiles`, `upsertFile`, `deleteFile`
+  - `githubOwner`: Repository owner, organization, or username when required
+  - `githubRepo`: Repository name when required
+  - `githubPerPage`: Optional page size from 1 to 100 for list operations
+- **Operation-specific fields**:
+  - Issues: `githubIssueNumber`, `githubTitle`, `githubBody`, `githubState`,
+    `githubStateReason`, `githubLabels`, `githubAssignees`, `githubAssignee`,
+    `githubCreator`, `githubMentioned`, `githubLabelsFilter`, `githubSince`,
+    `githubSort`, `githubDirection`, `githubLockReason`
+  - Pull requests and reviews: `githubPullRequestNumber`, `githubHead`,
+    `githubBase`, `githubDraft`, `githubReviewId`, `githubReviewBody`,
+    `githubReviewEvent`, `githubCommitId`
+  - Releases: `githubReleaseId`, `githubTagName`, `githubTitle`, `githubBody`,
+    `githubBranch`, `githubDraft`, `githubPrerelease`
+  - Actions: `githubWorkflowId`, `githubBranch`, `githubWorkflowInputs`,
+    `githubWaitTimeoutSeconds`, `githubPollIntervalSeconds`
+  - Files: `githubFilePath`, `githubBranch`, `githubFileContent`,
+    `githubCommitMessage`
+  - Organization invitation: `githubOrganization`, `githubInviteEmail`
+
+**GitHub examples**:
+```json
+{
+  "type": "github",
+  "data": {
+    "label": "createBug",
+    "credentialId": "github-credential-uuid",
+    "githubOperation": "createIssue",
+    "githubOwner": "heymrun",
+    "githubRepo": "heym",
+    "githubTitle": "$issueRequest.body.title",
+    "githubBody": "$issueRequest.body.description",
+    "githubLabels": "[\\"bug\\"]"
+  }
+}
+```
+
+```json
+{
+  "type": "github",
+  "data": {
+    "label": "runDeployment",
+    "credentialId": "github-credential-uuid",
+    "githubOperation": "dispatchWorkflowAndWait",
+    "githubOwner": "heymrun",
+    "githubRepo": "heym",
+    "githubWorkflowId": "deploy.yml",
+    "githubBranch": "main",
+    "githubWorkflowInputs": "{\\"environment\\":\\"production\\"}",
+    "githubWaitTimeoutSeconds": "600",
+    "githubPollIntervalSeconds": "5"
+  }
+}
+```
+
 ## Edge Connections
 
 Edges connect nodes. Handle specification depends on the node type:

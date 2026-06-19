@@ -659,7 +659,16 @@ async function handleContextMenuEvalAgent(): Promise<void> {
   }
 }
 
-function handleNodeDoubleClick(event: { node: { id: string; data?: { nodeType?: NodeType; ragOperation?: string } } }): void {
+function handleNodeDoubleClick(event: {
+  node: {
+    id: string;
+    data?: {
+      nodeType?: NodeType;
+      ragOperation?: string;
+      githubOperation?: string;
+    };
+  };
+}): void {
   workflowStore.selectNode(event.node.id);
   if (event.node.data?.nodeType === "sticky") return;
   const nodeType = event.node.data?.nodeType;
@@ -678,6 +687,27 @@ function handleNodeDoubleClick(event: { node: { id: string; data?: { nodeType?: 
       fieldToFocus = "documentContent";
     } else if (ragOperation === "search") {
       fieldToFocus = "queryText";
+    }
+  } else if (nodeType === "github") {
+    const githubOperation = event.node.data?.githubOperation;
+    if (githubOperation === "createComment") {
+      fieldToFocus = "githubCommentBody";
+    } else if (
+      githubOperation === "createIssue" ||
+      githubOperation === "updateIssue" ||
+      githubOperation === "createRelease" ||
+      githubOperation === "updateRelease"
+    ) {
+      fieldToFocus = "githubBody";
+    } else if (githubOperation === "upsertFile") {
+      fieldToFocus = "githubFileContent";
+    } else if (
+      githubOperation === "dispatchWorkflow" ||
+      githubOperation === "dispatchWorkflowAndWait"
+    ) {
+      fieldToFocus = "githubWorkflowInputs";
+    } else {
+      fieldToFocus = "githubOwner";
     }
   } else if (nodeType === "throwError") {
     fieldToFocus = "errorMessage";
@@ -928,6 +958,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     redis: { label: "redis", credentialId: "", redisOperation: undefined, redisKey: "$input.text", redisValue: "$input.text" },
     rag: { label: "rag", vectorStoreId: "", ragOperation: undefined, documentContent: "$input.text", documentMetadata: "{}", queryText: "$input.text", searchLimit: 5, metadataFilters: "{}" },
     grist: { label: "grist", credentialId: "", gristOperation: undefined, gristDocId: "", gristTableId: "", gristRecordId: "", gristRecordData: "{}", gristRecordsData: "[]", gristFilter: "{}", gristSort: "", gristLimit: 100, gristRecordIds: "[]" },
+    github: { label: "github", credentialId: "", githubOperation: "getRepository", githubOwner: "", githubRepo: "", githubOrganization: "", githubInviteEmail: "", githubIssueNumber: "", githubTitle: undefined, githubBody: undefined, githubCommentBody: "$input.text", githubState: undefined, githubStateReason: undefined, githubAssignee: "", githubCreator: "", githubMentioned: "", githubLabelsFilter: "", githubSince: "", githubSort: "", githubDirection: "", githubLabels: undefined, githubAssignees: undefined, githubLockReason: "", githubHead: "", githubBase: "main", githubPullRequestNumber: "", githubReviewId: "", githubReviewEvent: "APPROVE", githubReviewBody: "", githubCommitId: "", githubDraft: undefined, githubPrerelease: undefined, githubFilePath: "", githubFileContent: "$input.text", githubCommitMessage: "", githubBranch: "", githubPerPage: "30", githubTagName: "", githubReleaseId: "", githubWorkflowId: "", githubWorkflowInputs: undefined, githubWaitTimeoutSeconds: "600", githubPollIntervalSeconds: "5" },
     googleSheets: { label: "googleSheets", credentialId: "", gsOperation: undefined, gsSpreadsheetId: "", gsSheetName: "Sheet1", gsStartRow: "1", gsUpdateRow: "1", gsMaxRows: "0", gsHasHeader: true, gsRowCount: "1", gsKeepHeader: false, gsAppendPlacement: "append", gsValuesInputMode: "raw", gsValuesSelectiveRows: "1", gsValuesSelectiveCols: "3", gsValues: "[]" },
     bigquery: { label: "bigquery", credentialId: "", bqOperation: undefined, bqProjectId: "", bqQuery: "", bqMaxResults: "1000", bqDatasetId: "", bqTableId: "", bqRowsInputMode: "raw", bqRows: "[]", bqMappings: [{ key: "field", value: "$input.text" }] },
     supabase: { label: "supabase", credentialId: "", supabaseOperation: undefined, supabaseSchema: "public", supabaseTable: "", supabaseSelectColumns: "*", supabaseFilter: "{}", supabaseLimit: "100", supabaseOrderBy: "", supabaseAscending: true, supabaseRows: "[]", supabaseOnConflict: "", supabaseData: "{}" },

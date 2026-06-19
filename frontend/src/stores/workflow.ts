@@ -1973,6 +1973,262 @@ export const useWorkflowStore = defineStore("workflow", () => {
           });
         }
       }
+
+      if (node.type === "github") {
+        const operation = node.data.githubOperation;
+        const repoOptionalOperations = new Set([
+          "listOrganizationRepositories",
+          "listUserRepositories",
+          "getUserRepositories",
+          "getUserIssues",
+          "inviteUser",
+        ]);
+        const ownerOptionalOperations = new Set(["getUserIssues", "inviteUser"]);
+
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Credential is not selected",
+          });
+        }
+        if (!node.data.githubOperation) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Operation is not selected",
+          });
+        }
+        if (
+          !ownerOptionalOperations.has(operation ?? "") &&
+          (!node.data.githubOwner || node.data.githubOwner.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Owner is required",
+          });
+        }
+        if (
+          !repoOptionalOperations.has(operation ?? "") &&
+          (!node.data.githubRepo || node.data.githubRepo.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Repository is required",
+          });
+        }
+        if (
+          operation === "inviteUser" &&
+          (
+            !node.data.githubOrganization ||
+            node.data.githubOrganization.trim() === "" ||
+            !node.data.githubInviteEmail ||
+            node.data.githubInviteEmail.trim() === ""
+          )
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Organization and email are required to invite a user",
+          });
+        }
+
+        if (
+          (
+            operation === "getIssue" ||
+            operation === "updateIssue" ||
+            operation === "createComment" ||
+            operation === "lockIssue"
+          ) &&
+          (!node.data.githubIssueNumber || node.data.githubIssueNumber.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Issue number is required for this operation",
+          });
+        }
+        if (
+          operation === "createComment" &&
+          (!node.data.githubCommentBody || node.data.githubCommentBody.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Comment body is required for create comment",
+          });
+        }
+        if (
+          (
+            operation === "createIssue" ||
+            operation === "createPullRequest"
+          ) &&
+          (!node.data.githubTitle || node.data.githubTitle.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Title is required for this operation",
+          });
+        }
+        if (
+          operation === "createPullRequest" &&
+          (
+            !node.data.githubHead ||
+            node.data.githubHead.trim() === "" ||
+            !node.data.githubBase ||
+            node.data.githubBase.trim() === ""
+          )
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Head and base branches are required for create pull request",
+          });
+        }
+        if (
+          (
+            operation === "createReview" ||
+            operation === "getReview" ||
+            operation === "listReviews" ||
+            operation === "updateReview"
+          ) &&
+          (!node.data.githubPullRequestNumber ||
+            node.data.githubPullRequestNumber.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Pull request number is required for review operations",
+          });
+        }
+        if (
+          (operation === "getReview" || operation === "updateReview") &&
+          (!node.data.githubReviewId || node.data.githubReviewId.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Review ID is required for this operation",
+          });
+        }
+        if (
+          operation === "updateReview" &&
+          (!node.data.githubReviewBody || node.data.githubReviewBody.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Review body is required for update review",
+          });
+        }
+        if (
+          operation === "createReview" &&
+          (
+            node.data.githubReviewEvent === "REQUEST_CHANGES" ||
+            node.data.githubReviewEvent === "COMMENT"
+          ) &&
+          (!node.data.githubReviewBody || node.data.githubReviewBody.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Review body is required for comment and request changes events",
+          });
+        }
+        if (
+          (
+            operation === "getFile" ||
+            operation === "upsertFile" ||
+            operation === "deleteFile"
+          ) &&
+          (!node.data.githubFilePath || node.data.githubFilePath.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "File path is required for this operation",
+          });
+        }
+        if (
+          (operation === "upsertFile" || operation === "deleteFile") &&
+          (!node.data.githubCommitMessage || node.data.githubCommitMessage.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Commit message is required for file updates",
+          });
+        }
+        if (
+          (operation === "getRelease" || operation === "updateRelease" || operation === "deleteRelease") &&
+          (!node.data.githubReleaseId || node.data.githubReleaseId.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Release ID is required for this operation",
+          });
+        }
+        if (
+          operation === "createRelease" &&
+          (!node.data.githubTagName || node.data.githubTagName.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Tag name is required for this operation",
+          });
+        }
+        if (
+          (
+            operation === "getWorkflow" ||
+            operation === "dispatchWorkflow" ||
+            operation === "enableWorkflow" ||
+            operation === "disableWorkflow" ||
+            operation === "getWorkflowUsage"
+            || operation === "dispatchWorkflowAndWait"
+          ) &&
+          (!node.data.githubWorkflowId || node.data.githubWorkflowId.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Workflow ID or file name is required for this operation",
+          });
+        }
+        if (
+          (operation === "dispatchWorkflow" || operation === "dispatchWorkflowAndWait") &&
+          (!node.data.githubBranch || node.data.githubBranch.trim() === "")
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "GitHub",
+            message: "Ref or branch is required for workflow dispatch",
+          });
+        }
+      }
     }
 
     return {

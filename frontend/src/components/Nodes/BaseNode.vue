@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, GitBranch, GitMerge, Globe, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -54,6 +54,7 @@ const icons = {
   redis: Database,
   rag: Search,
   grist: Table2,
+  github: Github,
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
@@ -101,6 +102,7 @@ const nodeColorMap = {
   redis: "node-redis",
   rag: "node-rag",
   grist: "node-grist",
+  github: "node-github",
   googleSheets: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
@@ -585,6 +587,19 @@ const hasThrowErrorWarning = computed(() => {
           :title="data.gristTableId"
         >
           {{ data.gristTableId }}
+        </div>
+        <div
+          v-if="type === 'github' && data.githubOperation"
+          class="text-xs text-muted-foreground"
+        >
+          {{ data.githubOperation }}
+        </div>
+        <div
+          v-if="type === 'github' && data.githubRepo"
+          class="text-xs text-muted-foreground truncate max-w-[120px]"
+          :title="`${data.githubOwner || ''}/${data.githubRepo}`"
+        >
+          {{ data.githubOwner || '' }}/{{ data.githubRepo }}
         </div>
         <div
           v-if="type === 'drive' && data.driveOperation"

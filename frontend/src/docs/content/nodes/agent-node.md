@@ -226,6 +226,18 @@ Example — GitHub MCP with dynamic token from workflow input:
 }
 ```
 
+Example — GitHub MCP with a Heym GitHub credential:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "$credentials.MyGitHubToken" }
+}
+```
+
+The built-in GitHub credential currently targets PAT-based auth. If you need organization access, use a PAT with the required org/repository permissions.
+
 Example — Slack MCP:
 
 ```json

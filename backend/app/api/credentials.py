@@ -1,4 +1,5 @@
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -36,6 +37,29 @@ from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 router = APIRouter()
 
 
+def merge_credential_config_for_update(
+    credential_type: CredentialType,
+    existing_config: dict,
+    incoming_config: dict,
+) -> dict:
+    """Merge update payload into an existing credential config when needed."""
+    if credential_type != CredentialType.github:
+        return incoming_config
+
+    merged_config = dict(existing_config)
+
+    incoming_api_key = str(incoming_config.get("api_key", "") or "").strip()
+    if incoming_api_key:
+        merged_config["api_key"] = incoming_api_key
+
+    if "base_url" in incoming_config:
+        incoming_base_url = str(incoming_config.get("base_url", "") or "").strip()
+        if incoming_base_url:
+            merged_config["base_url"] = incoming_base_url
+
+    return merged_config
+
+
 def get_masked_value(credential_type: CredentialType, config: dict) -> str | None:
     if credential_type == CredentialType.header:
         header_value = config.get("header_value", "")
@@ -67,6 +91,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     elif credential_type in (
         CredentialType.openai,
         CredentialType.google,
+        CredentialType.github,
         CredentialType.custom,
         CredentialType.elevenlabs,
     ):
@@ -789,7 +814,11 @@ async def update_credential(
         config = (
             _merge_supabase_update_config(credential_data.config, config)
             if credential.type == CredentialType.supabase
-            else credential_data.config
+            else merge_credential_config_for_update(
+                credential.type,
+                config,
+                credential_data.config,
+            )
         )
         validate_credential_config(credential.type, config)
         credential.encrypted_config = encrypt_config(config)
@@ -907,6 +936,20 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Google credential requires api_key",
             )
+    elif credential_type == CredentialType.github:
+        if "api_key" not in config or not config["api_key"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="GitHub credential requires api_key",
+            )
+        github_base_url = str(config.get("base_url", "") or "").strip()
+        if github_base_url:
+            parsed = urlparse(github_base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="GitHub credential base_url must be a valid http(s) URL",
+                )
     elif credential_type == CredentialType.custom:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(

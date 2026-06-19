@@ -444,6 +444,7 @@ class LLMTraceListResponse(BaseModel):
 class CredentialType(str, Enum):
     openai = "openai"
     google = "google"
+    github = "github"
     custom = "custom"
     bearer = "bearer"
     header = "header"
@@ -473,6 +474,11 @@ class CredentialConfigOpenAI(BaseModel):
 
 class CredentialConfigGoogle(BaseModel):
     api_key: str
+
+
+class CredentialConfigGitHub(BaseModel):
+    api_key: str
+    base_url: str | None = None
 
 
 class CredentialConfigElevenLabs(BaseModel):
