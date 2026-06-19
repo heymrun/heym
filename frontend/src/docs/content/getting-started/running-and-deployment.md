@@ -86,6 +86,34 @@ Press `Ctrl+C` to gracefully stop all services.
 
 ---
 
+## End-to-End Tests: `run_e2e.sh`
+
+The frontend Playwright suite runs against the real Vue application, FastAPI backend, and an
+isolated PostgreSQL database:
+
+```bash
+./run_e2e.sh
+```
+
+The script starts a temporary PostgreSQL 16 container on port `6544`, applies Alembic migrations,
+installs the Playwright Chromium browser when needed, starts the backend on port `10106` and the
+frontend on port `4018`, and removes the database container when the run finishes.
+
+Useful commands:
+
+```bash
+cd frontend
+bun run test:e2e:ui       # Interactive Playwright runner; requires a compatible test stack
+bun run test:e2e:report   # Open the latest HTML report
+```
+
+`./check.sh` includes the E2E suite. Set `SKIP_E2E=1` only when Docker is unavailable and you need
+to run the remaining lint, typecheck, formatting, and backend tests locally. Pull requests always
+run the Chromium E2E suite in GitHub Actions and retain traces, screenshots, videos, and the HTML
+report when failures occur.
+
+---
+
 ## Production: `deploy.sh`
 
 `deploy.sh` builds and runs the full stack using Docker Compose. All three services — the database, the backend, and the frontend — run as containers. The backend entrypoint automatically runs migrations before starting the server with 8 workers.

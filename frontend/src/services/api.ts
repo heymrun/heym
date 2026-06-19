@@ -299,6 +299,7 @@ api.interceptors.response.use(
         const path = window.location.pathname;
         if (
           !path.startsWith("/login") &&
+          !path.startsWith("/register") &&
           !path.startsWith("/chat/") &&
           !path.startsWith("/review/")
         ) {

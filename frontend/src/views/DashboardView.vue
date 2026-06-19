@@ -1435,6 +1435,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="gradient"
                   size="sm"
+                  data-testid="new-workflow-button"
                   @click="showCreateDialog = true; pushOverlayState()"
                 >
                   <Plus class="w-3.5 h-3.5" />
@@ -1559,6 +1560,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     <Card
                       v-for="(workflow, index) in displayedPinnedDrawerWorkflows"
                       :key="workflow.id"
+                      :data-testid="`workflow-card-${workflow.id}`"
                       variant="interactive"
                       :class="cn(
                         'workflow-card cursor-pointer group relative p-3.5',
@@ -1709,6 +1711,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   <Card
                     v-for="(workflow, index) in displayedRootWorkflows"
                     :key="workflow.id"
+                    :data-testid="`workflow-card-${workflow.id}`"
                     variant="interactive"
                     :class="cn(
                       'workflow-card p-3.5 cursor-pointer group relative',

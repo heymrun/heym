@@ -559,6 +559,7 @@ function handleDoubleClick(type: NodeType): void {
         <div
           v-for="(node, index) in nodeTypes"
           :key="node.type"
+          :data-testid="`node-palette-${node.type}`"
           :data-node-index="index"
           :draggable="true"
           :class="cn(

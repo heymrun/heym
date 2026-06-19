@@ -41,6 +41,9 @@ coverage/
 .pytest_cache/
 .coverage
 htmlcov/
+frontend/e2e/.auth/
+frontend/playwright-report/
+frontend/test-results/
 
 # Misc
 *.bak

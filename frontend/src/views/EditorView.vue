@@ -1181,6 +1181,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           >
           <h1
             v-else
+            data-testid="workflow-title"
             class="font-semibold text-sm md:text-base truncate max-w-[120px] sm:max-w-[150px] md:max-w-[250px] cursor-text hover:bg-muted/50 rounded px-0.5 -mx-0.5"
             @mousedown.prevent="startTitleEdit"
           >
@@ -1402,6 +1403,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
         <Button
           variant="gradient"
           size="sm"
+          data-testid="save-workflow-button"
           :disabled="!hasUnsavedChanges"
           :loading="isSaving"
           class="hidden sm:inline-flex"
