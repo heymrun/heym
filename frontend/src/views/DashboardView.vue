@@ -1347,6 +1347,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
           <div
             v-if="activeTab === 'workflows'"
+            data-testid="workflow-import-dropzone"
             class="relative"
             @dragover="handleJsonDragOver"
             @dragleave="handleJsonDragLeave"

@@ -349,6 +349,7 @@ async function handleRunEvals(): Promise<void> {
       </Label>
       <Input
         v-model="suiteName"
+        data-testid="eval-suite-name"
         placeholder="Enter suite name..."
         class="font-medium"
       />

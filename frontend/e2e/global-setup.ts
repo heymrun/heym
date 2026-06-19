@@ -2,10 +2,11 @@ import { request, type FullConfig } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { E2E_USER as E2E_CREDENTIALS } from "./support";
+
 const E2E_USER = {
-  email: "playwright@heym.example.com",
+  ...E2E_CREDENTIALS,
   name: "Playwright User",
-  password: "Playwright123",
 };
 
 export default async function globalSetup(config: FullConfig): Promise<void> {

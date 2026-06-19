@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { mockVersionCheck } from "./support";
+import { E2E_USER, prepareAuthenticatedPage } from "./support";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 test.beforeEach(async ({ page }) => {
-  await mockVersionCheck(page);
+  await prepareAuthenticatedPage(page);
 });
 
 test("redirects protected pages to login", async ({ page }) => {
@@ -21,6 +21,17 @@ test("shows an error for invalid credentials", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.getByText("Invalid email or password")).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
+});
+
+test("logs in and logs out through the UI", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(E2E_USER.email);
+  await page.getByLabel("Password").fill(E2E_USER.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page).toHaveURL("/");
+  await page.getByRole("button", { name: "Logout" }).click();
   await expect(page).toHaveURL(/\/login$/);
 });
 

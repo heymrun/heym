@@ -1,19 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-import { mockVersionCheck } from "./support";
+import { prepareAuthenticatedPage } from "./support";
 
 test.beforeEach(async ({ page }) => {
-  await mockVersionCheck(page);
+  await prepareAuthenticatedPage(page);
 });
 
 test("creates, edits, saves, runs, reloads, and deletes a workflow", async ({ page }) => {
   const workflowName = `E2E Workflow ${Date.now()}`;
   const renamedWorkflow = `${workflowName} Renamed`;
 
-  await page.addInitScript(() => {
-    window.localStorage.setItem("showcase_seen_dashboard_workflows", "1");
-    window.localStorage.setItem("showcase_seen_editor", "1");
-  });
   await page.goto("/");
   await expect(
     page.getByRole("main").getByRole("heading", { name: "Workflows" }),
