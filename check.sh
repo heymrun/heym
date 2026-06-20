@@ -18,10 +18,3 @@ uv run ruff check .
 echo "Running backend tests..."
 cd "$REPO_ROOT"
 ./run_tests.sh
-
-if [ "${SKIP_E2E:-0}" = "1" ]; then
-    echo "Skipping frontend E2E tests (SKIP_E2E=1)."
-else
-    echo "Running frontend E2E tests..."
-    ./run_e2e.sh
-fi

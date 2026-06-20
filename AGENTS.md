@@ -10,6 +10,7 @@ Read and follow this `AGENTS.md` at the start of every session. Repository conve
 ./run.sh                    # Start all services (postgres, backend, frontend)
 ./run.sh --no-debug         # Start with INFO logging instead of DEBUG
 ./check.sh                  # Run frontend lint/typecheck, backend Ruff checks, and backend tests
+./run_e2e.sh                # Run frontend Playwright E2E tests separately
 SECRET_KEY=test-secret-key-for-tests-only-32-bytes ./check.sh  # Use when no SECRET_KEY is exported locally
 ```
 
@@ -72,8 +73,9 @@ SQLAlchemy 2.0 async, UUID primary keys only, Alembic for migrations, index freq
 
 ### Testing
 Backend: pytest with unittest.TestCase/IsolatedAsyncioTestCase, AsyncMock for DB mocking
-Frontend: No tests yet (add when needed)
+Frontend: Playwright E2E specs live in `frontend/e2e/`; run them with `./run_e2e.sh` from the repository root
 **New features must include backend tests** - run `./check.sh` before git push (includes backend tests via `./run_tests.sh`)
+**New UI behavior should include Playwright E2E coverage when practical.** E2E tests run as a separate required job in PR checks and are intentionally excluded from `./check.sh` to keep the default local check path fast.
 If the local environment does not export `SECRET_KEY`, prefix full-suite commands with `SECRET_KEY=test-secret-key-for-tests-only-32-bytes` (test-only value; never use it for runtime/prod).
 
 ### Expression evaluation (avoid executor vs dialog drift)
@@ -116,7 +118,7 @@ heymrun/
 - **Vue Flow:** Use `@vue-flow/core`, custom nodes extend `BaseNode.vue`, store nodes/edges in Pinia
 - **Pinia:** Stores in `frontend/src/stores/`, use composition API `defineStore`, export typed interfaces
 - **FastAPI:** Use dependency injection via `app/api/deps.py`, sessions via `get_db()`, auth via `get_current_user()`
-- **Testing:** Backend uses pytest (tests in `backend/tests/`, run with `uv run pytest tests/`), no frontend tests yet. **New features and meaningful behavior changes must include or extend backend tests** covering the touched code paths; do not ship feature work without tests when the change is testable in pytest.
+- **Testing:** Backend uses pytest (tests in `backend/tests/`, run with `uv run pytest tests/`). Frontend E2E tests use Playwright (specs in `frontend/e2e/`, run with `./run_e2e.sh`). **New features and meaningful behavior changes must include or extend backend tests** covering the touched code paths; new UI behavior should include Playwright coverage when practical.
 - **Tests use** unittest.TestCase and unittest.IsolatedAsyncioTestCase with AsyncMock for database mocking
 
 ## Tech Stack
