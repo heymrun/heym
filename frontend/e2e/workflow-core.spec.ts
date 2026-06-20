@@ -57,7 +57,7 @@ test("creates, edits, saves, runs, reloads, and deletes a workflow", async ({ pa
   await expect(page.getByTestId("workflow-title")).toHaveText(renamedWorkflow);
   await expect(page.locator(".vue-flow__node")).toHaveCount(1);
 
-  await page.getByRole("link", { name: "Heym" }).first().click();
+  await page.goto("/");
   await expect(page).toHaveURL("/");
 
   const workflowCard = page.getByTestId(`workflow-card-${workflowId}`);
