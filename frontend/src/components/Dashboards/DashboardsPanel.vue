@@ -5,6 +5,7 @@ import { LayoutGrid, Loader2, Pencil, Plus, RefreshCw, Sparkles } from "lucide-v
 
 import AddWidgetDialog from "@/components/Dashboards/AddWidgetDialog.vue";
 import AiWidgetDialog from "@/components/Dashboards/AiWidgetDialog.vue";
+import DashboardAutoRefreshControl from "@/components/Dashboards/DashboardAutoRefreshControl.vue";
 import DashboardGrid from "@/components/Dashboards/DashboardGrid.vue";
 import WidgetSettingsDialog from "@/components/Dashboards/WidgetSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
@@ -179,6 +180,7 @@ onMounted(() => {
         Dashboard
       </h1>
       <div class="flex items-center gap-2">
+        <DashboardAutoRefreshControl @refresh="refreshAll" />
         <Button
           variant="ghost"
           size="sm"

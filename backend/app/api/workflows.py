@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import String, case, cast, func, literal, or_, select, text, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -23,6 +24,7 @@ from app.db.models import (
     TeamMember,
     User,
     Workflow,
+    WorkflowAnalysisNote,
     WorkflowAuthType,
     WorkflowExecutionToken,
     WorkflowShare,
@@ -32,6 +34,9 @@ from app.db.models import (
 from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
     ActiveExecutionItem,
+    AnalysisNoteEditor,
+    AnalysisNoteResponse,
+    AnalysisNoteSaveRequest,
     ExecutionHistoryListResponse,
     ExecutionHistoryResponse,
     ExecutionHistoryWithWorkflowResponse,
@@ -3167,3 +3172,82 @@ async def cancel_workflow_execution(
         )
 
     return {"status": "cancel_requested"}
+
+
+def _serialize_analysis_note(note: WorkflowAnalysisNote | None) -> AnalysisNoteResponse:
+    if note is None:
+        return AnalysisNoteResponse(content="", revision=0, updated_by=None, updated_at=None)
+    editor = None
+    if note.updated_by is not None:
+        editor = AnalysisNoteEditor(id=note.updated_by.id, name=note.updated_by.name)
+    return AnalysisNoteResponse(
+        content=note.content,
+        revision=note.revision,
+        updated_by=editor,
+        updated_at=note.updated_at,
+    )
+
+
+@router.get("/{workflow_id}/analysis-note", response_model=AnalysisNoteResponse)
+async def get_workflow_analysis_note(
+    workflow_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnalysisNoteResponse:
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    result = await db.execute(
+        select(WorkflowAnalysisNote)
+        .options(selectinload(WorkflowAnalysisNote.updated_by))
+        .where(WorkflowAnalysisNote.workflow_id == workflow_id)
+    )
+    note = result.scalar_one_or_none()
+    return _serialize_analysis_note(note)
+
+
+@router.put("/{workflow_id}/analysis-note", response_model=AnalysisNoteResponse)
+async def save_workflow_analysis_note(
+    workflow_id: uuid.UUID,
+    body: AnalysisNoteSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnalysisNoteResponse:
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    result = await db.execute(
+        select(WorkflowAnalysisNote)
+        .options(selectinload(WorkflowAnalysisNote.updated_by))
+        .where(WorkflowAnalysisNote.workflow_id == workflow_id)
+    )
+    note = result.scalar_one_or_none()
+    current_revision = note.revision if note is not None else 0
+
+    if body.base_revision != current_revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_serialize_analysis_note(note).model_dump(mode="json"),
+        )
+
+    if note is None:
+        note = WorkflowAnalysisNote(
+            workflow_id=workflow_id,
+            content=body.content,
+            revision=1,
+            updated_by_id=current_user.id,
+        )
+        db.add(note)
+    else:
+        note.content = body.content
+        note.revision = current_revision + 1
+        note.updated_by_id = current_user.id
+
+    await db.commit()
+    return AnalysisNoteResponse(
+        content=body.content,
+        revision=current_revision + 1,
+        updated_by=AnalysisNoteEditor(id=current_user.id, name=current_user.name),
+        updated_at=None,
+    )

@@ -371,6 +371,27 @@ export const workflowApi = {
     return response.data;
   },
 
+  getAnalysisNote: async (
+    workflowId: string,
+  ): Promise<AnalysisNoteResponse> => {
+    const response = await api.get<AnalysisNoteResponse>(
+      `/workflows/${workflowId}/analysis-note`,
+    );
+    return response.data;
+  },
+
+  saveAnalysisNote: async (
+    workflowId: string,
+    content: string,
+    baseRevision: number,
+  ): Promise<AnalysisNoteResponse> => {
+    const response = await api.put<AnalysisNoteResponse>(
+      `/workflows/${workflowId}/analysis-note`,
+      { content, base_revision: baseRevision },
+    );
+    return response.data;
+  },
+
   getAgentMemoryGraph: async (
     workflowId: string,
     canvasNodeId: string,
@@ -1414,6 +1435,31 @@ export interface WorkflowWithInputs {
   updated_at: string;
 }
 
+export interface AnalysisNoteEditor {
+  id: string;
+  name: string;
+}
+
+export interface AnalysisNoteResponse {
+  content: string;
+  revision: number;
+  updated_by: AnalysisNoteEditor | null;
+  updated_at: string | null;
+}
+
+export interface AnalyzeWorkflowRequest {
+  credentialId: string;
+  model: string;
+  currentWorkflow?: {
+    id?: string;
+    name?: string;
+    description?: string | null;
+    nodes: unknown[];
+    edges: unknown[];
+  };
+  executionLog?: Record<string, unknown> | null;
+}
+
 export interface AIAssistantRequest {
   credentialId: string;
   model: string;
@@ -1911,6 +1957,72 @@ export const aiApi = {
       },
     );
     return response.data;
+  },
+
+  analyzeWorkflowStream: (
+    request: AnalyzeWorkflowRequest,
+    onContent: (text: string) => void,
+    onDone: () => void,
+    onError: (error: Error) => void,
+    signal?: AbortSignal,
+  ): void => {
+    const API_URL = import.meta.env.VITE_API_URL || "";
+
+    fetch(`${API_URL}/api/ai/analyze-workflow`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...heymClientHeaders,
+      },
+      body: JSON.stringify({
+        credential_id: request.credentialId,
+        model: request.model,
+        current_workflow: request.currentWorkflow,
+        execution_log: request.executionLog ?? null,
+      }),
+      signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.detail || `HTTP error! status: ${response.status}`,
+          );
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body");
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === "content") {
+                onContent(data.text);
+              } else if (data.type === "done") {
+                onDone();
+              } else if (data.type === "error") {
+                throw new Error(data.message);
+              }
+            }
+          }
+        }
+      })
+      .catch(onError);
   },
 
   assistantStream: (
@@ -2740,6 +2852,10 @@ export const chatApi = {
       model,
       ...(attachment ? { attachment } : {}),
     });
+  },
+
+  cancelStream: async (id: string): Promise<void> => {
+    await api.post(`/chats/${id}/cancel`);
   },
 
   subscribeStream: async (

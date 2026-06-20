@@ -19,9 +19,16 @@ import type {
 import type { WorkflowWithInputs } from "@/services/api";
 
 import Button from "@/components/ui/Button.vue";
+import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
+import {
+  extractClarifyBlock,
+  serializeAnswers,
+  stripClarifyBlock,
+} from "@/utils/parseClarify";
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isRetryAttemptNodeResult } from "@/lib/executionLog";
@@ -1116,6 +1123,8 @@ interface ChatMessage {
     edges: WorkflowEdge[];
   };
   hasParseError?: boolean;
+  clarify?: ClarifyQuestion[];
+  clarifyAnswered?: boolean;
 }
 
 interface SpeechRecognitionResultAlternative {
@@ -1498,8 +1507,8 @@ function extractWorkflowJson(content: string): { nodes: WorkflowNode[]; edges: W
   return null;
 }
 
-async function sendAiMessage(): Promise<void> {
-  const message = aiInputMessage.value.trim();
+async function sendAiMessage(overrideText?: string): Promise<void> {
+  const message = (overrideText ?? aiInputMessage.value).trim();
   if (!message || !selectedCredentialId.value || !selectedModel.value) return;
   if (aiStreaming.value) return;
 
@@ -1556,9 +1565,18 @@ async function sendAiMessage(): Promise<void> {
       aiLoading.value = false;
       aiAbortController.value = null;
 
+      const lastMsg = aiMessages.value[aiMessages.value.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") {
+        const clarify = extractClarifyBlock(lastMsg.content);
+        if (clarify) {
+          lastMsg.clarify = clarify;
+          lastMsg.hasParseError = false;
+          return;
+        }
+      }
+
       if (isAskMode) return;
 
-      const lastMsg = aiMessages.value[aiMessages.value.length - 1];
       if (lastMsg && lastMsg.role === "assistant") {
         const workflowJson = extractWorkflowJson(lastMsg.content);
         if (workflowJson) {
@@ -1585,6 +1603,13 @@ async function sendAiMessage(): Promise<void> {
     },
     aiAbortController.value.signal,
   );
+}
+
+function handleClarifySubmit(msg: ChatMessage, answers: ClarifyAnswer[]): void {
+  if (!msg.clarify || msg.clarifyAnswered) return;
+  msg.clarifyAnswered = true;
+  const serialized = serializeAnswers(msg.clarify, answers);
+  void sendAiMessage(serialized);
 }
 
 function stopAiStreaming(): void {
@@ -1655,6 +1680,12 @@ function retryMessage(failedMessageId: string): void {
 
       const lastMsg = aiMessages.value[aiMessages.value.length - 1];
       if (lastMsg && lastMsg.role === "assistant") {
+        const clarify = extractClarifyBlock(lastMsg.content);
+        if (clarify) {
+          lastMsg.clarify = clarify;
+          lastMsg.hasParseError = false;
+          return;
+        }
         const workflowJson = extractWorkflowJson(lastMsg.content);
         if (workflowJson) {
           lastMsg.workflowJson = workflowJson;
@@ -3197,9 +3228,15 @@ function renderContent(content: string): string {
             <!-- eslint-disable vue/no-v-html -->
             <div
               class="message-content"
-              v-html="renderContent(msg.content)"
+              v-html="renderContent(msg.clarify ? stripClarifyBlock(msg.content) : msg.content)"
             />
             <!-- eslint-enable vue/no-v-html -->
+            <ClarifyCard
+              v-if="msg.clarify"
+              :questions="msg.clarify"
+              :disabled="msg.clarifyAnswered || aiStreaming"
+              @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(msg, answers)"
+            />
             <div
               v-if="msg.workflowJson"
               class="workflow-detected"
@@ -3288,7 +3325,7 @@ function renderContent(content: string): string {
               :disabled="!aiInputMessage.trim() || !selectedCredentialId || !selectedModel"
               class="ai-btn-primary"
               title="Send"
-              @click="sendAiMessage"
+              @click="() => sendAiMessage()"
             >
               <Send class="w-3.5 h-3.5" />
               Send

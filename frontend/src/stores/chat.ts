@@ -58,6 +58,7 @@ export const useChatStore = defineStore("chat", () => {
   let latestConversationLoadId: string | null = null;
   const backgroundSubscribedConvIds = new Set<string>();
   const foregroundSubscribedConvIds = new Set<string>();
+  const userCancelledConvIds = new Set<string>();
 
   function getStreamState(conversationId: string | null | undefined): StreamState {
     if (!conversationId) return EMPTY_STREAM_STATE;
@@ -199,7 +200,11 @@ export const useChatStore = defineStore("chat", () => {
       if (fetched.has_unread) {
         void markConversationRead(id);
       }
-      if (fetched.is_running && !foregroundSubscribedConvIds.has(id)) {
+      if (
+        fetched.is_running &&
+        !foregroundSubscribedConvIds.has(id) &&
+        !userCancelledConvIds.has(id)
+      ) {
         void _subscribeToStream(id);
       }
       return "loaded";
@@ -316,6 +321,8 @@ export const useChatStore = defineStore("chat", () => {
       error: null,
       isStreaming: true,
     });
+
+    userCancelledConvIds.delete(conversationId);
 
     try {
       await chatApi.sendMessage(conversationId, content, credentialId, model, attachment);
@@ -499,10 +506,22 @@ export const useChatStore = defineStore("chat", () => {
 
   function cancelStreaming(conversationId: string): void {
     const controller = activeControllersByConv.get(conversationId);
+    userCancelledConvIds.add(conversationId);
     controller?.abort();
     activeControllersByConv.delete(conversationId);
-    _clearStreamState(conversationId);
+    foregroundSubscribedConvIds.delete(conversationId);
+    const current = getStreamState(conversationId);
+    _setStreamState(conversationId, {
+      isStreaming: false,
+      toolCalls: current.toolCalls.map((tc) =>
+        tc.status === "running"
+          ? { ...tc, status: "cancelled" as const, response_summary: "Cancelled" }
+          : tc,
+      ),
+    });
     _patchConversationFlag(conversationId, "is_running", false);
+    // Tell the backend to stop the running agent task, not just the local reader.
+    void chatApi.cancelStream(conversationId).catch(() => {});
   }
 
   function _patchConversation(updated: Conversation): void {

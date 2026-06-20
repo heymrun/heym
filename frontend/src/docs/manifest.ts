@@ -86,6 +86,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "canvas-features", title: "Canvas Features" },
       { slug: "keyboard-shortcuts", title: "Keyboard Shortcuts" },
       { slug: "ai-assistant", title: "AI Assistant" },
+      { slug: "workflow-analysis", title: "Workflow Analysis" },
       { slug: "chat-with-docs", title: "Chat with Docs" },
       { slug: "chat-voice", title: "Chat Voice (TTS & STT)" },
       { slug: "workflow-organization", title: "Workflow Organization" },

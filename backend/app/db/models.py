@@ -313,10 +313,41 @@ class Workflow(Base):
     versions: Mapped[list["WorkflowVersion"]] = relationship(
         "WorkflowVersion", back_populates="workflow", cascade="all, delete-orphan"
     )
+    analysis_note: Mapped["WorkflowAnalysisNote | None"] = relationship(
+        "WorkflowAnalysisNote",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     @property
     def allow_anonymous(self) -> bool:
         return self.auth_type == WorkflowAuthType.anonymous
+
+
+class WorkflowAnalysisNote(Base):
+    __tablename__ = "workflow_analysis_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="analysis_note")
+    updated_by: Mapped["User | None"] = relationship("User")
 
 
 class WorkflowVersion(Base):

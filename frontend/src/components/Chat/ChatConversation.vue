@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, computed, onUnmounted } from "vue";
+import { ref, reactive, watch, nextTick, onMounted, computed, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import {
   Send,
@@ -27,7 +27,14 @@ import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
+import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
+import {
+  extractClarifyBlock,
+  serializeAnswers,
+  stripClarifyBlock,
+} from "@/utils/parseClarify";
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi, credentialsApi } from "@/services/api";
@@ -168,6 +175,30 @@ const isConversationTransitioning = computed(
   () => chatStore.activeConversation !== null && !isShowingConversation.value,
 );
 const messages = computed(() => chatStore.activeConversation?.messages ?? []);
+
+const answeredClarify = reactive<Set<string>>(new Set());
+
+function clarifyFor(msg: Message): ClarifyQuestion[] | null {
+  if (msg.role !== "assistant") return null;
+  return extractClarifyBlock(msg.content);
+}
+
+function handleClarifySubmit(
+  msgId: string,
+  questions: ClarifyQuestion[],
+  answers: ClarifyAnswer[],
+): void {
+  if (answeredClarify.has(msgId)) return;
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  answeredClarify.add(msgId);
+  const serialized = serializeAnswers(questions, answers);
+  void chatStore.sendMessage(
+    props.conversationId,
+    serialized,
+    selectedCredentialId.value,
+    selectedModel.value,
+  );
+}
 const conversationTitle = computed(() =>
   chatStore.activeConversation?.title ?? "",
 );
@@ -970,9 +1001,15 @@ onUnmounted(() => {
             <div
               class="chat-markdown"
               @click="handleMarkdownImageClick"
-              v-html="renderMarkdown(msg.content)"
+              v-html="renderMarkdown(clarifyFor(msg) ? stripClarifyBlock(msg.content) : msg.content)"
             />
             <!-- eslint-enable vue/no-v-html -->
+            <ClarifyCard
+              v-if="clarifyFor(msg)"
+              :questions="clarifyFor(msg)!"
+              :disabled="answeredClarify.has(msg.id)"
+              @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(msg.id, clarifyFor(msg)!, answers)"
+            />
             <div
               v-if="msg.images && msg.images.length > 0"
               class="mt-2 flex flex-wrap gap-2"

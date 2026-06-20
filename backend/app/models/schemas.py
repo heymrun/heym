@@ -1474,3 +1474,20 @@ class TraceStatsResponse(BaseModel):
     kpis: TraceStatsKpis
     by_model: list[TraceStatsByModel]
     by_time: list[TraceStatsByTime]
+
+
+class AnalysisNoteEditor(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class AnalysisNoteResponse(BaseModel):
+    content: str
+    revision: int
+    updated_by: AnalysisNoteEditor | None = None
+    updated_at: datetime | None = None
+
+
+class AnalysisNoteSaveRequest(BaseModel):
+    content: str
+    base_revision: int

@@ -681,7 +681,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.47" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.48" />
 </a>
 
 </div>

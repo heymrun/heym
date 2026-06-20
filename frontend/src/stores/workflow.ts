@@ -64,6 +64,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const hasUnsavedChanges = ref(false);
   const runningNodeId = ref<string | null>(null);
   const propertiesPanelOpen = ref(false);
+  const analysisPanelOpen = ref(false);
   /** When true, workflow canvas global key handlers and editor undo should stay inactive (agent memory graph modal). */
   const agentMemoryGraphDialogOpen = ref(false);
   const propertiesPanelTab = ref<"properties" | "config">("config");
@@ -2603,6 +2604,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     fetchExecutionHistory,
     fetchMoreExecutionHistory,
     propertiesPanelOpen,
+    analysisPanelOpen,
     agentMemoryGraphDialogOpen,
     setAgentMemoryGraphDialogOpen,
     propertiesPanelTab,
