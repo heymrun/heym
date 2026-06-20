@@ -118,10 +118,10 @@ Direct `bun run test:e2e` and `bun run test:e2e:ui` runs require an explicit `DA
 cannot silently start against the local development database. Use `./run_e2e.sh` for normal local
 runs.
 
-`./check.sh` includes the E2E suite. Set `SKIP_E2E=1` only when Docker is unavailable and you need
-to run the remaining lint, typecheck, formatting, and backend tests locally. Pull requests always
-run the Chromium E2E suite in GitHub Actions and retain traces, screenshots, videos, and the HTML
-report when failures occur.
+`./check.sh` runs lint, typecheck, formatting, and backend tests without the E2E suite, keeping the
+default local check path fast. Run Playwright E2E tests separately with `./run_e2e.sh`. Pull
+requests always run the Chromium E2E suite in GitHub Actions and retain traces, screenshots,
+videos, and the HTML report when failures occur.
 
 ---
 
