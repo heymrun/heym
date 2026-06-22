@@ -531,7 +531,11 @@ class CredentialConfigSupabase(BaseModel):
 
 
 class CredentialConfigNotion(BaseModel):
-    api_token: str
+    api_token: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    access_token: str | None = None
+    auth_mode: str | None = None
 
 
 class CredentialCreate(BaseModel):
@@ -574,6 +578,21 @@ class NotionDataSourceItem(BaseModel):
 
 class NotionDataSourcesResponse(BaseModel):
     data_sources: list[NotionDataSourceItem]
+    next_cursor: str | None = None
+    has_more: bool = False
+    success: bool = True
+
+
+class NotionPageItem(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+
+
+class NotionPagesResponse(BaseModel):
+    pages: list[NotionPageItem]
+    next_cursor: str | None = None
+    has_more: bool = False
     success: bool = True
 
 

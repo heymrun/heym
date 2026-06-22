@@ -51,6 +51,7 @@ import {
   Power,
   Rabbit,
   Radio,
+  RefreshCw,
   Repeat,
   Search,
   Send,
@@ -72,7 +73,12 @@ import {
   Zap,
 } from "lucide-vue-next";
 
-import type { CredentialListItem, LLMModel, NotionDataSourceItem } from "@/types/credential";
+import type {
+  CredentialListItem,
+  LLMModel,
+  NotionDataSourceItem,
+  NotionPageItem,
+} from "@/types/credential";
 import type {
   AgentMCPConnection,
   AgentSkill,
@@ -471,7 +477,20 @@ const supabaseCredentials = ref<CredentialListItem[]>([]);
 const notionCredentials = ref<CredentialListItem[]>([]);
 const notionDiscoveredDataSources = ref<NotionDataSourceItem[]>([]);
 const loadingNotionDataSources = ref(false);
+const notionDataSourcesError = ref<string | null>(null);
+const notionDataSourceSearch = ref("");
+const notionDataSourcesNextCursor = ref<string | null>(null);
+const notionDataSourcesHasMore = ref(false);
 let notionDataSourcesRequestSequence = 0;
+let notionDataSourceSearchTimer: ReturnType<typeof setTimeout> | null = null;
+const notionDiscoveredPages = ref<NotionPageItem[]>([]);
+const loadingNotionPages = ref(false);
+const notionPagesError = ref<string | null>(null);
+const notionPageSearch = ref("");
+const notionPagesNextCursor = ref<string | null>(null);
+const notionPagesHasMore = ref(false);
+let notionPagesRequestSequence = 0;
+let notionPageSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const supabaseDiscoveredTables = ref<string[]>([]);
 const supabaseDiscoveredColumns = ref<string[]>([]);
 const loadingSupabaseTables = ref(false);
@@ -1099,22 +1118,43 @@ watch(
   },
 );
 
-async function loadNotionDataSourcesForSelectedNode(): Promise<void> {
+function mergeNotionOptions<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const itemsById = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    itemsById.set(item.id, item);
+  }
+  return [...itemsById.values()];
+}
+
+async function loadNotionDataSourcesForSelectedNode(
+  append = false,
+): Promise<void> {
   const node = workflowStore.selectedNode;
   if (!node || node.type !== "notion") {
     notionDiscoveredDataSources.value = [];
+    notionDataSourcesError.value = null;
+    notionDataSourcesNextCursor.value = null;
+    notionDataSourcesHasMore.value = false;
     return;
   }
   const credentialId = String(node.data.credentialId || "").trim();
   if (!credentialId) {
     notionDiscoveredDataSources.value = [];
+    notionDataSourcesError.value = null;
+    notionDataSourcesNextCursor.value = null;
+    notionDataSourcesHasMore.value = false;
     return;
   }
 
   const requestId = ++notionDataSourcesRequestSequence;
   loadingNotionDataSources.value = true;
+  notionDataSourcesError.value = null;
   try {
-    const result = await credentialsApi.listNotionDataSources(credentialId);
+    const result = await credentialsApi.listNotionDataSources(
+      credentialId,
+      notionDataSourceSearch.value.trim() || undefined,
+      append ? notionDataSourcesNextCursor.value || undefined : undefined,
+    );
     if (
       requestId !== notionDataSourcesRequestSequence ||
       workflowStore.selectedNode?.id !== node.id ||
@@ -1122,14 +1162,77 @@ async function loadNotionDataSourcesForSelectedNode(): Promise<void> {
     ) {
       return;
     }
-    notionDiscoveredDataSources.value = result.data_sources;
-  } catch {
+    notionDiscoveredDataSources.value = append
+      ? mergeNotionOptions(notionDiscoveredDataSources.value, result.data_sources)
+      : result.data_sources;
+    notionDataSourcesNextCursor.value = result.next_cursor || null;
+    notionDataSourcesHasMore.value = result.has_more;
+  } catch (error: unknown) {
     if (requestId === notionDataSourcesRequestSequence) {
-      notionDiscoveredDataSources.value = [];
+      if (!append) {
+        notionDiscoveredDataSources.value = [];
+      }
+      notionDataSourcesError.value =
+        (error as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
+        "Failed to load Notion data sources.";
     }
   } finally {
     if (requestId === notionDataSourcesRequestSequence) {
       loadingNotionDataSources.value = false;
+    }
+  }
+}
+
+async function loadNotionPagesForSelectedNode(append = false): Promise<void> {
+  const node = workflowStore.selectedNode;
+  if (!node || node.type !== "notion") {
+    notionDiscoveredPages.value = [];
+    notionPagesError.value = null;
+    notionPagesNextCursor.value = null;
+    notionPagesHasMore.value = false;
+    return;
+  }
+  const credentialId = String(node.data.credentialId || "").trim();
+  if (!credentialId) {
+    notionDiscoveredPages.value = [];
+    notionPagesError.value = null;
+    notionPagesNextCursor.value = null;
+    notionPagesHasMore.value = false;
+    return;
+  }
+  const requestId = ++notionPagesRequestSequence;
+  loadingNotionPages.value = true;
+  notionPagesError.value = null;
+  try {
+    const result = await credentialsApi.listNotionPages(
+      credentialId,
+      notionPageSearch.value.trim() || undefined,
+      append ? notionPagesNextCursor.value || undefined : undefined,
+    );
+    if (
+      requestId !== notionPagesRequestSequence ||
+      workflowStore.selectedNode?.id !== node.id ||
+      String(workflowStore.selectedNode?.data.credentialId || "").trim() !== credentialId
+    ) {
+      return;
+    }
+    notionDiscoveredPages.value = append
+      ? mergeNotionOptions(notionDiscoveredPages.value, result.pages)
+      : result.pages;
+    notionPagesNextCursor.value = result.next_cursor || null;
+    notionPagesHasMore.value = result.has_more;
+  } catch (error: unknown) {
+    if (requestId === notionPagesRequestSequence) {
+      if (!append) {
+        notionDiscoveredPages.value = [];
+      }
+      notionPagesError.value =
+        (error as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
+        "Failed to load Notion pages.";
+    }
+  } finally {
+    if (requestId === notionPagesRequestSequence) {
+      loadingNotionPages.value = false;
     }
   }
 }
@@ -1142,12 +1245,36 @@ watch(
   async () => {
     if (workflowStore.selectedNode?.type !== "notion") {
       notionDiscoveredDataSources.value = [];
+      notionDataSourcesError.value = null;
+      notionDiscoveredPages.value = [];
+      notionPagesError.value = null;
       return;
     }
-    await loadNotionDataSourcesForSelectedNode();
+    await Promise.all([
+      loadNotionDataSourcesForSelectedNode(),
+      loadNotionPagesForSelectedNode(),
+    ]);
   },
   { immediate: true },
 );
+
+watch(notionDataSourceSearch, () => {
+  if (notionDataSourceSearchTimer) {
+    clearTimeout(notionDataSourceSearchTimer);
+  }
+  notionDataSourceSearchTimer = setTimeout(() => {
+    void loadNotionDataSourcesForSelectedNode();
+  }, 300);
+});
+
+watch(notionPageSearch, () => {
+  if (notionPageSearchTimer) {
+    clearTimeout(notionPageSearchTimer);
+  }
+  notionPageSearchTimer = setTimeout(() => {
+    void loadNotionPagesForSelectedNode();
+  }, 300);
+});
 
 watch(
   () => workflowStore.selectedNode?.id,
@@ -4361,18 +4488,68 @@ const notionOperationOptions = [
   { value: "updatePage", label: "Update Page" },
   { value: "trashPage", label: "Move Page to Trash" },
   { value: "restorePage", label: "Restore Page" },
+  { value: "createDatabase", label: "Create Database" },
+  { value: "retrieveDatabase", label: "Retrieve Database" },
+  { value: "updateDatabase", label: "Update Database" },
+  { value: "createDataSource", label: "Create Data Source" },
+  { value: "retrieveDataSource", label: "Retrieve Data Source" },
+  { value: "updateDataSource", label: "Update Data Source" },
   { value: "queryDataSource", label: "Query Data Source" },
   { value: "getBlockChildren", label: "Get Block Children" },
+  { value: "updateBlock", label: "Update Block" },
+  { value: "deleteBlock", label: "Delete Block" },
   { value: "appendBlocks", label: "Append Blocks" },
 ];
 
-const notionDataSourceOptions = computed(() => [
-  { value: "", label: "Select discovered data source..." },
-  ...notionDiscoveredDataSources.value.map((dataSource) => ({
+const notionDataSourceOptions = computed(() => {
+  const selectedId =
+    selectedNode.value?.type === "notion"
+      ? String(selectedNode.value.data.notionDataSourceId || "").trim()
+      : "";
+  const discoveredOptions = notionDiscoveredDataSources.value.map((dataSource) => ({
     value: dataSource.id,
     label: dataSource.title || dataSource.id,
-  })),
-]);
+  }));
+  if (selectedId && !discoveredOptions.some((option) => option.value === selectedId)) {
+    discoveredOptions.unshift({ value: selectedId, label: selectedId });
+  }
+  return [
+    {
+      value: "",
+      label: loadingNotionDataSources.value
+        ? "Loading data sources..."
+        : "Select data source...",
+    },
+    ...discoveredOptions,
+  ];
+});
+
+const notionAppendPositionOptions = [
+  { value: "end", label: "End" },
+  { value: "start", label: "Start" },
+  { value: "after_block", label: "After Block" },
+];
+
+const notionPageOptions = computed(() => {
+  const selectedId =
+    selectedNode.value?.type === "notion"
+      ? String(selectedNode.value.data.notionParentPageId || "").trim()
+      : "";
+  const discoveredOptions = notionDiscoveredPages.value.map((page) => ({
+    value: page.id,
+    label: page.title || page.id,
+  }));
+  if (selectedId && !discoveredOptions.some((option) => option.value === selectedId)) {
+    discoveredOptions.unshift({ value: selectedId, label: selectedId });
+  }
+  return [
+    {
+      value: "",
+      label: loadingNotionPages.value ? "Loading pages..." : "Select parent page...",
+    },
+    ...discoveredOptions,
+  ];
+});
 
 const supabaseDiscoveredTableOptions = computed(() => {
   return supabaseDiscoveredTables.value.map((tableName) => ({
@@ -6693,6 +6870,12 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (notionDataSourceSearchTimer) {
+    clearTimeout(notionDataSourceSearchTimer);
+  }
+  if (notionPageSearchTimer) {
+    clearTimeout(notionPageSearchTimer);
+  }
   unsubDismissOverlays?.();
   unsubDismissOverlays = null;
   window.removeEventListener("keydown", handleKeyDown, true);
@@ -12837,34 +13020,248 @@ onUnmounted(() => {
               />
             </div>
 
+            <div
+              v-if="['retrieveDatabase', 'updateDatabase'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Database ID</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionDatabaseId || ''"
+                placeholder="Notion database ID, URL, or expression"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Database ID"
+                @update:model-value="updateNodeData('notionDatabaseId', $event)"
+              />
+            </div>
+
+            <div
+              v-if="['createDatabase', 'updateDatabase'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Database Request (JSON object)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionDatabase || '{}'"
+                :placeholder="selectedNode.data.notionOperation === 'createDatabase'
+                  ? '{&quot;parent&quot;:{&quot;type&quot;:&quot;page_id&quot;,&quot;page_id&quot;:&quot;...&quot;},&quot;title&quot;:[{&quot;type&quot;:&quot;text&quot;,&quot;text&quot;:{&quot;content&quot;:&quot;Tasks&quot;}}],&quot;initial_data_source&quot;:{&quot;properties&quot;:{&quot;Name&quot;:{&quot;title&quot;:{}}}}}'
+                  : '{&quot;title&quot;:[{&quot;type&quot;:&quot;text&quot;,&quot;text&quot;:{&quot;content&quot;:&quot;Updated&quot;}}]}'"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Database Request"
+                @update:model-value="updateNodeData('notionDatabase', $event)"
+              />
+              <p class="text-xs text-muted-foreground">
+                {{
+                  selectedNode.data.notionOperation === "createDatabase"
+                    ? "Create requires a parent object. The request supports the current Notion Database API fields."
+                    : "Provide one or more fields supported by the current Notion Update Database API."
+                }}
+              </p>
+            </div>
+
+            <div
+              v-if="['createPage', 'retrieveDataSource', 'updateDataSource', 'queryDataSource'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <Label>Data Source</Label>
+                <div class="flex items-center gap-1">
+                  <Button
+                    v-if="(selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="!selectedNode.data.credentialId || loadingNotionDataSources"
+                    @click="loadNotionDataSourcesForSelectedNode(false)"
+                  >
+                    <RefreshCw
+                      class="mr-1 h-3.5 w-3.5"
+                      :class="{ 'animate-spin': loadingNotionDataSources }"
+                    />
+                    Refresh
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="updateNodeData(
+                      'notionDataSourceInputMode',
+                      (selectedNode.data.notionDataSourceInputMode || 'select') === 'select'
+                        ? 'expression'
+                        : 'select',
+                    )"
+                  >
+                    {{
+                      (selectedNode.data.notionDataSourceInputMode || "select") === "select"
+                        ? "Use expression"
+                        : "Use selector"
+                    }}
+                  </Button>
+                </div>
+              </div>
+              <Select
+                v-if="(selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
+                :model-value="selectedNode.data.notionDataSourceId || ''"
+                :options="notionDataSourceOptions"
+                :disabled="!selectedNode.data.credentialId || loadingNotionDataSources"
+                @update:model-value="updateNodeData('notionDataSourceId', $event)"
+              />
+              <Input
+                v-if="(selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
+                v-model="notionDataSourceSearch"
+                placeholder="Search data sources..."
+                :disabled="!selectedNode.data.credentialId"
+              />
+              <Button
+                v-if="
+                  (selectedNode.data.notionDataSourceInputMode || 'select') === 'select' &&
+                    notionDataSourcesHasMore
+                "
+                type="button"
+                variant="outline"
+                size="sm"
+                :loading="loadingNotionDataSources"
+                :disabled="loadingNotionDataSources"
+                @click="loadNotionDataSourcesForSelectedNode(true)"
+              >
+                Load more
+              </Button>
+              <ExpressionInput
+                v-else
+                :model-value="selectedNode.data.notionDataSourceId || ''"
+                placeholder="$input.dataSourceId or a Notion URL"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Data Source"
+                @update:model-value="updateNodeData('notionDataSourceId', $event)"
+              />
+              <p
+                v-if="notionDataSourcesError && (selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
+                class="text-xs text-destructive"
+              >
+                {{ notionDataSourcesError }}
+              </p>
+              <p
+                v-else-if="(selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
+                class="text-xs text-muted-foreground"
+              >
+                Shows data sources shared with the selected Notion integration.
+              </p>
+              <p
+                v-else
+                class="text-xs text-muted-foreground"
+              >
+                Accepts an expression, raw data source ID, or full Notion URL.
+              </p>
+            </div>
+
+            <div
+              v-if="['createDataSource', 'updateDataSource'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Data Source Request (JSON object)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionDataSource || '{}'"
+                :placeholder="selectedNode.data.notionOperation === 'createDataSource'
+                  ? '{&quot;parent&quot;:{&quot;type&quot;:&quot;database_id&quot;,&quot;database_id&quot;:&quot;...&quot;},&quot;properties&quot;:{&quot;Name&quot;:{&quot;title&quot;:{}}}}'
+                  : '{&quot;properties&quot;:{&quot;Status&quot;:{&quot;status&quot;:{}}}}'"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Data Source Request"
+                @update:model-value="updateNodeData('notionDataSource', $event)"
+              />
+              <p class="text-xs text-muted-foreground">
+                {{
+                  selectedNode.data.notionOperation === "createDataSource"
+                    ? "Create requires a parent database object and a property schema."
+                    : "Provide one or more fields supported by the Notion Update Data Source API."
+                }}
+              </p>
+            </div>
+
             <template v-if="selectedNode.data.notionOperation === 'createPage'">
               <div class="space-y-2">
-                <Label>Data Source ID</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Parent Page</Label>
+                  <div class="flex items-center gap-1">
+                    <Button
+                      v-if="(selectedNode.data.notionParentPageInputMode || 'select') === 'select'"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      :disabled="!selectedNode.data.credentialId || loadingNotionPages"
+                      @click="loadNotionPagesForSelectedNode(false)"
+                    >
+                      <RefreshCw
+                        class="mr-1 h-3.5 w-3.5"
+                        :class="{ 'animate-spin': loadingNotionPages }"
+                      />
+                      Refresh
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      @click="updateNodeData(
+                        'notionParentPageInputMode',
+                        (selectedNode.data.notionParentPageInputMode || 'select') === 'select'
+                          ? 'expression'
+                          : 'select',
+                      )"
+                    >
+                      {{
+                        (selectedNode.data.notionParentPageInputMode || "select") === "select"
+                          ? "Use expression"
+                          : "Use selector"
+                      }}
+                    </Button>
+                  </div>
+                </div>
                 <Select
-                  v-if="loadingNotionDataSources || notionDiscoveredDataSources.length > 0"
-                  :model-value="selectedNode.data.notionDataSourceId || ''"
-                  :options="notionDataSourceOptions"
-                  :disabled="loadingNotionDataSources"
-                  @update:model-value="updateNodeData('notionDataSourceId', $event)"
-                />
-                <ExpressionInput
-                  :model-value="selectedNode.data.notionDataSourceId || ''"
-                  placeholder="Use this for database-style pages"
-                  single-line
-                  :nodes="workflowStore.nodes"
-                  :node-results="workflowStore.nodeResults"
-                  :edges="workflowStore.edges"
-                  :current-node-id="selectedNode.id"
-                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
-                  dialog-key-label="Data Source ID"
-                  @update:model-value="updateNodeData('notionDataSourceId', $event)"
-                />
-              </div>
-              <div class="space-y-2">
-                <Label>Parent Page ID</Label>
-                <ExpressionInput
+                  v-if="(selectedNode.data.notionParentPageInputMode || 'select') === 'select'"
                   :model-value="selectedNode.data.notionParentPageId || ''"
-                  placeholder="Alternative to Data Source ID"
+                  :options="notionPageOptions"
+                  :disabled="!selectedNode.data.credentialId || loadingNotionPages"
+                  @update:model-value="updateNodeData('notionParentPageId', $event)"
+                />
+                <Input
+                  v-if="(selectedNode.data.notionParentPageInputMode || 'select') === 'select'"
+                  v-model="notionPageSearch"
+                  placeholder="Search pages..."
+                  :disabled="!selectedNode.data.credentialId"
+                />
+                <Button
+                  v-if="
+                    (selectedNode.data.notionParentPageInputMode || 'select') === 'select' &&
+                      notionPagesHasMore
+                  "
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :loading="loadingNotionPages"
+                  :disabled="loadingNotionPages"
+                  @click="loadNotionPagesForSelectedNode(true)"
+                >
+                  Load more
+                </Button>
+                <ExpressionInput
+                  v-else
+                  :model-value="selectedNode.data.notionParentPageId || ''"
+                  placeholder="$input.parentPageId or a Notion URL"
                   single-line
                   :nodes="workflowStore.nodes"
                   :node-results="workflowStore.nodeResults"
@@ -12874,40 +13271,23 @@ onUnmounted(() => {
                   dialog-key-label="Parent Page ID"
                   @update:model-value="updateNodeData('notionParentPageId', $event)"
                 />
-                <p class="text-xs text-muted-foreground">
+                <p
+                  v-if="notionPagesError && (selectedNode.data.notionParentPageInputMode || 'select') === 'select'"
+                  class="text-xs text-destructive"
+                >
+                  {{ notionPagesError }}
+                </p>
+                <p
+                  v-else
+                  class="text-xs text-muted-foreground"
+                >
                   Set exactly one parent. Data Source ID takes precedence when both are present.
                 </p>
               </div>
             </template>
 
             <div
-              v-if="selectedNode.data.notionOperation === 'queryDataSource'"
-              class="space-y-2"
-            >
-              <Label>Data Source ID</Label>
-              <Select
-                v-if="loadingNotionDataSources || notionDiscoveredDataSources.length > 0"
-                :model-value="selectedNode.data.notionDataSourceId || ''"
-                :options="notionDataSourceOptions"
-                :disabled="loadingNotionDataSources"
-                @update:model-value="updateNodeData('notionDataSourceId', $event)"
-              />
-              <ExpressionInput
-                :model-value="selectedNode.data.notionDataSourceId || ''"
-                placeholder="Notion data source ID"
-                single-line
-                :nodes="workflowStore.nodes"
-                :node-results="workflowStore.nodeResults"
-                :edges="workflowStore.edges"
-                :current-node-id="selectedNode.id"
-                :dialog-node-label="selectedNodeEvaluateDialogLabel"
-                dialog-key-label="Data Source ID"
-                @update:model-value="updateNodeData('notionDataSourceId', $event)"
-              />
-            </div>
-
-            <div
-              v-if="['getBlockChildren', 'appendBlocks'].includes(selectedNode.data.notionOperation || '')"
+              v-if="['getBlockChildren', 'updateBlock', 'deleteBlock', 'appendBlocks'].includes(selectedNode.data.notionOperation || '')"
               class="space-y-2"
             >
               <Label>Block or Page ID</Label>
@@ -12926,6 +13306,24 @@ onUnmounted(() => {
             </div>
 
             <div
+              v-if="selectedNode.data.notionOperation === 'updateBlock'"
+              class="space-y-2"
+            >
+              <Label>Block Update (JSON object)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionBlock || '{}'"
+                placeholder="{&quot;paragraph&quot;:{&quot;rich_text&quot;:[{&quot;type&quot;:&quot;text&quot;,&quot;text&quot;:{&quot;content&quot;:&quot;Updated&quot;}}]}}"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Block Update"
+                @update:model-value="updateNodeData('notionBlock', $event)"
+              />
+            </div>
+
+            <div
               v-if="['createPage', 'updatePage'].includes(selectedNode.data.notionOperation || '')"
               class="space-y-2"
             >
@@ -12940,6 +13338,42 @@ onUnmounted(() => {
                 :dialog-node-label="selectedNodeEvaluateDialogLabel"
                 dialog-key-label="Properties"
                 @update:model-value="updateNodeData('notionProperties', $event)"
+              />
+            </div>
+
+            <div
+              v-if="['createPage', 'updatePage'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Icon (JSON object)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionIcon || '{}'"
+                placeholder="{&quot;type&quot;:&quot;emoji&quot;,&quot;emoji&quot;:&quot;📌&quot;}"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Icon"
+                @update:model-value="updateNodeData('notionIcon', $event)"
+              />
+            </div>
+
+            <div
+              v-if="['createPage', 'updatePage'].includes(selectedNode.data.notionOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Cover (JSON object)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.notionCover || '{}'"
+                placeholder="{&quot;type&quot;:&quot;external&quot;,&quot;external&quot;:{&quot;url&quot;:&quot;https://example.com/cover.jpg&quot;}}"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Cover"
+                @update:model-value="updateNodeData('notionCover', $event)"
               />
             </div>
 
@@ -13046,10 +13480,21 @@ onUnmounted(() => {
               v-if="selectedNode.data.notionOperation === 'appendBlocks'"
               class="space-y-2"
             >
-              <Label>After Block ID</Label>
+              <Label>Position</Label>
+              <Select
+                :model-value="selectedNode.data.notionAppendPosition || (selectedNode.data.notionAfterBlockId ? 'after_block' : 'end')"
+                :options="notionAppendPositionOptions"
+                @update:model-value="updateNodeData('notionAppendPosition', $event)"
+              />
+              <Label
+                v-if="(selectedNode.data.notionAppendPosition || (selectedNode.data.notionAfterBlockId ? 'after_block' : 'end')) === 'after_block'"
+              >
+                After Block ID
+              </Label>
               <ExpressionInput
+                v-if="(selectedNode.data.notionAppendPosition || (selectedNode.data.notionAfterBlockId ? 'after_block' : 'end')) === 'after_block'"
                 :model-value="selectedNode.data.notionAfterBlockId || ''"
-                placeholder="Optional block ID"
+                placeholder="Block ID, URL, or expression"
                 single-line
                 :nodes="workflowStore.nodes"
                 :node-results="workflowStore.nodeResults"
@@ -13069,6 +13514,9 @@ onUnmounted(() => {
                 <div>${{ selectedNode.data.label }}.success - Boolean success flag</div>
                 <div>${{ selectedNode.data.label }}.results - Search/query/block results</div>
                 <div>${{ selectedNode.data.label }}.page - Created, retrieved, or updated page</div>
+                <div>${{ selectedNode.data.label }}.database - Created, retrieved, or updated database</div>
+                <div>${{ selectedNode.data.label }}.data_source - Retrieved data source schema</div>
+                <div>${{ selectedNode.data.label }}.block - Updated or deleted block</div>
               </div>
             </div>
           </template>

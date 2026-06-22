@@ -35,10 +35,12 @@ Credentials are exposed as `$credentials.CredentialName` in the [Expression DSL]
 - HTTP nodes (Bearer/Header auth)
 - Telegram nodes
 - Slack nodes
+- Notion bearer tokens in custom HTTP requests (internal token or OAuth access token)
 - Any node that accepts expressions for auth
 
 ```dsl
 $credentials.MyBearerToken
+$credentials.MyNotionWorkspace
 ```
 
 ### By ID (credentialId)
@@ -48,6 +50,8 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 | Node Type | Field | Description |
 |-----------|-------|-------------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), Image Gen | `credentialId` | LLM API credential |
+| [Notion](../nodes/notion-node.md) | `credentialId` | Notion internal token or OAuth workspace credential |
+| [Supabase](../nodes/supabase-node.md) | `credentialId` | Supabase project URL and API key |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md), [Telegram](../nodes/telegram-node.md) | `credentialId` | Telegram bot credential |
 | [Discord Trigger](../nodes/discord-trigger-node.md), [Discord](../nodes/discord-node.md) | `credentialId` | Discord public key or webhook credential |
 | Vector Store | `credential_id` | Qdrant/vector DB |
@@ -66,5 +70,5 @@ After execution, `mask_sensitive_output()` replaces credential values in outputs
 - [Third-Party Integrations](./integrations.md) – Detailed setup for each credential type
 - [Teams](./teams.md) – Share with teams
 - [Expression DSL](./expression-dsl.md) – `$credentials` syntax
-- [Node Types](./node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), [Playwright](../nodes/playwright-node.md), [HTTP](../nodes/http-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md))
+- [Node Types](./node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), [Playwright](../nodes/playwright-node.md), [HTTP](../nodes/http-node.md), [Notion](../nodes/notion-node.md), [Supabase](../nodes/supabase-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md))
 - [Agent Node](../nodes/agent-node.md) – Uses `credentialId` for LLM

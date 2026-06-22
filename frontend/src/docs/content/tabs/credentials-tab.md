@@ -12,7 +12,7 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **OpenAI** | OpenAI API key for LLM, Agent, and RAG nodes |
 | **Google** | Google AI (Gemini) API key |
 | **GitHub** | GitHub personal access token (PAT) for GitHub API, GitHub node workflows, MCP servers, and agent workflows; optional GitHub Enterprise `base_url` |
-| **Notion** | Internal integration token; pages and data sources must be shared with the integration |
+| **Notion** | Internal integration token or public-integration OAuth workspace authorization |
 | **Custom** | Custom LLM endpoints |
 | **Bearer** | Bearer token for HTTP auth |
 | **Header** | Custom header key-value for HTTP requests |
@@ -34,6 +34,11 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 4. Give it a name for reference in nodes
 
 For GitHub, the current credential flow is PAT-based. Fine-grained PATs are recommended. GitHub App installation flows are not first-class in the UI today. If you use GitHub Enterprise Server, you can also set an optional GitHub API base URL such as `https://github.example.com/api/v3`.
+
+For **Notion**, choose **Internal token** or **OAuth** in the dialog. OAuth uses the Client ID and
+Client Secret from your Notion public integration; Heym stores them encrypted in the credential.
+Use **Test Connection** to verify Supabase or Notion credentials before saving a workflow. See
+[Third-Party Integrations](../reference/integrations.md#notion) for setup details.
 
 ## Editing and Deleting
 
@@ -57,7 +62,7 @@ Reference credentials by name in node configuration. For example:
 - [HTTP node](../nodes/http-node.md) – Use Bearer or Header credentials for auth
 - [Agent node](../nodes/agent-node.md) – Pass GitHub tokens into MCP server env vars such as `GITHUB_PERSONAL_ACCESS_TOKEN`
 - [GitHub node](../nodes/github-node.md) – Run native GitHub repository, user, issue, review, release, workflow, traffic, and file operations
-- [Notion node](../nodes/notion-node.md) – Search and manage Notion pages, data sources, and blocks
+- [Notion node](../nodes/notion-node.md) – Manage Notion databases, data sources, pages, and blocks
 - [RAG node](../nodes/rag-node.md) – Use Qdrant credential for the vector store
 - [Telegram Trigger node](../nodes/telegram-trigger-node.md) – Receive Telegram bot webhooks
 - [Telegram node](../nodes/telegram-node.md) – Send Telegram bot messages

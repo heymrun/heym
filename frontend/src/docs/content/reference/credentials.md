@@ -27,7 +27,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Google Sheets](../nodes/google-sheets-node.md) | Google Sheets (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [BigQuery](../nodes/bigquery-node.md) | BigQuery (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [Supabase](../nodes/supabase-node.md) | Supabase | Project URL + API key (+ optional default schema) |
-| [Notion](../nodes/notion-node.md) | Notion | Internal integration token |
+| [Notion](../nodes/notion-node.md) | Notion | Internal integration token, or public integration Client ID + Client Secret + OAuth consent |
 | [Amazon S3](../nodes/amazon-s3-node.md) | Amazon S3 | Access key, secret key, region |
 | [RabbitMQ](../nodes/rabbitmq-node.md) | RabbitMQ | AMQP URL |
 
@@ -40,7 +40,23 @@ you want to change that endpoint.
 
 ## In Expressions
 
-Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's value (e.g. Bearer token or GitHub PAT) inside an expression.
+Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression.
+
+| Credential type | Value exposed to `$credentials.Name` |
+|-----------------|--------------------------------------|
+| Bearer | Bearer token string |
+| GitHub | Personal access token |
+| Notion | Internal `api_token` or OAuth `access_token` (Bearer token for Notion API calls) |
+| Discord / Slack | Webhook URL |
+
+Example:
+
+```
+$credentials.MyBearerToken
+$credentials.MyNotionWorkspace
+```
+
+Use the Notion **node** for native database, page, and block operations. Use `$credentials` when a custom [HTTP](../nodes/http-node.md) request needs the same Notion bearer token.
 
 ## Related
 

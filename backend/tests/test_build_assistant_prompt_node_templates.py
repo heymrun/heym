@@ -99,6 +99,12 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn('"type": "notion"', prompt)
         self.assertIn("notionDataSourceId", prompt)
         self.assertIn("queryDataSource", prompt)
+        self.assertIn("retrieveDataSource", prompt)
+        self.assertIn("createDataSource", prompt)
+        self.assertIn("updateDataSource", prompt)
+        self.assertIn("createDatabase", prompt)
+        self.assertIn("retrieveDatabase", prompt)
+        self.assertIn("updateDatabase", prompt)
 
     def test_includes_filter_map_nested_reference_guidance(self) -> None:
         prompt = build_assistant_prompt()

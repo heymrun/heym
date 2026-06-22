@@ -1891,7 +1891,9 @@ async def get_credentials_context(
             elif cred.type == CredentialType.slack:
                 context[cred.name] = config.get("webhook_url", "")
             elif cred.type == CredentialType.notion:
-                context[cred.name] = config.get("api_token", "")
+                from app.services.notion_service import NotionService
+
+                context[cred.name] = NotionService.resolve_bearer_token(config)
             else:
                 context[cred.name] = config.get("api_key", "")
         except Exception:

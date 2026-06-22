@@ -92,6 +92,12 @@ const supabaseTesting = ref(false);
 const supabaseTestSuccess = ref<boolean | null>(null);
 const supabaseTestMessage = ref("");
 const notionToken = ref("");
+const notionAuthMode = ref<"token" | "oauth">("token");
+const notionClientId = ref("");
+const notionClientSecret = ref("");
+const notionOAuthConnected = ref(false);
+const notionOAuthConnecting = ref(false);
+const notionConnectedCredential = ref<Credential | null>(null);
 const notionTesting = ref(false);
 const notionTestSuccess = ref<boolean | null>(null);
 const notionTestMessage = ref("");
@@ -244,6 +250,22 @@ watch(
             ? props.credential.public_fields?.supabase_schema ?? "public"
             : "public";
         notionToken.value = "";
+        notionAuthMode.value =
+          props.credential.type === "notion" &&
+          (props.credential.masked_value === "connected" ||
+            props.credential.masked_value?.startsWith("connected (") ||
+            props.credential.public_fields?.auth_mode === "oauth")
+            ? "oauth"
+            : "token";
+        notionClientId.value = "";
+        notionClientSecret.value = "";
+        notionOAuthConnected.value =
+          props.credential.type === "notion" &&
+          (props.credential.masked_value === "connected" ||
+            props.credential.masked_value?.startsWith("connected (") ||
+            false);
+        notionOAuthConnecting.value = false;
+        notionConnectedCredential.value = null;
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value =
@@ -303,6 +325,12 @@ watch(
         supabaseKey.value = "";
         supabaseSchema.value = "public";
         notionToken.value = "";
+        notionAuthMode.value = "token";
+        notionClientId.value = "";
+        notionClientSecret.value = "";
+        notionOAuthConnected.value = false;
+        notionOAuthConnecting.value = false;
+        notionConnectedCredential.value = null;
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value = "us-east-1";
@@ -397,6 +425,17 @@ const isValid = computed(() => {
     }
     return !!supabaseUrl.value.trim() && !!supabaseKey.value.trim();
   } else if (type.value === "notion") {
+    if (notionAuthMode.value === "oauth") {
+      if (!isEditing.value) {
+        return notionOAuthConnected.value;
+      }
+      return (
+        notionOAuthConnected.value ||
+        props.credential?.masked_value === "connected" ||
+        (props.credential?.masked_value?.startsWith("connected (") ?? false) ||
+        props.credential?.masked_value === "Not connected"
+      );
+    }
     return !!notionToken.value.trim() || isEditing.value;
   } else if (type.value === "s3") {
     if (isEditing.value) {
@@ -517,7 +556,13 @@ function buildConfig(): CredentialConfig {
       supabase_schema: supabaseSchema.value.trim() || "public",
     };
   } else if (type.value === "notion") {
-    return { api_token: notionToken.value.trim() };
+    return notionAuthMode.value === "oauth"
+      ? {
+          auth_mode: "oauth",
+          client_id: notionClientId.value.trim(),
+          client_secret: notionClientSecret.value.trim(),
+        }
+      : { api_token: notionToken.value.trim() };
   } else if (type.value === "s3") {
     return {
       aws_access_key_id: s3AccessKeyId.value.trim(),
@@ -724,7 +769,13 @@ async function testSupabaseConnection(): Promise<void> {
 }
 
 async function testNotionConnection(): Promise<void> {
-  if (!notionToken.value.trim() && !isEditing.value) {
+  const connectedCredentialId =
+    props.credential?.id || notionConnectedCredential.value?.id;
+  if (
+    notionAuthMode.value === "token" &&
+    !notionToken.value.trim() &&
+    !connectedCredentialId
+  ) {
     error.value = "Enter an integration token to test the connection.";
     return;
   }
@@ -735,8 +786,11 @@ async function testNotionConnection(): Promise<void> {
   try {
     const result = await credentialsApi.testConnection({
       type: "notion",
-      config: { api_token: notionToken.value.trim() },
-      credential_id: isEditing.value ? props.credential?.id : undefined,
+      config:
+        notionAuthMode.value === "oauth"
+          ? { auth_mode: "oauth" }
+          : { api_token: notionToken.value.trim() },
+      credential_id: connectedCredentialId,
     });
     notionTestSuccess.value = result.success;
     notionTestMessage.value = result.message;
@@ -750,6 +804,102 @@ async function testNotionConnection(): Promise<void> {
     error.value = message;
   } finally {
     notionTesting.value = false;
+  }
+}
+
+const notionWorkspaceName = computed((): string => {
+  const fromCredential =
+    props.credential?.public_fields?.workspace_name ||
+    notionConnectedCredential.value?.public_fields?.workspace_name;
+  if (fromCredential) {
+    return fromCredential;
+  }
+  const masked = props.credential?.masked_value || "";
+  const match = masked.match(/^connected \((.+)\)$/);
+  return match?.[1]?.trim() ?? "";
+});
+
+const notionOAuthStatusLabel = computed((): string => {
+  if (notionOAuthConnected.value) {
+    return notionWorkspaceName.value
+      ? `Connected to ${notionWorkspaceName.value}`
+      : "Connected";
+  }
+  if (isEditing.value && props.credential?.masked_value === "Not connected") {
+    return "Not connected";
+  }
+  return "";
+});
+
+async function startNotionOAuth(): Promise<void> {
+  if (!notionClientId.value.trim() || !notionClientSecret.value.trim()) {
+    error.value = "Enter Client ID and Client Secret before connecting.";
+    return;
+  }
+  if (!name.value.trim()) {
+    error.value = "Enter a name for this credential before connecting.";
+    return;
+  }
+  notionOAuthConnecting.value = true;
+  error.value = "";
+  try {
+    let credentialId: string;
+    if (isEditing.value && props.credential) {
+      await credentialsApi.update(props.credential.id, {
+        name: name.value,
+        config: buildConfig(),
+      });
+      credentialId = props.credential.id;
+    } else {
+      const saved = await credentialsApi.create({
+        name: name.value,
+        type: "notion",
+        config: buildConfig(),
+      });
+      credentialId = saved.id;
+    }
+    const { auth_url } = await credentialsApi.notionOAuthAuthorize(credentialId);
+    const popup = window.open(auth_url, "notion-oauth", "width=520,height=680");
+    if (!popup) {
+      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
+    }
+    const onMessage = (event: MessageEvent): void => {
+      if (!isTrustedOAuthMessage(event, popup)) {
+        return;
+      }
+      if (
+        event.data?.type === "notion-oauth-success" &&
+        event.data.credentialId === credentialId
+      ) {
+        window.removeEventListener("message", onMessage);
+        clearInterval(pollClosed);
+        popup.close();
+        credentialsApi.get(credentialId).then((credential) => {
+          notionConnectedCredential.value = credential;
+          notionOAuthConnected.value = true;
+          notionOAuthConnecting.value = false;
+        }).catch(() => {
+          notionOAuthConnected.value = true;
+          notionOAuthConnecting.value = false;
+        });
+      } else if (event.data?.type === "notion-oauth-error") {
+        window.removeEventListener("message", onMessage);
+        clearInterval(pollClosed);
+        notionOAuthConnecting.value = false;
+        error.value = event.data.message || "Notion OAuth authorization failed";
+      }
+    };
+    const pollClosed = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(pollClosed);
+        window.removeEventListener("message", onMessage);
+        notionOAuthConnecting.value = false;
+      }
+    }, 500);
+    window.addEventListener("message", onMessage);
+  } catch (err) {
+    notionOAuthConnecting.value = false;
+    error.value = err instanceof Error ? err.message : "Notion OAuth authorization failed";
   }
 }
 
@@ -770,10 +920,11 @@ async function handleSave(): Promise<void> {
       }
 
       const headerKeyChanged = headerKey.value.trim() !== (props.credential.header_key || "");
-      // google_sheets and bigquery configs are managed entirely by the OAuth callback — never overwrite here
+      // OAuth configs are managed by their callbacks after connection.
       const hasConfigChange =
         type.value !== "google_sheets" &&
         type.value !== "bigquery" &&
+        !(type.value === "notion" && notionAuthMode.value === "oauth") &&
         (apiKey.value.trim() ||
           baseUrl.value.trim() ||
           bearerToken.value.trim() ||
@@ -829,6 +980,8 @@ async function handleSave(): Promise<void> {
       saved = gsConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
+    } else if (type.value === "notion" && notionConnectedCredential.value) {
+      saved = notionConnectedCredential.value;
     } else {
       saved = await credentialsApi.create({
         name: name.value,
@@ -1939,9 +2092,27 @@ async function handleSave(): Promise<void> {
 
       <template v-if="type === 'notion'">
         <div class="space-y-2">
-          <Label for="cred-notion-token">Internal Integration Token</Label>
+          <Label>Authentication</Label>
+          <Select
+            v-model="notionAuthMode"
+            :options="[
+              { value: 'token', label: 'Internal Integration Token' },
+              { value: 'oauth', label: 'OAuth (Public Integration)' },
+            ]"
+            :disabled="saving || notionOAuthConnecting"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label
+            v-if="notionAuthMode === 'token'"
+            for="cred-notion-token"
+          >
+            Internal Integration Token
+          </Label>
           <div class="relative">
             <Input
+              v-if="notionAuthMode === 'token'"
               id="cred-notion-token"
               v-model="notionToken"
               :type="showApiKey ? 'text' : 'password'"
@@ -1950,6 +2121,7 @@ async function handleSave(): Promise<void> {
               class="pr-10"
             />
             <button
+              v-if="notionAuthMode === 'token'"
               type="button"
               class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               @click="showApiKey = !showApiKey"
@@ -1964,18 +2136,74 @@ async function handleSave(): Promise<void> {
               />
             </button>
           </div>
-          <p class="text-xs text-muted-foreground">
+          <p
+            v-if="notionAuthMode === 'token'"
+            class="text-xs text-muted-foreground"
+          >
             Create an internal integration in Notion, then share the required pages and data sources with it.
           </p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <template v-if="notionAuthMode === 'oauth'">
+          <div class="space-y-2">
+            <Label for="cred-notion-client-id">OAuth Client ID</Label>
+            <Input
+              id="cred-notion-client-id"
+              v-model="notionClientId"
+              placeholder="Public integration OAuth client ID"
+              :disabled="saving || notionOAuthConnecting"
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="cred-notion-client-secret">OAuth Client Secret</Label>
+            <Input
+              id="cred-notion-client-secret"
+              v-model="notionClientSecret"
+              type="password"
+              placeholder="Public integration OAuth client secret"
+              :disabled="saving || notionOAuthConnecting"
+            />
+          </div>
+          <div class="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :loading="notionOAuthConnecting"
+              :disabled="saving || notionOAuthConnecting || !notionClientId.trim() || !notionClientSecret.trim()"
+              @click="startNotionOAuth"
+            >
+              {{ notionOAuthConnected ? "Reconnect" : "Connect" }}
+            </Button>
+            <span
+              v-if="notionOAuthStatusLabel"
+              class="text-xs"
+              :class="
+                notionOAuthConnected
+                  ? 'text-emerald-600'
+                  : 'text-muted-foreground'
+              "
+            >
+              {{ notionOAuthStatusLabel }}
+            </span>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Register
+            <code>/api/credentials/notion/oauth/callback</code>
+            in your Notion public integration.
+          </p>
+        </template>
+
+        <div
+          v-if="notionAuthMode === 'token' || notionOAuthConnected"
+          class="flex items-center gap-3"
+        >
           <Button
             type="button"
             variant="outline"
             size="sm"
             :loading="notionTesting"
-            :disabled="saving || notionTesting || (!notionToken.trim() && !isEditing)"
+            :disabled="saving || notionTesting || (notionAuthMode === 'token' && !notionToken.trim() && !isEditing)"
             @click="testNotionConnection"
           >
             Test Connection

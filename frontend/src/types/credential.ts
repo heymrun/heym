@@ -195,7 +195,11 @@ export interface CredentialConfigSupabase {
 }
 
 export interface CredentialConfigNotion {
-  api_token: string;
+  api_token?: string;
+  client_id?: string;
+  client_secret?: string;
+  access_token?: string;
+  auth_mode?: "token" | "oauth";
 }
 
 export type CredentialConfig =
@@ -264,6 +268,21 @@ export interface NotionDataSourceItem {
 
 export interface NotionDataSourcesResponse {
   data_sources: NotionDataSourceItem[];
+  next_cursor?: string | null;
+  has_more: boolean;
+  success: boolean;
+}
+
+export interface NotionPageItem {
+  id: string;
+  title: string;
+  url?: string | null;
+}
+
+export interface NotionPagesResponse {
+  pages: NotionPageItem[];
+  next_cursor?: string | null;
+  has_more: boolean;
   success: boolean;
 }
 
@@ -290,7 +309,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_sheets: "Google Sheets (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
-  notion: "Notion",
+  notion: "Notion (Token or OAuth)",
   s3: "Amazon S3",
   elevenlabs: "ElevenLabs (Voice)",
 };
@@ -318,7 +337,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
-  notion: "Connect to Notion — search, query data sources, and manage pages and blocks",
+  notion: "Connect to Notion with an internal token or user-authorized OAuth workspace",
   s3: "Connect to Amazon S3 — manage buckets, folders, and objects",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
 };

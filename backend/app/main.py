@@ -34,6 +34,7 @@ from app.api import (
     logs,
     mcp,
     mcp_servers,
+    notion_oauth,
     oauth,
     playwright,
     portal,
@@ -62,6 +63,7 @@ from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
 from app.services.hitl_service import build_public_base_url, build_review_url
 from app.services.imap_trigger_service import imap_trigger_manager
+from app.services.notion_service import NotionService
 from app.services.qdrant_pool import close_all_clients as close_qdrant_clients
 from app.services.qdrant_pool import warm_up_pools as warm_up_qdrant_pools
 from app.services.rabbitmq_consumer import rabbitmq_consumer_manager
@@ -144,6 +146,7 @@ async def lifespan(app: FastAPI):
     close_redis_pools()
     close_grist_clients()
     close_qdrant_clients()
+    NotionService.close_shared_client()
     close_http_client()
 
 
@@ -229,6 +232,11 @@ app.include_router(
     bigquery_oauth.router,
     prefix="/api/credentials/bigquery/oauth",
     tags=["BigQuery OAuth"],
+)
+app.include_router(
+    notion_oauth.router,
+    prefix="/api/credentials/notion/oauth",
+    tags=["Notion OAuth"],
 )
 app.include_router(
     global_variables.router, prefix="/api/global-variables", tags=["Global Variables"]

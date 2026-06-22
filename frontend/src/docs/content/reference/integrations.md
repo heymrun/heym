@@ -20,7 +20,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
-| **Notion** | [Notion node](../nodes/notion-node.md) | `api_token` |
+| **Notion** | [Notion node](../nodes/notion-node.md) | `api_token`, or `client_id` + `client_secret` OAuth |
 | **Amazon S3** | [Amazon S3 node](../nodes/amazon-s3-node.md) | `aws_access_key_id`, `aws_secret_access_key`, `aws_region` |
 | **SMTP** | [Send Email](../nodes/send-email-node.md) | `host`, `port`, `email`, `password` |
 | **IMAP** | [IMAP Trigger node](../nodes/imap-trigger-node.md) | `imap_host`, `imap_port`, `imap_username`, `imap_password` |
@@ -215,10 +215,56 @@ The Supabase credential connects Heym to a Supabase project's PostgREST API so w
 
 ## Notion
 
-The Notion credential stores an internal integration token. Create the integration in Notion, copy
-the token into Heym, and explicitly share every page or data source that the workflow needs with the
-integration. The [Notion node](../nodes/notion-node.md) uses API version `2026-03-11`, including the
-current data source query endpoints.
+The Notion credential supports either an internal integration token or a public-integration OAuth
+connection. OAuth lets each user authorize a Notion workspace from Heym instead of manually copying
+a token.
+
+### Required Fields
+
+| Mode | Field | Description |
+|------|-------|-------------|
+| Internal token | `api_token` | Internal integration token (`ntn_...`) |
+| OAuth | `client_id` | Client ID from a Notion public integration |
+| OAuth | `client_secret` | Client Secret from the Notion public integration |
+
+The OAuth callback stores `access_token`, `auth_mode`, `workspace_id`, `workspace_name`, and `bot_id`
+automatically. Any previous internal `api_token` is removed when OAuth completes. Register this
+redirect URI in Notion:
+`{FRONTEND_URL}/api/credentials/notion/oauth/callback`.
+
+### OAuth setup flow
+
+1. Choose **OAuth** in the credential dialog, enter a name, Client ID, and Client Secret.
+2. Click **Connect** and authorize the workspace in the Notion popup.
+   - For a **new** credential, Heym creates the credential record when you click **Connect**.
+   - Complete authorization in the popup, then click **Save** to return to the credentials list.
+3. A connected credential shows `connected (Workspace Name)` in the list. Pending OAuth
+   credentials show `Not connected` until authorization finishes.
+
+Use **Test Connection** in the credential dialog to verify either an internal token or a completed
+OAuth authorization. When editing, leaving the token field blank preserves the stored internal token.
+
+Both internal tokens and OAuth access tokens are available through
+`$credentials.CredentialName` for custom [HTTP](../nodes/http-node.md) calls that need a Notion
+bearer token.
+
+### Notes
+
+- Internal integrations require the relevant pages, databases, and data sources to be shared.
+- OAuth users choose the workspace/pages during Notion authorization.
+- OAuth application credentials are encrypted inside the Notion credential. The callback reloads
+  them server-side; the secret is not embedded in OAuth state.
+- Connected OAuth credentials display the workspace name; pending OAuth credentials show
+  `Not connected` until authorization completes.
+- **Production:** Set backend **`FRONTEND_URL`** to the public browser URL (scheme + host, no
+  trailing slash). The Notion redirect URI must match exactly:
+  `{FRONTEND_URL}/api/credentials/notion/oauth/callback`.
+- The node uses API version `2026-03-11` and current `data_source` terminology. See the
+  [Notion node](../nodes/notion-node.md#api-version-notes) article for migration guidance from
+  older `archived`, `after`, or database-query examples.
+- Old search filters with object value `database` are normalized to `data_source`.
+
+### Used By
 
 - [Notion node](../nodes/notion-node.md)
 

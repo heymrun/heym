@@ -33,7 +33,7 @@ Key environment variables:
 | `DATABASE_URL` | Optional database connection string override. If empty, Heym builds it from `POSTGRES_*` settings. |
 | `BACKEND_PORT` | Backend API port — defaults to `10105` |
 | `FRONTEND_PORT` | Frontend port — defaults to `4017` |
-| `FRONTEND_URL` | **Required in production.** Public URL of the app (scheme + host, e.g. `https://heym.example.com`). Used for Google Sheets OAuth redirect URI and similar; must match the URL users use in the browser. |
+| `FRONTEND_URL` | **Required in production.** Public URL of the app (scheme + host, e.g. `https://heym.example.com`). Used for OAuth redirect URIs (Google Sheets, BigQuery, Notion, and similar); must match the URL users use in the browser. |
 | `ALLOW_REGISTER` | Open user registration (`false` in prod, `true` in dev) |
 | `DOCKER_LOGS_ENABLED` | Enables Docker-backed Logs tab access when set to `true`; also requires Docker socket access |
 | `DOCKER_LOGS_ALLOWED_EMAILS` | Comma-separated list of trusted user emails allowed to access Docker logs when `DOCKER_LOGS_ENABLED=true` |
