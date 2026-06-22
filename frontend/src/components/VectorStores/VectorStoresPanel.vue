@@ -54,9 +54,15 @@ const newStoreName = ref("");
 const newStoreDescription = ref("");
 const newStoreCredentialId = ref("");
 const newStoreCollectionName = ref("");
-const qdrantCredentials = ref<CredentialListItem[]>([]);
+const newStoreDbType = ref<"qdrant" | "pgvector">("qdrant");
+const vectorCredentials = ref<CredentialListItem[]>([]);
 const saving = ref(false);
 const createError = ref("");
+
+const dbTypeOptions = [
+  { value: "qdrant", label: "Qdrant" },
+  { value: "pgvector", label: "Postgres (pgvector)" },
+];
 
 const uploadFiles = ref<File[]>([]);
 const uploading = ref(false);
@@ -77,10 +83,14 @@ const expandedSources = ref<Set<string>>(new Set());
 const deletingSource = ref<string | null>(null);
 const deletingItem = ref<string | null>(null);
 
+const filteredCredentials = computed(() =>
+  vectorCredentials.value.filter((c) => c.type === newStoreDbType.value),
+);
+
 const credentialOptions = computed(() => {
   return [
     { value: "", label: "Select a credential" },
-    ...qdrantCredentials.value.map((c) => ({
+    ...filteredCredentials.value.map((c) => ({
       value: c.id,
       label: c.name,
     })),
@@ -114,11 +124,11 @@ async function loadVectorStores(): Promise<void> {
 }
 
 async function loadCredentials(): Promise<void> {
-  try {
-    qdrantCredentials.value = await credentialsApi.listByType("qdrant");
-  } catch {
-    qdrantCredentials.value = [];
-  }
+  const [qdrant, pgvector] = await Promise.all([
+    credentialsApi.listByType("qdrant").catch(() => []),
+    credentialsApi.listByType("pgvector").catch(() => []),
+  ]);
+  vectorCredentials.value = [...qdrant, ...pgvector];
 }
 
 function openCreateDialog(): void {
@@ -126,8 +136,14 @@ function openCreateDialog(): void {
   newStoreDescription.value = "";
   newStoreCredentialId.value = "";
   newStoreCollectionName.value = "";
+  newStoreDbType.value = "qdrant";
   createError.value = "";
   showCreateDialog.value = true;
+}
+
+function onDbTypeChange(value: string | undefined): void {
+  newStoreDbType.value = value === "pgvector" ? "pgvector" : "qdrant";
+  newStoreCredentialId.value = "";
 }
 
 async function createVectorStore(): Promise<void> {
@@ -437,7 +453,8 @@ async function removeTeamShare(teamId: string): Promise<void> {
 
 function formatVectorCount(stats: VectorStoreListItem["stats"]): string {
   if (!stats) return "N/A";
-  return stats.vector_count.toLocaleString();
+  const count = stats.vector_count || stats.points_count || 0;
+  return count.toLocaleString();
 }
 
 async function openItemsDialog(store: VectorStoreListItem): Promise<void> {
@@ -513,7 +530,7 @@ async function deleteItem(pointId: string): Promise<void> {
           Vector Stores
         </h2>
         <p class="text-muted-foreground mt-1">
-          Manage QDrant vector stores for RAG workflows
+          Manage vector stores (Qdrant or Postgres) for RAG workflows
         </p>
       </div>
       <Button @click="openCreateDialog">
@@ -651,12 +668,17 @@ async function deleteItem(pointId: string): Promise<void> {
           <div class="text-xs font-mono text-muted-foreground bg-muted/50 px-2 py-1 rounded">
             {{ store.collection_name }}
           </div>
-          <div class="text-xs text-muted-foreground">
+          <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span v-if="store.is_shared && store.shared_by">
               Shared by {{ store.shared_by }}
             </span>
             <span v-else>
               Created {{ formatDate(store.created_at) }}
+            </span>
+            <span
+              class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-node-rag/10 text-node-rag shrink-0"
+            >
+              {{ store.backend === "pgvector" ? "Postgres" : "Qdrant" }}
             </span>
           </div>
         </div>
@@ -694,6 +716,20 @@ async function deleteItem(pointId: string): Promise<void> {
         </div>
 
         <div class="space-y-2">
+          <Label for="store-dbtype">Database <span class="text-destructive">*</span></Label>
+          <Select
+            id="store-dbtype"
+            :model-value="newStoreDbType"
+            :options="dbTypeOptions"
+            :disabled="saving"
+            @update:model-value="onDbTypeChange"
+          />
+          <p class="text-xs text-muted-foreground">
+            Qdrant uses an external server; Postgres (pgvector) stores vectors in Heym's own database.
+          </p>
+        </div>
+
+        <div class="space-y-2">
           <Label for="store-credential">Credential <span class="text-destructive">*</span></Label>
           <Select
             id="store-credential"
@@ -702,10 +738,10 @@ async function deleteItem(pointId: string): Promise<void> {
             :disabled="saving"
           />
           <p
-            v-if="qdrantCredentials.length === 0"
+            v-if="filteredCredentials.length === 0"
             class="text-xs text-amber-500"
           >
-            No QDrant credentials found.
+            No {{ newStoreDbType === "pgvector" ? "Postgres (pgvector)" : "Qdrant" }} credentials found.
             <a
               href="/?tab=credentials"
               class="text-primary hover:underline"
@@ -770,14 +806,14 @@ async function deleteItem(pointId: string): Promise<void> {
             type="checkbox"
             class="rounded border-border"
           >
-          <span class="text-sm">Also delete QDrant collection</span>
+          <span class="text-sm">Also delete the stored vectors</span>
         </label>
 
         <p
           v-if="!deleteCollection"
           class="text-xs text-amber-500"
         >
-          The QDrant collection will remain and can be reused later.
+          The stored vectors will remain and can be reused later.
         </p>
 
         <div class="flex justify-end gap-3 pt-4">

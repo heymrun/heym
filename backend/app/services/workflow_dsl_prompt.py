@@ -1828,19 +1828,20 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 - `$redisNodeLabel.ttl` - TTL value (for set operation with TTL)
 
 ### 21. rag (Vector Store / RAG Operations)
-- **Purpose**: Insert documents into or search documents from a QDrant vector store for RAG (Retrieval Augmented Generation)
+- **Purpose**: Insert documents into or search documents from a vector store (Qdrant or Postgres/pgvector) for RAG (Retrieval Augmented Generation)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
   - `operation`: Operation type - "insert" | "search"
   - `vectorStoreId`: UUID of the Vector Store to use
+  - `dbType`: "qdrant" | "pgvector" (optional, default "qdrant"). The vector store backend. This is only a UI hint for filtering the store list; the actual backend is determined by the selected Vector Store's credential, so a valid `vectorStoreId` works regardless of `dbType`.
   - `documentContent`: Document text to insert (only for "insert" operation, supports expressions)
   - `documentMetadata`: JSON object with metadata for the document (only for "insert" operation)
   - `queryText`: Search query text (only for "search" operation, supports expressions)
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation)
 
-**SETUP**: Requires a Vector Store created in the Vector Stores tab with a QDrant + OpenAI Embedding credential.
+**SETUP**: Requires a Vector Store created in the Vector Stores tab with either a "RAG: Qdrant + OpenAI" credential (external Qdrant server) or a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service). The same RAG operations, metadata filters, and reranking work identically with both backends.
 
 **RAG Operations**:
 
@@ -4238,6 +4239,43 @@ Access request context:
 """
 
 
+CLARIFY_PROTOCOL_PROMPT = """
+
+## Clarification Protocol (planning phase)
+
+If the user's request is ambiguous or under-specified (missing trigger, goal, data
+source, output format, credentials, or any choice you would otherwise guess), DO NOT
+generate the workflow yet: do not emit a workflow JSON block, and (in chat) do NOT call
+the workflow create/edit tools. Instead, emit exactly ONE fenced
+block tagged `heym-clarify` containing a JSON object with a `questions` array, then stop
+and wait. The `heym-clarify` block must be plain assistant text, not a tool call.
+
+Rules for the clarify block:
+- Ask at most 3-4 questions. Only ask about things that materially change the workflow.
+- Each question: `id` (short slug), `text`, `type` ("single" | "multi" | "text"),
+  optional `options` (string array), optional `allowOther` (boolean).
+- Use `single` for one choice, `multi` for several, `text` for free input.
+- Provide `options` whenever sensible; set `allowOther: true` when a genuine free-form
+  answer is plausible.
+
+Example:
+
+```heym-clarify
+{"questions": [
+  {"id": "trigger", "text": "How should this workflow be triggered?", "type": "single",
+   "options": ["Webhook", "Manual", "Scheduled"], "allowOther": true},
+  {"id": "outputs", "text": "Which outputs are needed?", "type": "multi",
+   "options": ["Email", "Slack", "Database"], "allowOther": true}
+]}
+```
+
+The user will reply with a message that starts with `[Plan answers]` listing their
+choices. After reading it: if the request is now clear, generate the workflow JSON as
+usual; if it is still ambiguous, you may emit one more `heym-clarify` block. For requests
+that are already clear, skip this protocol entirely and generate the workflow directly.
+"""
+
+
 DASHBOARD_WIDGET_PROMPT_HINT = (
     "\n\n## Dashboard Widget Context\n"
     "This workflow is a DASHBOARD WIDGET. It has no trigger or input node — it starts by "
@@ -4380,5 +4418,7 @@ def build_assistant_prompt(
         prompt += "- Add new nodes with unique IDs\n"
         prompt += "- For new nodes that need credentials, use placeholder 'YOUR_CREDENTIAL_ID' or ask the user"
         prompt += "\n- **Credential fields** (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Slack/SMTP/Redis/etc.): use ONLY owned credentials in generated output; never shared credentials."
+
+    prompt += CLARIFY_PROTOCOL_PROMPT
 
     return prompt

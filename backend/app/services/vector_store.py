@@ -1,6 +1,7 @@
 import json
 import uuid
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
@@ -59,7 +60,56 @@ class VectorStoreSourceGroup:
     items: list[VectorStoreItem]
 
 
-class VectorStoreService:
+class VectorStoreBackend(Protocol):
+    """Common interface implemented by every vector store backend."""
+
+    def create_collection(self, collection_name: str) -> bool: ...
+    def delete_collection(self, collection_name: str) -> bool: ...
+    def collection_exists(self, collection_name: str) -> bool: ...
+    def get_collection_stats(self, collection_name: str) -> CollectionStats | None: ...
+    def insert(
+        self,
+        collection_name: str,
+        text: str,
+        metadata: dict | None = None,
+        point_id: str | None = None,
+    ) -> str: ...
+    def insert_batch(
+        self,
+        collection_name: str,
+        texts: list[str],
+        metadata_list: list[dict] | None = None,
+    ) -> list[str]: ...
+    def search(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 5,
+        metadata_filter: dict | None = None,
+    ) -> list[SearchResult]: ...
+    def delete_points(self, collection_name: str, point_ids: list[str]) -> bool: ...
+    def find_existing_files(
+        self,
+        collection_name: str,
+        files: list[tuple[str, int]],
+    ) -> list[ExistingFile]: ...
+    def delete_by_source(self, collection_name: str, source: str) -> int: ...
+    def clone_collection(
+        self,
+        source_collection: str,
+        target_collection: str,
+        batch_size: int = 100,
+    ) -> int: ...
+    def list_items(
+        self,
+        collection_name: str,
+        limit: int = 100,
+        text_truncate_length: int = 200,
+    ) -> tuple[list[VectorStoreSourceGroup], int]: ...
+    def delete_point(self, collection_name: str, point_id: str) -> bool: ...
+
+
+class QdrantVectorStoreService:
     def __init__(
         self,
         qdrant_host: str,
@@ -102,13 +152,29 @@ class VectorStoreService:
         if not self.collection_exists(collection_name):
             return None
 
-        info = self.client.get_collection(collection_name)
+        # Use the count API for the point total: it is reliable across Qdrant
+        # versions, unlike CollectionInfo.vectors_count (deprecated / sometimes
+        # removed, which would raise and hide the real count behind "N/A").
+        points_count = self.client.count(collection_name, exact=True).count
+
+        status = "green"
+        indexed_count = 0
+        segments_count = 0
+        try:
+            info = self.client.get_collection(collection_name)
+            status = str(getattr(info, "status", "green"))
+            indexed_count = getattr(info, "indexed_vectors_count", None) or 0
+            segments = getattr(info, "segments", None)
+            segments_count = len(segments) if segments else 0
+        except Exception:
+            pass
+
         return CollectionStats(
-            vector_count=info.vectors_count or 0,
-            indexed_vectors_count=info.indexed_vectors_count or 0,
-            points_count=info.points_count or 0,
-            segments_count=len(info.segments) if info.segments else 0,
-            status=str(info.status),
+            vector_count=points_count,
+            indexed_vectors_count=indexed_count,
+            points_count=points_count,
+            segments_count=segments_count,
+            status=status,
         )
 
     def insert(
@@ -446,15 +512,39 @@ class VectorStoreService:
         return True
 
 
+# Backward-compatible alias (existing imports use VectorStoreService).
+VectorStoreService = QdrantVectorStoreService
+
+
 def create_vector_store_service(
     qdrant_host: str,
     qdrant_port: int,
     qdrant_api_key: str | None,
     openai_api_key: str,
-) -> VectorStoreService:
-    return VectorStoreService(
+) -> QdrantVectorStoreService:
+    return QdrantVectorStoreService(
         qdrant_host=qdrant_host,
         qdrant_port=qdrant_port,
         qdrant_api_key=qdrant_api_key,
         openai_api_key=openai_api_key,
     )
+
+
+def create_vector_store_service_for_credential(
+    credential_type: object,
+    config: dict,
+) -> VectorStoreBackend:
+    """Build the vector store backend implied by the credential type."""
+    type_str = credential_type.value if hasattr(credential_type, "value") else str(credential_type)
+    if type_str == "qdrant":
+        return QdrantVectorStoreService(
+            qdrant_host=config.get("qdrant_host", "localhost"),
+            qdrant_port=int(config.get("qdrant_port", 6333)),
+            qdrant_api_key=config.get("qdrant_api_key"),
+            openai_api_key=config["openai_api_key"],
+        )
+    if type_str == "pgvector":
+        from app.services.vector_store_pg import PgVectorStoreService
+
+        return PgVectorStoreService(openai_api_key=config["openai_api_key"])
+    raise ValueError(f"Unsupported vector store credential type: {type_str}")

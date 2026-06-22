@@ -62,6 +62,7 @@ from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
 from app.services.timezone_utils import get_configured_timezone
 from app.services.workflow_dsl_prompt import (
+    CLARIFY_PROTOCOL_PROMPT,
     DASHBOARD_WIDGET_PROMPT_HINT,
     build_assistant_prompt,
     is_dashboard_widget_workflow,
@@ -70,6 +71,21 @@ from app.services.workflow_executor import WorkflowCancelledError, execute_workf
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _await_chat_completions(
+    client: OpenAI,
+    cancel_event: Event | None,
+    **kwargs: Any,
+) -> Any | None:
+    """Run a blocking OpenAI chat completion off the event loop; honour cancel_event."""
+    if cancel_event is not None and cancel_event.is_set():
+        return None
+    response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+    if cancel_event is not None and cancel_event.is_set():
+        return None
+    return response
+
 
 GOOGLE_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
@@ -86,6 +102,8 @@ You can help with:
 Do NOT generate workflow JSON or DSL output. Respond in plain language only.
 Respond in the same language the user uses."""
 
+CANVAS_ASK_SYSTEM_PROMPT = CANVAS_ASK_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
+
 
 class AIAssistantRequest(BaseModel):
     credential_id: uuid.UUID
@@ -95,6 +113,13 @@ class AIAssistantRequest(BaseModel):
     conversation_history: list[dict] | None = None
     available_workflows: list[dict] | None = None
     ask_mode: bool = False
+    execution_log: dict | None = None
+
+
+class AnalyzeWorkflowRequest(BaseModel):
+    credential_id: uuid.UUID
+    model: str
+    current_workflow: dict | None = None
     execution_log: dict | None = None
 
 
@@ -123,6 +148,22 @@ class FixTranscriptionRequest(BaseModel):
 
 class FixTranscriptionResponse(BaseModel):
     fixed_text: str
+
+
+WORKFLOW_ANALYZE_SYSTEM_PROMPT = """You analyze an automation workflow and produce a clear Markdown report.
+
+Given the workflow's nodes and edges, write Markdown with these sections, in this exact order:
+
+## Improvement areas
+A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). If the workflow already looks solid, say so and suggest small refinements.
+
+## Purpose
+One or two sentences on what this workflow is for.
+
+## What it does
+A numbered, step-by-step walk through the nodes in execution order, in plain language.
+
+Output ONLY Markdown. Do not include JSON, code fences around the whole document, or tool calls. Be concise and specific to THIS workflow."""
 
 
 MAX_DASHBOARD_CHAT_HISTORY = 25
@@ -323,9 +364,9 @@ CRITICAL - Workflow-first behavior: You receive a list of available workflows at
 
 When you do not know the answer, or the answer may require current/external web information, you may call internal workflows that can search the internet, load websites, browse pages, crawl sites, fetch URLs, or read online content. Look for matching workflow names, descriptions, and input fields, then run the most relevant workflow with the user's query or URL instead of saying you cannot access the internet.
 
-Research-before-create behavior: Before calling create_and_run_workflow for a new automation that depends on current/external web information, unknown public URLs, release notes, changelog pages, pricing pages, documentation pages, news, or third-party platform updates, first try to use available workflows that can search the internet, load websites, browse pages, crawl sites, fetch URLs, or read online content. Use those findings to identify the most canonical source URLs and monitoring strategy, then include that research in the workflow creation goal. If no suitable research workflow exists, create a Heym workflow that performs discovery at runtime instead of hardcoding guessed URLs.
+Research-before-create behavior: Before calling create_workflow for a new automation that depends on current/external web information, unknown public URLs, release notes, changelog pages, pricing pages, documentation pages, news, or third-party platform updates, first try to use available workflows that can search the internet, load websites, browse pages, crawl sites, fetch URLs, or read online content. Use those findings to identify the most canonical source URLs and monitoring strategy, then include that research in the workflow creation goal. If no suitable research workflow exists, create a Heym workflow that performs discovery at runtime instead of hardcoding guessed URLs.
 
-Heym-only creation behavior: Do not recommend alternative platforms, external automation products, separate app/server setups, custom scripts outside Heym, or platform-external workarounds. When the user wants something built, configured, automated, or generated, stay inside Heym: use existing workflows, Heym DSL, and the AI Builder DSL generator via create_and_run_workflow or edit_and_run_workflow. If the request cannot be completed with available Heym capabilities, say that clearly and explain the closest Heym-native option.
+Heym-only creation behavior: Do not recommend alternative platforms, external automation products, separate app/server setups, custom scripts outside Heym, or platform-external workarounds. When the user wants something built, configured, automated, or generated, stay inside Heym: use existing workflows, Heym DSL, and the AI Builder DSL generator via create_workflow or edit_workflow. If the request cannot be completed with available Heym capabilities, say that clearly and explain the closest Heym-native option.
 
 Respond in the same language the user uses. Be concise and helpful. When you run a workflow, summarize the result for the user. When a workflow is pending human review, your reply must include the review link and the direct chat options to approve, edit, or reject.
 
@@ -335,8 +376,10 @@ When the user asks for something you cannot do with your tools (e.g. console log
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
-13. When the user asks you to create, build, generate, or set up a new workflow/automation and then do the requested job, call create_and_run_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL, saves it, and runs it immediately. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
-14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_and_run_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow."""
+13. When the user asks you to create, build, generate, or set up a new workflow/automation, call create_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL and saves it. It does NOT run the workflow; the user runs it from the Run button on the workflow card. Do not run the workflow yourself unless the user explicitly asks you to. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
+14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow."""
+
+DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
 DASHBOARD_CHAT_TOOLS = [
     {
@@ -371,8 +414,8 @@ DASHBOARD_CHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "create_and_run_workflow",
-            "description": "Create a brand-new workflow using the Workflow AI Builder Heym DSL generator, save it to the user's workflows, and run it immediately. Use this when the user asks to create/build/generate/set up a workflow or automation and wants the multi-step job done. Do not suggest alternative platforms or external setups for these requests. Do not use it for questions about existing workflows.",
+            "name": "create_workflow",
+            "description": "Create a brand-new workflow using the Workflow AI Builder Heym DSL generator and save it to the user's workflows. Do NOT run it; the user runs it from the Run button on the workflow card. Use this when the user asks to create/build/generate/set up a workflow or automation. IMPORTANT: only call this once the request is clear. If the request is ambiguous or under-specified (unclear trigger, goal, data source, output format, routing rules, or any choice you would otherwise guess), DO NOT call this tool — instead reply with a plain-text `heym-clarify` block (see the Clarification Protocol) and wait for the user's answers before building. Do not suggest alternative platforms or external setups for these requests. Do not use it for questions about existing workflows.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -382,7 +425,7 @@ DASHBOARD_CHAT_TOOLS = [
                     },
                     "inputs": {
                         "type": "object",
-                        "description": "Values to pass into the generated workflow on its first run. Use user-provided values keyed by expected input field names when known.",
+                        "description": "Values to prefill on the generated workflow's input fields when known, keyed by expected input field names.",
                     },
                 },
                 "required": ["goal"],
@@ -392,8 +435,8 @@ DASHBOARD_CHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "edit_and_run_workflow",
-            "description": "Edit an existing workflow using the Workflow AI Builder engine, save the changes to the same workflow, and run it. Use this for follow-up feedback in the same chat about a workflow that was just created or previously linked.",
+            "name": "edit_workflow",
+            "description": "Edit an existing workflow using the Workflow AI Builder engine and save the changes to the same workflow. Do NOT run it; the user runs it from the Run button on the workflow card. Use this for follow-up feedback in the same chat about a workflow that was just created or previously linked.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -407,7 +450,7 @@ DASHBOARD_CHAT_TOOLS = [
                     },
                     "inputs": {
                         "type": "object",
-                        "description": "Values to pass into the edited workflow on its validation run.",
+                        "description": "Values to prefill on the edited workflow's input fields when known.",
                     },
                 },
                 "required": ["workflow_id", "instructions"],
@@ -950,17 +993,17 @@ def _build_workflow_builder_user_message(
         "Use only Heym DSL capabilities and the AI Builder DSL generator; do not propose alternative platforms, external app/server setups, or custom scripts outside Heym.",
         "Return exactly one fenced ```json code block with an object containing name, description, nodes, and edges.",
         "Generate a concise English workflow name and description.",
-        "The workflow will be saved and run immediately after your response.",
+        "The workflow will be saved but not run automatically; the user runs it manually.",
         "If runtime values are needed, expose them as input nodes with clear field keys.",
         "For workflows about third-party platform releases, changelogs, features, news, docs, pricing, or other current web information, do not hardcode guessed source URLs. Build discovery into the workflow with search/load/crawl/fetch/http/agent steps that find official release or changelog sources before monitoring or notifying.",
         "",
         f"User request:\n{goal}",
     ]
     if inputs:
-        parts.append("\nInputs available for the first run:\n" + json.dumps(inputs, default=str))
+        parts.append("\nInputs the user provided:\n" + json.dumps(inputs, default=str))
     if attachment is not None:
         parts.append(
-            "\nAn attachment is available for the first run. "
+            "\nAn attachment is available. "
             f"Name: {attachment.name}. Kind: {attachment.kind}. "
             "Use an input field suitable for this attachment if the workflow needs it."
         )
@@ -994,12 +1037,10 @@ def _build_workflow_editor_user_message(
         f"User edit request:\n{instructions}",
     ]
     if inputs:
-        parts.append(
-            "\nInputs available for the validation run:\n" + json.dumps(inputs, default=str)
-        )
+        parts.append("\nInputs the user provided:\n" + json.dumps(inputs, default=str))
     if attachment is not None:
         parts.append(
-            "\nAn attachment is available for the validation run. "
+            "\nAn attachment is available. "
             f"Name: {attachment.name}. Kind: {attachment.kind}. "
             "Use an input field suitable for this attachment if the workflow needs it."
         )
@@ -1012,34 +1053,33 @@ def _build_saved_workflow_payload(
     edges: list[dict[str, Any]],
     input_fields: list[Any],
     run_inputs: dict[str, Any],
-    execution_payload: Any,
+    execution_payload: Any = None,
     *,
     status_value: str,
 ) -> str:
-    return json.dumps(
-        {
-            "status": status_value,
-            "workflow_id": str(workflow.id),
-            "workflow_name": workflow.name,
-            "workflow_description": workflow.description,
-            "workflow_url": f"/workflows/{workflow.id}",
-            "workflow_link_markdown": (
-                f'[Open "{workflow.name}" in a new tab](/workflows/{workflow.id})'
-            ),
-            "workflow_preview": {
-                "id": str(workflow.id),
-                "name": workflow.name,
-                "description": workflow.description,
-                "url": f"/workflows/{workflow.id}",
-                "nodes": nodes,
-                "edges": edges,
-            },
-            "input_fields": [field.model_dump(by_alias=True) for field in input_fields],
-            "run_inputs": run_inputs,
-            "execution": execution_payload,
+    payload: dict[str, Any] = {
+        "status": status_value,
+        "workflow_id": str(workflow.id),
+        "workflow_name": workflow.name,
+        "workflow_description": workflow.description,
+        "workflow_url": f"/workflows/{workflow.id}",
+        "workflow_link_markdown": (
+            f'[Open "{workflow.name}" in a new tab](/workflows/{workflow.id})'
+        ),
+        "workflow_preview": {
+            "id": str(workflow.id),
+            "name": workflow.name,
+            "description": workflow.description,
+            "url": f"/workflows/{workflow.id}",
+            "nodes": nodes,
+            "edges": edges,
         },
-        default=str,
-    )
+        "input_fields": [field.model_dump(by_alias=True) for field in input_fields],
+        "run_inputs": run_inputs,
+    }
+    if execution_payload is not None:
+        payload["execution"] = execution_payload
+    return json.dumps(payload, default=str)
 
 
 async def create_and_run_generated_workflow_tool(
@@ -1057,7 +1097,7 @@ async def create_and_run_generated_workflow_tool(
     attachment: FileAttachment | None = None,
     cancel_event: Event | None = None,
 ) -> str:
-    """Generate a workflow with the AI Builder prompt, save it, and execute it once."""
+    """Generate a workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
 
@@ -1094,7 +1134,9 @@ async def create_and_run_generated_workflow_tool(
         }
         if not is_reasoning_model(model):
             builder_kwargs["temperature"] = WORKFLOW_BUILDER_TEMPERATURE
-        builder_response = client.chat.completions.create(**builder_kwargs)
+        builder_response = await _await_chat_completions(client, cancel_event, **builder_kwargs)
+        if builder_response is None:
+            return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
         builder_choice = builder_response.choices[0] if builder_response.choices else None
         builder_content = builder_choice.message.content if builder_choice else ""
         workflow_config = _extract_generated_workflow_config(builder_content or "", goal)
@@ -1129,30 +1171,17 @@ async def create_and_run_generated_workflow_tool(
         if not run_inputs and input_fields:
             run_inputs[input_fields[0].key] = goal
 
-        execution_result = await run_execute_workflow_tool(
-            db,
-            user.id,
-            str(workflow.id),
-            run_inputs,
-            public_base_url,
-            cancel_event,
-        )
-        try:
-            execution_payload: Any = json.loads(execution_result)
-        except json.JSONDecodeError:
-            execution_payload = {"raw": execution_result}
-
         return _build_saved_workflow_payload(
             workflow,
             nodes,
             edges,
             input_fields,
             run_inputs,
-            execution_payload,
-            status_value="created_and_ran",
+            None,
+            status_value="created",
         )
     except Exception as exc:
-        logger.exception("Dashboard chat create_and_run_workflow failed")
+        logger.exception("Dashboard chat create_workflow failed")
         return json.dumps({"status": "error", "error": str(exc)})
 
 
@@ -1172,7 +1201,7 @@ async def edit_and_run_generated_workflow_tool(
     attachment: FileAttachment | None = None,
     cancel_event: Event | None = None,
 ) -> str:
-    """Edit a saved workflow with the AI Builder prompt, save it, and execute it once."""
+    """Edit a saved workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
 
@@ -1229,7 +1258,9 @@ async def edit_and_run_generated_workflow_tool(
         }
         if not is_reasoning_model(model):
             builder_kwargs["temperature"] = WORKFLOW_BUILDER_TEMPERATURE
-        builder_response = client.chat.completions.create(**builder_kwargs)
+        builder_response = await _await_chat_completions(client, cancel_event, **builder_kwargs)
+        if builder_response is None:
+            return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
         builder_choice = builder_response.choices[0] if builder_response.choices else None
         builder_content = builder_choice.message.content if builder_choice else ""
         workflow_config = _extract_generated_workflow_config(
@@ -1269,30 +1300,17 @@ async def edit_and_run_generated_workflow_tool(
         if not run_inputs and input_fields:
             run_inputs[input_fields[0].key] = instructions
 
-        execution_result = await run_execute_workflow_tool(
-            db,
-            user.id,
-            str(workflow.id),
-            run_inputs,
-            public_base_url,
-            cancel_event,
-        )
-        try:
-            execution_payload: Any = json.loads(execution_result)
-        except json.JSONDecodeError:
-            execution_payload = {"raw": execution_result}
-
         return _build_saved_workflow_payload(
             workflow,
             nodes,
             edges,
             input_fields,
             run_inputs,
-            execution_payload,
-            status_value="edited_and_ran",
+            None,
+            status_value="edited",
         )
     except Exception as exc:
-        logger.exception("Dashboard chat edit_and_run_workflow failed")
+        logger.exception("Dashboard chat edit_workflow failed")
         return json.dumps({"status": "error", "error": str(exc)})
 
 
@@ -2006,31 +2024,23 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
                 return " · ".join(parts)
             return "Workflow completed successfully"
         return f"Status: {status}"
-    if tool_name == "create_and_run_workflow":
+    if tool_name == "create_workflow":
         if not isinstance(data, dict):
             return str(data)[:200]
         if data.get("error"):
             return f"Error: {str(data.get('error'))[:150]}"
         workflow_name = str(data.get("workflow_name") or "").strip()
-        execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
-        run_status = str(execution.get("status") or "").strip()
-        if workflow_name and run_status:
-            return f"Created and ran workflow: {workflow_name} ({run_status})"
         if workflow_name:
             return f"Created workflow: {workflow_name}"
         return f"Status: {str(data.get('status') or '')[:80]}"
-    if tool_name == "edit_and_run_workflow":
+    if tool_name == "edit_workflow":
         if not isinstance(data, dict):
             return str(data)[:200]
         if data.get("error"):
             return f"Error: {str(data.get('error'))[:150]}"
         workflow_name = str(data.get("workflow_name") or "").strip()
-        execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
-        run_status = str(execution.get("status") or "").strip()
-        if workflow_name and run_status:
-            return f"Edited and ran workflow: {workflow_name} ({run_status})"
         if workflow_name:
-            return f"Edited workflow: {workflow_name}"
+            return f"Updated workflow: {workflow_name}"
         return f"Status: {str(data.get('status') or '')[:80]}"
     if tool_name == "resolve_hitl_review":
         if not isinstance(data, dict):
@@ -2293,7 +2303,11 @@ async def stream_dashboard_chat(
             last_trace_request = {**kwargs, "messages": kwargs["messages"]}
             round_start = time.time()
             try:
-                response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+                response = await _await_chat_completions(client, cancel_event, **kwargs)
+                if response is None:
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    _record_dashboard_run("cancelled", round(elapsed_ms, 2))
+                    return
             except Exception as exc:
                 if not _is_context_overflow_error(exc):
                     raise
@@ -2317,7 +2331,11 @@ async def stream_dashboard_chat(
                 }
                 last_trace_request = {**kwargs, "messages": kwargs["messages"]}
                 round_start = time.time()
-                response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+                response = await _await_chat_completions(client, cancel_event, **kwargs)
+                if response is None:
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    _record_dashboard_run("cancelled", round(elapsed_ms, 2))
+                    return
             round_elapsed_ms = (time.time() - round_start) * 1000
             usage = getattr(response, "usage", None)
             used_tokens = (
@@ -2565,7 +2583,7 @@ async def stream_dashboard_chat(
                                 yield f"data: {json.dumps({'type': 'tool_output', 'tool': name, 'images': images})}\n\n"
                     except (json.JSONDecodeError, TypeError):
                         pass
-                elif name == "create_and_run_workflow":
+                elif name == "create_workflow":
                     if selected_credential is None:
                         result = json.dumps(
                             {
@@ -2580,7 +2598,7 @@ async def stream_dashboard_chat(
                                     "type": "tool_start",
                                     "id": tc.id,
                                     "name": name,
-                                    "label": "Building and running a new workflow...",
+                                    "label": "Building a new workflow...",
                                     "args": args,
                                 }
                             )
@@ -2588,7 +2606,7 @@ async def stream_dashboard_chat(
                         )
                         run_steps.append(
                             {
-                                "label": "Building and running a new workflow...",
+                                "label": "Building a new workflow...",
                                 "tool": name,
                                 "request": args,
                                 "response_summary": _summarize_tool_result(name, result),
@@ -2604,7 +2622,7 @@ async def stream_dashboard_chat(
                     else:
                         goal = str(args.get("goal") or "").strip() or last_user_message
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
-                        step_label = "Building and running a new workflow..."
+                        step_label = "Building a new workflow..."
                         yield (
                             "data: "
                             + json.dumps(
@@ -2702,7 +2720,7 @@ async def stream_dashboard_chat(
                                 yield f"data: {json.dumps({'type': 'tool_output', 'tool': name, 'images': images})}\n\n"
                     except (json.JSONDecodeError, TypeError, AttributeError):
                         pass
-                elif name == "edit_and_run_workflow":
+                elif name == "edit_workflow":
                     if selected_credential is None:
                         result = json.dumps(
                             {
@@ -2717,7 +2735,7 @@ async def stream_dashboard_chat(
                                     "type": "tool_start",
                                     "id": tc.id,
                                     "name": name,
-                                    "label": "Editing and running workflow...",
+                                    "label": "Updating the workflow...",
                                     "args": args,
                                 }
                             )
@@ -2725,7 +2743,7 @@ async def stream_dashboard_chat(
                         )
                         run_steps.append(
                             {
-                                "label": "Editing and running workflow...",
+                                "label": "Updating the workflow...",
                                 "tool": name,
                                 "request": args,
                                 "response_summary": _summarize_tool_result(name, result),
@@ -2744,7 +2762,7 @@ async def stream_dashboard_chat(
                             str(args.get("instructions") or "").strip() or last_user_message
                         )
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
-                        step_label = "Editing and running workflow..."
+                        step_label = "Updating the workflow..."
                         try:
                             wid = uuid.UUID(workflow_id_str)
                             w = await get_workflow_for_user(db, wid, user_id)
@@ -3483,6 +3501,72 @@ async def _stream_sse_with_heartbeat(
         if isinstance(item, Exception):
             raise item
         yield item
+
+
+@router.post("/analyze-workflow")
+async def analyze_workflow_stream(
+    request: AnalyzeWorkflowRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    credential = await get_credential_for_user(request.credential_id, current_user, db)
+    if not credential:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
+        )
+
+    config = decrypt_config(credential.encrypted_config)
+    client, provider = get_openai_client(credential.type, config)
+
+    system_prompt = WORKFLOW_ANALYZE_SYSTEM_PROMPT
+    if request.current_workflow:
+        wf_summary = json.dumps(request.current_workflow, ensure_ascii=False)
+        system_prompt += f"\n\nWorkflow:\n```json\n{wf_summary}\n```"
+    system_prompt = _append_execution_log_to_prompt(system_prompt, request.execution_log)
+
+    workflow_id = None
+    if request.current_workflow:
+        wf_id = request.current_workflow.get("id")
+        if wf_id:
+            workflow_id = uuid.UUID(wf_id) if isinstance(wf_id, str) else wf_id
+
+    trace_context = LLMTraceContext(
+        user_id=current_user.id,
+        credential_id=credential.id,
+        workflow_id=workflow_id,
+        node_label="Workflow Analyze",
+        source="workflow_analyze",
+    )
+
+    messages = [{"role": "user", "content": "Analyze this workflow."}]
+    assistant_stream = stream_llm_response(
+        client,
+        request.model,
+        system_prompt,
+        messages,
+        provider,
+        trace_context,
+        run_type="workflow_assistant",
+    )
+
+    return StreamingResponse(
+        _stream_sse_with_heartbeat(
+            assistant_stream,
+            heartbeat_seconds=WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/workflow-assistant")

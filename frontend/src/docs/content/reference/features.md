@@ -126,9 +126,9 @@ The LLM node processes text with a language model or generates images. It suppor
 
 Pairs naturally with [Qdrant RAG](../nodes/rag-node.md), [Agent Node](../nodes/agent-node.md), [Guardrails](./guardrails.md), and [Expression Evaluation Dialog](./expression-evaluation-dialog.md).
 
-#### [Qdrant RAG](../nodes/rag-node.md)
+#### [RAG / Vector Store](../nodes/rag-node.md)
 
-The Qdrant RAG node inserts documents into or searches a vector store for retrieval-augmented generation. Choose a vector store from the [Vectorstores](../tabs/vectorstores-tab.md) tab and set the operation to insert or search. Search supports metadata filters and optional Cohere reranking, and returns an array of results with text, score, metadata, reranked flag, and count for use in [LLM](../nodes/llm-node.md) or [Agent Node](../nodes/agent-node.md) flows.
+The RAG / Vector Store node inserts documents into or searches a vector store for retrieval-augmented generation. A Database dropdown selects the backend — **Qdrant** (external server) or **Postgres (pgvector)** (Heym's own database, no external service), defaulting to Qdrant. Choose a vector store from the [Vectorstores](../tabs/vectorstores-tab.md) tab and set the operation to insert or search. Search supports metadata filters and optional Cohere reranking, and returns an array of results with text, score, metadata, reranked flag, and count for use in [LLM](../nodes/llm-node.md) or [Agent Node](../nodes/agent-node.md) flows.
 
 Common downstream nodes are [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md); vector store setup lives in [Vectorstores](../tabs/vectorstores-tab.md).
 
@@ -553,7 +553,7 @@ See also [Execution Tokens](./execution-tokens.md), [Guardrails](./guardrails.md
 
 ### [Third-Party Integrations](./integrations.md)
 
-Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, Qdrant, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.
+Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.
 
 See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sharing.md), and [Teams](./teams.md).
 
@@ -611,7 +611,7 @@ See also [AI Assistant](./ai-assistant.md), [Credentials](./credentials.md), and
 
 ### [Credentials](../tabs/credentials-tab.md)
 
-The Credentials tab manages API keys and secrets used by nodes. Add credentials by type (OpenAI, Google, Custom, Bearer, Header, [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), SMTP, [Redis](../nodes/redis-node.md), Qdrant, Cohere, etc.), name them, and reference them in workflow nodes. Edit or delete from the card; share with users by email or with [teams](./teams.md). All values are encrypted at rest and masked in the UI.
+The Credentials tab manages API keys and secrets used by nodes. Add credentials by type (OpenAI, Google, Custom, Bearer, Header, [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), SMTP, [Redis](../nodes/redis-node.md), RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, Cohere, etc.), name them, and reference them in workflow nodes. Edit or delete from the card; share with users by email or with [teams](./teams.md). All values are encrypted at rest and masked in the UI.
 
 See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sharing.md), and [Third-Party Integrations](./integrations.md).
 
@@ -620,7 +620,7 @@ See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sh
 
 ### [Vectorstores](../tabs/vectorstores-tab.md)
 
-The Vectorstores tab manages vector stores used by [Qdrant RAG](../nodes/rag-node.md) nodes. Create a store with a name and Qdrant [credential](./credentials.md), optionally set a collection name, then upload documents (PDF, TXT, etc.). Manage content (view, delete sources), edit store details, and share stores with users. In a [Qdrant RAG](../nodes/rag-node.md) node, select the vector store to run insert or search operations.
+The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, TXT, etc.). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert or search operations.
 
 See also [Qdrant RAG](../nodes/rag-node.md), [Credentials](./credentials.md), and [Teams](./teams.md).
 

@@ -167,7 +167,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Multi-Agent Orchestration** — One agent orchestrates named sub-agents and sub-workflows, all wired visually
 - **Human-in-the-Loop (HITL)** — Pause agent execution to request user approval or input before proceeding
 - **Guardrails** — Content filtering, NSFW protection, and multilingual safety checks on LLM and Agent nodes
-- **Built-In RAG** — Insert documents and run semantic search against managed QDrant vector stores in two nodes
+- **Built-In RAG** — Insert documents and run semantic search against managed vector stores (Qdrant or built-in Postgres/pgvector) in two nodes
 - **MCP Support** — Connect Agent nodes to any MCP server as a client; expose your workflows as an MCP server for Claude, Cursor, and other clients
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
@@ -347,7 +347,7 @@ cp .env.example .env
         AI Agent Node (tool calling)<br/>
         Persistent memory graph (agents)<br/>
         Multi-agent orchestration<br/>
-        RAG / QDrant vector store<br/>
+        RAG / Vector store (Qdrant or pgvector)<br/>
         MCP Client & Server<br/>
         Skills system
       </td>
@@ -681,7 +681,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.47" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.50" />
 </a>
 
 </div>

@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -79,6 +81,32 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_current_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
+) -> uuid.UUID:
+    """Resolve the authenticated user's id from the JWT without opening a DB session.
+
+    Streaming endpoints use this so they do not hold a request-scoped DB connection for
+    the entire response lifetime (which can exhaust the pool under many open streams).
+    """
+    token = _extract_token(request, credentials)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id = verify_access_token(token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user_id
 
 
 async def get_current_user_optional(

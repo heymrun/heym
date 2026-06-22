@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -39,9 +40,11 @@ from app.models.schemas import (
 from app.services.encryption import decrypt_config
 from app.services.file_processor import create_file_processor
 from app.services.upload_limits import read_upload_file_limited
-from app.services.vector_store import create_vector_store_service
+from app.services.vector_store import create_vector_store_service_for_credential
+from app.services.vector_store_pg import VectorStoreBackendUnavailableError
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def get_credential_config(
@@ -86,23 +89,22 @@ async def get_credential_config(
             detail="Credential not found",
         )
 
-    if credential.type != CredentialType.qdrant:
+    if credential.type not in (CredentialType.qdrant, CredentialType.pgvector):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Credential must be of type 'qdrant'",
+            detail="Credential must be a vector store credential (Qdrant or Postgres)",
         )
 
     config = decrypt_config(credential.encrypted_config)
     return credential, config
 
 
-def get_vector_store_service_from_config(config: dict):
-    return create_vector_store_service(
-        qdrant_host=config.get("qdrant_host", "localhost"),
-        qdrant_port=int(config.get("qdrant_port", 6333)),
-        qdrant_api_key=config.get("qdrant_api_key"),
-        openai_api_key=config["openai_api_key"],
-    )
+def get_vector_store_service_from_config(config: dict, credential_type: object):
+    return create_vector_store_service_for_credential(credential_type, config)
+
+
+def _backend_for_credential_type(credential_type: object) -> str:
+    return "pgvector" if credential_type == CredentialType.pgvector else "qdrant"
 
 
 async def _get_store_credential_config(
@@ -161,6 +163,7 @@ async def list_vector_stores(
                 shared_by=None,
                 shared_by_team=None,
                 stats=stats,
+                backend=await _store_backend(store, db),
             )
         )
         seen_ids.add(store.id)
@@ -182,6 +185,7 @@ async def list_vector_stores(
                 shared_by=owner_email,
                 shared_by_team=None,
                 stats=stats,
+                backend=await _store_backend(store, db),
             )
         )
 
@@ -202,10 +206,19 @@ async def list_vector_stores(
                 shared_by=None,
                 shared_by_team=team_name,
                 stats=stats,
+                backend=await _store_backend(store, db),
             )
         )
 
     return responses
+
+
+async def _store_backend(store: VectorStore, db: AsyncSession) -> str:
+    result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
+    credential = result.scalar_one_or_none()
+    if credential and credential.type == CredentialType.pgvector:
+        return "pgvector"
+    return "qdrant"
 
 
 async def _get_store_stats(
@@ -219,7 +232,7 @@ async def _get_store_stats(
             return None
 
         config = decrypt_config(credential.encrypted_config)
-        service = get_vector_store_service_from_config(config)
+        service = get_vector_store_service_from_config(config, credential.type)
         stats = service.get_collection_stats(store.collection_name)
 
         if stats:
@@ -229,7 +242,12 @@ async def _get_store_stats(
                 status=stats.status,
             )
     except Exception:
-        pass
+        logger.warning(
+            "Failed to fetch stats for vector store %s (collection %s)",
+            store.id,
+            store.collection_name,
+            exc_info=True,
+        )
     return None
 
 
@@ -269,14 +287,19 @@ async def create_vector_store(
             detail="Collection name already in use",
         )
 
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
 
     try:
         service.create_collection(collection_name)
+    except VectorStoreBackendUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create QDrant collection: {e!s}",
+            detail=f"Failed to create vector store collection: {e!s}",
         )
 
     store = VectorStore(
@@ -301,6 +324,7 @@ async def create_vector_store(
         created_at=store.created_at,
         updated_at=store.updated_at,
         stats=None,
+        backend=_backend_for_credential_type(credential.type),
     )
 
 
@@ -323,6 +347,7 @@ async def get_vector_store(
         created_at=store.created_at,
         updated_at=store.updated_at,
         stats=stats,
+        backend=await _store_backend(store, db),
     )
 
 
@@ -380,6 +405,7 @@ async def update_vector_store(
         created_at=store.created_at,
         updated_at=store.updated_at,
         stats=stats,
+        backend=await _store_backend(store, db),
     )
 
 
@@ -412,7 +438,7 @@ async def delete_vector_store(
             credential = cred_result.scalar_one_or_none()
             if credential:
                 config = decrypt_config(credential.encrypted_config)
-                service = get_vector_store_service_from_config(config)
+                service = get_vector_store_service_from_config(config, credential.type)
                 service.delete_collection(store.collection_name)
         except Exception:
             pass
@@ -446,14 +472,14 @@ async def clone_vector_store(
         new_name = f"{store.name} (Copy {count})"
 
     credential, config = await _get_store_credential_config(store, current_user.id, db)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
 
     try:
         service.clone_collection(store.collection_name, new_collection)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to clone QDrant collection: {e!s}",
+            detail=f"Failed to clone vector store collection: {e!s}",
         )
 
     new_store = VectorStore(
@@ -480,6 +506,7 @@ async def clone_vector_store(
         created_at=new_store.created_at,
         updated_at=new_store.updated_at,
         stats=stats,
+        backend=_backend_for_credential_type(credential.type),
     )
 
 
@@ -501,7 +528,7 @@ async def check_duplicate_files(
         )
 
     config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
 
     files_to_check = [(f.filename, f.file_size) for f in data.files]
     existing = service.find_existing_files(store.collection_name, files_to_check)
@@ -549,7 +576,7 @@ async def upload_file_to_vector_store(
         )
 
     config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
 
     if override_duplicates:
         service.delete_by_source(store.collection_name, filename)
@@ -565,6 +592,11 @@ async def upload_file_to_vector_store(
 
     try:
         point_ids = service.insert_batch(store.collection_name, texts, metadata_list)
+    except VectorStoreBackendUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -874,7 +906,7 @@ async def list_vector_store_items(
         )
 
     config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
 
     source_groups, total_items = service.list_items(
         store.collection_name, limit=limit, text_truncate_length=text_truncate_length
@@ -935,7 +967,7 @@ async def delete_items_by_source(
         )
 
     config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
     service.delete_by_source(store.collection_name, source)
 
 
@@ -972,7 +1004,7 @@ async def delete_item(
         )
 
     config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config)
+    service = get_vector_store_service_from_config(config, credential.type)
     service.delete_point(store.collection_name, point_id)
 
 

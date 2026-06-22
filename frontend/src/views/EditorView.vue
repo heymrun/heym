@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useMediaQuery } from "@vueuse/core";
 import { useRoute, useRouter } from "vue-router";
-import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Globe, GitBranch, History, LayoutTemplate, Moon, Pencil, RefreshCw, Save, Search, Share2, Sun, TerminalSquare, Trash2, Users, X, XCircle } from "lucide-vue-next";
+import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Globe, GitBranch, History, LayoutTemplate, Moon, Pencil, RefreshCw, Save, Search, Share2, Sparkles, Sun, TerminalSquare, Trash2, Users, X, XCircle } from "lucide-vue-next";
 import axios from "axios";
 
 import type {
@@ -27,6 +27,7 @@ import WebPortalSettingsDialog from "@/components/Dialogs/WebPortalSettingsDialo
 import WorkflowEditHistoryDialog from "@/components/Dialogs/WorkflowEditHistoryDialog.vue";
 import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
 import ExpressionEvaluateFallbackDialog from "@/components/ui/ExpressionEvaluateFallbackDialog.vue";
+import AnalysisPanel from "@/components/Panels/AnalysisPanel.vue";
 import DebugPanel from "@/components/Panels/DebugPanel.vue";
 import ExecutionHistoryDialog from "@/components/Panels/ExecutionHistoryDialog.vue";
 import NodePanel from "@/components/Panels/NodePanel.vue";
@@ -40,6 +41,7 @@ import Textarea from "@/components/ui/Textarea.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
+import { buildExecutionLogForAssistant } from "@/lib/executionLog";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
@@ -265,6 +267,54 @@ watch(isMobile, (mobile) => {
 function toggleRightPanel(): void {
   rightPanelOpen.value = !rightPanelOpen.value;
 }
+
+const { analysisPanelOpen } = storeToRefs(workflowStore);
+
+const analysisWorkflowId = computed(() => workflowStore.currentWorkflow?.id ?? "");
+const analysisWorkflowPayload = computed(() => ({
+  id: workflowStore.currentWorkflow?.id,
+  name: workflowStore.currentWorkflow?.name,
+  description: workflowStore.currentWorkflow?.description ?? null,
+  nodes: workflowStore.nodes,
+  edges: workflowStore.edges,
+}));
+
+function toggleAnalysisPanel(): void {
+  analysisPanelOpen.value = !analysisPanelOpen.value;
+  if (analysisPanelOpen.value) {
+    leftPanelOpen.value = false;
+  }
+}
+
+// Runs the workflow (best-effort) and returns its execution log so the analysis
+// prompt can include real run results. Returns undefined if it can't run.
+async function runWorkflowForAnalysis(): Promise<
+  Record<string, unknown> | undefined
+> {
+  if (workflowStore.isExecuting || workflowStore.nodes.length === 0) {
+    return undefined;
+  }
+  if (!workflowStore.validateWorkflow().isValid) return undefined;
+  const targets = await workflowStore.validateExecuteTargetsExist();
+  if (!targets.isValid) return undefined;
+  try {
+    await workflowStore.executeWorkflow(workflowStore.buildExecutionRequestBody());
+  } catch {
+    // Errors surface via execution state; analysis still proceeds.
+  }
+  const log = buildExecutionLogForAssistant(
+    workflowStore.nodeResults,
+    workflowStore.executionResult,
+  );
+  return (log as Record<string, unknown> | null) ?? undefined;
+}
+
+// The analysis panel and NodePanel share the left slot; opening one hides the other.
+watch(leftPanelOpen, (open) => {
+  if (open && analysisPanelOpen.value) {
+    analysisPanelOpen.value = false;
+  }
+});
 
 function toggleShowcaseGuide(): void {
   if (!showcaseContext.value) return;
@@ -1181,6 +1231,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           >
           <h1
             v-else
+            data-testid="workflow-title"
             class="font-semibold text-sm md:text-base truncate max-w-[120px] sm:max-w-[150px] md:max-w-[250px] cursor-text hover:bg-muted/50 rounded px-0.5 -mx-0.5"
             @mousedown.prevent="startTitleEdit"
           >
@@ -1358,6 +1409,18 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           cURL
         </Button>
         <Button
+          v-if="isStandardWorkflow"
+          variant="ghost"
+          size="sm"
+          class="hidden xl:inline-flex gap-2 text-foreground"
+          :class="{ 'text-primary': analysisPanelOpen }"
+          title="Analyze my workflow"
+          @click="toggleAnalysisPanel"
+        >
+          <Sparkles class="w-4 h-4" />
+          Analyze
+        </Button>
+        <Button
           variant="ghost"
           size="icon"
           class="h-11 w-11 min-h-[44px] min-w-[44px] md:hidden text-foreground"
@@ -1402,6 +1465,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
         <Button
           variant="gradient"
           size="sm"
+          data-testid="save-workflow-button"
           :disabled="!hasUnsavedChanges"
           :loading="isSaving"
           class="hidden sm:inline-flex"
@@ -2033,7 +2097,13 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       v-else
       class="flex-1 flex overflow-hidden overflow-x-hidden"
     >
-      <NodePanel v-show="leftPanelOpen" />
+      <NodePanel v-show="leftPanelOpen && !analysisPanelOpen" />
+      <AnalysisPanel
+        v-if="analysisPanelOpen"
+        :workflow-id="analysisWorkflowId"
+        :current-workflow="analysisWorkflowPayload"
+        :run-workflow="runWorkflowForAnalysis"
+      />
 
       <div class="flex-1 flex flex-col min-h-0 min-w-0">
         <div class="flex-1 relative min-h-0 min-w-0">

@@ -469,14 +469,15 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   },
   rag: {
     type: "rag",
-    label: "Qdrant RAG",
-    description: "Insert or search documents in Qdrant vector store",
+    label: "RAG / Vector Store",
+    description: "Insert or search documents in a Qdrant or Postgres vector store",
     color: "node-rag",
     icon: "Search",
     inputs: 1,
     outputs: 1,
     defaultData: {
       label: "rag",
+      dbType: "qdrant",
       vectorStoreId: "",
       ragOperation: undefined,
       documentContent: "$input.text",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, computed, onUnmounted } from "vue";
+import { ref, reactive, watch, nextTick, onMounted, computed, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import {
   Send,
@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Play,
   Square,
   Mic,
   MicOff,
@@ -27,7 +28,14 @@ import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
+import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
+import {
+  extractClarifyBlock,
+  serializeAnswers,
+  stripClarifyBlock,
+} from "@/utils/parseClarify";
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi, credentialsApi } from "@/services/api";
@@ -168,6 +176,30 @@ const isConversationTransitioning = computed(
   () => chatStore.activeConversation !== null && !isShowingConversation.value,
 );
 const messages = computed(() => chatStore.activeConversation?.messages ?? []);
+
+const answeredClarify = reactive<Set<string>>(new Set());
+
+function clarifyFor(msg: Message): ClarifyQuestion[] | null {
+  if (msg.role !== "assistant") return null;
+  return extractClarifyBlock(msg.content);
+}
+
+function handleClarifySubmit(
+  msgId: string,
+  questions: ClarifyQuestion[],
+  answers: ClarifyAnswer[],
+): void {
+  if (answeredClarify.has(msgId)) return;
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  answeredClarify.add(msgId);
+  const serialized = serializeAnswers(questions, answers);
+  void chatStore.sendMessage(
+    props.conversationId,
+    serialized,
+    selectedCredentialId.value,
+    selectedModel.value,
+  );
+}
 const conversationTitle = computed(() =>
   chatStore.activeConversation?.title ?? "",
 );
@@ -180,12 +212,16 @@ const contextUsageForBadge = computed(() => {
   if (live) return live;
   return chatStore.contextUsageByConv[props.conversationId] ?? null;
 });
+const interactiveVoiceOpen = ref(false);
 const canFocusInput = computed(
   () =>
     canSendMessage.value &&
     !isThisConvStreaming.value &&
     !isLoadingModels.value &&
     !modelsLoadFailed.value &&
+    // Never steal focus into the chat textarea while the full-screen voice
+    // overlay is open; on mobile that pops up the on-screen keyboard.
+    !interactiveVoiceOpen.value &&
     Boolean(selectedCredentialId.value) &&
     Boolean(selectedModel.value),
 );
@@ -501,13 +537,14 @@ async function readMessageAloud(msg: Message): Promise<void> {
   }
 }
 
-const interactiveVoiceOpen = ref(false);
-
 function openInteractiveVoice(): void {
   if (!tts.isConfigured.value) {
     voiceStore.requestVoiceSettings();
     return;
   }
+  // Drop focus from the chat textarea so the mobile keyboard does not stay up
+  // behind the full-screen voice overlay.
+  chatInputRef.value?.blur();
   interactiveVoiceOpen.value = true;
 }
 
@@ -516,6 +553,17 @@ async function sendVoiceText(text: string): Promise<void> {
   await chatStore.sendMessage(
     props.conversationId,
     text,
+    selectedCredentialId.value,
+    selectedModel.value,
+  );
+}
+
+async function runWorkflowFromCard(workflow: WorkflowPreview): Promise<void> {
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  if (isThisConvStreaming.value) return;
+  await chatStore.sendMessage(
+    props.conversationId,
+    `Run the "${workflow.name}" workflow now (id: ${workflow.id}).`,
     selectedCredentialId.value,
     selectedModel.value,
   );
@@ -970,9 +1018,15 @@ onUnmounted(() => {
             <div
               class="chat-markdown"
               @click="handleMarkdownImageClick"
-              v-html="renderMarkdown(msg.content)"
+              v-html="renderMarkdown(clarifyFor(msg) ? stripClarifyBlock(msg.content) : msg.content)"
             />
             <!-- eslint-enable vue/no-v-html -->
+            <ClarifyCard
+              v-if="clarifyFor(msg)"
+              :questions="clarifyFor(msg)!"
+              :disabled="answeredClarify.has(msg.id)"
+              @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(msg.id, clarifyFor(msg)!, answers)"
+            />
             <div
               v-if="msg.images && msg.images.length > 0"
               class="mt-2 flex flex-wrap gap-2"
@@ -1002,15 +1056,26 @@ onUnmounted(() => {
                     {{ msg.workflowPreview.description }}
                   </p>
                 </div>
-                <a
-                  :href="msg.workflowPreview.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  <ExternalLink class="h-3.5 w-3.5" />
-                  Open workflow
-                </a>
+                <div class="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    :disabled="isThisConvStreaming"
+                    class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    @click="runWorkflowFromCard(msg.workflowPreview)"
+                  >
+                    <Play class="h-3.5 w-3.5" />
+                    Run
+                  </button>
+                  <a
+                    :href="msg.workflowPreview.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                  >
+                    <ExternalLink class="h-3.5 w-3.5" />
+                    Open workflow
+                  </a>
+                </div>
               </div>
               <div
                 :class="[

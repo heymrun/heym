@@ -4,7 +4,14 @@ import { defineConfigWithVueTs, vueTsConfigs } from "@vue/eslint-config-typescri
 export default defineConfigWithVueTs(
   {
     name: "app/files-to-ignore",
-    ignores: ["dist/**", ".e2e-artifacts/**", "vite.config.ts"],
+    ignores: [
+      "dist/**",
+      "e2e/.auth/**",
+      "playwright-report/**",
+      "test-results/**",
+      ".e2e-artifacts/**",
+      "vite.config.ts",
+    ],
   },
   pluginVue.configs["flat/recommended"],
   vueTsConfigs.recommended,

@@ -2,6 +2,19 @@ services:
   postgres:
     image: postgres:16
     container_name: heym-postgres
+    # Keep the official postgres:16 image (existing data dirs and their collation
+    # are never changed). The pgvector extension package is installed at container
+    # start before Postgres boots, so the migration's CREATE EXTENSION succeeds.
+    # Non-fatal: if it cannot be installed (e.g. no network) Postgres still starts,
+    # the migration skips the pgvector table, and Qdrant RAG keeps working.
+    entrypoint:
+      - bash
+      - -c
+      - >-
+        ( dpkg -s postgresql-16-pgvector >/dev/null 2>&1
+        || ( apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-16-pgvector ) )
+        || echo 'pgvector unavailable; continuing without it';
+        exec docker-entrypoint.sh postgres
     environment:
       TZ: ${TIMEZONE:-Europe/Berlin}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}

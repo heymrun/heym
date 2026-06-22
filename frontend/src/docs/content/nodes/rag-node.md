@@ -1,6 +1,13 @@
-# Qdrant RAG
+# RAG / Vector Store
 
-The **Qdrant RAG** node inserts documents into or searches a Qdrant vector store for Retrieval Augmented Generation (RAG). Use it to augment LLM context with relevant documents.
+The **RAG / Vector Store** node inserts documents into or searches a vector store for Retrieval Augmented Generation (RAG). Use it to augment LLM context with relevant documents.
+
+The node has a **Database** dropdown that selects the backend:
+
+- **Qdrant** – stores vectors in an external Qdrant server (requires a *RAG: Qdrant + OpenAI* credential).
+- **Postgres (pgvector)** – stores vectors inside Heym's own Postgres database, no external service (requires a *RAG: Psql + OpenAI* credential).
+
+The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, and Cohere reranking.
 
 ## Overview
 
@@ -14,6 +21,7 @@ The **Qdrant RAG** node inserts documents into or searches a Qdrant vector store
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
+| `dbType` | `"qdrant"` \| `"pgvector"` | Vector store backend (default: `"qdrant"`) |
 | `vectorStoreId` | UUID | Vector store from [Vectorstores](../tabs/vectorstores-tab.md) tab |
 | `ragOperation` | `"insert"` \| `"search"` | Operation type (also `operation`) |
 | `documentContent` | expression | Document text to insert (insert only) |
@@ -108,6 +116,6 @@ When reranking is enabled:
 - [Why Heym](../getting-started/why-heym.md) – Built-in RAG vs external service stitching
 - [Node Types](../reference/node-types.md) – Overview of all node types
 - [Vectorstores Tab](../tabs/vectorstores-tab.md) – Create and manage vector stores
-- [Third-Party Integrations](../reference/integrations.md#qdrant) – Qdrant credential setup
+- [Third-Party Integrations](../reference/integrations.md#qdrant) – Qdrant and Postgres (pgvector) credential setup
 - [Agent Node](./agent-node.md) – Use RAG results as agent context
 - [LLM Node](./llm-node.md) – Feed RAG results into LLM system prompt

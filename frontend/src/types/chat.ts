@@ -16,7 +16,7 @@ export interface ToolCall {
   args: Record<string, unknown>
   response_summary?: string
   elapsed_ms?: number
-  status: 'running' | 'success' | 'error' | 'compressed'
+  status: 'running' | 'success' | 'error' | 'compressed' | 'cancelled'
 }
 
 export interface ContextBreakdown {

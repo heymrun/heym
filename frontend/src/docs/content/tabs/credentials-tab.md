@@ -23,7 +23,8 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **IMAP** | Inbound mailbox trigger credentials |
 | **SMTP** | Email sending credentials |
 | **Redis** | Redis connection |
-| **Qdrant** | Vector store for RAG nodes |
+| **RAG: Qdrant + OpenAI** | Vector store for RAG nodes, backed by an external Qdrant server |
+| **RAG: Psql + OpenAI** | Vector store for RAG nodes, backed by Heym's own Postgres database (pgvector) — no external service |
 | **Cohere** | Cohere API for embeddings |
 
 ## Adding Credentials
@@ -63,7 +64,7 @@ Reference credentials by name in node configuration. For example:
 - [Agent node](../nodes/agent-node.md) – Pass GitHub tokens into MCP server env vars such as `GITHUB_PERSONAL_ACCESS_TOKEN`
 - [GitHub node](../nodes/github-node.md) – Run native GitHub repository, user, issue, review, release, workflow, traffic, and file operations
 - [Notion node](../nodes/notion-node.md) – Manage Notion databases, data sources, pages, and blocks
-- [RAG node](../nodes/rag-node.md) – Use Qdrant credential for the vector store
+- [RAG node](../nodes/rag-node.md) – Use a Qdrant or Postgres (pgvector) credential for the vector store
 - [Telegram Trigger node](../nodes/telegram-trigger-node.md) – Receive Telegram bot webhooks
 - [Telegram node](../nodes/telegram-node.md) – Send Telegram bot messages
 - [Discord Trigger node](../nodes/discord-trigger-node.md) – Receive Discord interaction webhooks
@@ -78,6 +79,6 @@ See [Expression DSL](../reference/expression-dsl.md) for referencing credential-
 - [Credentials Sharing](../reference/credentials-sharing.md) – Share credentials with other users
 - [Security](../reference/security.md) – Encryption at rest, session management, rate limiting
 - [Node Types](../reference/node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [GitHub](../nodes/github-node.md), [RAG](../nodes/rag-node.md), [HTTP](../nodes/http-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md), [Redis](../nodes/redis-node.md))
-- [Vectorstores Tab](./vectorstores-tab.md) – Uses Qdrant credentials
+- [Vectorstores Tab](./vectorstores-tab.md) – Uses Qdrant or Postgres (pgvector) credentials
 - [Chat Tab](./chat-tab.md) – Uses OpenAI/Google credentials
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

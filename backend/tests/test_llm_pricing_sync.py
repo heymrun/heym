@@ -113,6 +113,15 @@ class SyncFromHeliconeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EnsurePricingSyncedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_skips_when_sync_is_disabled(self):
+        db = AsyncMock()
+
+        with patch("app.services.llm_pricing_sync.settings.llm_pricing_sync_enabled", False):
+            triggered = await ensure_pricing_synced(db, force=True)
+
+        self.assertFalse(triggered)
+        db.execute.assert_not_awaited()
+
     async def test_skips_when_fresh_within_ttl(self):
         db = AsyncMock()
         fresh = datetime.now(timezone.utc) - timedelta(hours=1)

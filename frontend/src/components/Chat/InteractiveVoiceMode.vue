@@ -28,7 +28,7 @@ const voice = useInteractiveVoice((text: string) => {
 });
 
 const stateLabel: Record<VoiceState, string> = {
-  idle: "Paused",
+  idle: "Mic off",
   listening: "Listening…",
   transcribing: "Transcribing…",
   thinking: "Thinking…",
@@ -83,7 +83,16 @@ watch(
           /* ignore synthesis errors */
         }
         await waitForPlaybackEnd();
-        if (props.open && !voice.muted.value) await voice.start();
+        // A barge-in (onMicButton during speaking) moves us straight to
+        // "listening"; only auto-resume when we are still in the speaking phase.
+        if (props.open && voice.state.value === "speaking") {
+          if (!voice.muted.value) {
+            await voice.start();
+          } else {
+            // Mic is off — return to a clean idle instead of staying in the speaking pulse.
+            voice.setState("idle");
+          }
+        }
       }
     }
   },
@@ -111,6 +120,17 @@ watch(
     }
   },
 );
+
+function onMicButton(): void {
+  // While the assistant is speaking, the mic button interrupts it (barge-in)
+  // and starts listening immediately; otherwise it toggles the mic on/off.
+  if (voice.state.value === "speaking") {
+    tts.stop();
+    voice.bargeIn();
+    return;
+  }
+  voice.toggleMute();
+}
 
 function close(): void {
   emit("close");
@@ -175,8 +195,14 @@ onBeforeUnmount(() => {
           type="button"
           class="flex h-16 w-16 items-center justify-center rounded-full border border-border transition-colors"
           :class="voice.muted.value ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'"
-          :aria-label="voice.muted.value ? 'Unmute microphone' : 'Mute microphone'"
-          @click="voice.toggleMute()"
+          :aria-label="
+            voice.state.value === 'speaking'
+              ? 'Interrupt and speak'
+              : voice.muted.value
+                ? 'Turn microphone on'
+                : 'Turn microphone off'
+          "
+          @click="onMicButton()"
         >
           <MicOff
             v-if="voice.muted.value"

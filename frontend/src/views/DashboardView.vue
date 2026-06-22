@@ -1347,6 +1347,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
           <div
             v-if="activeTab === 'workflows'"
+            data-testid="workflow-import-dropzone"
             class="relative"
             @dragover="handleJsonDragOver"
             @dragleave="handleJsonDragLeave"
@@ -1435,6 +1436,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="gradient"
                   size="sm"
+                  data-testid="new-workflow-button"
                   @click="showCreateDialog = true; pushOverlayState()"
                 >
                   <Plus class="w-3.5 h-3.5" />
@@ -1559,6 +1561,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     <Card
                       v-for="(workflow, index) in displayedPinnedDrawerWorkflows"
                       :key="workflow.id"
+                      :data-testid="`workflow-card-${workflow.id}`"
                       variant="interactive"
                       :class="cn(
                         'workflow-card cursor-pointer group relative p-3.5',
@@ -1635,6 +1638,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                           <Button
                             variant="ghost"
                             size="icon"
+                            :data-testid="`workflow-delete-${workflow.id}`"
                             class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
                             title="Delete workflow"
                             @click="deleteWorkflow(workflow.id, $event)"
@@ -1709,6 +1713,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   <Card
                     v-for="(workflow, index) in displayedRootWorkflows"
                     :key="workflow.id"
+                    :data-testid="`workflow-card-${workflow.id}`"
                     variant="interactive"
                     :class="cn(
                       'workflow-card p-3.5 cursor-pointer group relative',
@@ -1791,6 +1796,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                         <Button
                           variant="ghost"
                           size="icon"
+                          :data-testid="`workflow-delete-${workflow.id}`"
                           class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
                           title="Delete workflow"
                           @click="deleteWorkflow(workflow.id, $event)"

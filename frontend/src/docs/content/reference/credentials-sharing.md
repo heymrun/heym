@@ -54,7 +54,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 | [Supabase](../nodes/supabase-node.md) | `credentialId` | Supabase project URL and API key |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md), [Telegram](../nodes/telegram-node.md) | `credentialId` | Telegram bot credential |
 | [Discord Trigger](../nodes/discord-trigger-node.md), [Discord](../nodes/discord-node.md) | `credentialId` | Discord public key or webhook credential |
-| Vector Store | `credential_id` | Qdrant/vector DB |
+| Vector Store | `credential_id` | Qdrant or Postgres (pgvector) vector DB |
 | Evals | `credential_id`, `judge_credential_id` | Model credentials |
 | [Playwright](../nodes/playwright-node.md) AI step | `credentialId` | LLM/Vision model (for AI step and [Auto Heal](../nodes/playwright-node.md#ai-auto-heal)) |
 

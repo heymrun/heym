@@ -8111,7 +8111,9 @@ class WorkflowExecutor:
             elif node_type == "rag":
                 from app.db.session import SessionLocal
                 from app.services.encryption import decrypt_config
-                from app.services.vector_store import create_vector_store_service
+                from app.services.vector_store import (
+                    create_vector_store_service_for_credential,
+                )
 
                 vector_store_id = node_data.get("vectorStoreId")
                 if not vector_store_id:
@@ -8121,7 +8123,8 @@ class WorkflowExecutor:
                 if not operation:
                     raise ValueError("RAG node requires an operation")
 
-                qdrant_config: dict = {}
+                vector_store_config: dict = {}
+                credential_type = None
                 collection_name: str = ""
                 with SessionLocal() as db:
                     store = self._get_accessible_vector_store(db, vector_store_id)
@@ -8130,16 +8133,14 @@ class WorkflowExecutor:
                     collection_name = store.collection_name
                     cred = self._get_vector_store_backing_credential(db, store.credential_id)
                     if cred:
-                        qdrant_config = decrypt_config(cred.encrypted_config)
+                        vector_store_config = decrypt_config(cred.encrypted_config)
+                        credential_type = cred.type
 
-                if not qdrant_config:
+                if not vector_store_config:
                     raise ValueError("Vector store credential not found")
 
-                service = create_vector_store_service(
-                    qdrant_host=qdrant_config.get("qdrant_host", "localhost"),
-                    qdrant_port=int(qdrant_config.get("qdrant_port", 6333)),
-                    qdrant_api_key=qdrant_config.get("qdrant_api_key"),
-                    openai_api_key=qdrant_config["openai_api_key"],
+                service = create_vector_store_service_for_credential(
+                    credential_type, vector_store_config
                 )
 
                 if operation == "insert":

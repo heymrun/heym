@@ -15,7 +15,8 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Cohere** | Embeddings | `api_key` |
-| **Qdrant** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
+| **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
+| **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
 | **Grist** | [Grist node](../nodes/grist-node.md) | `api_key`, `server_url` |
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
@@ -95,7 +96,32 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 
 ### Used By
 
-- [Qdrant RAG node](../nodes/rag-node.md) (via vector store)
+- [RAG node](../nodes/rag-node.md) (via vector store)
+- [Vectorstores Tab](../tabs/vectorstores-tab.md)
+
+## Postgres (pgvector)
+
+Heym can also store vectors **inside its own Postgres database** using the
+[pgvector](https://github.com/pgvector/pgvector) extension — no external vector service
+required. Create a **RAG: Psql + OpenAI** credential and use it when creating a vector
+store, then pick **Postgres (pgvector)** in the RAG node's Database dropdown.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `openai_api_key` | OpenAI API key used to generate embeddings when indexing and searching documents |
+
+### Notes
+
+- No host/port is needed — vectors are written to Heym's own database; Heym never connects to a different database.
+- Every RAG feature available with Qdrant (insert, search, metadata filters, Cohere reranking, cloning, sharing) works identically with the Postgres backend.
+- Requires the `vector` extension. Heym keeps the official `postgres:16` image unchanged (so existing data is never touched) and **auto-installs the `postgresql-16-pgvector` package at startup** — `run.sh`, `deploy.sh`, and `run_e2e.sh` all handle this. The install is non-fatal: if it cannot run (e.g. no network), Qdrant RAG keeps working and the Postgres backend stays inactive (the migration skips the table gracefully).
+- If you run the published single-container image (`ghcr.io/heymrun/heym`) against **your own external Postgres**, that database must support the `vector` extension (Heym cannot install it into a database it does not manage). Without it, creating or uploading to a Postgres vector store returns a clear message and Qdrant RAG continues to work.
+
+### Used By
+
+- [RAG node](../nodes/rag-node.md) (via vector store)
 - [Vectorstores Tab](../tabs/vectorstores-tab.md)
 
 ---

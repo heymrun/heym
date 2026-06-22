@@ -67,3 +67,76 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1' }}
           SECRET_KEY: ci-test-secret-key-for-testing-only-not-for-production
         run: sh ./run_tests.sh
+
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: heym_e2e
+        ports:
+          - 6544:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d heym_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: bunx playwright install --with-deps chromium
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install backend
+        working-directory: backend
+        run: uv sync
+
+      - name: Apply database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:6544/heym_e2e
+          SECRET_KEY: e2e-test-secret-key-for-playwright-only
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        run: uv run alembic upgrade head
+
+      - name: Run frontend E2E tests
+        working-directory: frontend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:6544/heym_e2e
+          E2E_ARTIFACT_DIR: .e2e-artifacts/ci
+        run: bun run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/.e2e-artifacts/ci/playwright-report/
+            frontend/.e2e-artifacts/ci/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

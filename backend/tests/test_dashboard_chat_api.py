@@ -554,7 +554,7 @@ Here is the workflow:
         self.assertEqual(config["nodes"][0]["id"], "input")
         self.assertEqual(config["edges"], [])
 
-    async def test_create_and_run_generated_workflow_saves_and_executes(self) -> None:
+    async def test_create_generated_workflow_saves_without_running(self) -> None:
         user = MagicMock()
         user.id = uuid.uuid4()
         user.user_rules = None
@@ -610,9 +610,7 @@ Here is the workflow:
             ),
             patch(
                 "app.api.ai_assistant.run_execute_workflow_tool",
-                AsyncMock(
-                    return_value='{"status":"success","outputs":{"text":"done"},"node_results":[]}'
-                ),
+                AsyncMock(),
             ) as run_tool,
         ):
             raw_result = await create_and_run_generated_workflow_tool(
@@ -632,22 +630,20 @@ Here is the workflow:
         self.assertEqual(saved_workflow.name, "Echo Assistant")
         self.assertEqual(saved_workflow.nodes[1]["data"]["credentialId"], str(credential.id))
         self.assertEqual(saved_workflow.nodes[1]["data"]["model"], "gpt-4o-mini")
-        run_tool.assert_awaited_once()
-        self.assertEqual(run_tool.call_args.args[2], str(saved_workflow.id))
-        self.assertEqual(run_tool.call_args.args[3], {"text": "hello"})
-
-        result = json.loads(raw_result)
-        self.assertEqual(result["status"], "created_and_ran")
-        self.assertEqual(result["workflow_name"], "Echo Assistant")
-        self.assertEqual(result["workflow_url"], f"/workflows/{saved_workflow.id}")
-        self.assertIn('Open "Echo Assistant" in a new tab', result["workflow_link_markdown"])
-        self.assertEqual(result["workflow_preview"]["id"], str(saved_workflow.id))
-        self.assertEqual(result["workflow_preview"]["nodes"][1]["id"], "llm")
-        self.assertEqual(result["execution"]["status"], "success")
+        run_tool.assert_not_awaited()
+        payload = json.loads(raw_result)
+        self.assertEqual(payload["status"], "created")
+        self.assertNotIn("execution", payload)
+        self.assertEqual(payload["workflow_preview"]["name"], "Echo Assistant")
+        self.assertEqual(payload["workflow_name"], "Echo Assistant")
+        self.assertEqual(payload["workflow_url"], f"/workflows/{saved_workflow.id}")
+        self.assertIn('Open "Echo Assistant" in a new tab', payload["workflow_link_markdown"])
+        self.assertEqual(payload["workflow_preview"]["id"], str(saved_workflow.id))
+        self.assertEqual(payload["workflow_preview"]["nodes"][1]["id"], "llm")
         builder_kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(builder_kwargs["temperature"], 0.0)
 
-    async def test_edit_and_run_generated_workflow_updates_same_workflow(self) -> None:
+    async def test_edit_generated_workflow_updates_same_workflow_without_running(self) -> None:
         user = MagicMock()
         user.id = uuid.uuid4()
         user.user_rules = None
@@ -722,9 +718,7 @@ Here is the workflow:
             ),
             patch(
                 "app.api.ai_assistant.run_execute_workflow_tool",
-                AsyncMock(
-                    return_value='{"status":"success","outputs":{"text":"done"},"node_results":[]}'
-                ),
+                AsyncMock(),
             ) as run_tool,
         ):
             raw_result = await edit_and_run_generated_workflow_tool(
@@ -761,14 +755,13 @@ Here is the workflow:
             ],
         )
         self.assertEqual(saved_version.edges, [])
-        run_tool.assert_awaited_once()
-        self.assertEqual(run_tool.call_args.args[2], str(workflow.id))
+        run_tool.assert_not_awaited()
 
         result = json.loads(raw_result)
-        self.assertEqual(result["status"], "edited_and_ran")
+        self.assertEqual(result["status"], "edited")
+        self.assertNotIn("execution", result)
         self.assertEqual(result["workflow_id"], str(workflow.id))
         self.assertEqual(result["workflow_preview"]["nodes"][1]["id"], "output")
-        self.assertEqual(result["execution"]["status"], "success")
         builder_kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(builder_kwargs["temperature"], 0.0)
 

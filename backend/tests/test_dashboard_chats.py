@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import unittest
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from types import TracebackType
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -300,19 +302,23 @@ class TestStreamConversation(unittest.IsolatedAsyncioTestCase):
         queue: asyncio.Queue[object | None] = asyncio.Queue()
         mock_db = AsyncMock()
 
+        @contextlib.asynccontextmanager
+        async def _fake_session() -> AsyncGenerator[AsyncMock, None]:
+            yield mock_db
+
         with (
             patch(
                 "app.api.chats._get_conversation_or_404",
                 new_callable=AsyncMock,
                 return_value=conv,
             ),
+            patch("app.api.chats.async_session_maker", _fake_session),
             patch("app.api.chats.registry.subscribe", return_value=_QueueContext(queue)),
             patch("app.api.chats.CHAT_STREAM_HEARTBEAT_SECONDS", 0.001),
         ):
             response = await stream_conversation(
                 conversation_id=conv.id,
-                current_user=user,
-                db=mock_db,
+                user_id=user.id,
             )
 
             stream = response.body_iterator

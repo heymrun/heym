@@ -517,7 +517,7 @@ const dataTableSelectiveExpressionInputRefs = ref<
   Map<string, InstanceType<typeof ExpressionInput>>
 >(new Map());
 const gristColumns = ref<{ id: string; name: string; type: string }[]>([]);
-const vectorStores = ref<{ id: string; name: string }[]>([]);
+const vectorStores = ref<{ id: string; name: string; backend: string }[]>([]);
 const ragQueryInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const ragDocumentInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const rabbitmqExchangeInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -857,7 +857,11 @@ watch(
       try {
         const { vectorStoresApi } = await import("@/services/api");
         const stores = await vectorStoresApi.list();
-        vectorStores.value = stores.map((s) => ({ id: s.id, name: s.name }));
+        vectorStores.value = stores.map((s) => ({
+          id: s.id,
+          name: s.name,
+          backend: s.backend ?? "qdrant",
+        }));
       } catch {
         vectorStores.value = [];
       }
@@ -4161,14 +4165,26 @@ const redisCredentialOptions = computed(() => {
 });
 
 const vectorStoreOptions = computed(() => {
+  const node = selectedNode.value;
+  const dbType =
+    node && node.type === "rag"
+      ? (node.data.dbType as string | undefined) || "qdrant"
+      : "qdrant";
   return [
     { value: "", label: "Select a vector store" },
-    ...vectorStores.value.map((s) => ({
-      value: s.id,
-      label: s.name,
-    })),
+    ...vectorStores.value
+      .filter((s) => s.backend === dbType)
+      .map((s) => ({
+        value: s.id,
+        label: s.name,
+      })),
   ];
 });
+
+const ragDbTypeOptions = [
+  { value: "qdrant", label: "Qdrant" },
+  { value: "pgvector", label: "Postgres (pgvector)" },
+];
 
 const ragOperationOptions = [
   { value: "", label: "Select operation" },
@@ -10436,6 +10452,22 @@ onUnmounted(() => {
           </template>
 
           <template v-if="selectedNode.type === 'rag'">
+            <div class="space-y-2">
+              <Label>Database</Label>
+              <Select
+                :model-value="selectedNode.data.dbType || 'qdrant'"
+                :options="ragDbTypeOptions"
+                @update:model-value="
+                  updateNodeData('dbType', $event);
+                  updateNodeData('vectorStoreId', '');
+                "
+              />
+              <p class="text-xs text-muted-foreground">
+                Qdrant uses an external server; Postgres (pgvector) stores vectors in
+                Heym's own database.
+              </p>
+            </div>
+
             <div class="space-y-2">
               <Label>Vector Store</Label>
               <Select

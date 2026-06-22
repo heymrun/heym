@@ -86,6 +86,45 @@ Press `Ctrl+C` to gracefully stop all services.
 
 ---
 
+## End-to-End Tests: `run_e2e.sh`
+
+The frontend Playwright suite runs against the real Vue application, FastAPI backend, and an
+isolated PostgreSQL database:
+
+```bash
+./run_e2e.sh
+```
+
+The suite is a key-path smoke and regression suite, not exhaustive product coverage. It covers
+authentication, core workflow lifecycle and execution, selected dashboard resources, public
+routes, and a mocked HITL review UI. Provider integrations, every node type, sharing/permission
+matrices, and full HITL resume execution remain covered primarily by backend tests or require
+dedicated integration environments.
+
+Each run gets its own temporary PostgreSQL 16 container, random available database/backend/frontend
+ports, authentication state, test results, and HTML report. This allows multiple `run_e2e.sh`
+processes to run concurrently without sharing state or overwriting artifacts. The script removes
+its database container when the run finishes and prints the artifact directory and report path.
+
+Useful commands:
+
+```bash
+./run_e2e.sh --ui         # Interactive Playwright runner with an isolated database
+cd frontend
+bun run test:e2e:report   # Open the most recently completed local run
+```
+
+Direct `bun run test:e2e` and `bun run test:e2e:ui` runs require an explicit `DATABASE_URL` so they
+cannot silently start against the local development database. Use `./run_e2e.sh` for normal local
+runs.
+
+`./check.sh` runs lint, typecheck, formatting, and backend tests without the E2E suite, keeping the
+default local check path fast. Run Playwright E2E tests separately with `./run_e2e.sh`. Pull
+requests always run the Chromium E2E suite in GitHub Actions and retain traces, screenshots,
+videos, and the HTML report when failures occur.
+
+---
+
 ## Production: `deploy.sh`
 
 `deploy.sh` builds and runs the full stack using Docker Compose. All three services — the database, the backend, and the frontend — run as containers. The backend entrypoint automatically runs migrations before starting the server with 8 workers.
@@ -132,6 +171,8 @@ The app header shows the running Docker build version. When that version is behi
 If you prefer not to build the app locally, you can pull the published container image and run it directly.
 
 The image starts the frontend and backend together in one container. PostgreSQL is still external, but you can provide either `DATABASE_URL` or the `POSTGRES_*` variables from `.env.example`.
+
+> **Vector store backend.** `run.sh` and `deploy.sh` run the official `postgres:16` image and auto-install the `postgresql-16-pgvector` package at startup, so the **Postgres (pgvector) RAG backend** works out of the box there with no change to your data. The prebuilt single-container image, however, connects to a PostgreSQL **you** provide — that database must support the `vector` extension to use the Postgres backend. Heym cannot install pgvector into a database it does not manage. Without it, the startup migration skips the pgvector table gracefully — the deploy still succeeds, Qdrant RAG keeps working, and creating or uploading to a Postgres vector store returns a clear "backend unavailable" message until pgvector is enabled.
 
 **Set the keys yourself for direct image runs.** Unlike `run.sh`/`deploy.sh`, the prebuilt image does not auto-generate keys. After `cp .env.example .env`, populate the two empty keys (replacing in place avoids duplicate entries):
 

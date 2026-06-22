@@ -457,6 +457,7 @@ class CredentialType(str, Enum):
     smtp = "smtp"
     redis = "redis"
     qdrant = "qdrant"
+    pgvector = "pgvector"
     grist = "grist"
     rabbitmq = "rabbitmq"
     cohere = "cohere"
@@ -764,6 +765,10 @@ class CredentialConfigQdrant(BaseModel):
     openai_api_key: str
 
 
+class CredentialConfigPgvector(BaseModel):
+    openai_api_key: str
+
+
 class CredentialConfigGrist(BaseModel):
     api_key: str
     server_url: str
@@ -805,6 +810,7 @@ class VectorStoreResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     stats: VectorStoreStatsResponse | None = None
+    backend: str = "qdrant"
 
     class Config:
         from_attributes = True
@@ -821,6 +827,7 @@ class VectorStoreListResponse(BaseModel):
     shared_by: str | None = None
     shared_by_team: str | None = None
     stats: VectorStoreStatsResponse | None = None
+    backend: str = "qdrant"
 
     class Config:
         from_attributes = True
@@ -1509,3 +1516,20 @@ class TraceStatsResponse(BaseModel):
     kpis: TraceStatsKpis
     by_model: list[TraceStatsByModel]
     by_time: list[TraceStatsByTime]
+
+
+class AnalysisNoteEditor(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class AnalysisNoteResponse(BaseModel):
+    content: str
+    revision: int
+    updated_by: AnalysisNoteEditor | None = None
+    updated_at: datetime | None = None
+
+
+class AnalysisNoteSaveRequest(BaseModel):
+    content: str
+    base_revision: int

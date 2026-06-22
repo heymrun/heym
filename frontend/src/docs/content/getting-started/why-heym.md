@@ -66,8 +66,9 @@ See [Agent Architecture](../reference/agent-architecture.md) for execution detai
 
 ## Built-In RAG Pipeline
 
-Heym includes a [Qdrant RAG Node](../nodes/rag-node.md) and a managed [Vectorstores](../tabs/vectorstores-tab.md) tab. You can:
+Heym includes a [RAG / Vector Store Node](../nodes/rag-node.md) and a managed [Vectorstores](../tabs/vectorstores-tab.md) tab. You can:
 
+- Choose your vector backend: **Qdrant** (external server) or **Postgres (pgvector)** — vectors stored in Heym's own database with no extra service to run
 - Insert documents into a vector store directly from a workflow node
 - Perform semantic search and feed results into an LLM or Agent node
 - Reference results with expressions like `$ragNode.results.map("item.payload.content").join("\n\n")`
@@ -211,7 +212,7 @@ Heym is licensed under the **MIT License with the Commons Clause condition**. Th
 - [Migrate to Heym](./migrate-to-heym.md) – Bring your n8n, Flowise, Dify, or Langflow workflows over with AI
 - [Agent Node](../nodes/agent-node.md) – LLM node with tool calling, MCP, and skills
 - [Agent Architecture](../reference/agent-architecture.md) – Sub-agents, orchestrator, and tool dispatch
-- [Qdrant RAG Node](../nodes/rag-node.md) – Vector search and document insertion
+- [RAG / Vector Store Node](../nodes/rag-node.md) – Vector search and document insertion (Qdrant or Postgres pgvector)
 - [AI Assistant](../reference/ai-assistant.md) – Natural language workflow builder
 - [Human-in-the-Loop](../reference/human-in-the-loop.md) – Agent checkpoints with public review URLs
 - [Guardrails](../reference/guardrails.md) – Block unsafe prompts before they reach your models

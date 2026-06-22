@@ -51,7 +51,14 @@ const proxyConfig: Record<string, ProxyOptions> = {
   "/.well-known/oauth-authorization-server": apiProxyOptions,
   "/authorize": apiProxyOptions,
   "/token": apiProxyOptions,
-  "/register": apiProxyOptions,
+  "/register": {
+    ...apiProxyOptions,
+    bypass: (req): string | undefined => {
+      if (req.method === "GET" && req.headers.accept?.includes("text/html")) {
+        return "/index.html";
+      }
+    },
+  },
 };
 
 const heymDevHeaders = {

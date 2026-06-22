@@ -189,6 +189,24 @@ fi
 
 sleep 2
 
+# Enable the pgvector extension on the stock postgres:16 image (opt-in Postgres
+# RAG backend). We keep the official postgres:16 image untouched — so existing
+# data dirs and their collation are never changed — and just add the extension
+# package at runtime. Non-fatal: if it cannot be installed (e.g. no network),
+# Qdrant RAG keeps working and the migration skips the pgvector table.
+ensure_pgvector() {
+    if docker exec heym-postgres sh -c "dpkg -s postgresql-16-pgvector >/dev/null 2>&1"; then
+        return 0
+    fi
+    echo -e "${YELLOW}Installing pgvector extension into PostgreSQL...${NC}"
+    docker exec -u root heym-postgres sh -c \
+        "apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-16-pgvector" \
+        >/dev/null 2>&1 \
+        && echo -e "${GREEN}pgvector installed.${NC}" \
+        || echo -e "${YELLOW}pgvector install skipped (Qdrant RAG still works).${NC}"
+}
+ensure_pgvector
+
 echo -e "\n${YELLOW}Setting up backend...${NC}"
 cd "$PROJECT_ROOT/backend"
 uv sync

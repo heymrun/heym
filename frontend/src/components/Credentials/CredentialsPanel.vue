@@ -318,6 +318,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
       <Card
         v-for="(credential, index) in credentials"
         :key="credential.id"
+        :data-testid="`credential-card-${credential.id}`"
         :class="cn(
           'credential-card p-5 cursor-pointer group',
           credential.is_shared && 'shared-card'
@@ -372,6 +373,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
             <Button
               variant="ghost"
               size="icon"
+              :data-testid="`credential-delete-${credential.id}`"
               class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive h-8 w-8"
               title="Delete credential"
               @click="deleteCredential(credential.id, $event)"

@@ -23,7 +23,7 @@ See [Triggers](./triggers.md) for all entry points.
 |------|-------------|--------|---------|
 | [LLM](../nodes/llm-node.md) | Process text with a language model | 1 | 1 |
 | [AI Agent](../nodes/agent-node.md) | LLM with tool calling, skills, MCP, optional [human review](./human-in-the-loop.md), and optional [persistent memory graph](./agent-persistent-memory.md). See [Agent Architecture](./agent-architecture.md). | 1 | 1, plus optional `review` output |
-| [Qdrant RAG](../nodes/rag-node.md) | Insert or search in [vector store](../tabs/vectorstores-tab.md) for RAG | 1 | 1 |
+| [RAG / Vector Store](../nodes/rag-node.md) | Insert or search in a Qdrant or Postgres (pgvector) [vector store](../tabs/vectorstores-tab.md) for RAG | 1 | 1 |
 
 ## Logic Nodes
 

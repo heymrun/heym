@@ -1,6 +1,6 @@
 {
   "name": "heym-frontend",
-  "version": "0.0.47",
+  "version": "0.0.50",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE AND COMMONS-CLAUSE.md",
   "scripts": {
@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "lint": "eslint . --fix",
     "lint:check": "eslint .",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report .e2e-artifacts/latest/playwright-report"
   },
   "dependencies": {
     "@vue-flow/background": "^1.3.2",
@@ -37,6 +40,7 @@
     "vue3-apexcharts": "^1.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/dompurify": "^3.2.0",
     "@types/marked": "^6.0.0",
     "@types/node": "^20.11.5",

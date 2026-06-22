@@ -83,6 +83,9 @@ class Settings(BaseSettings):
         default=1.0, validation_alias="HEYM_OTEL_TRACES_SAMPLER_RATIO"
     )
     otel_capture_node_io: bool = Field(default=False, validation_alias="HEYM_OTEL_CAPTURE_NODE_IO")
+    llm_pricing_sync_enabled: bool = Field(
+        default=True, validation_alias="HEYM_LLM_PRICING_SYNC_ENABLED"
+    )
 
     @property
     def resolved_version(self) -> str:

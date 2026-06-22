@@ -9,9 +9,11 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 
 1. Click **New Vector Store**
 2. Enter a name and optional description
-3. Select a **Qdrant credential** – Must be a [Credentials](./credentials-tab.md) entry of type Qdrant
+3. Select a vector store **credential** – either *RAG: Qdrant + OpenAI* (external Qdrant server) or *RAG: Psql + OpenAI* (Heym's own Postgres database via pgvector). The credential determines the store's backend.
 4. Optionally set a custom collection name (defaults to auto-generated)
 5. Save
+
+> A store's backend is fixed by its credential at creation time. In a RAG node, the **Database** dropdown filters stores to the matching backend.
 
 ## Uploading Documents
 
@@ -37,7 +39,7 @@ In a [RAG node](../nodes/rag-node.md), select the vector store by name. The node
 
 ## Related
 
-- [Credentials Tab](./credentials-tab.md) – Qdrant credential setup
+- [Credentials Tab](./credentials-tab.md) – Vector store credential setup (Qdrant or Postgres)
 - [RAG Node](../nodes/rag-node.md) – Node reference
 - [Workflows Tab](./workflows-tab.md) – Create workflows that use RAG
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

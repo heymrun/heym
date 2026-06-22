@@ -65,6 +65,7 @@ const qdrantHost = ref("");
 const qdrantPort = ref("6333");
 const qdrantApiKey = ref("");
 const qdrantOpenaiApiKey = ref("");
+const pgvectorOpenaiApiKey = ref("");
 const gristApiKey = ref("");
 const gristServerUrl = ref("");
 const rabbitmqHost = ref("");
@@ -172,6 +173,7 @@ const typeOptions = [
   { value: "smtp", label: CREDENTIAL_TYPE_LABELS.smtp },
   { value: "redis", label: CREDENTIAL_TYPE_LABELS.redis },
   { value: "qdrant", label: CREDENTIAL_TYPE_LABELS.qdrant },
+  { value: "pgvector", label: CREDENTIAL_TYPE_LABELS.pgvector },
   { value: "grist", label: CREDENTIAL_TYPE_LABELS.grist },
   { value: "rabbitmq", label: CREDENTIAL_TYPE_LABELS.rabbitmq },
   { value: "cohere", label: CREDENTIAL_TYPE_LABELS.cohere },
@@ -222,6 +224,7 @@ watch(
         qdrantPort.value = "6333";
         qdrantApiKey.value = "";
         qdrantOpenaiApiKey.value = "";
+        pgvectorOpenaiApiKey.value = "";
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -304,6 +307,7 @@ watch(
         qdrantPort.value = "6333";
         qdrantApiKey.value = "";
         qdrantOpenaiApiKey.value = "";
+        pgvectorOpenaiApiKey.value = "";
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -399,6 +403,8 @@ const isValid = computed(() => {
       !!qdrantPort.value.trim() &&
       !!qdrantOpenaiApiKey.value.trim()
     ) || isEditing.value;
+  } else if (type.value === "pgvector") {
+    return !!pgvectorOpenaiApiKey.value.trim() || isEditing.value;
   } else if (type.value === "grist") {
     return (
       !!gristApiKey.value.trim() &&
@@ -517,6 +523,10 @@ function buildConfig(): CredentialConfig {
       qdrant_port: qdrantPort.value,
       qdrant_api_key: qdrantApiKey.value,
       openai_api_key: qdrantOpenaiApiKey.value,
+    };
+  } else if (type.value === "pgvector") {
+    return {
+      openai_api_key: pgvectorOpenaiApiKey.value,
     };
   } else if (type.value === "grist") {
     return {
@@ -953,6 +963,7 @@ async function handleSave(): Promise<void> {
           qdrantPort.value.trim() ||
           qdrantApiKey.value.trim() ||
           qdrantOpenaiApiKey.value.trim() ||
+          pgvectorOpenaiApiKey.value.trim() ||
           gristApiKey.value.trim() ||
           gristServerUrl.value.trim() ||
           rabbitmqHost.value.trim() ||
@@ -1672,6 +1683,40 @@ async function handleSave(): Promise<void> {
           </div>
           <p class="text-xs text-muted-foreground">
             OpenAI API key for text-embedding-3-large embeddings
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'pgvector'">
+        <div class="space-y-2">
+          <Label for="cred-pgvector-openai-key">OpenAI API Key</Label>
+          <div class="relative">
+            <Input
+              id="cred-pgvector-openai-key"
+              v-model="pgvectorOpenaiApiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'sk-...'"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            OpenAI API key for text-embedding-3-large embeddings. Vectors are stored
+            in Heym's own Postgres database — no external service required.
           </p>
         </div>
       </template>
