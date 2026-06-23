@@ -4020,15 +4020,15 @@ watch(
   () => workflowStore.propertiesPanelOpen,
   (open) => {
     if (open) {
-      if (activeTab.value === "properties") {
-        if (!workflowStore.skipPrimaryExpandOnNextPropertiesOpen) {
-          openPrimaryExpandDialogForSelectedNode();
-        }
-      } else {
+      const shouldOpenExpand = !workflowStore.skipPrimaryExpandOnNextPropertiesOpen;
+      if (activeTab.value !== "properties") {
         activeTab.value = "properties";
       }
       workflowStore.clearSkipPrimaryExpandOnNextPropertiesOpen();
       workflowStore.propertiesPanelOpen = false;
+      if (shouldOpenExpand) {
+        nextTick(() => openPrimaryExpandDialogForSelectedNode());
+      }
     }
   }
 );
