@@ -361,6 +361,9 @@ class NotionService:
         """Create a data source using the current Notion Data Source API."""
         if not isinstance(data_source.get("parent"), dict):
             raise ValueError("Notion createDataSource requires a parent object")
+        properties = data_source.get("properties")
+        if not isinstance(properties, dict) or not properties:
+            raise ValueError("Notion createDataSource requires a properties object")
         created_data_source = self._request(
             "POST",
             "/data_sources",

@@ -2427,7 +2427,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
     `createDatabase` requires `parent`; it can also include `title`, `description`, `is_inline`,
     `initial_data_source`, `icon`, and `cover`. `updateDatabase` supports the update endpoint fields.
   - `notionDataSource`: complete Data Source API request JSON object or full-object expression.
-    `createDataSource` requires a `parent` database object and property schema.
+    `createDataSource` requires a `parent` database object and a non-empty `properties` object.
   - `notionProperties`: Notion page properties JSON object or full-object expression
   - `notionChildren`: Notion block children JSON array or full-array expression; more than 100
     top-level children are sent in ordered batches
@@ -2451,7 +2451,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
 | `createDatabase` | `notionDatabase` with `parent` | `{database, id, url, success}` |
 | `retrieveDatabase` | `notionDatabaseId` | `{database, success}` |
 | `updateDatabase` | `notionDatabaseId`, non-empty `notionDatabase` | `{database, id, url, success}` |
-| `createDataSource` | `notionDataSource` with `parent` | `{data_source, id, url, success}` |
+| `createDataSource` | `notionDataSource` with `parent` and non-empty `properties` | `{data_source, id, url, success}` |
 | `retrieveDataSource` | `notionDataSourceId` | `{data_source, success}` |
 | `updateDataSource` | `notionDataSourceId`, non-empty `notionDataSource` | `{data_source, id, url, success}` |
 | `queryDataSource` | `notionDataSourceId` | `{results, count, next_cursor, success}` |

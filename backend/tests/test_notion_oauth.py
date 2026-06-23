@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import httpx
 import jwt
 from fastapi import HTTPException
 from starlette.datastructures import Headers
@@ -97,7 +98,7 @@ class NotionOAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
         return credential
 
     async def test_authorize_returns_auth_url_for_valid_credential(self) -> None:
-        from app.api.notion_oauth import AuthorizeRequest, authorize
+        from app.api.notion_oauth import AuthorizeRequest, AuthorizeResponse, authorize
 
         credential = self._make_credential()
         db = AsyncMock()
@@ -117,9 +118,9 @@ class NotionOAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
             settings.jwt_algorithm = _ALGORITHM
             result = await authorize(body=body, request=request, current_user=user, db=db)
 
-        self.assertIn("auth_url", result)
-        self.assertIn("api.notion.com/v1/oauth/authorize", result["auth_url"])
-        self.assertIn("client_id=client-id", result["auth_url"])
+        self.assertIsInstance(result, AuthorizeResponse)
+        self.assertIn("api.notion.com/v1/oauth/authorize", result.auth_url)
+        self.assertIn("client_id=client-id", result.auth_url)
 
     async def test_authorize_returns_404_when_credential_missing(self) -> None:
         from app.api.notion_oauth import AuthorizeRequest, authorize
@@ -234,4 +235,44 @@ class NotionOAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = AsyncMock()
         response = await callback(code="auth-code", state="invalid-state", db=db)
         self.assertIn("notion-oauth-error", response.body.decode())
+        db.commit.assert_not_called()
+
+    async def test_callback_hides_token_exchange_error_details(self) -> None:
+        from app.api.notion_oauth import callback, create_oauth_state
+
+        credential = self._make_credential()
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_make_db_result(credential))
+
+        with patch("app.api.notion_oauth.settings") as settings:
+            settings.secret_key = _TEST_SECRET
+            settings.jwt_algorithm = _ALGORITHM
+            state = create_oauth_state(
+                str(credential.owner_id),
+                str(credential.id),
+                "http://testserver/api/credentials/notion/oauth/callback",
+            )
+
+        request = httpx.Request("POST", "https://api.notion.com/v1/oauth/token")
+        token_response = httpx.Response(
+            401,
+            request=request,
+            text="client_secret=super-secret-value",
+        )
+        http_client = AsyncMock()
+        http_client.post = AsyncMock(return_value=token_response)
+        http_client.__aenter__ = AsyncMock(return_value=http_client)
+        http_client.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch("app.api.notion_oauth.settings") as settings,
+            patch("app.api.notion_oauth.httpx.AsyncClient", return_value=http_client),
+        ):
+            settings.secret_key = _TEST_SECRET
+            settings.jwt_algorithm = _ALGORITHM
+            response = await callback(code="auth-code", state=state, db=db)
+
+        html = response.body.decode()
+        self.assertIn("Token exchange failed", html)
+        self.assertNotIn("super-secret-value", html)
         db.commit.assert_not_called()

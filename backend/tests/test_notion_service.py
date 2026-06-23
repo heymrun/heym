@@ -258,6 +258,12 @@ class NotionServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "parent object"):
             self.service.create_data_source({"properties": {}})
 
+    def test_create_data_source_requires_properties(self) -> None:
+        with self.assertRaisesRegex(ValueError, "properties object"):
+            self.service.create_data_source(
+                {"parent": {"type": "database_id", "database_id": "database-1"}}
+            )
+
     def test_create_database_sends_complete_request(self) -> None:
         database_request = {
             "parent": {"type": "page_id", "page_id": "page-1"},

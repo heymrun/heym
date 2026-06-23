@@ -1,6 +1,7 @@
 """Notion OAuth authorization and callback endpoints."""
 
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -22,6 +23,7 @@ from app.services.encryption import decrypt_config, encrypt_config
 from app.services.public_url import resolve_public_origin
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _NOTION_AUTH_URL = "https://api.notion.com/v1/oauth/authorize"
 _NOTION_TOKEN_URL = "https://api.notion.com/v1/oauth/token"
@@ -31,6 +33,10 @@ _STATE_TTL_MINUTES = 10
 
 class AuthorizeRequest(BaseModel):
     credential_id: uuid.UUID
+
+
+class AuthorizeResponse(BaseModel):
+    auth_url: str
 
 
 def create_oauth_state(
@@ -97,13 +103,13 @@ def _popup_html(success: bool, credential_id: str = "", message: str = "") -> st
     return f"<html><body><script>{script}</script></body></html>"
 
 
-@router.post("/authorize")
+@router.post("/authorize", response_model=AuthorizeResponse)
 async def authorize(
     body: AuthorizeRequest,
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> AuthorizeResponse:
     """Return the Notion OAuth authorization URL for the popup flow."""
     cred_uuid = body.credential_id
     result = await db.execute(
@@ -133,7 +139,7 @@ async def authorize(
         str(cred_uuid),
         redirect_uri,
     )
-    return {"auth_url": build_auth_url(client_id, redirect_uri, state_token)}
+    return AuthorizeResponse(auth_url=build_auth_url(client_id, redirect_uri, state_token))
 
 
 @router.get("/callback", response_class=HTMLResponse)
@@ -189,11 +195,14 @@ async def callback(
             )
         response.raise_for_status()
         token_data = response.json()
+        if not isinstance(token_data, dict):
+            raise ValueError("Notion token response must be a JSON object")
         access_token = str(token_data.get("access_token", "")).strip()
         if not access_token:
             raise ValueError("Notion token response is missing access_token")
-    except Exception as exc:
-        return HTMLResponse(_popup_html(False, message=f"Token exchange failed: {exc}"))
+    except (httpx.HTTPError, ValueError, TypeError):
+        logger.exception("Notion OAuth token exchange failed")
+        return HTMLResponse(_popup_html(False, message="Token exchange failed"))
 
     config.pop("api_token", None)
     config.update(

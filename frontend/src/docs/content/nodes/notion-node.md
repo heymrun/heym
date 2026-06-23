@@ -29,7 +29,7 @@ embedded resource ID before the API request.
 | Create Database | Database request with `parent` | `.database`, `.id`, `.url` |
 | Retrieve Database | Database ID | `.database` |
 | Update Database | Database ID, non-empty database request | `.database`, `.id`, `.url` |
-| Create Data Source | Data source request with `parent` | `.data_source`, `.id`, `.url` |
+| Create Data Source | Data source request with `parent` and non-empty `properties` | `.data_source`, `.id`, `.url` |
 | Retrieve Data Source | Data Source | `.data_source` |
 | Update Data Source | Data Source ID, non-empty data source request | `.data_source`, `.id`, `.url` |
 | Query Data Source | Data Source ID | `.results`, `.count`, `.next_cursor` |
@@ -121,8 +121,28 @@ Update Database accepts the update endpoint's request object, including `parent`
 a raw ID, full Notion URL, or expression.
 
 Use **Retrieve Data Source** to fetch the data source's `properties` schema before building a
-Create Page properties object. **Create Data Source** and **Update Data Source** accept the complete
-request objects from the corresponding Notion endpoints.
+Create Page properties object. **Create Data Source** requires a parent database object and a
+non-empty `properties` schema. **Update Data Source** accepts a non-empty request object supported
+by the corresponding Notion endpoint.
+
+For example, create a data source inside an existing database:
+
+```json
+{
+  "parent": {
+    "type": "database_id",
+    "database_id": "$input.databaseId"
+  },
+  "properties": {
+    "Name": {
+      "title": {}
+    },
+    "Status": {
+      "status": {}
+    }
+  }
+}
+```
 
 The Data Source and Parent Page selectors support server-side search with a short debounce and
 cursor-based **Load more** pagination. Use **Refresh** after sharing a new resource in Notion.
