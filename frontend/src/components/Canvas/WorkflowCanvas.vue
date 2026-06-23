@@ -666,6 +666,7 @@ function handleNodeDoubleClick(event: {
       nodeType?: NodeType;
       ragOperation?: string;
       githubOperation?: string;
+      notionOperation?: string;
     };
   };
 }): void {
@@ -708,6 +709,42 @@ function handleNodeDoubleClick(event: {
       fieldToFocus = "githubWorkflowInputs";
     } else {
       fieldToFocus = "githubOwner";
+    }
+  } else if (nodeType === "notion") {
+    const notionOperation = event.node.data?.notionOperation;
+    if (notionOperation === "search") {
+      fieldToFocus = "notionQuery";
+    } else if (
+      notionOperation === "getPage" ||
+      notionOperation === "updatePage" ||
+      notionOperation === "trashPage" ||
+      notionOperation === "restorePage"
+    ) {
+      fieldToFocus = "notionPageId";
+    } else if (notionOperation === "createPage") {
+      fieldToFocus = "notionProperties";
+    } else if (notionOperation === "createDatabase") {
+      fieldToFocus = "notionDatabase";
+    } else if (
+      notionOperation === "retrieveDatabase" ||
+      notionOperation === "updateDatabase"
+    ) {
+      fieldToFocus = "notionDatabaseId";
+    } else if (
+      notionOperation === "retrieveDataSource" ||
+      notionOperation === "queryDataSource" ||
+      notionOperation === "updateDataSource"
+    ) {
+      fieldToFocus = "notionDataSourceId";
+    } else if (notionOperation === "createDataSource") {
+      fieldToFocus = "notionDataSource";
+    } else if (
+      notionOperation === "getBlockChildren" ||
+      notionOperation === "updateBlock" ||
+      notionOperation === "deleteBlock" ||
+      notionOperation === "appendBlocks"
+    ) {
+      fieldToFocus = "notionBlockId";
     }
   } else if (nodeType === "throwError") {
     fieldToFocus = "errorMessage";

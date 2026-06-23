@@ -616,6 +616,14 @@ const supabaseRowsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> 
 const supabaseOnConflictExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const supabaseDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const currentSupabaseExpressionFieldIndex = ref(0);
+const notionQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionPageIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionDatabaseIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionDatabaseExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionDataSourceIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionDataSourceExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionBlockIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const notionPropertiesExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const dataTableRowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const dataTableDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const dataTableFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -1970,6 +1978,14 @@ function closeAllExpressionExpandDialogs(): void {
   googleSheetsSheetNameExpressionInputRef.value?.closeExpandDialog();
   googleSheetsValuesInputRef.value?.closeExpandDialog();
   closeBigQueryExpressionDialogs();
+  notionQueryExpressionInputRef.value?.closeExpandDialog();
+  notionPageIdExpressionInputRef.value?.closeExpandDialog();
+  notionDatabaseIdExpressionInputRef.value?.closeExpandDialog();
+  notionDatabaseExpressionInputRef.value?.closeExpandDialog();
+  notionDataSourceIdExpressionInputRef.value?.closeExpandDialog();
+  notionDataSourceExpressionInputRef.value?.closeExpandDialog();
+  notionBlockIdExpressionInputRef.value?.closeExpandDialog();
+  notionPropertiesExpressionInputRef.value?.closeExpandDialog();
   closeS3ExpressionDialogs();
   closeMCPCallExpressionDialogs();
   closeChartOutputExpressionDialogs();
@@ -1977,6 +1993,31 @@ function closeAllExpressionExpandDialogs(): void {
 }
 
 /** Opens the primary expression evaluate dialog for whichever node is currently selected. */
+function notionExpressionInputRefForField(
+  field: string | null,
+): InstanceType<typeof ExpressionInput> | null {
+  switch (field) {
+    case "notionQuery":
+      return notionQueryExpressionInputRef.value;
+    case "notionPageId":
+      return notionPageIdExpressionInputRef.value;
+    case "notionDatabaseId":
+      return notionDatabaseIdExpressionInputRef.value;
+    case "notionDatabase":
+      return notionDatabaseExpressionInputRef.value;
+    case "notionDataSourceId":
+      return notionDataSourceIdExpressionInputRef.value;
+    case "notionDataSource":
+      return notionDataSourceExpressionInputRef.value;
+    case "notionBlockId":
+      return notionBlockIdExpressionInputRef.value;
+    case "notionProperties":
+      return notionPropertiesExpressionInputRef.value;
+    default:
+      return null;
+  }
+}
+
 function openPrimaryExpandDialogForSelectedNode(): void {
   workflowStore.closeExpressionEvaluateFallbackDialog();
   const nodeType = workflowStore.selectedNode?.type;
@@ -2222,6 +2263,23 @@ function openPrimaryExpandDialogForSelectedNode(): void {
       const field = githubExpressionFields.value[startIndex];
       if (field && githubExpressionInputRefForKey(field.key)) {
         nextTick(() => openGitHubExpressionFieldAtIndex(startIndex));
+      } else {
+        setTimeout(() => tryOpenDialog(attempts + 1), 100);
+      }
+    };
+    nextTick(() => tryOpenDialog());
+  } else if (nodeType === "notion") {
+    const tryOpenDialog = (attempts = 0): void => {
+      if (attempts > 20) {
+        return;
+      }
+      const n = workflowStore.selectedNode;
+      if (!n || n.type !== "notion") {
+        return;
+      }
+      const input = notionExpressionInputRefForField(workflowStore.focusField);
+      if (input) {
+        nextTick(() => input.openExpandDialog());
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -13020,6 +13078,7 @@ onUnmounted(() => {
             >
               <Label>Search Query</Label>
               <ExpressionInput
+                ref="notionQueryExpressionInputRef"
                 :model-value="selectedNode.data.notionQuery || ''"
                 placeholder="Roadmap"
                 single-line
@@ -13039,6 +13098,7 @@ onUnmounted(() => {
             >
               <Label>Page ID</Label>
               <ExpressionInput
+                ref="notionPageIdExpressionInputRef"
                 :model-value="selectedNode.data.notionPageId || ''"
                 placeholder="Notion page ID"
                 single-line
@@ -13058,6 +13118,7 @@ onUnmounted(() => {
             >
               <Label>Database ID</Label>
               <ExpressionInput
+                ref="notionDatabaseIdExpressionInputRef"
                 :model-value="selectedNode.data.notionDatabaseId || ''"
                 placeholder="Notion database ID, URL, or expression"
                 single-line
@@ -13077,6 +13138,7 @@ onUnmounted(() => {
             >
               <Label>Database Request (JSON object)</Label>
               <ExpressionInput
+                ref="notionDatabaseExpressionInputRef"
                 :model-value="selectedNode.data.notionDatabase || '{}'"
                 :placeholder="selectedNode.data.notionOperation === 'createDatabase'
                   ? '{&quot;parent&quot;:{&quot;type&quot;:&quot;page_id&quot;,&quot;page_id&quot;:&quot;...&quot;},&quot;title&quot;:[{&quot;type&quot;:&quot;text&quot;,&quot;text&quot;:{&quot;content&quot;:&quot;Tasks&quot;}}],&quot;initial_data_source&quot;:{&quot;properties&quot;:{&quot;Name&quot;:{&quot;title&quot;:{}}}}}'
@@ -13167,6 +13229,7 @@ onUnmounted(() => {
               </Button>
               <ExpressionInput
                 v-else
+                ref="notionDataSourceIdExpressionInputRef"
                 :model-value="selectedNode.data.notionDataSourceId || ''"
                 placeholder="$input.dataSourceId or a Notion URL"
                 single-line
@@ -13204,6 +13267,7 @@ onUnmounted(() => {
             >
               <Label>Data Source Request (JSON object)</Label>
               <ExpressionInput
+                ref="notionDataSourceExpressionInputRef"
                 :model-value="selectedNode.data.notionDataSource || '{}'"
                 :placeholder="selectedNode.data.notionOperation === 'createDataSource'
                   ? '{&quot;parent&quot;:{&quot;type&quot;:&quot;database_id&quot;,&quot;database_id&quot;:&quot;...&quot;},&quot;properties&quot;:{&quot;Name&quot;:{&quot;title&quot;:{}}}}'
@@ -13324,6 +13388,7 @@ onUnmounted(() => {
             >
               <Label>Block or Page ID</Label>
               <ExpressionInput
+                ref="notionBlockIdExpressionInputRef"
                 :model-value="selectedNode.data.notionBlockId || ''"
                 placeholder="Notion block or page ID"
                 single-line
@@ -13361,6 +13426,7 @@ onUnmounted(() => {
             >
               <Label>Properties (JSON object)</Label>
               <ExpressionInput
+                ref="notionPropertiesExpressionInputRef"
                 :model-value="selectedNode.data.notionProperties || '{}'"
                 placeholder="{&quot;Name&quot;:{&quot;title&quot;:[{&quot;text&quot;:{&quot;content&quot;:&quot;$input.title&quot;}}]}}"
                 :nodes="workflowStore.nodes"
