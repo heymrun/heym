@@ -39,6 +39,14 @@
 
 ---
 
+<p align="center">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=heym">
+    <img src="./docs/readme-assets/atlas-cloud-logo.svg" alt="Atlas Cloud" width="200">
+  </a>
+</p>
+
+> 🎁 **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=heym)** is a full-modal, OpenAI-compatible AI inference platform — plug it into Heym's **Custom** LLM credential as a drop-in backend to power your LLM & Agent nodes with DeepSeek, Qwen, GLM, Kimi, MiniMax and more, all through a single API with no multi-vendor setup. Set the credential's base URL to `https://api.atlascloud.ai/v1` and pick a model such as `deepseek-ai/deepseek-v4-pro`. Budget-friendly [coding plan](https://www.atlascloud.ai/console/coding-plan) · see [Third-Party Integrations](frontend/src/docs/content/reference/integrations.md#llm-providers-openai-google-custom-cohere).
+
 ## What Is Heym?
 
 Heym is an **AI-native automation platform** built from the ground up around LLMs, agents, and intelligent tooling. Wire together AI agents, vector stores, web scrapers, HTTP calls, and message queues on a visual canvas — then deploy instantly via Docker.
