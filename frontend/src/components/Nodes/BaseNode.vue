@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -55,6 +55,7 @@ const icons = {
   rag: Search,
   grist: Table2,
   github: Github,
+  linear: ListTodo,
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
@@ -103,6 +104,7 @@ const nodeColorMap = {
   rag: "node-rag",
   grist: "node-grist",
   github: "node-github",
+  linear: "node-linear",
   googleSheets: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",

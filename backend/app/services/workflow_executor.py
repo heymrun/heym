@@ -8745,6 +8745,168 @@ class WorkflowExecutor:
                     else:
                         raise ValueError(f"Unknown BigQuery operation: {operation}")
 
+            elif node_type == "linear":
+                from app.db.models import CredentialType
+                from app.db.session import SessionLocal
+                from app.services.encryption import decrypt_config
+                from app.services.linear_service import LinearService
+
+                credential_id = node_data.get("credentialId")
+                if not credential_id:
+                    raise ValueError("Linear node requires a credential")
+
+                linear_config: dict = {}
+                with SessionLocal() as db:
+                    cred = self._get_accessible_credential(db, credential_id)
+                    if cred:
+                        if cred.type != CredentialType.linear:
+                            raise ValueError("Linear node requires a Linear credential")
+                        linear_config = decrypt_config(cred.encrypted_config)
+                if not linear_config:
+                    raise ValueError("Linear credential not found or invalid")
+
+                operation = str(node_data.get("linearOperation", "") or "").strip()
+                if not operation:
+                    raise ValueError("Linear node requires an operation")
+
+                def _linear_field(name: str, default: str = "") -> str:
+                    raw_value = node_data.get(name, default)
+                    if raw_value is None or str(raw_value).strip() == "":
+                        return default
+                    return self.evaluate_message_template(
+                        str(raw_value),
+                        inputs,
+                        node_id,
+                    ).strip()
+
+                def _linear_limit() -> int:
+                    raw_limit = _linear_field("linearLimit", "50")
+                    try:
+                        return max(1, min(int(float(raw_limit or "50")), 250))
+                    except (TypeError, ValueError):
+                        return 50
+
+                def _linear_priority() -> int | None:
+                    raw_priority = _linear_field("linearPriority")
+                    if not raw_priority:
+                        return None
+                    try:
+                        priority = int(float(raw_priority))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Linear priority must be an integer from 0 to 4") from exc
+                    if priority < 0 or priority > 4:
+                        raise ValueError("Linear priority must be an integer from 0 to 4")
+                    return priority
+
+                service = LinearService(linear_config)
+                try:
+                    if operation == "getViewer":
+                        viewer = service.get_viewer()
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "viewer": viewer,
+                        }
+                    elif operation == "listTeams":
+                        teams = service.list_teams(_linear_limit())
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "teams": teams,
+                            "count": len(teams),
+                        }
+                    elif operation == "listProjects":
+                        projects = service.list_projects(_linear_limit())
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "projects": projects,
+                            "count": len(projects),
+                        }
+                    elif operation == "listIssues":
+                        issues = service.list_issues(
+                            _linear_limit(),
+                            team_id=_linear_field("linearTeamId") or None,
+                            project_id=_linear_field("linearProjectId") or None,
+                        )
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "issues": issues,
+                            "count": len(issues),
+                        }
+                    elif operation == "getIssue":
+                        issue_id = _linear_field("linearIssueId")
+                        if not issue_id:
+                            raise ValueError("Linear getIssue requires an issue ID or identifier")
+                        issue = service.get_issue(issue_id)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "issue": issue,
+                            "identifier": issue.get("identifier"),
+                            "url": issue.get("url"),
+                        }
+                    elif operation == "createIssue":
+                        team_id = _linear_field("linearTeamId")
+                        title = _linear_field("linearTitle")
+                        if not team_id or not title:
+                            raise ValueError("Linear createIssue requires team ID and title")
+                        issue = service.create_issue(
+                            team_id,
+                            title,
+                            description=_linear_field("linearDescription") or None,
+                            project_id=_linear_field("linearProjectId") or None,
+                            assignee_id=_linear_field("linearAssigneeId") or None,
+                            priority=_linear_priority(),
+                        )
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "issue": issue,
+                            "identifier": issue.get("identifier"),
+                            "url": issue.get("url"),
+                        }
+                    elif operation == "updateIssue":
+                        issue_id = _linear_field("linearIssueId")
+                        if not issue_id:
+                            raise ValueError(
+                                "Linear updateIssue requires an issue ID or identifier"
+                            )
+                        issue = service.update_issue(
+                            issue_id,
+                            title=_linear_field("linearTitle") or None,
+                            description=_linear_field("linearDescription") or None,
+                            state_id=_linear_field("linearStateId") or None,
+                            project_id=_linear_field("linearProjectId") or None,
+                            assignee_id=_linear_field("linearAssigneeId") or None,
+                            priority=_linear_priority(),
+                        )
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "issue": issue,
+                            "identifier": issue.get("identifier"),
+                            "url": issue.get("url"),
+                        }
+                    elif operation == "createComment":
+                        issue_id = _linear_field("linearIssueId")
+                        body = _linear_field("linearCommentBody")
+                        if not issue_id or not body:
+                            raise ValueError(
+                                "Linear createComment requires an issue ID and comment body"
+                            )
+                        comment = service.create_comment(issue_id, body)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "comment": comment,
+                        }
+                    else:
+                        raise ValueError(f"Unknown Linear operation: {operation}")
+                finally:
+                    service.close()
+
             elif node_type == "github":
                 import json as _json
 

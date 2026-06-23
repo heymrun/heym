@@ -4,6 +4,7 @@ import {
   acceptNextDialog,
   createWorkflow,
   deleteWorkflow,
+  deleteCredential,
   expectOk,
   prepareAuthenticatedPage,
 } from "./support";
@@ -199,4 +200,56 @@ test("shows a failed workflow execution", async ({ page }) => {
   await expect(page.getByText(/"httpStatusCode":\s*400/)).toBeVisible();
 
   await deleteWorkflow(page, workflow.id);
+});
+
+test("adds and configures a Linear node", async ({ page }) => {
+  const credentialResponse = await page.request.post("/api/credentials", {
+    data: {
+      name: `E2E Linear ${Date.now()}`,
+      type: "linear",
+      config: { api_key: "lin_api_e2e_test" },
+    },
+  });
+  await expectOk(credentialResponse);
+  const credential = (await credentialResponse.json()) as { id: string };
+  const workflow = await createWorkflow(page, `Linear Workflow ${Date.now()}`);
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByTestId("node-palette-linear").dblclick();
+    await expect(page.locator(".vue-flow__node")).toHaveCount(1);
+    await page.getByRole("button", { name: "Properties" }).click();
+    await page.locator(".vue-flow__node").click();
+
+    await page
+      .getByTestId("linear-credential-field")
+      .locator("select")
+      .selectOption(credential.id);
+    await page
+      .getByTestId("linear-operation-field")
+      .locator("select")
+      .selectOption("getIssue");
+    await page
+      .getByTestId("linear-issue-id-field")
+      .locator("input")
+      .fill("ENG-123");
+
+    const saveButton = page.getByTestId("save-workflow-button");
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await page.reload();
+
+    await expect(page.locator(".vue-flow__node")).toHaveCount(1);
+    await page.getByRole("button", { name: "Properties" }).click();
+    await page.locator(".vue-flow__node").click();
+    await expect(
+      page.getByTestId("linear-operation-field").locator("select"),
+    ).toHaveValue("getIssue");
+    await expect(
+      page.getByTestId("linear-issue-id-field").locator("input"),
+    ).toHaveValue("ENG-123");
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+    await deleteCredential(page, credential.id);
+  }
 });

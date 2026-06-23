@@ -29,6 +29,7 @@ class CredentialType(str, PyEnum):
     openai = "openai"
     google = "google"
     github = "github"
+    linear = "linear"
     custom = "custom"
     bearer = "bearer"
     header = "header"

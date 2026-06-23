@@ -70,3 +70,30 @@ test("creates a header credential with type-specific fields and deletes it", asy
   );
   await expect(credentialCard).toBeHidden();
 });
+
+test("creates and deletes a Linear credential", async ({ page }) => {
+  const credentialName = `e2e-linear-${Date.now()}`;
+
+  await openCredentialDialog(page);
+  await page.getByLabel("Name").fill(credentialName);
+  await page.locator("#cred-type select").selectOption("linear");
+  await page.getByLabel("API Key").fill("lin_api_e2e_test");
+
+  const credentialResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/credentials",
+  );
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const credential = (await (await credentialResponsePromise).json()) as { id: string };
+
+  const credentialCard = page.getByTestId(`credential-card-${credential.id}`);
+  await expect(credentialCard).toContainText(credentialName);
+  await expect(credentialCard).toContainText("Linear");
+  await acceptNextDialog(
+    page,
+    () => page.getByTestId(`credential-delete-${credential.id}`).click(),
+    "Are you sure you want to delete this credential?",
+  );
+  await expect(credentialCard).toBeHidden();
+});

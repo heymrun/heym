@@ -12,6 +12,7 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **OpenAI** | OpenAI API key for LLM, Agent, and RAG nodes |
 | **Google** | Google AI (Gemini) API key |
 | **GitHub** | GitHub personal access token (PAT) for GitHub API, GitHub node workflows, MCP servers, and agent workflows; optional GitHub Enterprise `base_url` |
+| **Linear** | Linear personal API key for teams, projects, issues, and comments |
 | **Custom** | Custom LLM endpoints |
 | **Bearer** | Bearer token for HTTP auth |
 | **Header** | Custom header key-value for HTTP requests |
@@ -35,6 +36,9 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 
 For GitHub, the current credential flow is PAT-based. Fine-grained PATs are recommended. GitHub App installation flows are not first-class in the UI today. If you use GitHub Enterprise Server, you can also set an optional GitHub API base URL such as `https://github.example.com/api/v3`.
 
+For Linear, create a personal API key under **Settings → Security & Access → Personal API keys**.
+The credential acts with the permissions of the Linear user who created it.
+
 ## Editing and Deleting
 
 - **Edit** – Update credential values (sensitive values are masked)
@@ -57,6 +61,7 @@ Reference credentials by name in node configuration. For example:
 - [HTTP node](../nodes/http-node.md) – Use Bearer or Header credentials for auth
 - [Agent node](../nodes/agent-node.md) – Pass GitHub tokens into MCP server env vars such as `GITHUB_PERSONAL_ACCESS_TOKEN`
 - [GitHub node](../nodes/github-node.md) – Run native GitHub repository, user, issue, review, release, workflow, traffic, and file operations
+- [Linear node](../nodes/linear-node.md) – Read workspace metadata and automate Linear issues and comments
 - [RAG node](../nodes/rag-node.md) – Use a Qdrant or Postgres (pgvector) credential for the vector store
 - [Telegram Trigger node](../nodes/telegram-trigger-node.md) – Receive Telegram bot webhooks
 - [Telegram node](../nodes/telegram-node.md) – Send Telegram bot messages
@@ -71,7 +76,7 @@ See [Expression DSL](../reference/expression-dsl.md) for referencing credential-
 - [Third-Party Integrations](../reference/integrations.md) – Detailed setup guide for each credential type (Telegram, Discord, Qdrant, Grist, IMAP, SMTP, RabbitMQ, Redis, Slack, and more)
 - [Credentials Sharing](../reference/credentials-sharing.md) – Share credentials with other users
 - [Security](../reference/security.md) – Encryption at rest, session management, rate limiting
-- [Node Types](../reference/node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [GitHub](../nodes/github-node.md), [RAG](../nodes/rag-node.md), [HTTP](../nodes/http-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md), [Redis](../nodes/redis-node.md))
+- [Node Types](../reference/node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [GitHub](../nodes/github-node.md), [Linear](../nodes/linear-node.md), [RAG](../nodes/rag-node.md), [HTTP](../nodes/http-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md), [Redis](../nodes/redis-node.md))
 - [Vectorstores Tab](./vectorstores-tab.md) – Uses Qdrant or Postgres (pgvector) credentials
 - [Chat Tab](./chat-tab.md) – Uses OpenAI/Google credentials
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

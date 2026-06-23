@@ -36,6 +36,7 @@ import {
   Globe,
   HardDrive,
   Inbox,
+  ListTodo,
   Loader2,
   Mail,
   Maximize2,
@@ -165,6 +166,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   rag: Search,
   grist: Table2,
   github: Github,
+  linear: ListTodo,
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
@@ -213,6 +215,7 @@ const nodeColorMap: Record<NodeType, string> = {
   rag: "node-rag",
   grist: "node-grist",
   github: "node-github",
+  linear: "node-linear",
   googleSheets: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
@@ -261,6 +264,7 @@ const nodeDocSlugMap: Record<NodeType, string> = {
   rag: "rag-node",
   grist: "grist-node",
   github: "github-node",
+  linear: "linear-node",
   googleSheets: "google-sheets-node",
   bigquery: "bigquery-node",
   supabase: "supabase-node",
@@ -461,6 +465,7 @@ const smtpCredentials = ref<CredentialListItem[]>([]);
 const redisCredentials = ref<CredentialListItem[]>([]);
 const gristCredentials = ref<CredentialListItem[]>([]);
 const githubCredentials = ref<CredentialListItem[]>([]);
+const linearCredentials = ref<CredentialListItem[]>([]);
 const googleSheetsCredentials = ref<CredentialListItem[]>([]);
 const bigqueryCredentials = ref<CredentialListItem[]>([]);
 const supabaseCredentials = ref<CredentialListItem[]>([]);
@@ -858,6 +863,14 @@ watch(
         githubCredentials.value = await credentialsApi.listByType("github");
       } catch {
         githubCredentials.value = [];
+      }
+    }
+
+    if (type === "linear") {
+      try {
+        linearCredentials.value = await credentialsApi.listByType("linear");
+      } catch {
+        linearCredentials.value = [];
       }
     }
 
@@ -2295,6 +2308,7 @@ function selectedNodeHasPrimaryEvaluateExpandTarget(): boolean {
     case "redis":
     case "rag":
     case "github":
+    case "linear":
     case "throwError":
     case "crawler":
     case "consoleLog":
@@ -4036,6 +4050,32 @@ const githubCredentialOptions = computed(() => {
     "Shared GitHub credential (from owner)",
   );
 });
+
+const linearCredentialOptions = computed(() => {
+  const node = selectedNode.value;
+  const selectedCredentialId =
+    node && node.type === "linear"
+      ? (node.data.credentialId as string | undefined)
+      : undefined;
+
+  return buildCredentialOptions(
+    linearCredentials.value,
+    selectedCredentialId,
+    "Select Linear credential...",
+    "Shared Linear credential (from owner)",
+  );
+});
+
+const linearOperationOptions = [
+  { value: "getViewer", label: "Get Viewer" },
+  { value: "listTeams", label: "List Teams" },
+  { value: "listProjects", label: "List Projects" },
+  { value: "listIssues", label: "List Issues" },
+  { value: "getIssue", label: "Get Issue" },
+  { value: "createIssue", label: "Create Issue" },
+  { value: "updateIssue", label: "Update Issue" },
+  { value: "createComment", label: "Create Comment" },
+];
 
 const githubOperationOptions = [
   { value: "getRepository", label: "Get Repository" },
@@ -10774,6 +10814,239 @@ onUnmounted(() => {
                 <template v-else>
                   <div>Select an operation to see output fields</div>
                 </template>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'linear'">
+            <div
+              class="space-y-2"
+              data-testid="linear-credential-field"
+            >
+              <Label>Linear Credential</Label>
+              <Select
+                :model-value="selectedNode.data.credentialId || ''"
+                :options="linearCredentialOptions"
+                @update:model-value="updateNodeData('credentialId', $event)"
+              />
+              <p
+                v-if="!selectedNode.data.credentialId"
+                class="text-xs text-amber-500 flex items-center gap-1"
+              >
+                <AlertTriangle class="h-3 w-3" />
+                Credential is required.
+              </p>
+            </div>
+
+            <div
+              class="space-y-2"
+              data-testid="linear-operation-field"
+            >
+              <Label>Operation</Label>
+              <Select
+                :model-value="selectedNode.data.linearOperation || 'listIssues'"
+                :options="linearOperationOptions"
+                @update:model-value="updateNodeData('linearOperation', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues'"
+              class="space-y-2"
+            >
+              <Label>Limit</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearLimit || '50'"
+                placeholder="50"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearLimit', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'createIssue'"
+              class="space-y-2"
+            >
+              <Label>
+                Team ID
+                <span v-if="selectedNode.data.linearOperation === 'createIssue'">*</span>
+              </Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearTeamId || ''"
+                placeholder="team UUID"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearTeamId', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>Project ID (Optional)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearProjectId || ''"
+                placeholder="project UUID"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearProjectId', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'getIssue' || selectedNode.data.linearOperation === 'updateIssue' || selectedNode.data.linearOperation === 'createComment'"
+              class="space-y-2"
+              data-testid="linear-issue-id-field"
+            >
+              <Label>Issue ID or Identifier</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearIssueId || ''"
+                placeholder="ENG-123 or issue UUID"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearIssueId', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>
+                Title
+                <span v-if="selectedNode.data.linearOperation === 'createIssue'">*</span>
+              </Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearTitle || ''"
+                placeholder="Issue title"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearTitle', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>Description (Optional)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearDescription || ''"
+                placeholder="$input.text"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearDescription', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>State ID (Optional)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearStateId || ''"
+                placeholder="workflow state UUID"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearStateId', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div class="space-y-2">
+                <Label>Assignee ID</Label>
+                <ExpressionInput
+                  :model-value="selectedNode.data.linearAssigneeId || ''"
+                  placeholder="user UUID"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  @update:model-value="updateNodeData('linearAssigneeId', $event)"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label>Priority (0–4)</Label>
+                <ExpressionInput
+                  :model-value="selectedNode.data.linearPriority || ''"
+                  placeholder="0"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  @update:model-value="updateNodeData('linearPriority', $event)"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'createComment'"
+              class="space-y-2"
+            >
+              <Label>Comment Body</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearCommentBody || '$input.text'"
+                placeholder="$input.text"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearCommentBody', $event)"
+              />
+            </div>
+
+            <div class="p-3 rounded-lg bg-muted/50 space-y-1">
+              <div class="text-xs font-medium">
+                Output
+              </div>
+              <div class="text-xs text-muted-foreground font-mono space-y-0.5">
+                <div>${{ selectedNode.data.label }}.success - Boolean</div>
+                <div v-if="selectedNode.data.linearOperation === 'getViewer'">
+                  ${{ selectedNode.data.label }}.viewer - User
+                </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'listTeams'">
+                  ${{ selectedNode.data.label }}.teams - Team array
+                </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'listProjects'">
+                  ${{ selectedNode.data.label }}.projects - Project array
+                </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'listIssues'">
+                  ${{ selectedNode.data.label }}.issues - Issue array
+                </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'createComment'">
+                  ${{ selectedNode.data.label }}.comment - Comment
+                </div>
+                <div v-else>
+                  ${{ selectedNode.data.label }}.issue - Issue
+                </div>
               </div>
             </div>
           </template>

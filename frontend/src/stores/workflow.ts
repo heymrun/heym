@@ -2230,6 +2230,58 @@ export const useWorkflowStore = defineStore("workflow", () => {
           });
         }
       }
+
+      if (node.type === "linear") {
+        const operation = node.data.linearOperation;
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Credential is not selected",
+          });
+        }
+        if (!operation) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Operation is not selected",
+          });
+        }
+        if (
+          operation === "createIssue" &&
+          (!node.data.linearTeamId?.trim() || !node.data.linearTitle?.trim())
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Team ID and title are required to create an issue",
+          });
+        }
+        if (
+          (operation === "getIssue" ||
+            operation === "updateIssue" ||
+            operation === "createComment") &&
+          !node.data.linearIssueId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Issue ID or identifier is required for this operation",
+          });
+        }
+        if (operation === "createComment" && !node.data.linearCommentBody?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Comment body is required",
+          });
+        }
+      }
     }
 
     return {

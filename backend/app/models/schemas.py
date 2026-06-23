@@ -445,6 +445,7 @@ class CredentialType(str, Enum):
     openai = "openai"
     google = "google"
     github = "github"
+    linear = "linear"
     custom = "custom"
     bearer = "bearer"
     header = "header"
@@ -480,6 +481,10 @@ class CredentialConfigGoogle(BaseModel):
 class CredentialConfigGitHub(BaseModel):
     api_key: str
     base_url: str | None = None
+
+
+class CredentialConfigLinear(BaseModel):
+    api_key: str
 
 
 class CredentialConfigElevenLabs(BaseModel):

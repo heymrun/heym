@@ -3688,7 +3688,45 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 33. github (GitHub REST Operations)
+### 33. linear (Linear Workspace and Issue Operations)
+- **Type**: `linear`
+- **Inputs**: 1, **Outputs**: 1
+- **Credential required**: `linear` credential type containing a Linear personal API key
+- **Operations**:
+  - `getViewer`: authenticated user
+  - `listTeams`: teams visible to the user
+  - `listProjects`: projects visible to the user
+  - `listIssues`: issues, optionally filtered by `linearTeamId` and `linearProjectId`
+  - `getIssue`: fetch by UUID or identifier such as `ENG-123`
+  - `createIssue`: requires `linearTeamId` and `linearTitle`
+  - `updateIssue`: requires `linearIssueId` and at least one changed field
+  - `createComment`: requires `linearIssueId` and `linearCommentBody`
+- **Fields**: `linearOperation`, `linearTeamId`, `linearProjectId`, `linearIssueId`,
+  `linearTitle`, `linearDescription`, `linearStateId`, `linearAssigneeId`,
+  `linearPriority` (0-4), `linearCommentBody`, `linearLimit` (1-250)
+- Text fields support expressions.
+- List outputs contain `{success, operation, count, teams|projects|issues}`.
+- Issue outputs contain `{success, operation, issue, identifier, url}`.
+
+**Example — create an issue:**
+```json
+{
+  "id": "linear-1",
+  "type": "linear",
+  "position": {"x": 500, "y": 100},
+  "data": {
+    "label": "createLinearIssue",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "linearOperation": "createIssue",
+    "linearTeamId": "team-uuid",
+    "linearTitle": "$input.title",
+    "linearDescription": "$input.description",
+    "linearPriority": "2"
+  }
+}
+```
+
+### 34. github (GitHub REST Operations)
 - **Type**: `github`
 - **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
   workflows, traffic insights, and repository files
@@ -3892,7 +3930,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `googleSheets`, `bigquery`, `supabase`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `linear`, `googleSheets`, `bigquery`, `supabase`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

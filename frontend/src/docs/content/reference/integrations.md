@@ -13,6 +13,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenAI** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md) | `api_key` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
+| **Linear** | [Linear node](../nodes/linear-node.md) | `api_key` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -72,6 +73,31 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 - [GitHub node](../nodes/github-node.md)
 - [Agent node](../nodes/agent-node.md)
 - [HTTP node](../nodes/http-node.md)
+
+---
+
+## Linear
+
+The Linear credential stores a personal API key for the
+[Linear node](../nodes/linear-node.md). Heym sends native GraphQL queries to Linear for workspace
+metadata, projects, issues, and comments.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `api_key` | Linear personal API key, commonly prefixed with `lin_api_` |
+
+### Notes
+
+- Create the key in Linear under **Settings → Security & Access → Personal API keys**.
+- The key acts as the user who created it and can access that user's visible workspaces and teams.
+- Use List Teams and List Projects to discover UUIDs before creating or filtering issues.
+- Rotate a key by editing the credential and entering the replacement value.
+
+### Used By
+
+- [Linear node](../nodes/linear-node.md)
 
 ---
 

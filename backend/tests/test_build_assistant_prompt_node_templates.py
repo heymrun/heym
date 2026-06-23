@@ -84,13 +84,23 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_github_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 33. github (GitHub REST Operations)", prompt)
+        self.assertIn("### 34. github (GitHub REST Operations)", prompt)
         self.assertIn('"type": "github"', prompt)
         self.assertIn("githubOperation", prompt)
         self.assertIn("createIssue", prompt)
         self.assertIn("dispatchWorkflowAndWait", prompt)
         self.assertIn("githubWorkflowInputs", prompt)
         self.assertIn("githubFilePath", prompt)
+
+    def test_includes_linear_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 33. linear (Linear Workspace and Issue Operations)", prompt)
+        self.assertIn('"type": "linear"', prompt)
+        self.assertIn("linearOperation", prompt)
+        self.assertIn("linearTeamId", prompt)
+        self.assertIn("createIssue", prompt)
+        self.assertIn("createComment", prompt)
 
     def test_includes_filter_map_nested_reference_guidance(self) -> None:
         prompt = build_assistant_prompt()

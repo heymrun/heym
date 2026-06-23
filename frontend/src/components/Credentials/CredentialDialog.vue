@@ -150,6 +150,7 @@ const typeOptions = [
   { value: "openai", label: CREDENTIAL_TYPE_LABELS.openai },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
   { value: "github", label: CREDENTIAL_TYPE_LABELS.github },
+  { value: "linear", label: CREDENTIAL_TYPE_LABELS.linear },
   { value: "elevenlabs", label: CREDENTIAL_TYPE_LABELS.elevenlabs },
   { value: "custom", label: CREDENTIAL_TYPE_LABELS.custom },
   { value: "bearer", label: CREDENTIAL_TYPE_LABELS.bearer },
@@ -321,6 +322,7 @@ const isValid = computed(() => {
     type.value === "openai" ||
     type.value === "google" ||
     type.value === "github" ||
+    type.value === "linear" ||
     type.value === "elevenlabs"
   ) {
     return !!apiKey.value.trim() || isEditing.value;
@@ -430,6 +432,8 @@ function buildConfig(): CredentialConfig {
       api_key: apiKey.value,
       ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
     };
+  } else if (type.value === "linear") {
+    return { api_key: apiKey.value };
   } else if (type.value === "elevenlabs") {
     return { api_key: apiKey.value };
   } else if (type.value === "custom") {
@@ -857,7 +861,7 @@ async function handleSave(): Promise<void> {
       </div>
 
       <div
-        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'elevenlabs'"
+        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'linear' || type === 'elevenlabs'"
         class="space-y-2"
       >
         <Label for="cred-api-key">API Key</Label>
@@ -866,7 +870,7 @@ async function handleSave(): Promise<void> {
             id="cred-api-key"
             v-model="apiKey"
             :type="showApiKey ? 'text' : 'password'"
-            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : 'sk-...')"
+            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : (type === 'linear' ? 'lin_api_...' : 'sk-...'))"
             :disabled="saving"
             class="pr-10"
           />
@@ -898,6 +902,12 @@ async function handleSave(): Promise<void> {
           class="text-xs text-muted-foreground"
         >
           Use a GitHub personal access token. Fine-grained PATs are recommended. This credential currently targets PAT-based auth, not GitHub App installation flows.
+        </p>
+        <p
+          v-else-if="type === 'linear'"
+          class="text-xs text-muted-foreground"
+        >
+          Create a personal API key in Linear under Settings → Security & Access → Personal API keys.
         </p>
       </div>
 

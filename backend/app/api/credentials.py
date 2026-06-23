@@ -43,7 +43,7 @@ def merge_credential_config_for_update(
     incoming_config: dict,
 ) -> dict:
     """Merge update payload into an existing credential config when needed."""
-    if credential_type != CredentialType.github:
+    if credential_type not in {CredentialType.github, CredentialType.linear}:
         return incoming_config
 
     merged_config = dict(existing_config)
@@ -92,6 +92,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.openai,
         CredentialType.google,
         CredentialType.github,
+        CredentialType.linear,
         CredentialType.custom,
         CredentialType.elevenlabs,
     ):
@@ -953,6 +954,12 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="GitHub credential base_url must be a valid http(s) URL",
                 )
+    elif credential_type == CredentialType.linear:
+        if "api_key" not in config or not str(config["api_key"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Linear credential requires api_key",
+            )
     elif credential_type == CredentialType.custom:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(
