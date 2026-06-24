@@ -92,6 +92,9 @@ const supabaseSchema = ref("public");
 const supabaseTesting = ref(false);
 const supabaseTestSuccess = ref<boolean | null>(null);
 const supabaseTestMessage = ref("");
+const linearTesting = ref(false);
+const linearTestSuccess = ref<boolean | null>(null);
+const linearTestMessage = ref("");
 const s3AccessKeyId = ref("");
 const s3SecretAccessKey = ref("");
 const s3Region = ref("us-east-1");
@@ -311,6 +314,9 @@ watch(
       supabaseTesting.value = false;
       supabaseTestSuccess.value = null;
       supabaseTestMessage.value = "";
+      linearTesting.value = false;
+      linearTestSuccess.value = null;
+      linearTestMessage.value = "";
     }
   }
 );
@@ -416,6 +422,16 @@ const canTestSupabaseConnection = computed((): boolean => {
     return false;
   }
   if (!!supabaseUrl.value.trim() && !!supabaseKey.value.trim()) {
+    return true;
+  }
+  return isEditing.value && !!props.credential?.id;
+});
+
+const canTestLinearConnection = computed((): boolean => {
+  if (type.value !== "linear") {
+    return false;
+  }
+  if (!!apiKey.value.trim()) {
     return true;
   }
   return isEditing.value && !!props.credential?.id;
@@ -723,6 +739,40 @@ async function testSupabaseConnection(): Promise<void> {
   }
 }
 
+async function testLinearConnection(): Promise<void> {
+  if (!canTestLinearConnection.value) {
+    error.value = "Enter an API key to test the connection.";
+    return;
+  }
+
+  linearTesting.value = true;
+  linearTestSuccess.value = null;
+  linearTestMessage.value = "";
+  error.value = "";
+
+  try {
+    const result = await credentialsApi.testConnection({
+      type: "linear",
+      config: {
+        api_key: apiKey.value.trim(),
+      },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    linearTestSuccess.value = result.success;
+    linearTestMessage.value = result.message;
+    if (!result.success) {
+      error.value = result.message;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection test failed";
+    linearTestSuccess.value = false;
+    linearTestMessage.value = message;
+    error.value = message;
+  } finally {
+    linearTesting.value = false;
+  }
+}
+
 async function handleSave(): Promise<void> {
   if (!isValid.value) return;
 
@@ -909,6 +959,29 @@ async function handleSave(): Promise<void> {
         >
           Create a personal API key in Linear under Settings → Security & Access → Personal API keys.
         </p>
+        <div
+          v-if="type === 'linear'"
+          class="flex items-center gap-3"
+        >
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="linear-test-connection-button"
+            :loading="linearTesting"
+            :disabled="saving || linearTesting || !canTestLinearConnection"
+            @click="testLinearConnection"
+          >
+            Test Connection
+          </Button>
+          <p
+            v-if="linearTestMessage"
+            class="text-xs"
+            :class="linearTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ linearTestMessage }}
+          </p>
+        </div>
       </div>
 
       <div

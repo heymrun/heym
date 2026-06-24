@@ -224,6 +224,18 @@ def _merge_supabase_update_config(
     return merged
 
 
+def _merge_linear_test_config(
+    inline_config: dict,
+    stored_config: dict,
+) -> dict[str, str]:
+    """Merge inline form values with stored secrets for Linear connection tests."""
+    merged = dict(stored_config)
+    inline_key = str(inline_config.get("api_key", "")).strip()
+    if inline_key:
+        merged["api_key"] = inline_key
+    return merged
+
+
 @router.get("", response_model=list[CredentialListResponse])
 async def list_credentials(
     current_user: User = Depends(get_current_user),
@@ -622,7 +634,7 @@ async def run_credential_connection_test(
     db: AsyncSession = Depends(get_db),
 ) -> CredentialTestResponse:
     """Test whether a credential configuration can reach the external service."""
-    if test_data.type != CredentialType.supabase:
+    if test_data.type not in {CredentialType.supabase, CredentialType.linear}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Connection test is not supported for this credential type",
@@ -636,23 +648,42 @@ async def run_credential_connection_test(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Credential not found",
             )
-        if credential.type != CredentialType.supabase:
+        if credential.type != test_data.type:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Credential type does not match the requested test",
             )
         stored_config = decrypt_config(credential.encrypted_config)
-        config = _merge_supabase_test_config(config, stored_config)
+        if test_data.type == CredentialType.supabase:
+            config = _merge_supabase_test_config(config, stored_config)
+        else:
+            config = _merge_linear_test_config(config, stored_config)
 
-    validate_credential_config(CredentialType.supabase, config)
+    validate_credential_config(test_data.type, config)
 
-    from app.services.supabase_service import SupabaseService
+    if test_data.type == CredentialType.supabase:
+        from app.services.supabase_service import SupabaseService
+
+        try:
+            SupabaseService(config).test_connection()
+        except ValueError as exc:
+            return CredentialTestResponse(success=False, message=str(exc))
+
+        return CredentialTestResponse(success=True, message="Connection successful")
+
+    from app.services.linear_service import LinearService
 
     try:
-        SupabaseService(config).test_connection()
+        viewer = LinearService(config).test_connection()
     except ValueError as exc:
         return CredentialTestResponse(success=False, message=str(exc))
 
+    viewer_name = str(viewer.get("displayName") or viewer.get("name") or viewer.get("email") or "")
+    if viewer_name:
+        return CredentialTestResponse(
+            success=True,
+            message=f"Connected as {viewer_name}",
+        )
     return CredentialTestResponse(success=True, message="Connection successful")
 
 

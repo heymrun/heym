@@ -37,7 +37,10 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 For GitHub, the current credential flow is PAT-based. Fine-grained PATs are recommended. GitHub App installation flows are not first-class in the UI today. If you use GitHub Enterprise Server, you can also set an optional GitHub API base URL such as `https://github.example.com/api/v3`.
 
 For Linear, create a personal API key under **Settings → Security & Access → Personal API keys**.
-The credential acts with the permissions of the Linear user who created it.
+The credential acts with the permissions of the Linear user who created it. Use **Test Connection**
+in the credential dialog to verify the key before saving.
+
+Supabase credentials also expose **Test Connection** to validate the project URL and API key.
 
 ## Editing and Deleting
 

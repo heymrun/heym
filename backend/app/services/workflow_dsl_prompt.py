@@ -3697,16 +3697,20 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   - `listTeams`: teams visible to the user
   - `listProjects`: projects visible to the user
   - `listIssues`: issues, optionally filtered by `linearTeamId` and `linearProjectId`
+  - `listWorkflowStates`: workflow states for `linearTeamId`
+  - `listTeamMembers`: members for `linearTeamId`
   - `getIssue`: fetch by UUID or identifier such as `ENG-123`
   - `createIssue`: requires `linearTeamId` and `linearTitle`
   - `updateIssue`: requires `linearIssueId` and at least one changed field
   - `createComment`: requires `linearIssueId` and `linearCommentBody`
 - **Fields**: `linearOperation`, `linearTeamId`, `linearProjectId`, `linearIssueId`,
   `linearTitle`, `linearDescription`, `linearStateId`, `linearAssigneeId`,
-  `linearPriority` (0-4), `linearCommentBody`, `linearLimit` (1-250)
+  `linearPriority` (0-4), `linearCommentBody`, `linearLimit` (1-250), `linearAfter`
 - Text fields support expressions.
-- List outputs contain `{success, operation, count, teams|projects|issues}`.
+- List outputs contain `{success, operation, count, teams|projects|issues|members, pageInfo}`.
+- `listWorkflowStates` outputs `{success, operation, count, states}`.
 - Issue outputs contain `{success, operation, issue, identifier, url}`.
+- Set an update field to `null` to clear description, project, assignee, or state.
 
 **Example — create an issue:**
 ```json

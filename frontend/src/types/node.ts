@@ -588,6 +588,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       linearPriority: "",
       linearCommentBody: "$input.text",
       linearLimit: "50",
+      linearAfter: "",
     },
   },
   googleSheets: {

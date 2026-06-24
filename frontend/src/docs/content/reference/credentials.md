@@ -14,6 +14,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 |-----------|--------------------|---------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
+| [Linear](../nodes/linear-node.md) | Linear | Personal API key for teams, projects, issues, and comments |
 | [HTTP](../nodes/http-node.md) | Bearer, Header | Auth for requests |
 | [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md) | Telegram | Bot token and optional webhook secret |
 | [Discord](../nodes/discord-node.md) | Discord | Incoming webhook URL |
@@ -27,6 +28,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Google Sheets](../nodes/google-sheets-node.md) | Google Sheets (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [BigQuery](../nodes/bigquery-node.md) | BigQuery (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [Supabase](../nodes/supabase-node.md) | Supabase | Project URL + API key (+ optional default schema) |
+| [Linear](../nodes/linear-node.md) | Linear | Personal API key for GraphQL workspace and issue automation |
 | [Amazon S3](../nodes/amazon-s3-node.md) | Amazon S3 | Access key, secret key, region |
 | [RabbitMQ](../nodes/rabbitmq-node.md) | RabbitMQ | AMQP URL |
 
@@ -37,6 +39,10 @@ Enterprise Server instead of GitHub.com. When you edit a GitHub credential to ro
 leaving `base_url` empty preserves the existing Enterprise endpoint. Enter a new URL only when
 you want to change that endpoint.
 
+Linear and Supabase credentials expose **Test Connection** in the credential dialog. For Linear,
+the check calls the Linear API with `getViewer` and confirms the key is valid. When editing,
+you can test without re-entering the API key if the stored secret is still present.
+
 ## In Expressions
 
 Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's value (e.g. Bearer token or GitHub PAT) inside an expression.
@@ -45,6 +51,7 @@ Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md)
 
 - [Credentials Tab](../tabs/credentials-tab.md) – Add, edit, delete credentials
 - [GitHub Node](../nodes/github-node.md) – Native GitHub REST operations
+- [Linear Node](../nodes/linear-node.md) – Linear GraphQL workspace and issue automation
 - [Credentials Sharing](./credentials-sharing.md) – Share with users and teams
 - [Third-Party Integrations](./integrations.md) – Setup guide per credential type
 - [Expression DSL](./expression-dsl.md) – `$credentials` in expressions

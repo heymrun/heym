@@ -4071,6 +4071,8 @@ const linearOperationOptions = [
   { value: "listTeams", label: "List Teams" },
   { value: "listProjects", label: "List Projects" },
   { value: "listIssues", label: "List Issues" },
+  { value: "listWorkflowStates", label: "List Workflow States" },
+  { value: "listTeamMembers", label: "List Team Members" },
   { value: "getIssue", label: "Get Issue" },
   { value: "createIssue", label: "Create Issue" },
   { value: "updateIssue", label: "Update Issue" },
@@ -10851,8 +10853,9 @@ onUnmounted(() => {
             </div>
 
             <div
-              v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues'"
+              v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'listTeamMembers'"
               class="space-y-2"
+              data-testid="linear-limit-field"
             >
               <Label>Limit</Label>
               <ExpressionInput
@@ -10868,12 +10871,31 @@ onUnmounted(() => {
             </div>
 
             <div
-              v-if="selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'createIssue'"
+              v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'listTeamMembers'"
               class="space-y-2"
+              data-testid="linear-after-field"
+            >
+              <Label>After Cursor (Optional)</Label>
+              <ExpressionInput
+                :model-value="selectedNode.data.linearAfter || ''"
+                placeholder="pageInfo.endCursor from a previous list"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                @update:model-value="updateNodeData('linearAfter', $event)"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'listWorkflowStates' || selectedNode.data.linearOperation === 'listTeamMembers'"
+              class="space-y-2"
+              data-testid="linear-team-id-field"
             >
               <Label>
                 Team ID
-                <span v-if="selectedNode.data.linearOperation === 'createIssue'">*</span>
+                <span v-if="selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'listWorkflowStates' || selectedNode.data.linearOperation === 'listTeamMembers'">*</span>
               </Label>
               <ExpressionInput
                 :model-value="selectedNode.data.linearTeamId || ''"
@@ -10909,7 +10931,10 @@ onUnmounted(() => {
               class="space-y-2"
               data-testid="linear-issue-id-field"
             >
-              <Label>Issue ID or Identifier</Label>
+              <Label>
+                Issue ID or Identifier
+                <span>*</span>
+              </Label>
               <ExpressionInput
                 :model-value="selectedNode.data.linearIssueId || ''"
                 placeholder="ENG-123 or issue UUID"
@@ -11008,6 +11033,14 @@ onUnmounted(() => {
             </div>
 
             <div
+              v-if="selectedNode.data.linearOperation === 'updateIssue'"
+              class="text-xs text-muted-foreground"
+            >
+              Leave optional update fields empty to keep their current values. Set a field to
+              <code class="font-mono">null</code> to clear description, project, assignee, or state.
+            </div>
+
+            <div
               v-if="selectedNode.data.linearOperation === 'createComment'"
               class="space-y-2"
             >
@@ -11029,6 +11062,7 @@ onUnmounted(() => {
               </div>
               <div class="text-xs text-muted-foreground font-mono space-y-0.5">
                 <div>${{ selectedNode.data.label }}.success - Boolean</div>
+                <div>${{ selectedNode.data.label }}.operation - String</div>
                 <div v-if="selectedNode.data.linearOperation === 'getViewer'">
                   ${{ selectedNode.data.label }}.viewer - User
                 </div>
@@ -11041,11 +11075,42 @@ onUnmounted(() => {
                 <div v-else-if="selectedNode.data.linearOperation === 'listIssues'">
                   ${{ selectedNode.data.label }}.issues - Issue array
                 </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'listWorkflowStates'">
+                  ${{ selectedNode.data.label }}.states - Workflow state array
+                </div>
+                <div v-else-if="selectedNode.data.linearOperation === 'listTeamMembers'">
+                  ${{ selectedNode.data.label }}.members - Team member array
+                </div>
                 <div v-else-if="selectedNode.data.linearOperation === 'createComment'">
                   ${{ selectedNode.data.label }}.comment - Comment
                 </div>
                 <div v-else>
                   ${{ selectedNode.data.label }}.issue - Issue
+                </div>
+                <div
+                  v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'listWorkflowStates' || selectedNode.data.linearOperation === 'listTeamMembers'"
+                >
+                  ${{ selectedNode.data.label }}.count - Number
+                </div>
+                <div
+                  v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'listTeamMembers'"
+                >
+                  ${{ selectedNode.data.label }}.pageInfo.hasNextPage - Boolean
+                </div>
+                <div
+                  v-if="selectedNode.data.linearOperation === 'listTeams' || selectedNode.data.linearOperation === 'listProjects' || selectedNode.data.linearOperation === 'listIssues' || selectedNode.data.linearOperation === 'listTeamMembers'"
+                >
+                  ${{ selectedNode.data.label }}.pageInfo.endCursor - String
+                </div>
+                <div
+                  v-if="selectedNode.data.linearOperation === 'getIssue' || selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+                >
+                  ${{ selectedNode.data.label }}.identifier - String
+                </div>
+                <div
+                  v-if="selectedNode.data.linearOperation === 'getIssue' || selectedNode.data.linearOperation === 'createIssue' || selectedNode.data.linearOperation === 'updateIssue'"
+                >
+                  ${{ selectedNode.data.label }}.url - String
                 </div>
               </div>
             </div>

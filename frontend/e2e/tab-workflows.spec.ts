@@ -248,6 +248,82 @@ test("adds and configures a Linear node", async ({ page }) => {
     await expect(
       page.getByTestId("linear-issue-id-field").locator("input"),
     ).toHaveValue("ENG-123");
+
+    await page
+      .getByTestId("linear-operation-field")
+      .locator("select")
+      .selectOption("listWorkflowStates");
+    await expect(page.getByTestId("linear-team-id-field")).toBeVisible();
+
+    await page
+      .getByTestId("linear-operation-field")
+      .locator("select")
+      .selectOption("listTeams");
+    await expect(page.getByTestId("linear-after-field")).toBeVisible();
+    await page
+      .getByTestId("linear-after-field")
+      .locator("input")
+      .fill("$previousLinear.pageInfo.endCursor");
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+    await deleteCredential(page, credential.id);
+  }
+});
+
+test("configures Linear listTeamMembers fields and persists after save", async ({ page }) => {
+  const credentialResponse = await page.request.post("/api/credentials", {
+    data: {
+      name: `E2E Linear Members ${Date.now()}`,
+      type: "linear",
+      config: { api_key: "lin_api_e2e_test" },
+    },
+  });
+  await expectOk(credentialResponse);
+  const credential = (await credentialResponse.json()) as { id: string };
+  const workflow = await createWorkflow(page, `Linear Members Workflow ${Date.now()}`);
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByTestId("node-palette-linear").dblclick();
+    await page.getByRole("button", { name: "Properties" }).click();
+    await page.locator(".vue-flow__node").click();
+
+    await page
+      .getByTestId("linear-credential-field")
+      .locator("select")
+      .selectOption(credential.id);
+    await page
+      .getByTestId("linear-operation-field")
+      .locator("select")
+      .selectOption("listTeamMembers");
+    await expect(page.getByTestId("linear-team-id-field")).toBeVisible();
+    await expect(page.getByTestId("linear-limit-field")).toBeVisible();
+    await expect(page.getByTestId("linear-after-field")).toBeVisible();
+    await page
+      .getByTestId("linear-team-id-field")
+      .locator("input")
+      .fill("team-uuid-1");
+    await page.getByTestId("linear-limit-field").locator("input").fill("25");
+    await page
+      .getByTestId("linear-after-field")
+      .locator("input")
+      .fill("cursor-members-1");
+
+    await page.getByTestId("save-workflow-button").click();
+    await page.reload();
+    await page.getByRole("button", { name: "Properties" }).click();
+    await page.locator(".vue-flow__node").click();
+
+    await expect(
+      page.getByTestId("linear-operation-field").locator("select"),
+    ).toHaveValue("listTeamMembers");
+    await expect(page.getByTestId("linear-team-id-field").locator("input")).toHaveValue(
+      "team-uuid-1",
+    );
+    await expect(page.getByTestId("linear-limit-field").locator("input")).toHaveValue("25");
+    await expect(page.getByTestId("linear-after-field").locator("input")).toHaveValue(
+      "cursor-members-1",
+    );
   } finally {
     await deleteWorkflow(page, workflow.id);
     await deleteCredential(page, credential.id);

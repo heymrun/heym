@@ -8798,6 +8798,49 @@ class WorkflowExecutor:
                         raise ValueError("Linear priority must be an integer from 0 to 4")
                     return priority
 
+                from app.services.linear_service import _UNSET
+
+                def _linear_update_field(name: str) -> Any:
+                    if name not in node_data:
+                        return _UNSET
+                    raw_value = node_data.get(name)
+                    if raw_value is None or str(raw_value).strip() == "":
+                        return _UNSET
+                    resolved = self.evaluate_message_template(
+                        str(raw_value),
+                        inputs,
+                        node_id,
+                    ).strip()
+                    if resolved.lower() == "null":
+                        return None
+                    return resolved
+
+                def _linear_update_priority() -> Any:
+                    if "linearPriority" not in node_data:
+                        return _UNSET
+                    raw_priority = node_data.get("linearPriority")
+                    if raw_priority is None or str(raw_priority).strip() == "":
+                        return _UNSET
+                    return _linear_priority()
+
+                def _linear_after() -> str | None:
+                    after = _linear_field("linearAfter")
+                    return after or None
+
+                def _linear_list_output(
+                    result: dict[str, Any],
+                    field_name: str,
+                    operation_name: str,
+                ) -> dict[str, Any]:
+                    nodes = result["nodes"]
+                    return {
+                        "success": True,
+                        "operation": operation_name,
+                        field_name: nodes,
+                        "count": len(nodes),
+                        "pageInfo": result["pageInfo"],
+                    }
+
                 service = LinearService(linear_config)
                 try:
                     if operation == "getViewer":
@@ -8808,33 +8851,52 @@ class WorkflowExecutor:
                             "viewer": viewer,
                         }
                     elif operation == "listTeams":
-                        teams = service.list_teams(_linear_limit())
-                        output = {
-                            "success": True,
-                            "operation": operation,
-                            "teams": teams,
-                            "count": len(teams),
-                        }
-                    elif operation == "listProjects":
-                        projects = service.list_projects(_linear_limit())
-                        output = {
-                            "success": True,
-                            "operation": operation,
-                            "projects": projects,
-                            "count": len(projects),
-                        }
-                    elif operation == "listIssues":
-                        issues = service.list_issues(
-                            _linear_limit(),
-                            team_id=_linear_field("linearTeamId") or None,
-                            project_id=_linear_field("linearProjectId") or None,
+                        output = _linear_list_output(
+                            service.list_teams(_linear_limit(), after=_linear_after()),
+                            "teams",
+                            operation,
                         )
+                    elif operation == "listProjects":
+                        output = _linear_list_output(
+                            service.list_projects(_linear_limit(), after=_linear_after()),
+                            "projects",
+                            operation,
+                        )
+                    elif operation == "listIssues":
+                        output = _linear_list_output(
+                            service.list_issues(
+                                _linear_limit(),
+                                team_id=_linear_field("linearTeamId") or None,
+                                project_id=_linear_field("linearProjectId") or None,
+                                after=_linear_after(),
+                            ),
+                            "issues",
+                            operation,
+                        )
+                    elif operation == "listWorkflowStates":
+                        team_id = _linear_field("linearTeamId")
+                        if not team_id:
+                            raise ValueError("Linear listWorkflowStates requires a team ID")
+                        states = service.list_workflow_states(team_id)
                         output = {
                             "success": True,
                             "operation": operation,
-                            "issues": issues,
-                            "count": len(issues),
+                            "states": states,
+                            "count": len(states),
                         }
+                    elif operation == "listTeamMembers":
+                        team_id = _linear_field("linearTeamId")
+                        if not team_id:
+                            raise ValueError("Linear listTeamMembers requires a team ID")
+                        output = _linear_list_output(
+                            service.list_team_members(
+                                team_id,
+                                _linear_limit(),
+                                after=_linear_after(),
+                            ),
+                            "members",
+                            operation,
+                        )
                     elif operation == "getIssue":
                         issue_id = _linear_field("linearIssueId")
                         if not issue_id:
@@ -8873,14 +8935,25 @@ class WorkflowExecutor:
                             raise ValueError(
                                 "Linear updateIssue requires an issue ID or identifier"
                             )
+                        update_fields = {
+                            "title": _linear_update_field("linearTitle"),
+                            "description": _linear_update_field("linearDescription"),
+                            "state_id": _linear_update_field("linearStateId"),
+                            "project_id": _linear_update_field("linearProjectId"),
+                            "assignee_id": _linear_update_field("linearAssigneeId"),
+                            "priority": _linear_update_priority(),
+                        }
+                        if not any(value is not _UNSET for value in update_fields.values()):
+                            raise ValueError(
+                                "Linear updateIssue requires at least one field to update"
+                            )
                         issue = service.update_issue(
                             issue_id,
-                            title=_linear_field("linearTitle") or None,
-                            description=_linear_field("linearDescription") or None,
-                            state_id=_linear_field("linearStateId") or None,
-                            project_id=_linear_field("linearProjectId") or None,
-                            assignee_id=_linear_field("linearAssigneeId") or None,
-                            priority=_linear_priority(),
+                            **{
+                                key: value
+                                for key, value in update_fields.items()
+                                if value is not _UNSET
+                            },
                         )
                         output = {
                             "success": True,

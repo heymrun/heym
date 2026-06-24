@@ -510,6 +510,8 @@ export interface NodeData {
     | "listTeams"
     | "listProjects"
     | "listIssues"
+    | "listWorkflowStates"
+    | "listTeamMembers"
     | "getIssue"
     | "createIssue"
     | "updateIssue"
@@ -524,6 +526,7 @@ export interface NodeData {
   linearPriority?: string;
   linearCommentBody?: string;
   linearLimit?: string;
+  linearAfter?: string;
   errorMessage?: string;
   httpStatusCode?: number;
   retryEnabled?: boolean;

@@ -99,6 +99,9 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn('"type": "linear"', prompt)
         self.assertIn("linearOperation", prompt)
         self.assertIn("linearTeamId", prompt)
+        self.assertIn("linearAfter", prompt)
+        self.assertIn("listWorkflowStates", prompt)
+        self.assertIn("listTeamMembers", prompt)
         self.assertIn("createIssue", prompt)
         self.assertIn("createComment", prompt)
 

@@ -92,7 +92,9 @@ metadata, projects, issues, and comments.
 
 - Create the key in Linear under **Settings → Security & Access → Personal API keys**.
 - The key acts as the user who created it and can access that user's visible workspaces and teams.
-- Use List Teams and List Projects to discover UUIDs before creating or filtering issues.
+- Use **Test Connection** in the credential dialog to verify the key against the Linear API.
+- Use List Teams and List Projects in the Linear node to discover UUIDs before creating or filtering issues.
+- Use List Workflow States and List Team Members to discover state and assignee UUIDs for updates.
 - Rotate a key by editing the credential and entering the replacement value.
 
 ### Used By
