@@ -727,6 +727,18 @@ export interface ExecutionResult {
   execution_history_id?: string | null;
 }
 
+export interface FileUploadSlotStatus {
+  status: "pending" | "consumed" | "expired";
+  run_id: string | null;
+  run: {
+    status: string;
+    outputs: Record<string, unknown>;
+    node_results: NodeResult[];
+    execution_time_ms: number;
+    execution_history_id: string;
+  } | null;
+}
+
 export interface ExecutionHistoryEntry {
   id: string;
   started_at: string;

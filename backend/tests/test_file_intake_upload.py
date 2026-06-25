@@ -219,6 +219,59 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rejected_consumed", _added_events(db))
 
 
+class SlotStatusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_slot_returns_no_run(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        owner_id = uuid.uuid4()
+        slot = _make_slot(status="pending")
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow]
+        user = SimpleNamespace(id=owner_id)
+
+        result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(result["status"], "pending")
+        self.assertIsNone(result["run"])
+
+    async def test_consumed_slot_returns_run_result(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        owner_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        slot = _make_slot(status="consumed", run_id=str(run_id))
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
+        history = SimpleNamespace(
+            id=run_id,
+            status="success",
+            outputs={"Result": {"result": "ok"}},
+            node_results=[{"node_id": "n2", "status": "success"}],
+            execution_time_ms=5.0,
+        )
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow, history]
+        user = SimpleNamespace(id=owner_id)
+
+        result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(result["status"], "consumed")
+        self.assertIsNotNone(result["run"])
+        self.assertEqual(result["run"]["status"], "success")
+        self.assertEqual(result["run"]["execution_history_id"], str(run_id))
+
+    async def test_other_users_slot_is_404(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        slot = _make_slot(status="pending")
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=uuid.uuid4())
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow]
+        user = SimpleNamespace(id=uuid.uuid4())
+
+        with self.assertRaises(HTTPException) as ctx:
+            await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
 class TokenNeverStoredPlaintextTest(unittest.TestCase):
     def test_slot_stores_only_hash(self) -> None:
         token = file_intake_service.generate_token()

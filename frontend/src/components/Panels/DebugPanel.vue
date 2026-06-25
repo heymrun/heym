@@ -2570,6 +2570,10 @@ function renderContent(content: string): string {
             Allowed: {{ fileUploadMint.allowed_types.join(", ") }}
           </div>
         </div>
+        <div class="flex items-center gap-2 text-xs text-blue-400 pt-1">
+          <Loader2 class="w-3.5 h-3.5 animate-spin" />
+          <span>Waiting for the upload — results appear here automatically.</span>
+        </div>
       </div>
 
       <div

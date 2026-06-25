@@ -44,6 +44,7 @@ import type {
   ExpressionEvaluateRequest,
   ExpressionEvaluateResponse,
   ExecutionResult,
+  FileUploadSlotStatus,
   Folder,
   FolderTree,
   FolderWithContents,
@@ -833,6 +834,7 @@ export const workflowApi = {
                     expires_at: data.expires_at,
                     max_size_mb: data.max_size_mb,
                     allowed_types: data.allowed_types,
+                    slot_id: data.slot_id,
                     instructions: data.instructions,
                   },
                   execution_time_ms: 0,
@@ -869,6 +871,10 @@ export const workflowApi = {
   },
   cancelExecution: async (workflowId: string, executionId: string): Promise<void> => {
     await api.post(`/workflows/${workflowId}/executions/${executionId}/cancel`);
+  },
+  getFileUploadSlot: async (slotId: string): Promise<FileUploadSlotStatus> => {
+    const response = await api.get<FileUploadSlotStatus>(`/file-intake/slots/${slotId}`);
+    return response.data;
   },
   getActiveExecutions: async (): Promise<ActiveExecutionItem[]> => {
     const response = await api.get<ActiveExecutionItem[]>(

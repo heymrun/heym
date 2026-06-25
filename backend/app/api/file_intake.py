@@ -8,13 +8,15 @@ stores the file, runs the workflow synchronously, and returns its output.
 
 import asyncio
 import copy
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ExecutionHistory, FileUploadSlot, Workflow
+from app.api.deps import get_current_user
+from app.db.models import ExecutionHistory, FileUploadSlot, User, Workflow
 from app.db.session import get_db
 from app.services import file_intake_service, file_storage
 from app.services.hitl_service import build_public_base_url
@@ -37,6 +39,38 @@ def _attach_initial_inputs(nodes: list[dict], node_id: str, initial: dict) -> li
         if node.get("id") == node_id:
             node.setdefault("data", {})["_initial_inputs"] = initial
     return cloned
+
+
+@router.get("/slots/{slot_id}")
+async def get_slot_status(
+    slot_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Poll a mint slot so the canvas can advance once the file is uploaded."""
+    slot = await db.get(FileUploadSlot, slot_id)
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Upload slot not found")
+
+    workflow = await db.get(Workflow, slot.workflow_id)
+    if workflow is None or workflow.owner_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Upload slot not found")
+
+    result: dict = {"status": slot.status, "run_id": slot.run_id, "run": None}
+    if slot.status == "consumed" and slot.run_id:
+        try:
+            history = await db.get(ExecutionHistory, uuid.UUID(slot.run_id))
+        except (ValueError, TypeError):
+            history = None
+        if history is not None:
+            result["run"] = {
+                "status": history.status,
+                "outputs": history.outputs,
+                "node_results": history.node_results,
+                "execution_time_ms": history.execution_time_ms,
+                "execution_history_id": str(history.id),
+            }
+    return result
 
 
 @router.post("/u/{token}")
@@ -156,7 +190,7 @@ async def upload_to_slot(
     nodes = _attach_initial_inputs(
         workflow.nodes,
         slot.trigger_node_id,
-        {"file": file_payload, "uploaded_at": now.isoformat(), "client_ip": ip},
+        {"file": file_payload, "uploaded_at": now.isoformat()},
     )
 
     # Lazy imports to avoid import cycles with the workflows/mcp API modules.
