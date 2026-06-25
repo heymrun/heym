@@ -25,6 +25,7 @@ from app.api import (
     discord,
     evals,
     expressions,
+    file_intake,
     files,
     folders,
     global_variables,
@@ -252,6 +253,7 @@ app.include_router(llm_pricing.router, prefix="/api/llm-pricing", tags=["LLM Pri
 app.include_router(portal.router, prefix="/api/portal", tags=["Portal"])
 app.include_router(hitl.router, prefix="/api/hitl", tags=["HITL"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
+app.include_router(file_intake.router, prefix="/api", tags=["File Intake"])
 app.include_router(portal.router, prefix="/api/workflows", tags=["Portal Settings"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["Dashboards"])
