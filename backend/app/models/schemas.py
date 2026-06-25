@@ -1274,6 +1274,17 @@ class FileAccessTokenResponse(BaseModel):
     created_at: datetime
 
 
+class FileUploadMintResponse(BaseModel):
+    file_upload_required: bool = True
+    curl: str
+    upload_url: str
+    expires_at: str
+    max_size_mb: int
+    allowed_types: list[str]
+    slot_id: str
+    instructions: str
+
+
 class CreateFileShareRequest(BaseModel):
     expires_hours: int | None = None
     basic_auth_password: str | None = None
