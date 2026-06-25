@@ -153,6 +153,9 @@ class MCPServer(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     owner: Mapped["User"] = relationship("User", back_populates="mcp_servers")
     server_workflows: Mapped[list["MCPServerWorkflow"]] = relationship(

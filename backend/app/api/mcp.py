@@ -246,7 +246,7 @@ async def get_all_user_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[W
                 ),
             ),
         )
-        .order_by(Workflow.name.asc())
+        .order_by(Workflow.updated_at.desc(), Workflow.name.asc())
     )
     return list(result.scalars().all())
 
@@ -425,6 +425,7 @@ async def get_mcp_config(
                 description=w.description,
                 mcp_enabled=mcp_enabled,
                 input_fields=input_fields,
+                updated_at=w.updated_at,
             )
         )
 
@@ -512,6 +513,7 @@ async def toggle_workflow_mcp(
         description=workflow.description,
         mcp_enabled=mcp_enabled,
         input_fields=input_fields,
+        updated_at=workflow.updated_at,
     )
 
 

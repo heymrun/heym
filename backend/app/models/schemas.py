@@ -975,6 +975,7 @@ class MCPWorkflowItem(BaseModel):
     description: str | None = None
     mcp_enabled: bool = False
     input_fields: list[InputFieldSchema] = Field(default_factory=list)
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -1007,6 +1008,7 @@ class MCPServerResponse(BaseModel):
     name: str
     api_key: str
     created_at: datetime
+    updated_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
 
 

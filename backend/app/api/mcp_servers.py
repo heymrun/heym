@@ -74,6 +74,21 @@ async def _get_server_workflow_ids(db: AsyncSession, server_id: uuid.UUID) -> li
     return [row[0] for row in result.all()]
 
 
+def _touch_server(server: MCPServer) -> None:
+    server.updated_at = datetime.now(timezone.utc)
+
+
+def _server_response(server: MCPServer, workflow_ids: list[uuid.UUID]) -> MCPServerResponse:
+    return MCPServerResponse(
+        id=server.id,
+        name=server.name,
+        api_key=server.api_key,
+        created_at=server.created_at,
+        updated_at=server.updated_at,
+        workflow_ids=workflow_ids,
+    )
+
+
 async def _get_server_workflows(db: AsyncSession, server_id: uuid.UUID) -> list[Workflow]:
     result = await db.execute(
         select(Workflow)
@@ -212,21 +227,15 @@ async def list_mcp_servers(
     db: AsyncSession = Depends(get_db),
 ) -> MCPServerListResponse:
     result = await db.execute(
-        select(MCPServer).where(MCPServer.user_id == current_user.id).order_by(MCPServer.created_at)
+        select(MCPServer)
+        .where(MCPServer.user_id == current_user.id)
+        .order_by(MCPServer.updated_at.desc(), MCPServer.created_at.desc())
     )
     servers = list(result.scalars().all())
     items = []
     for s in servers:
         workflow_ids = await _get_server_workflow_ids(db, s.id)
-        items.append(
-            MCPServerResponse(
-                id=s.id,
-                name=s.name,
-                api_key=s.api_key,
-                created_at=s.created_at,
-                workflow_ids=workflow_ids,
-            )
-        )
+        items.append(_server_response(s, workflow_ids))
     return MCPServerListResponse(servers=items)
 
 
@@ -244,13 +253,7 @@ async def create_mcp_server(
     db.add(server)
     await db.commit()
     await db.refresh(server)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=[],
-    )
+    return _server_response(server, [])
 
 
 @router.delete("/{server_id}", status_code=204)
@@ -272,16 +275,11 @@ async def regenerate_server_key(
 ) -> MCPServerResponse:
     server = await _fetch_server_for_user(db, server_id, current_user.id)
     server.api_key = secrets.token_urlsafe(48)
+    _touch_server(server)
     await db.commit()
     await db.refresh(server)
     workflow_ids = await _get_server_workflow_ids(db, server.id)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=workflow_ids,
-    )
+    return _server_response(server, workflow_ids)
 
 
 @router.patch("/{server_id}/workflows/{workflow_id}")
@@ -292,7 +290,7 @@ async def toggle_server_workflow(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    await _fetch_server_for_user(db, server_id, current_user.id)
+    server = await _fetch_server_for_user(db, server_id, current_user.id)
 
     wf_res = await db.execute(
         select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == current_user.id)
@@ -309,6 +307,7 @@ async def toggle_server_workflow(
         )
         if existing.scalar_one_or_none() is None:
             db.add(MCPServerWorkflow(mcp_server_id=server_id, workflow_id=workflow_id))
+            _touch_server(server)
             await db.commit()
     else:
         await db.execute(
@@ -317,6 +316,7 @@ async def toggle_server_workflow(
                 MCPServerWorkflow.workflow_id == workflow_id,
             )
         )
+        _touch_server(server)
         await db.commit()
 
     return {"enabled": body.enabled}
