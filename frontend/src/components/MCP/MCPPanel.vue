@@ -57,15 +57,7 @@ const enabledCount = computed(() => {
   return config.value?.workflows.filter((w) => w.mcp_enabled).length ?? 0;
 });
 
-function sortServersByUpdated(servers: MCPServerItem[]): MCPServerItem[] {
-  return [...servers].sort((a, b) => {
-    const aTime = a.updated_at ?? a.created_at;
-    const bTime = b.updated_at ?? b.created_at;
-    return bTime.localeCompare(aTime);
-  });
-}
-
-const sortedWorkflows = computed(() => {
+const serverWorkflowsSorted = computed(() => {
   return [...allWorkflows.value].sort((a, b) => {
     const aTime = a.updated_at ?? "";
     const bTime = b.updated_at ?? "";
@@ -115,7 +107,7 @@ function serverSseUrl(serverId: string): string {
 
 async function loadNamedServers(): Promise<void> {
   const result = await mcpServersApi.list();
-  namedServers.value = sortServersByUpdated(result.servers);
+  namedServers.value = result.servers;
 }
 
 async function createServer(): Promise<void> {
@@ -123,7 +115,7 @@ async function createServer(): Promise<void> {
   creatingServer.value = true;
   try {
     const server = await mcpServersApi.create(newServerName.value.trim());
-    namedServers.value = sortServersByUpdated([server, ...namedServers.value]);
+    namedServers.value.push(server);
     newServerName.value = "";
     expandedServer.value = server.id;
     showToast(`Server "${server.name}" created`);
@@ -153,11 +145,7 @@ async function regenerateServerKey(server: MCPServerItem): Promise<void> {
   try {
     const updated = await mcpServersApi.regenerateKey(server.id);
     const idx = namedServers.value.findIndex((s) => s.id === server.id);
-    if (idx !== -1) {
-      const next = [...namedServers.value];
-      next[idx] = updated;
-      namedServers.value = sortServersByUpdated(next);
-    }
+    if (idx !== -1) namedServers.value[idx] = updated;
     showServerApiKey.value[server.id] = true;
     showToast("API key regenerated");
   } catch {
@@ -215,13 +203,7 @@ async function toggleServerWorkflow(server: MCPServerItem, workflowId: string): 
         const wIdx = ids.indexOf(workflowId);
         if (wIdx !== -1) ids.splice(wIdx, 1);
       }
-      const next = [...namedServers.value];
-      next[idx] = {
-        ...namedServers.value[idx],
-        workflow_ids: ids,
-        updated_at: new Date().toISOString(),
-      };
-      namedServers.value = sortServersByUpdated(next);
+      namedServers.value[idx] = { ...namedServers.value[idx], workflow_ids: ids };
     }
   } catch {
     showToast("Failed to update workflow assignment", "error");
@@ -902,7 +884,7 @@ function addToCursor(): void {
               <div>
                 <label class="text-xs font-medium text-muted-foreground block mb-2">Assigned Workflows</label>
                 <div
-                  v-if="sortedWorkflows.length === 0"
+                  v-if="serverWorkflowsSorted.length === 0"
                   class="text-xs text-muted-foreground italic"
                 >
                   No workflows available. Create workflows to assign them here.
@@ -912,7 +894,7 @@ function addToCursor(): void {
                   class="space-y-1 max-h-48 overflow-y-auto pr-1"
                 >
                   <div
-                    v-for="workflow in sortedWorkflows"
+                    v-for="workflow in serverWorkflowsSorted"
                     :key="workflow.id"
                     class="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                     @click="toggleServerWorkflow(server, workflow.id)"

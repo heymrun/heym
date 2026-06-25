@@ -16,15 +16,13 @@ from app.api.mcp_servers import (
 from app.models.schemas import MCPServerCreate, MCPServerWorkflowToggleRequest
 
 
-def _make_server(user_id: uuid.UUID, *, updated_at: datetime | None = None) -> SimpleNamespace:
-    now = datetime.now(timezone.utc)
+def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(),
         user_id=user_id,
         name="Test Server",
         api_key=secrets.token_urlsafe(48),
-        created_at=now,
-        updated_at=updated_at or now,
+        created_at=datetime.now(timezone.utc),
     )
 
 
@@ -51,7 +49,6 @@ class MCPServerCreateTests(unittest.IsolatedAsyncioTestCase):
         async def mock_refresh(obj: object) -> None:
             obj.id = server_id  # type: ignore[attr-defined]
             obj.created_at = now  # type: ignore[attr-defined]
-            obj.updated_at = now  # type: ignore[attr-defined]
 
         db.refresh = mock_refresh
 
@@ -87,35 +84,6 @@ class MCPServerListTests(unittest.IsolatedAsyncioTestCase):
         result = await list_mcp_servers(current_user=user, db=db)
         self.assertEqual(len(result.servers), 1)
         self.assertEqual(result.servers[0].name, "Test Server")
-
-    async def test_list_orders_by_updated_at_desc(self) -> None:
-        user = SimpleNamespace(id=uuid.uuid4())
-        older = _make_server(
-            user.id,
-            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        )
-        newer = _make_server(
-            user.id,
-            updated_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
-        )
-        older.name = "Older Server"
-        newer.name = "Newer Server"
-
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[
-                MagicMock(
-                    scalars=MagicMock(
-                        return_value=MagicMock(all=MagicMock(return_value=[newer, older]))
-                    )
-                ),
-                MagicMock(all=MagicMock(return_value=[])),
-                MagicMock(all=MagicMock(return_value=[])),
-            ]
-        )
-
-        result = await list_mcp_servers(current_user=user, db=db)
-        self.assertEqual([s.name for s in result.servers], ["Newer Server", "Older Server"])
 
 
 class MCPServerDeleteTests(unittest.IsolatedAsyncioTestCase):
@@ -168,7 +136,6 @@ class MCPServerToggleWorkflowTests(unittest.IsolatedAsyncioTestCase):
         db.add = MagicMock()
         db.commit = AsyncMock()
 
-        before = server.updated_at
         await toggle_server_workflow(
             server_id=server.id,
             workflow_id=workflow.id,
@@ -179,7 +146,6 @@ class MCPServerToggleWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         db.add.assert_called_once()
         db.commit.assert_called_once()
-        self.assertGreater(server.updated_at, before)
 
     async def test_toggle_remove_deletes_join_row(self) -> None:
         user = SimpleNamespace(id=uuid.uuid4())

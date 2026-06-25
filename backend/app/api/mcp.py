@@ -246,7 +246,7 @@ async def get_all_user_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[W
                 ),
             ),
         )
-        .order_by(Workflow.updated_at.desc(), Workflow.name.asc())
+        .order_by(Workflow.name.asc())
     )
     return list(result.scalars().all())
 

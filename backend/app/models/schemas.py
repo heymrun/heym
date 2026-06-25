@@ -1008,7 +1008,6 @@ class MCPServerResponse(BaseModel):
     name: str
     api_key: str
     created_at: datetime
-    updated_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
