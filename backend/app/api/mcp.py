@@ -46,6 +46,7 @@ from app.models.schemas import (
     MCPToolsListResponse,
     MCPWorkflowItem,
 )
+from app.services import file_intake_service
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
@@ -609,6 +610,34 @@ async def call_mcp_tool(
             content=[MCPTextContent(text="Workflow has no nodes")],
             isError=True,
         )
+
+    upload_node = file_intake_service.find_file_upload_trigger(target_workflow.nodes)
+    if upload_node is not None:
+        slot, token = await file_intake_service.mint_slot(
+            db,
+            workflow_id=target_workflow.id,
+            node=upload_node,
+            created_by_user_id=mcp_user.id,
+            mint_source="mcp",
+        )
+        await file_intake_service.write_audit(
+            db,
+            event="minted",
+            slot_id=slot.id,
+            workflow_id=target_workflow.id,
+            client_ip=None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await db.commit()
+        mint_payload = file_intake_service.build_mint_payload(
+            base_url=str(request.base_url),
+            token=token,
+            expires_at_iso=slot.expires_at.isoformat(),
+            max_size_bytes=slot.max_size_bytes,
+            allowed_mime=slot.allowed_mime,
+            slot_id=str(slot.id),
+        )
+        return MCPToolResult(content=[MCPTextContent(text=json.dumps(mint_payload, indent=2))])
 
     enriched_inputs = {
         "headers": {},
