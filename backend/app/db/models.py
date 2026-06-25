@@ -1460,6 +1460,61 @@ class FileAccessToken(Base):
     file: Mapped["GeneratedFile"] = relationship("GeneratedFile", back_populates="access_tokens")
 
 
+class FileUploadSlot(Base):
+    """A single-use, TTL-bounded capability slot for a multipart file upload
+    that triggers a workflow run (see fileUploadTrigger node)."""
+
+    __tablename__ = "file_upload_slots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    max_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    allowed_mime: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    trigger_node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    trigger_node_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("generated_files.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mint_source: Mapped[str] = mapped_column(String(16), nullable=False, default="http")
+
+
+class FileUploadAudit(Base):
+    """Append-only audit trail for file-intake mint and upload attempts."""
+
+    __tablename__ = "file_upload_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    event: Mapped[str] = mapped_column(String(32), nullable=False)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mime: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WorkflowResponseCache(Base):
     """Cross-worker cache for workflow HTTP/curl endpoint responses.
 
