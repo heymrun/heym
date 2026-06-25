@@ -377,6 +377,37 @@
     opacity: 1;
   }
 
+  .workflow-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(
+      from calc(var(--workflow-border-angle) + 270deg),
+      transparent 0deg,
+      hsl(var(--primary)) 22deg,
+      hsl(var(--primary) / 0.35) 52deg,
+      transparent 88deg
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .workflow-card:hover::after {
+    opacity: 1;
+    animation: workflow-border-trace 2.2s linear infinite;
+  }
+
   .btn-gradient {
     position: relative;
     overflow: hidden;
@@ -836,6 +867,18 @@ body,
 * {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+@property --workflow-border-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes workflow-border-trace {
+  to {
+    --workflow-border-angle: 360deg;
+  }
 }
 
 @keyframes heartbeat {

@@ -2328,25 +2328,6 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
   animation: fade-in-card 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.workflow-card::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg,
-      hsl(var(--primary)) 0%,
-      hsl(var(--primary) / 0.3) 60%,
-      transparent 100%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.workflow-card:hover::after {
-  opacity: 1;
-}
-
 .workflow-card:hover {
   box-shadow:
     0 6px 20px hsl(var(--primary) / 0.08),
