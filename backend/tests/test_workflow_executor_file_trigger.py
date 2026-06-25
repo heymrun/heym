@@ -30,7 +30,6 @@ class FileUploadTriggerExecutorTests(unittest.TestCase):
                     "_initial_inputs": {
                         "file": file_payload,
                         "uploaded_at": "2026-06-25T12:00:00+00:00",
-                        "client_ip": "1.2.3.4",
                     },
                 },
             },
@@ -53,4 +52,4 @@ class FileUploadTriggerExecutorTests(unittest.TestCase):
         trigger_output = _node_output(result, "fileUploadTrigger")
         self.assertIsNotNone(trigger_output)
         self.assertEqual(trigger_output["file"]["name"], "recording.mp3")
-        self.assertEqual(trigger_output["client_ip"], "1.2.3.4")
+        self.assertEqual(trigger_output["uploaded_at"], "2026-06-25T12:00:00+00:00")

@@ -10,7 +10,7 @@ Use it when a caller — including an AI agent like Claude or ChatGPT running in
 |----------|-------|
 | Inputs | 0 |
 | Outputs | 1 |
-| Output | `$nodeLabel.file.{id,name,mime,size,download_url}`, `$nodeLabel.uploaded_at`, `$nodeLabel.client_ip` |
+| Output | `$nodeLabel.file.{id,name,mime,size,download_url}`, `$nodeLabel.uploaded_at` |
 
 ## How it works
 
@@ -51,7 +51,6 @@ On the canvas, **Run Workflow** shows the minted `curl` in the debug panel with 
 | `$nodeLabel.file.size` | Size in bytes. |
 | `$nodeLabel.file.download_url` | Authenticated download URL for downstream nodes. |
 | `$nodeLabel.uploaded_at` | ISO timestamp of the upload. |
-| `$nodeLabel.client_ip` | IP address of the uploader. |
 
 ## Example
 

@@ -6846,7 +6846,6 @@ class WorkflowExecutor:
                 output = {
                     "file": trigger_inputs.get("file", {}),
                     "uploaded_at": trigger_inputs.get("uploaded_at"),
-                    "client_ip": trigger_inputs.get("client_ip"),
                 }
             elif node_type == "llm":
                 combined_input = ""

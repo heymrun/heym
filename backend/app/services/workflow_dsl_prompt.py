@@ -375,7 +375,6 @@ In workflow expressions:
   - `$<label>.file.size` — size in bytes
   - `$<label>.file.download_url` — authenticated download URL for downstream nodes
   - `$<label>.uploaded_at` — ISO timestamp of the upload
-  - `$<label>.client_ip` — uploader IP
 
 **Example node JSON:**
 ```json
