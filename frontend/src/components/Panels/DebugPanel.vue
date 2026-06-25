@@ -5,7 +5,7 @@ import axios from "axios";
 import DOMPurify from "dompurify";
 import { jsonrepair } from "jsonrepair";
 import { marked } from "marked";
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, FileText, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, X } from "lucide-vue-next";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, FileText, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -375,6 +375,43 @@ const sanitizedFinalOutputs = computed(() => {
   return sanitizeForDisplay(executionResult.value.outputs);
 });
 
+interface FileUploadMint {
+  curl: string;
+  upload_url: string;
+  expires_at: string;
+  max_size_mb: number;
+  allowed_types: string[];
+}
+
+const fileUploadMint = computed<FileUploadMint | null>(() => {
+  const r = executionResult.value;
+  if (!r || r.status !== "awaiting_file_upload") return null;
+  const o = r.outputs as Partial<FileUploadMint> | undefined;
+  if (!o?.curl || !o?.upload_url) return null;
+  return {
+    curl: o.curl,
+    upload_url: o.upload_url,
+    expires_at: o.expires_at ?? "",
+    max_size_mb: o.max_size_mb ?? 100,
+    allowed_types: o.allowed_types ?? [],
+  };
+});
+
+const uploadCurlCopied = ref(false);
+
+async function copyUploadCurl(): Promise<void> {
+  if (!fileUploadMint.value) return;
+  try {
+    await navigator.clipboard.writeText(fileUploadMint.value.curl);
+    uploadCurlCopied.value = true;
+    setTimeout(() => {
+      uploadCurlCopied.value = false;
+    }, 2000);
+  } catch {
+    // clipboard unavailable; ignore
+  }
+}
+
 const isFinalOutputExpanded = ref(false);
 const finalOutputJsonTreeKey = ref(0);
 const finalOutputJsonAutoDepth = ref(1);
@@ -450,6 +487,7 @@ const statusColors = {
   success: "text-green-500",
   error: "text-red-500",
   pending: "text-amber-500",
+  awaiting_file_upload: "text-blue-500",
   running: "text-yellow-500",
   skipped: "text-gray-400",
 };
@@ -458,6 +496,7 @@ const statusIcons = {
   success: CheckCircle2,
   error: AlertCircle,
   pending: Clock,
+  awaiting_file_upload: Upload,
   running: Loader2,
   skipped: Clock,
 };
@@ -2971,6 +3010,41 @@ function renderContent(content: string): string {
               class="w-20 h-20 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
               @click="imageLightboxSrc = src"
             >
+          </div>
+        </div>
+
+        <div
+          v-if="fileUploadMint"
+          class="p-3 rounded-md bg-blue-500/10 border border-blue-500/20 space-y-2"
+        >
+          <div class="flex items-center gap-2 text-xs text-blue-400">
+            <Upload class="w-3.5 h-3.5" />
+            <span>File upload required</span>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Run this <code>curl</code> with your file path. The link is single-use and the
+            response is the workflow result.
+          </p>
+          <div class="flex items-start gap-2">
+            <pre class="flex-1 overflow-x-auto rounded bg-background/60 p-2 text-xs font-mono whitespace-pre-wrap break-all">{{ fileUploadMint.curl }}</pre>
+            <button
+              type="button"
+              class="flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors text-xs shrink-0"
+              :title="uploadCurlCopied ? 'Copied!' : 'Copy curl'"
+              @click="copyUploadCurl"
+            >
+              <Copy class="w-3.5 h-3.5" />
+              {{ uploadCurlCopied ? 'Copied' : 'Copy' }}
+            </button>
+          </div>
+          <div class="text-xs text-muted-foreground space-y-0.5">
+            <div>Max size: {{ fileUploadMint.max_size_mb }} MB</div>
+            <div v-if="fileUploadMint.expires_at">
+              Expires: {{ fileUploadMint.expires_at }}
+            </div>
+            <div v-if="fileUploadMint.allowed_types.length">
+              Allowed: {{ fileUploadMint.allowed_types.join(", ") }}
+            </div>
           </div>
         </div>
 

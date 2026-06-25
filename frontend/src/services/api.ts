@@ -821,6 +821,24 @@ export const workflowApi = {
                 onNodeComplete(data);
               } else if (data.type === "final_output" && onFinalOutput) {
                 onFinalOutput(data);
+              } else if (data.type === "file_upload_required") {
+                completionReceived = true;
+                onComplete({
+                  workflow_id: data.workflow_id ?? "",
+                  status: "awaiting_file_upload",
+                  outputs: {
+                    file_upload_required: true,
+                    curl: data.curl,
+                    upload_url: data.upload_url,
+                    expires_at: data.expires_at,
+                    max_size_mb: data.max_size_mb,
+                    allowed_types: data.allowed_types,
+                    instructions: data.instructions,
+                  },
+                  execution_time_ms: 0,
+                  node_results: [],
+                  execution_history_id: null,
+                });
               } else if (data.type === "execution_complete") {
                 completionReceived = true;
                 onComplete({

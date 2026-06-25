@@ -720,7 +720,7 @@ export interface ExecutionToken {
 
 export interface ExecutionResult {
   workflow_id: string;
-  status: "success" | "error" | "pending";
+  status: "success" | "error" | "pending" | "awaiting_file_upload";
   outputs: Record<string, unknown>;
   execution_time_ms: number;
   node_results: NodeResult[];
