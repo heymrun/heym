@@ -2538,7 +2538,42 @@ function renderContent(content: string): string {
       class="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 min-w-0"
     >
       <div
-        v-if="displayResults.length === 0 && !isExecuting"
+        v-if="fileUploadMint"
+        class="p-3 rounded-md bg-blue-500/10 border border-blue-500/20 space-y-2 mb-2"
+      >
+        <div class="flex items-center gap-2 text-xs text-blue-400">
+          <Upload class="w-3.5 h-3.5" />
+          <span>File upload required</span>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Run this <code>curl</code> with your file path. The link is single-use and the
+          response is the workflow result.
+        </p>
+        <div class="flex items-start gap-2">
+          <pre class="flex-1 overflow-x-auto rounded bg-background/60 p-2 text-xs font-mono whitespace-pre-wrap break-all">{{ fileUploadMint.curl }}</pre>
+          <button
+            type="button"
+            class="flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors text-xs shrink-0"
+            :title="uploadCurlCopied ? 'Copied!' : 'Copy curl'"
+            @click="copyUploadCurl"
+          >
+            <Copy class="w-3.5 h-3.5" />
+            {{ uploadCurlCopied ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+        <div class="text-xs text-muted-foreground space-y-0.5">
+          <div>Max size: {{ fileUploadMint.max_size_mb }} MB</div>
+          <div v-if="fileUploadMint.expires_at">
+            Expires: {{ fileUploadMint.expires_at }}
+          </div>
+          <div v-if="fileUploadMint.allowed_types.length">
+            Allowed: {{ fileUploadMint.allowed_types.join(", ") }}
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="displayResults.length === 0 && !isExecuting && !fileUploadMint"
         class="flex items-center justify-center h-full"
       >
         <p class="text-muted-foreground text-sm">
@@ -3010,41 +3045,6 @@ function renderContent(content: string): string {
               class="w-20 h-20 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
               @click="imageLightboxSrc = src"
             >
-          </div>
-        </div>
-
-        <div
-          v-if="fileUploadMint"
-          class="p-3 rounded-md bg-blue-500/10 border border-blue-500/20 space-y-2"
-        >
-          <div class="flex items-center gap-2 text-xs text-blue-400">
-            <Upload class="w-3.5 h-3.5" />
-            <span>File upload required</span>
-          </div>
-          <p class="text-xs text-muted-foreground">
-            Run this <code>curl</code> with your file path. The link is single-use and the
-            response is the workflow result.
-          </p>
-          <div class="flex items-start gap-2">
-            <pre class="flex-1 overflow-x-auto rounded bg-background/60 p-2 text-xs font-mono whitespace-pre-wrap break-all">{{ fileUploadMint.curl }}</pre>
-            <button
-              type="button"
-              class="flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors text-xs shrink-0"
-              :title="uploadCurlCopied ? 'Copied!' : 'Copy curl'"
-              @click="copyUploadCurl"
-            >
-              <Copy class="w-3.5 h-3.5" />
-              {{ uploadCurlCopied ? 'Copied' : 'Copy' }}
-            </button>
-          </div>
-          <div class="text-xs text-muted-foreground space-y-0.5">
-            <div>Max size: {{ fileUploadMint.max_size_mb }} MB</div>
-            <div v-if="fileUploadMint.expires_at">
-              Expires: {{ fileUploadMint.expires_at }}
-            </div>
-            <div v-if="fileUploadMint.allowed_types.length">
-              Allowed: {{ fileUploadMint.allowed_types.join(", ") }}
-            </div>
           </div>
         </div>
 

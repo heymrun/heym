@@ -2300,7 +2300,7 @@ async def execute_workflow_endpoint(
         )
 
     upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
-    if upload_node is not None and not test_run:
+    if upload_node is not None:
         minter_id = current_user.id if current_user else workflow.owner_id
         slot, token = await file_intake_service.mint_slot(
             db,
@@ -2899,7 +2899,7 @@ async def execute_workflow_stream(
         )
 
     upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
-    if upload_node is not None and not test_run:
+    if upload_node is not None:
         minter_id = current_user.id if current_user else workflow.owner_id
         slot, token = await file_intake_service.mint_slot(
             db,
