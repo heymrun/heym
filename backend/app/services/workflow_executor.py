@@ -6841,6 +6841,13 @@ class WorkflowExecutor:
                     "connection": trigger_inputs.get("connection"),
                     "close": trigger_inputs.get("close"),
                 }
+            elif node_type == "fileUploadTrigger":
+                trigger_inputs = node_data.get("_initial_inputs", {})
+                output = {
+                    "file": trigger_inputs.get("file", {}),
+                    "uploaded_at": trigger_inputs.get("uploaded_at"),
+                    "client_ip": trigger_inputs.get("client_ip"),
+                }
             elif node_type == "llm":
                 combined_input = ""
                 for data in self._visible_inputs(inputs).values():
