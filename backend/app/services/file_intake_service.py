@@ -59,9 +59,7 @@ def resolve_slot_config(node: dict) -> SlotConfig:
     size_mb = max(1, min(HARD_MAX_SIZE_MB, size_mb))
 
     allowed_raw = (data.get("allowedTypes") or "").strip()
-    allowed_mime = (
-        [p.strip() for p in allowed_raw.split(",") if p.strip()] if allowed_raw else None
-    )
+    allowed_mime = [p.strip() for p in allowed_raw.split(",") if p.strip()] if allowed_raw else None
 
     return SlotConfig(
         ttl_minutes=ttl,
