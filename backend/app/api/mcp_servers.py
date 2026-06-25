@@ -15,9 +15,14 @@ from app.api.deps import get_current_user
 from app.api.mcp import (
     _accept_sse_response_if_active,
     _add_mcp_workflow_trace,
+    _is_mcp_tool_call_with_response,
+    _maybe_mint_file_upload_jsonrpc_response,
+    _mcp_tool_result_jsonrpc_response,
     _reject_if_sse_channel_missing,
     _run_mcp_protocol_limited,
+    _schedule_legacy_sse_jsonrpc_response,
     _session_user_from_id,
+    _stream_mcp_jsonrpc_response,
     get_credentials_context_for_user,
     workflow_to_mcp_tool,
 )
@@ -380,14 +385,26 @@ async def named_server_sse(
     )
 
 
-@router.post("/{server_id}/sse")
+@router.post("/{server_id}/sse", response_model=None)
 async def named_server_sse_post(
     server_id: uuid.UUID,
     request: Request,
     server: tuple[User, MCPServer] = Depends(_get_named_server_context),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict | StreamingResponse:
     """Streamable HTTP transport (MCP 2025-03-26): POST directly to SSE endpoint."""
+    body = await request.json()
+    msg = MCPJSONRPCRequest(**body)
+    if _is_mcp_tool_call_with_response(msg):
+        return _stream_mcp_jsonrpc_response(
+            msg=msg,
+            operation=lambda: _run_mcp_protocol_limited(
+                lambda: _dispatch_named_server_jsonrpc(
+                    server_id=server_id, request=request, server=server, db=db
+                )
+            ),
+        )
+
     return await _run_mcp_protocol_limited(
         lambda: _dispatch_named_server_jsonrpc(
             server_id=server_id, request=request, server=server, db=db
@@ -448,6 +465,16 @@ async def _dispatch_named_server_jsonrpc(
                 "id": msg.id,
                 "error": {"code": -32602, "message": "Workflow has no nodes"},
             }
+
+        upload_response = await _maybe_mint_file_upload_jsonrpc_response(
+            request,
+            db,
+            msg_id=msg.id,
+            user_id=user.id,
+            workflow=target_workflow,
+        )
+        if upload_response is not None:
+            return upload_response
 
         enriched_inputs = {"headers": {}, "query": {}, "body": arguments}
         workflow_cache = await collect_referenced_workflows(
@@ -526,14 +553,11 @@ async def _dispatch_named_server_jsonrpc(
             await db.flush()
 
             output_text = json.dumps(execution_result.outputs, indent=2, ensure_ascii=False)
-            return {
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "result": {
-                    "content": [{"type": "text", "text": output_text}],
-                    "isError": execution_result.status == "error",
-                },
-            }
+            return _mcp_tool_result_jsonrpc_response(
+                msg.id,
+                output_text,
+                is_error=execution_result.status == "error",
+            )
         except Exception as e:
             _add_mcp_workflow_trace(
                 db,
@@ -571,6 +595,21 @@ async def handle_named_server_message(
     db: AsyncSession = Depends(get_db),
 ) -> dict | Response:
     _reject_if_sse_channel_missing(request)
+    body = await request.json()
+    msg = MCPJSONRPCRequest(**body)
+    session_token = request.query_params.get("session")
+    if session_token and _is_mcp_tool_call_with_response(msg):
+        _schedule_legacy_sse_jsonrpc_response(
+            session_token=session_token,
+            msg=msg,
+            operation_factory=lambda bg_db: _run_mcp_protocol_limited(
+                lambda: _dispatch_named_server_jsonrpc(
+                    server_id=server_id, request=request, server=server, db=bg_db
+                )
+            ),
+        )
+        return Response("Accepted", status_code=status.HTTP_202_ACCEPTED)
+
     response = await _run_mcp_protocol_limited(
         lambda: _dispatch_named_server_jsonrpc(
             server_id=server_id, request=request, server=server, db=db
