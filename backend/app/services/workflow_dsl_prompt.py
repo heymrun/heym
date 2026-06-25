@@ -359,6 +359,33 @@ In workflow expressions:
 }
 ```
 
+### 3e. fileUploadTrigger (Large File Upload Entry Point)
+- **Purpose**: Accept a large file (audio/video) that cannot fit in base64 JSON. When the workflow is invoked (HTTP/MCP/canvas), it returns a prefilled single-use `curl` upload link instead of running. The multipart upload to that link starts the run with the file attached.
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When a caller must send a large binary file (e.g. a 20 MB voice recording, a 75 MB video) to the workflow. Do NOT use base64 in a textInput for large files.
+- **Data fields**:
+  - `label`: Node identifier (e.g., "audio")
+  - `ttlMinutes`: Upload-link lifetime in minutes (default 60, 1-10080)
+  - `maxSizeMb`: Max accepted file size in MB (default 100, hard ceiling 100)
+  - `allowedTypes`: Optional comma-separated mime/extension allowlist (e.g. `audio/*, .wav`); empty = any
+- **Output fields available downstream**:
+  - `$<label>.file.id` — stored file UUID
+  - `$<label>.file.name` — original filename
+  - `$<label>.file.mime` — content type
+  - `$<label>.file.size` — size in bytes
+  - `$<label>.file.download_url` — authenticated download URL for downstream nodes
+  - `$<label>.uploaded_at` — ISO timestamp of the upload
+  - `$<label>.client_ip` — uploader IP
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "fileUploadTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "audio", "ttlMinutes": 60, "maxSizeMb": 100, "allowedTypes": "audio/*"}}
+```
+
+**Example downstream expressions:**
+- Transcribe input file id: `$audio.file.id`
+- LLM context: `"Transcript of $audio.file.name"`
+
 ### 3d. websocketSend (Outbound WebSocket Send)
 - **Purpose**: Open an outbound WebSocket client connection, send one message, and close it
 - **Inputs**: 1 | **Outputs**: 1
