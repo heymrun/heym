@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -27,6 +27,7 @@ const icons = {
   cron: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
+  fileUploadTrigger: Upload,
   llm: Brain,
   agent: Bot,
   condition: GitBranch,
@@ -76,6 +77,7 @@ const nodeColorMap = {
   cron: "node-cron",
   telegramTrigger: "node-telegram",
   websocketTrigger: "node-websocket",
+  fileUploadTrigger: "node-websocket",
   llm: "node-llm",
   agent: "node-agent",
   condition: "node-condition",
@@ -138,6 +140,7 @@ const hasInput = computed(
     && props.type !== "errorHandler"
     && props.type !== "telegramTrigger"
     && props.type !== "websocketTrigger"
+    && props.type !== "fileUploadTrigger"
     && props.type !== "slackTrigger"
     && props.type !== "discordTrigger"
     && props.type !== "imapTrigger"

@@ -128,6 +128,7 @@ export type NodeType =
   | "cron"
   | "telegramTrigger"
   | "websocketTrigger"
+  | "fileUploadTrigger"
   | "llm"
   | "agent"
   | "condition"
@@ -331,6 +332,9 @@ export interface NodeData {
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
+  ttlMinutes?: number;
+  maxSizeMb?: number;
+  allowedTypes?: string;
   curl?: string;
   websocketUrl?: string;
   websocketHeaders?: string;

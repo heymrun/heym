@@ -937,6 +937,12 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       retryEnabled: true,
       retryWaitSeconds: 5,
     },
+    fileUploadTrigger: {
+      label: "fileUpload",
+      ttlMinutes: 60,
+      maxSizeMb: 100,
+      allowedTypes: "",
+    },
     llm: {
       label: "llm",
       model: "",
