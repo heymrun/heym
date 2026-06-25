@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import ExecutionHistory, FileUploadSlot, Workflow
 from app.db.session import get_db
 from app.services import file_intake_service, file_storage
+from app.services.hitl_service import build_public_base_url
 from app.services.upload_limits import read_upload_file_limited
 from app.services.workflow_executor import execute_workflow
 
@@ -143,7 +144,7 @@ async def upload_to_slot(
         source_node_label=slot.trigger_node_label,
     )
 
-    base = str(request.base_url).rstrip("/")
+    base = build_public_base_url(request)
     file_payload = {
         "id": str(stored.id),
         "name": stored.filename,

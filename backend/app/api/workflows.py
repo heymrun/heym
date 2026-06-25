@@ -2319,7 +2319,7 @@ async def execute_workflow_endpoint(
         )
         await db.commit()
         mint_payload = file_intake_service.build_mint_payload(
-            base_url=str(request.base_url),
+            base_url=build_public_base_url(request),
             token=token,
             expires_at_iso=slot.expires_at.isoformat(),
             max_size_bytes=slot.max_size_bytes,
@@ -2918,7 +2918,7 @@ async def execute_workflow_stream(
         )
         await db.commit()
         mint_payload = file_intake_service.build_mint_payload(
-            base_url=str(request.base_url),
+            base_url=build_public_base_url(request),
             token=token,
             expires_at_iso=slot.expires_at.isoformat(),
             max_size_bytes=slot.max_size_bytes,

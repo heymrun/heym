@@ -55,6 +55,7 @@ from app.services.execution_cancellation import (
     register_execution,
 )
 from app.services.global_variables_service import get_global_variables_context
+from app.services.hitl_service import build_public_base_url
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import oauth_token_lookup_values
 from app.services.workflow_executor import execute_workflow
@@ -630,7 +631,7 @@ async def call_mcp_tool(
         )
         await db.commit()
         mint_payload = file_intake_service.build_mint_payload(
-            base_url=str(request.base_url),
+            base_url=build_public_base_url(request),
             token=token,
             expires_at_iso=slot.expires_at.isoformat(),
             max_size_bytes=slot.max_size_bytes,
