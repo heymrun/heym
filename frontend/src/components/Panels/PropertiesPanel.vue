@@ -652,6 +652,8 @@ const dataTableSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput>
 const currentDataTableExpressionFieldIndex = ref(0);
 const driveFileIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const drivePasswordExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const driveFilenameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const driveBase64ContentExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const currentDriveExpressionFieldIndex = ref(0);
 const s3BucketExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const s3KeyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -1992,6 +1994,8 @@ function closeAllExpressionExpandDialogs(): void {
   }
   driveFileIdExpressionInputRef.value?.closeExpandDialog();
   drivePasswordExpressionInputRef.value?.closeExpandDialog();
+  driveFilenameExpressionInputRef.value?.closeExpandDialog();
+  driveBase64ContentExpressionInputRef.value?.closeExpandDialog();
   closeAllPlaywrightExpressionDialogs();
   llmSystemInstructionInputRef.value?.closeExpandDialog();
   llmImageExpressionInputRef.value?.closeExpandDialog();
@@ -2620,8 +2624,13 @@ function openPrimaryExpandDialogForSelectedNode(): void {
     currentDriveExpressionFieldIndex.value = 0;
     const tryOpenDialog = (attempts = 0): void => {
       if (attempts > 20) return;
-      if (driveFileIdExpressionInputRef.value) {
-        nextTick(() => driveFileIdExpressionInputRef.value?.openExpandDialog());
+      const operation = workflowStore.selectedNode?.data.driveOperation;
+      const firstRef =
+        operation === "save"
+          ? driveFilenameExpressionInputRef.value
+          : driveFileIdExpressionInputRef.value;
+      if (firstRef) {
+        nextTick(() => openDriveExpressionFieldAtIndex(0));
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -4049,7 +4058,10 @@ const driveExpressionFieldCount = computed((): number => {
   if (n.data.driveOperation === "getAll") {
     return 0;
   }
-  return n.data.driveOperation === "setPassword" ? 2 : 1;
+  if (n.data.driveOperation === "setPassword" || n.data.driveOperation === "save") {
+    return 2;
+  }
+  return 1;
 });
 
 const isDriveFileIdAgentProvided = computed((): boolean => {
@@ -4077,12 +4089,24 @@ function openDriveExpressionFieldAtIndex(index: number): void {
     }
     return;
   }
+  if (n.data.driveOperation === "save") {
+    if (index === 0) {
+      driveFilenameExpressionInputRef.value?.openExpandDialog();
+    } else {
+      driveBase64ContentExpressionInputRef.value?.openExpandDialog();
+    }
+    return;
+  }
   driveFileIdExpressionInputRef.value?.openExpandDialog();
 }
 
 function handleDriveExpressionFieldNavigate(direction: "prev" | "next"): void {
   const n = selectedNode.value;
-  if (!n || n.type !== "drive" || n.data.driveOperation !== "setPassword") {
+  if (
+    !n
+    || n.type !== "drive"
+    || (n.data.driveOperation !== "setPassword" && n.data.driveOperation !== "save")
+  ) {
     return;
   }
   const total = driveExpressionFieldCount.value;
@@ -4095,6 +4119,8 @@ function handleDriveExpressionFieldNavigate(direction: "prev" | "next"): void {
   }
   driveFileIdExpressionInputRef.value?.closeExpandDialog();
   drivePasswordExpressionInputRef.value?.closeExpandDialog();
+  driveFilenameExpressionInputRef.value?.closeExpandDialog();
+  driveBase64ContentExpressionInputRef.value?.closeExpandDialog();
   currentDriveExpressionFieldIndex.value = newIndex;
   nextTick(() => {
     openDriveExpressionFieldAtIndex(newIndex);
@@ -4920,6 +4946,7 @@ const driveOperationOptions = [
   { value: "get", label: "Get File" },
   { value: "getAll", label: "Get All Files" },
   { value: "downloadUrl", label: "Download from URL" },
+  { value: "save", label: "Save from Base64" },
   { value: "convertFile", label: "Convert File" },
   { value: "delete", label: "Delete File" },
   { value: "setPassword", label: "Set Password" },
@@ -14997,7 +15024,65 @@ onUnmounted(() => {
             </div>
 
             <div
-              v-if="selectedNode.data.driveOperation && !['downloadUrl', 'getAll'].includes(selectedNode.data.driveOperation)"
+              v-if="selectedNode.data.driveOperation === 'save'"
+              class="space-y-4"
+            >
+              <div class="space-y-2">
+                <Label>Filename</Label>
+                <ExpressionInput
+                  ref="driveFilenameExpressionInputRef"
+                  :model-value="selectedNode.data.driveFilename || ''"
+                  placeholder="1.mp3"
+                  :rows="1"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  expandable
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Drive save · Filename"
+                  field-key="driveFilename"
+                  :navigation-enabled="true"
+                  :navigation-index="0"
+                  :navigation-total="driveExpressionFieldCount"
+                  @navigate="handleDriveExpressionFieldNavigate"
+                  @register-field-index="onDriveRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('driveFilename', $event)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Full filename including extension (for example, 1.mp3)
+                </p>
+              </div>
+              <div class="space-y-2">
+                <Label>Base64 Content</Label>
+                <ExpressionInput
+                  ref="driveBase64ContentExpressionInputRef"
+                  :model-value="selectedNode.data.driveBase64Content || ''"
+                  placeholder="$userInput.body.base64"
+                  :rows="3"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  expandable
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Drive save · Base64 Content"
+                  field-key="driveBase64Content"
+                  :navigation-enabled="true"
+                  :navigation-index="1"
+                  :navigation-total="driveExpressionFieldCount"
+                  @navigate="handleDriveExpressionFieldNavigate"
+                  @register-field-index="onDriveRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('driveBase64Content', $event)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Raw base64 string or data URL to decode and store in Drive
+                </p>
+              </div>
+            </div>
+
+            <div
+              v-if="selectedNode.data.driveOperation && !['downloadUrl', 'getAll', 'save'].includes(selectedNode.data.driveOperation)"
               class="space-y-2"
             >
               <div class="flex items-center justify-between gap-2">
@@ -15215,6 +15300,13 @@ onUnmounted(() => {
                   <div>${{ selectedNode.data.label }}.files[0].download_url - public download URL</div>
                 </template>
                 <template v-else-if="selectedNode.data.driveOperation === 'downloadUrl'">
+                  <div>${{ selectedNode.data.label }}.id - new file UUID</div>
+                  <div>${{ selectedNode.data.label }}.filename - file name</div>
+                  <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>
+                  <div>${{ selectedNode.data.label }}.size_bytes - file size</div>
+                  <div>${{ selectedNode.data.label }}.download_url - Drive download URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.driveOperation === 'save'">
                   <div>${{ selectedNode.data.label }}.id - new file UUID</div>
                   <div>${{ selectedNode.data.label }}.filename - file name</div>
                   <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>

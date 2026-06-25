@@ -461,3 +461,64 @@ test("shows an error workflow when an HTTP API call fails", async ({ page }) => 
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+const ONE_PX_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+
+test("saves a 1px base64 image from canvas input to drive", async ({ page }) => {
+  const filename = `e2e-1px-${Date.now()}.png`;
+
+  const workflow = await createWorkflow(
+    page,
+    `Canvas Drive Save ${Date.now()}`,
+    [
+      workflowNode("input_file", "textInput", 80, 160, {
+        label: "userInput",
+        value: "",
+        inputFields: [{ key: "filename" }, { key: "base64" }],
+      }),
+      workflowNode("drive_save", "drive", 340, 160, {
+        label: "saveFile",
+        driveOperation: "save",
+        driveFilename: "$userInput.body.filename",
+        driveBase64Content: "$userInput.body.base64",
+      }),
+      workflowNode("output_save", "output", 600, 160, {
+        label: "saveOutput",
+        message: "$saveFile.download_url",
+      }),
+    ],
+    [
+      workflowEdge("edge_input_save", "input_file", "drive_save"),
+      workflowEdge("edge_save_output", "drive_save", "output_save"),
+    ],
+  );
+
+  try {
+    const result = await runWorkflowFromCanvas(page, workflow.id, 3, {
+      filename,
+      base64: ONE_PX_PNG_BASE64,
+    });
+
+    const saveOutput = singleNodeOutput(result, "saveFile");
+
+    expect(result.status).toBe("success");
+    expect(saveOutput.operation).toBe("save");
+    expect(saveOutput.filename).toBe(filename);
+    expect(saveOutput.mime_type).toBe("image/png");
+    expect(saveOutput.size_bytes).toBeGreaterThan(0);
+    expect(typeof saveOutput.id).toBe("string");
+    expect(typeof saveOutput.download_url).toBe("string");
+
+    const filesResponse = await page.request.get("/api/files");
+    expect(filesResponse.ok()).toBeTruthy();
+    const filesPayload = (await filesResponse.json()) as {
+      files: { id: string; filename: string }[];
+    };
+    const saved = filesPayload.files.find((file) => file.id === saveOutput.id);
+    expect(saved?.filename).toBe(filename);
+    expect(outputResult(result, "saveOutput")).toBe(saveOutput.download_url);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});

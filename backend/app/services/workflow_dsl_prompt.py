@@ -3051,10 +3051,12 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 - **No credential required** — operates on files owned by the workflow owner
 - **Data fields**:
   - `label`: Node identifier
-  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"convertFile"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"`
-  - `driveFileId`: UUID of the Drive file (supports expressions, e.g. `$agentLabel._generated_files[0].id`; all operations except getAll/downloadUrl)
+  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"save"` | `"convertFile"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"`
+  - `driveFileId`: UUID of the Drive file (supports expressions, e.g. `$agentLabel._generated_files[0].id`; all operations except getAll/downloadUrl/save)
   - `driveLimit`: Optional max number of files to return (getAll only; omit for no limit)
   - `driveSourceUrl`: URL to fetch and store as a Drive file (downloadUrl only, supports expressions)
+  - `driveFilename`: Full filename including extension (save only, supports expressions, e.g. `"1.mp3"` or `$userInput.body.filename`)
+  - `driveBase64Content`: Base64 string or data URL to decode and store (save only, supports expressions)
   - `driveIncludeBinary`: Boolean to include base64 file contents in `file_base64` (get only)
   - `drivePassword`: Password string (setPassword only, supports expressions)
   - `driveTtlHours`: Hours until expiry as integer (setTtl only)
@@ -3071,6 +3073,7 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 | `get` | driveFileId | Return file metadata and download URL; optionally include base64 content with driveIncludeBinary |
 | `getAll` | none | List the workflow owner's Drive files as metadata objects |
 | `downloadUrl` | driveSourceUrl | Download an external URL and store it as a Drive file |
+| `save` | driveFilename, driveBase64Content | Decode base64 content and store it as a Drive file |
 | `delete` | driveFileId | Delete the file and all its access tokens from disk and database |
 | `setPassword` | driveFileId, drivePassword | Replace default public token with a password-protected token |
 | `setTtl` | driveFileId, driveTtlHours | Replace default public token with one that expires after N hours |
@@ -3078,6 +3081,22 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 | `convertFile` | driveFileId, driveConvertTargetFormat | Convert file to a new format; stores result as a new Drive file (original unchanged). Inputs: docx/html/md/txt/csv/pdf + json (array of objects). Doc outputs: pdf/docx/html/md/txt/epub via pandoc; csv output: json→csv via Python csv module; image outputs: jpg/png/bmp/webp via Pillow. Same-format conversion not allowed. |
 
 **⚠️ CRITICAL: File ID comes from the agent/skill output**: When an Agent node runs a skill that generates files, the output contains `_generated_files` — an array of file objects. Each object has an `id` field. Reference it with `$agentLabel._generated_files[0].id`.
+
+**Example - Save Base64 Input to Drive**:
+```json
+{
+  "id": "drive-save",
+  "type": "drive",
+  "position": {"x": 600, "y": 200},
+  "data": {
+    "label": "saveAudio",
+    "driveOperation": "save",
+    "driveFilename": "$userInput.body.filename",
+    "driveBase64Content": "$userInput.body.base64"
+  }
+}
+```
+Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 
 **Example - Delete File After Delivery**:
 ```json

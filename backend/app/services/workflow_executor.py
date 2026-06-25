@@ -10978,7 +10978,7 @@ class WorkflowExecutor:
                 if not owner_id:
                     raise ValueError("Drive Node: no owner context available")
 
-                if operation not in ("downloadUrl", "getAll"):
+                if operation not in ("downloadUrl", "getAll", "save"):
                     file_id_str = self._resolve_template(
                         node_data.get("driveFileId", ""), inputs, node_id
                     )
@@ -10989,7 +10989,91 @@ class WorkflowExecutor:
                     except ValueError as exc:
                         raise ValueError(f"Drive Node: invalid file ID '{file_id_str}'") from exc
 
-                if operation == "downloadUrl":
+                if operation == "save":
+                    import base64 as _base64
+                    import mimetypes as _mimetypes
+                    import secrets as _secrets
+
+                    from app.config import settings as _settings
+
+                    filename = self._resolve_template(
+                        node_data.get("driveFilename", ""), inputs, node_id
+                    )
+                    if not filename or not str(filename).strip():
+                        raise ValueError("Drive Node: filename is required for save")
+
+                    base64_content = self._resolve_template(
+                        node_data.get("driveBase64Content", ""), inputs, node_id
+                    )
+                    if not base64_content or not str(base64_content).strip():
+                        raise ValueError("Drive Node: base64 content is required for save")
+
+                    filename = _normalize_storage_filename(str(filename).strip())
+                    base64_payload = str(base64_content).strip()
+                    if base64_payload.startswith("data:"):
+                        _comma_idx = base64_payload.find(",")
+                        if _comma_idx == -1:
+                            raise ValueError("Drive Node: invalid base64 data URL")
+                        base64_payload = base64_payload[_comma_idx + 1 :].strip()
+
+                    try:
+                        file_bytes = _base64.b64decode(base64_payload, validate=True)
+                    except Exception as exc:
+                        raise ValueError("Drive Node: invalid base64 content") from exc
+
+                    mime_type = _mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+                    _max_bytes = _settings.file_max_size_mb * 1024 * 1024
+                    if len(file_bytes) > _max_bytes:
+                        raise ValueError(
+                            f"Drive Node: file exceeds size limit ({_settings.file_max_size_mb} MB)"
+                        )
+
+                    with SessionLocal() as db:
+                        _file_uuid = uuid.uuid4()
+                        _rel_path = f"{owner_id}/{_file_uuid}/{filename}"
+                        _abs_path = _safe_storage_path(_rel_path)
+                        _abs_path.parent.mkdir(parents=True, exist_ok=True)
+                        _abs_path.write_bytes(file_bytes)
+
+                        _row = GeneratedFile(
+                            id=_file_uuid,
+                            owner_id=owner_id,
+                            workflow_id=self.workflow_id,
+                            filename=filename,
+                            storage_path=_rel_path,
+                            mime_type=mime_type,
+                            size_bytes=len(file_bytes),
+                            source_node_id=node_id,
+                            source_node_label=node_data.get("label"),
+                            metadata_json={},
+                        )
+                        db.add(_row)
+                        db.flush()
+
+                        _token_str = _secrets.token_urlsafe(32)
+                        db.add(
+                            FileAccessToken(
+                                file_id=_file_uuid,
+                                token=_token_str,
+                                created_by_id=owner_id,
+                            )
+                        )
+                        db.commit()
+
+                    base_url = self._base_url
+                    dl_url = build_download_url(base_url, _token_str)
+                    output = {
+                        "status": "success",
+                        "operation": "save",
+                        "id": str(_file_uuid),
+                        "filename": filename,
+                        "mime_type": mime_type,
+                        "size_bytes": len(file_bytes),
+                        "download_url": dl_url,
+                    }
+
+                elif operation == "downloadUrl":
                     import mimetypes as _mimetypes
                     import secrets as _secrets
                     import urllib.parse as _urllib_parse

@@ -562,6 +562,7 @@ export interface NodeData {
     | "setTtl"
     | "setMaxDownloads"
     | "downloadUrl"
+    | "save"
     | "convertFile";
   driveFileId?: string;
   driveLimit?: number;
@@ -570,6 +571,8 @@ export interface NodeData {
   driveMaxDownloads?: number;
   driveIncludeBinary?: boolean;
   driveSourceUrl?: string;
+  driveFilename?: string;
+  driveBase64Content?: string;
   driveConvertTargetFormat?: string;
   s3Operation?: "putObject" | "getObject" | "deleteObject" | "listObjects" | "createBucket" | "deleteBucket" | "createFolder" | "deleteFolder" | "getAllFolder" | "listBuckets" | "copyObject";
   s3Bucket?: string;

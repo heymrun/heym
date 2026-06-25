@@ -713,6 +713,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "drive",
       driveOperation: undefined,
       driveFileId: "",
+      driveFilename: "",
+      driveBase64Content: "",
     },
   },
   s3: {
