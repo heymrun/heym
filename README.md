@@ -172,6 +172,8 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
 - **Data Tables** — Manage structured data directly in the dashboard and reference it from workflows
+- **Workflow Analyzer** — Run-aware AI feedback that generates a shared Markdown report with improvement areas, purpose, and step-by-step behavior
+- **Workflow-Powered Dashboards** — Build custom chart dashboards where every widget is backed by its own hidden Heym workflow
 - **Templates** — Start from pre-built workflow templates to get up and running quickly
 - **Parallel Execution** — Independent nodes run concurrently based on the graph structure, no configuration needed
 - **Auto Heal** — Playwright selectors break? AI automatically detects and fixes them at runtime
@@ -224,6 +226,8 @@ Heym Built for developers who want control and enterprise teams that need a trus
 | Built-in RAG / vector store | ✅ | ✅ | limited¹ | plugin² |
 | WebSocket read / write | ✅ | limited¹² | ❌¹³ | ❌¹⁴ |
 | Natural language workflow builder | ✅ | limited³ | ✅ | ✅ |
+| Workflow Analyzer | ✅ | ❌¹⁸ | ❌¹⁸ | ❌¹⁸ |
+| Workflow-powered dashboards | ✅ | partial¹⁹ | partial¹⁹ | partial¹⁹ |
 | MCP (Model Context Protocol) | ✅ | ✅ | ✅ | ✅ |
 | Skills system for agents | ✅ | ❌ | ❌ | ❌ |
 | Auto Heal (Playwright) | ✅ | ❌ | ❌ | ❌ |
@@ -257,6 +261,8 @@ Heym Built for developers who want control and enterprise teams that need a trus
 15. As of April 22, 2026, n8n's official docs document HTTP batching and loop/wait patterns rather than a native LLM batch-status branch, Zapier's official ChatGPT app docs list no triggers and only a generic API Request beta, and Make's official OpenAI integration page exposes batch actions like create/watch completed but not a first-class status-branching LLM node, so n8n/Make are marked partial and Zapier is marked unavailable for this specific pattern
 16. n8n has no native LLM token cost tracking; community workaround workflows exist (e.g. "Token Estim8r") but require manual installation and post-execution API calls — an open feature request exists as of May 2026. Zapier exposes no per-execution token count or USD cost to users; AI steps consume tasks only, with no model pricing table. Make switched to a credits model in August 2025 that partially reflects token consumption for Make-hosted AI, but third-party connections using your own API key are billed as 1 operation = 1 credit with no token counting, and there is no per-execution USD breakdown by model
 17. Heym emits native OpenTelemetry spans (one per workflow run plus one per node) over OTLP/HTTP to any compatible backend, with W3C trace-context propagation and no instrumentation code, configured via `HEYM_OTEL_*` env vars and disabled by default. n8n has a documented OpenTelemetry tracing setup for workflow and node executions (blog.n8n.io). Zapier and Make.com do not document OpenTelemetry export of their workflow/scenario executions as of June 2026
+18. Heym Workflow Analyzer runs the workflow when possible, reads the execution result, and generates a shared editable Markdown report covering improvement areas, purpose, and step-by-step behavior. n8n AI Workflow Builder can create/refine/debug workflows, Zapier AI troubleshooting explains errored runs, and Make scenario history/agent reasoning exposes run details, but their public docs do not describe the same shared run-aware workflow analysis document
+19. n8n Insights, Zapier Zap History/Task Usage, and Make Scenario History are monitoring/history surfaces. They do not document custom dashboard widgets backed by arbitrary workflow logic like Heym's Dashboard tab, where each widget can fetch, transform, retrieve, or generate data through its own hidden workflow
 
 </details>
 
