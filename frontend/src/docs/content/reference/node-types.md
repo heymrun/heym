@@ -12,6 +12,7 @@ Heym provides a variety of node types for building workflows. Use [expressions](
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Trigger when Discord sends an application interaction webhook | 1 |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Trigger when a new email arrives in an IMAP mailbox | 1 |
 | [WebSocket Trigger](../nodes/websocket-trigger-node.md) | Trigger from an outbound connection to an external WebSocket server | 1 |
+| [File Upload Trigger](../nodes/file-upload-trigger-node.md) | Mint a single-use upload link and start when a large file is uploaded | 1 |
 | [RabbitMQ](../nodes/rabbitmq-node.md) | Trigger when a message is received from a queue | 1 |
 | [Error Handler](../nodes/error-handler-node.md) | Run when any node errors (no incoming edge) | 1 |
 
@@ -91,6 +92,7 @@ See [Triggers](./triggers.md) for all entry points.
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pause agent output for human approval
 - [Expression DSL](./expression-dsl.md) – Referencing data in node config
 - [Expression Evaluation Dialog](./expression-evaluation-dialog.md) – Expandable editor with live backend preview
+- [File Upload Trigger](../nodes/file-upload-trigger-node.md) – Accept large multipart uploads through single-use links
 - [WebSocket Trigger](../nodes/websocket-trigger-node.md) – Realtime outbound socket trigger
 - [WebSocket Send](../nodes/websocket-send-node.md) – Push messages to external sockets
 - [Workflow Structure](./workflow-structure.md) – JSON format for nodes and edges
