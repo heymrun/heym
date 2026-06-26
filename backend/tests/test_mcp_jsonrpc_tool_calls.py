@@ -13,7 +13,7 @@ from app.api.mcp import (
     handle_mcp_message,
     mcp_sse_post_endpoint,
 )
-from app.api.mcp_servers import _dispatch_named_server_jsonrpc
+from app.api.mcp_servers import _dispatch_named_server_jsonrpc, named_server_sse_post
 from app.services.mcp_session import mcp_sse_channels
 
 
@@ -175,10 +175,11 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
                 "result": {"content": [{"type": "text", "text": "{}"}], "isError": False},
             }
 
+        session_context = _FakeSessionContext()
         with (
             patch("app.api.mcp._MCP_PROGRESS_INTERVAL_SECONDS", 0.01),
             patch("app.api.mcp._dispatch_mcp_jsonrpc", AsyncMock(side_effect=fake_dispatch)),
-            patch("app.api.mcp.async_session_maker", MagicMock(return_value=_FakeSessionContext())),
+            patch("app.api.mcp.async_session_maker", MagicMock(return_value=session_context)),
         ):
             response = await handle_mcp_message(
                 request=_make_json_request(
@@ -218,9 +219,11 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
                 "result": {"content": [{"type": "text", "text": "{}"}], "isError": False},
             }
 
+        session_context = _FakeSessionContext()
         with (
             patch("app.api.mcp._MCP_PROGRESS_INTERVAL_SECONDS", 0.01),
             patch("app.api.mcp._dispatch_mcp_jsonrpc", AsyncMock(side_effect=fake_dispatch)),
+            patch("app.api.mcp.async_session_maker", MagicMock(return_value=session_context)),
         ):
             response = await mcp_sse_post_endpoint(
                 request=_make_json_request(
@@ -228,13 +231,13 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
                     _tool_call_body(msg_id="call-1", progress_token="progress-2"),
                 ),
                 mcp_user=SimpleNamespace(id=uuid.uuid4()),
-                db=AsyncMock(),
             )
 
             body_iterator = response.body_iterator
             first_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
             second_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
-            self.assertEqual(first_chunk, ": running\n\n")
+            self.assertTrue(first_chunk.startswith(": keep-alive"))
+            self.assertGreater(len(first_chunk), 1024)
             self.assertIn("notifications/progress", second_chunk)
 
             done.set()
@@ -247,3 +250,53 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             await body_iterator.aclose()
 
         self.assertTrue(any('"id": "call-1"' in chunk for chunk in chunks))
+        session_context.session.commit.assert_awaited_once()
+
+    async def test_named_streamable_http_tool_call_streams_keepalive_and_final(self) -> None:
+        done = asyncio.Event()
+        server = SimpleNamespace(id=uuid.uuid4())
+
+        async def fake_dispatch(*_args: object, **_kwargs: object) -> dict:
+            await done.wait()
+            return {
+                "jsonrpc": "2.0",
+                "id": "named-call-1",
+                "result": {"content": [{"type": "text", "text": "{}"}], "isError": False},
+            }
+
+        session_context = _FakeSessionContext()
+        with (
+            patch("app.api.mcp._MCP_PROGRESS_INTERVAL_SECONDS", 0.01),
+            patch(
+                "app.api.mcp_servers._dispatch_named_server_jsonrpc",
+                AsyncMock(side_effect=fake_dispatch),
+            ),
+            patch("app.api.mcp.async_session_maker", MagicMock(return_value=session_context)),
+        ):
+            response = await named_server_sse_post(
+                server_id=server.id,
+                request=_make_json_request(
+                    f"/api/mcp/servers/{server.id}/sse",
+                    _tool_call_body(msg_id="named-call-1", progress_token="progress-3"),
+                ),
+                server=(SimpleNamespace(id=uuid.uuid4()), server),
+            )
+
+            body_iterator = response.body_iterator
+            first_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+            second_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+            self.assertTrue(first_chunk.startswith(": keep-alive"))
+            self.assertGreater(len(first_chunk), 1024)
+            self.assertIn("notifications/progress", second_chunk)
+
+            done.set()
+            chunks: list[str] = []
+            for _ in range(5):
+                chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+                chunks.append(chunk)
+                if '"id": "named-call-1"' in chunk:
+                    break
+            await body_iterator.aclose()
+
+        self.assertTrue(any('"id": "named-call-1"' in chunk for chunk in chunks))
+        session_context.session.commit.assert_awaited_once()

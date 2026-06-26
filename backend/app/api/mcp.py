@@ -65,6 +65,20 @@ router = APIRouter()
 T = TypeVar("T")
 _MCP_PROTOCOL_SEMAPHORE = asyncio.Semaphore(max(1, settings.mcp_protocol_max_concurrency))
 _MCP_PROGRESS_INTERVAL_SECONDS = 30.0
+_MCP_STREAM_PADDING_BYTES = 2048
+
+
+def _mcp_stream_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "Pragma": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+
+
+def _mcp_keepalive_comment() -> str:
+    return ": keep-alive" + (" " * _MCP_STREAM_PADDING_BYTES) + "\n\n"
 
 
 async def _run_mcp_protocol_limited(operation: Callable[[], Awaitable[T]]) -> T:
@@ -80,6 +94,22 @@ async def _run_mcp_protocol_limited(operation: Callable[[], Awaitable[T]]) -> T:
         return await operation()
     finally:
         _MCP_PROTOCOL_SEMAPHORE.release()
+
+
+async def _run_mcp_protocol_limited_with_session(
+    operation: Callable[[AsyncSession], Awaitable[T]],
+) -> T:
+    async def run_with_session() -> T:
+        async with async_session_maker() as db:
+            try:
+                result = await operation(db)
+                await db.commit()
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return await _run_mcp_protocol_limited(run_with_session)
 
 
 def _sanitize_workflow_tool_name(name: str) -> str:
@@ -232,7 +262,7 @@ def _stream_mcp_jsonrpc_response(
             await queue.put(_format_sse_jsonrpc_message(payload))
 
         async def send_heartbeat() -> None:
-            await queue.put(": running\n\n")
+            await queue.put(_mcp_keepalive_comment())
 
         async def worker() -> None:
             try:
@@ -264,11 +294,7 @@ def _stream_mcp_jsonrpc_response(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_mcp_stream_headers(),
     )
 
 
@@ -389,7 +415,7 @@ async def get_mcp_user_for_sse(
     x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
 ) -> User:
     """
-    Authenticate MCP SSE without holding a DB dependency for the stream lifetime.
+    Authenticate MCP streaming routes without holding a DB dependency for the stream lifetime.
 
     FastAPI finalizes yield dependencies after a StreamingResponse completes, so
     using get_db() directly on long-lived SSE routes can pin pooled DB
@@ -1188,21 +1214,24 @@ async def handle_mcp_message(
 @router.post("/sse", response_model=None)
 async def mcp_sse_post_endpoint(
     request: Request,
-    mcp_user: User = Depends(get_mcp_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict | StreamingResponse:
+    mcp_user: User = Depends(get_mcp_user_for_sse),
+) -> dict[str, Any] | StreamingResponse:
     body = await request.json()
     msg = MCPJSONRPCRequest(**body)
     if _is_mcp_tool_call_with_response(msg):
         return _stream_mcp_jsonrpc_response(
             msg=msg,
-            operation=lambda: _run_mcp_protocol_limited(
-                lambda: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
+            operation=lambda: _run_mcp_protocol_limited_with_session(
+                lambda bg_db: _dispatch_mcp_jsonrpc(
+                    request=request,
+                    mcp_user=mcp_user,
+                    db=bg_db,
+                )
             ),
         )
 
-    return await _run_mcp_protocol_limited(
-        lambda: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
+    return await _run_mcp_protocol_limited_with_session(
+        lambda bg_db: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=bg_db)
     )
 
 
@@ -1233,7 +1262,7 @@ async def mcp_sse_endpoint(
                 try:
                     payload = await asyncio.wait_for(response_queue.get(), timeout=15)
                 except TimeoutError:
-                    yield ": keep-alive\n\n"
+                    yield _mcp_keepalive_comment()
                     continue
                 yield f"event: message\ndata: {payload}\n\n"
         finally:
@@ -1242,9 +1271,5 @@ async def mcp_sse_endpoint(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_mcp_stream_headers(),
     )

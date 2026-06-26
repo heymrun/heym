@@ -17,9 +17,12 @@ from app.api.mcp import (
     _add_mcp_workflow_trace,
     _is_mcp_tool_call_with_response,
     _maybe_mint_file_upload_jsonrpc_response,
+    _mcp_keepalive_comment,
+    _mcp_stream_headers,
     _mcp_tool_result_jsonrpc_response,
     _reject_if_sse_channel_missing,
     _run_mcp_protocol_limited,
+    _run_mcp_protocol_limited_with_session,
     _schedule_legacy_sse_jsonrpc_response,
     _session_user_from_id,
     _stream_mcp_jsonrpc_response,
@@ -195,7 +198,7 @@ async def _get_named_server_context_for_sse(
     x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
 ) -> tuple[User, MCPServer]:
     """
-    Authenticate named MCP SSE without holding a DB dependency for the stream lifetime.
+    Authenticate named MCP streaming routes without holding a DB dependency for the stream lifetime.
     """
     async with async_session_maker() as db:
         return await _get_named_server_context(
@@ -368,7 +371,7 @@ async def named_server_sse(
                 try:
                     payload = await asyncio.wait_for(response_queue.get(), timeout=15)
                 except TimeoutError:
-                    yield ": keep-alive\n\n"
+                    yield _mcp_keepalive_comment()
                     continue
                 yield f"event: message\ndata: {payload}\n\n"
         finally:
@@ -377,11 +380,7 @@ async def named_server_sse(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_mcp_stream_headers(),
     )
 
 
@@ -389,25 +388,30 @@ async def named_server_sse(
 async def named_server_sse_post(
     server_id: uuid.UUID,
     request: Request,
-    server: tuple[User, MCPServer] = Depends(_get_named_server_context),
-    db: AsyncSession = Depends(get_db),
-) -> dict | StreamingResponse:
+    server: tuple[User, MCPServer] = Depends(_get_named_server_context_for_sse),
+) -> dict[str, object] | StreamingResponse:
     """Streamable HTTP transport (MCP 2025-03-26): POST directly to SSE endpoint."""
     body = await request.json()
     msg = MCPJSONRPCRequest(**body)
     if _is_mcp_tool_call_with_response(msg):
         return _stream_mcp_jsonrpc_response(
             msg=msg,
-            operation=lambda: _run_mcp_protocol_limited(
-                lambda: _dispatch_named_server_jsonrpc(
-                    server_id=server_id, request=request, server=server, db=db
+            operation=lambda: _run_mcp_protocol_limited_with_session(
+                lambda bg_db: _dispatch_named_server_jsonrpc(
+                    server_id=server_id,
+                    request=request,
+                    server=server,
+                    db=bg_db,
                 )
             ),
         )
 
-    return await _run_mcp_protocol_limited(
-        lambda: _dispatch_named_server_jsonrpc(
-            server_id=server_id, request=request, server=server, db=db
+    return await _run_mcp_protocol_limited_with_session(
+        lambda bg_db: _dispatch_named_server_jsonrpc(
+            server_id=server_id,
+            request=request,
+            server=server,
+            db=bg_db,
         )
     )
 
