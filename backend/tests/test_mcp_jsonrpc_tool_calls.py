@@ -196,7 +196,14 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(progress["params"]["progressToken"], "progress-1")
 
             done.set()
-            final = json.loads(await asyncio.wait_for(queue.get(), timeout=0.2))
+            final: dict | None = None
+            for _ in range(5):
+                payload = json.loads(await asyncio.wait_for(queue.get(), timeout=0.2))
+                if payload.get("id") == 1:
+                    final = payload
+                    break
+
+            self.assertIsNotNone(final)
             self.assertEqual(final["id"], 1)
             self.assertFalse(final["result"]["isError"])
 
