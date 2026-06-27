@@ -184,6 +184,17 @@ class ClickHouseService:
         rows = self._rows_to_dicts(result)
         return {"row": rows[0] if rows else None, "success": True}
 
+    def list_columns(self, table: str) -> dict[str, Any]:
+        """Discover a table's columns (name + type) via DESCRIBE TABLE."""
+        tbl = _validate_identifier(table, "table")
+        result = self._client().query(f"DESCRIBE TABLE {tbl}")
+        columns = [
+            {"name": str(row[0]), "type": str(row[1])}
+            for row in result.result_rows
+            if row and row[0]
+        ]
+        return {"columns": columns, "success": True}
+
     def insert(self, table: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
         tbl = _validate_identifier(table, "table")
         if not rows:

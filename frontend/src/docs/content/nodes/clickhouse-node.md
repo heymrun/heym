@@ -66,7 +66,7 @@ This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. Only
 ## Input Modes (insert / upsert)
 
 - **JSON array** (`raw`): provide a JSON array of row objects in `clickhouseData`. Keys that are missing from a given row are inserted as `NULL`. The column set is the union of keys across all rows.
-- **Key-value** (`selective`): add one `clickhouseMappings` entry per column. One row is inserted per execution; each value supports expressions.
+- **Key-value** (`selective`): after you select a credential and table, the editor discovers the table columns and creates one value field per column. One row is inserted per execution; each value supports expressions.
 
 ## Mutations and ClickHouse Semantics
 

@@ -21,6 +21,7 @@ import type {
   NotionDataSourcesResponse,
   NotionPagesResponse,
   SupabaseColumnsResponse,
+  ClickHouseColumnsResponse,
   SupabaseTablesResponse,
   UpdateCredentialRequest,
 } from "@/types/credential";
@@ -1149,6 +1150,17 @@ export const credentialsApi = {
     const response = await api.get<SupabaseColumnsResponse>(
       `/credentials/${id}/supabase/columns`,
       { params: { table, ...(schema ? { schema } : {}) } },
+    );
+    return response.data;
+  },
+
+  listClickhouseColumns: async (
+    id: string,
+    table: string,
+  ): Promise<ClickHouseColumnsResponse> => {
+    const response = await api.get<ClickHouseColumnsResponse>(
+      `/credentials/${id}/clickhouse/columns`,
+      { params: { table } },
     );
     return response.data;
   },

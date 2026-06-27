@@ -581,6 +581,16 @@ class SupabaseColumnsResponse(BaseModel):
     success: bool = True
 
 
+class ClickHouseColumn(BaseModel):
+    name: str
+    type: str
+
+
+class ClickHouseColumnsResponse(BaseModel):
+    columns: list[ClickHouseColumn]
+    success: bool = True
+
+
 class NotionDataSourceItem(BaseModel):
     id: str
     title: str

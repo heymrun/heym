@@ -2458,7 +2458,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `clickhouseRowId`: Value matched against the `id` column for `getById`.
   - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
   - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update`. Supports expressions.
-  - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`.
+  - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns.
 - **Operation → required fields → output**:
 
 | Operation | Required | Output |

@@ -18,6 +18,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.models.schemas import (
+    ClickHouseColumnsResponse,
     CredentialCreate,
     CredentialForIntellisense,
     CredentialListResponse,
@@ -892,6 +893,36 @@ async def list_supabase_columns(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return SupabaseColumnsResponse(**result)
+
+
+@router.get("/{credential_id}/clickhouse/columns", response_model=ClickHouseColumnsResponse)
+async def list_clickhouse_columns(
+    credential_id: uuid.UUID,
+    table: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClickHouseColumnsResponse:
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.clickhouse:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential type does not support ClickHouse column discovery",
+        )
+
+    config = decrypt_config(credential.encrypted_config)
+    from app.services.clickhouse_service import ClickHouseService
+
+    try:
+        result = await run_in_threadpool(ClickHouseService(config).list_columns, table)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ClickHouseColumnsResponse(**result)
 
 
 @router.get("/{credential_id}", response_model=CredentialResponse)

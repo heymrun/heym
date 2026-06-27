@@ -277,6 +277,16 @@ export interface SupabaseColumnsResponse {
   success: boolean;
 }
 
+export interface ClickHouseColumn {
+  name: string;
+  type: string;
+}
+
+export interface ClickHouseColumnsResponse {
+  columns: ClickHouseColumn[];
+  success: boolean;
+}
+
 export interface NotionDataSourceItem {
   id: string;
   title: string;

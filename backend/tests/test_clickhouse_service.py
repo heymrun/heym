@@ -98,6 +98,26 @@ class TestClickHouseReads(unittest.TestCase):
         out = svc.get_by_id("events", "7")
         self.assertEqual(out["row"], {"id": 7, "name": "x"})
 
+    def test_list_columns(self) -> None:
+        client = MagicMock()
+        client.query.return_value = self._mock_query_result(
+            [("id", "String", "", ""), ("ts", "DateTime", "", "")],
+            ["name", "type", "default_type", "default_expression"],
+        )
+        svc = self._svc_with_client(client)
+        out = svc.list_columns("events")
+        self.assertEqual(
+            out["columns"],
+            [{"name": "id", "type": "String"}, {"name": "ts", "type": "DateTime"}],
+        )
+        self.assertTrue(out["success"])
+        self.assertIn("DESCRIBE TABLE events", client.query.call_args[0][0])
+
+    def test_list_columns_rejects_bad_table(self) -> None:
+        svc = self._svc_with_client(MagicMock())
+        with self.assertRaises(ValueError):
+            svc.list_columns("bad table; DROP")
+
     def test_find_unlimited_when_limit_zero(self) -> None:
         client = MagicMock()
         client.query.return_value = self._mock_query_result([], [])
