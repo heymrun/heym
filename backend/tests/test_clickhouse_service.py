@@ -162,3 +162,95 @@ class TestClickHouseWrites(unittest.TestCase):
         out = svc.upsert("events", [{"id": 1}])
         client.insert.assert_called_once()
         self.assertTrue(out["success"])
+
+
+class TestClickHouseExecutorBranch(unittest.TestCase):
+    def _executor(self):
+        from app.services.workflow_executor import WorkflowExecutor
+
+        return WorkflowExecutor.__new__(WorkflowExecutor)
+
+    def test_find_dispatch(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        node_data = {
+            "credentialId": "cred-1",
+            "clickhouseOperation": "find",
+            "clickhouseTable": "events",
+            "clickhouseFilter": '{"status":"active"}',
+            "clickhouseLimit": "5",
+            "clickhouseSort": "",
+        }
+        executor = self._executor()
+        executor.evaluate_message_template = lambda tpl, inputs, node_id: tpl
+        executor.evaluate_nonempty_message_template = lambda tpl, inputs, node_id: tpl
+        fake_service = MagicMock()
+        fake_service.find.return_value = {"rows": [], "count": 0, "success": True}
+        with patch.object(
+            WorkflowExecutor,
+            "_get_accessible_credential",
+            return_value=MagicMock(encrypted_config="x"),
+        ), patch(
+            "app.services.encryption.decrypt_config",
+            return_value={"host": "h", "database": "d"},
+        ), patch(
+            "app.services.clickhouse_service.ClickHouseService",
+            return_value=fake_service,
+        ):
+            output = executor._run_clickhouse_node(node_data, {}, "node-1")
+        fake_service.find.assert_called_once()
+        self.assertTrue(output["success"])
+
+    def test_insert_selective_dispatch(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        node_data = {
+            "credentialId": "cred-1",
+            "clickhouseOperation": "insert",
+            "clickhouseTable": "events",
+            "clickhouseInputMode": "selective",
+            "clickhouseMappings": [{"key": "name", "value": "Alice"}],
+        }
+        executor = self._executor()
+        executor.evaluate_message_template = lambda tpl, inputs, node_id: tpl
+        executor.evaluate_nonempty_message_template = lambda tpl, inputs, node_id: tpl
+        fake_service = MagicMock()
+        fake_service.insert.return_value = {"count": 1, "success": True}
+        with patch.object(
+            WorkflowExecutor,
+            "_get_accessible_credential",
+            return_value=MagicMock(encrypted_config="x"),
+        ), patch(
+            "app.services.encryption.decrypt_config",
+            return_value={"host": "h", "database": "d"},
+        ), patch(
+            "app.services.clickhouse_service.ClickHouseService",
+            return_value=fake_service,
+        ):
+            output = executor._run_clickhouse_node(node_data, {}, "node-1")
+        fake_service.insert.assert_called_once_with("events", [{"name": "Alice"}])
+        self.assertTrue(output["success"])
+
+    def test_unknown_operation_raises(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        node_data = {
+            "credentialId": "cred-1",
+            "clickhouseOperation": "bogus",
+        }
+        executor = self._executor()
+        executor.evaluate_message_template = lambda tpl, inputs, node_id: tpl
+        fake_service = MagicMock()
+        with patch.object(
+            WorkflowExecutor,
+            "_get_accessible_credential",
+            return_value=MagicMock(encrypted_config="x"),
+        ), patch(
+            "app.services.encryption.decrypt_config",
+            return_value={"host": "h", "database": "d"},
+        ), patch(
+            "app.services.clickhouse_service.ClickHouseService",
+            return_value=fake_service,
+        ):
+            with self.assertRaises(ValueError):
+                executor._run_clickhouse_node(node_data, {}, "node-1")
