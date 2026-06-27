@@ -491,6 +491,7 @@ const githubCredentials = ref<CredentialListItem[]>([]);
 const googleSheetsCredentials = ref<CredentialListItem[]>([]);
 const bigqueryCredentials = ref<CredentialListItem[]>([]);
 const supabaseCredentials = ref<CredentialListItem[]>([]);
+const clickhouseCredentials = ref<CredentialListItem[]>([]);
 const notionCredentials = ref<CredentialListItem[]>([]);
 const notionDiscoveredDataSources = ref<NotionDataSourceItem[]>([]);
 const loadingNotionDataSources = ref(false);
@@ -624,6 +625,14 @@ const bqTableIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | n
 const bqRowsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const bqMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
 const currentBigQueryExpressionFieldIndex = ref(0);
+const clickhouseQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseTableExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseRowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const clickhouseMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
+const currentClickhouseExpressionFieldIndex = ref(0);
 const supabaseSchemaExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const supabaseTableExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const supabaseSelectColumnsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -947,6 +956,14 @@ watch(
         supabaseCredentials.value = await credentialsApi.listByType("supabase");
       } catch {
         supabaseCredentials.value = [];
+      }
+    }
+
+    if (type === "clickhouse") {
+      try {
+        clickhouseCredentials.value = await credentialsApi.listByType("clickhouse");
+      } catch {
+        clickhouseCredentials.value = [];
       }
     }
 
@@ -3373,6 +3390,141 @@ function onBigQueryRegisterExpressionFieldIndex(index: number): void {
   currentBigQueryExpressionFieldIndex.value = index;
 }
 
+const clickhouseExpressionFieldCount = computed((): number => {
+  const n = workflowStore.selectedNode;
+  if (!n || n.type !== "clickhouse") return 1;
+  const op = (n.data.clickhouseOperation as string | undefined) || "";
+  if (!op) return 1;
+  if (op === "query" || op === "getAll") return 1;
+  if (op === "find") return 3; // table, filter, sort
+  if (op === "count" || op === "remove" || op === "getById") return 2;
+  if (op === "update") return 3; // table, data, filter
+  if (op === "insert" || op === "upsert") {
+    const mode = (n.data.clickhouseInputMode as string | undefined) || "raw";
+    if (mode === "selective") {
+      return 1 + ((n.data.clickhouseMappings as unknown[]) || []).length;
+    }
+    return 2; // table + data
+  }
+  return 1;
+});
+
+function openClickhouseExpressionFieldAtIndex(index: number): void {
+  const n = selectedNode.value;
+  if (!n || n.type !== "clickhouse") return;
+  currentClickhouseExpressionFieldIndex.value = index;
+  const op = (n.data.clickhouseOperation as string | undefined) || "";
+  if (op === "query") {
+    clickhouseQueryExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (index === 0) {
+    clickhouseTableExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (op === "find") {
+    if (index === 1) clickhouseFilterExpressionInputRef.value?.openExpandDialog();
+    else if (index === 2) clickhouseSortExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (op === "count" || op === "remove") {
+    if (index === 1) clickhouseFilterExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (op === "getById") {
+    if (index === 1) clickhouseRowIdExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (op === "update") {
+    if (index === 1) clickhouseDataExpressionInputRef.value?.openExpandDialog();
+    else if (index === 2) clickhouseFilterExpressionInputRef.value?.openExpandDialog();
+    return;
+  }
+  if (op === "insert" || op === "upsert") {
+    const mode = (n.data.clickhouseInputMode as string | undefined) || "raw";
+    if (mode === "selective") {
+      clickhouseMappingInputRefs.value.get(index - 1)?.openExpandDialog();
+    } else if (index === 1) {
+      clickhouseDataExpressionInputRef.value?.openExpandDialog();
+    }
+  }
+}
+
+function closeClickhouseExpressionDialogs(): void {
+  clickhouseQueryExpressionInputRef.value?.closeExpandDialog();
+  clickhouseTableExpressionInputRef.value?.closeExpandDialog();
+  clickhouseFilterExpressionInputRef.value?.closeExpandDialog();
+  clickhouseSortExpressionInputRef.value?.closeExpandDialog();
+  clickhouseRowIdExpressionInputRef.value?.closeExpandDialog();
+  clickhouseDataExpressionInputRef.value?.closeExpandDialog();
+  for (const inst of clickhouseMappingInputRefs.value.values()) inst.closeExpandDialog();
+}
+
+function handleClickhouseExpressionFieldNavigate(direction: "prev" | "next"): void {
+  const total = clickhouseExpressionFieldCount.value;
+  const newIndex =
+    direction === "prev"
+      ? currentClickhouseExpressionFieldIndex.value - 1
+      : currentClickhouseExpressionFieldIndex.value + 1;
+  if (newIndex < 0 || newIndex >= total) return;
+  closeClickhouseExpressionDialogs();
+  currentClickhouseExpressionFieldIndex.value = newIndex;
+  nextTick(() => {
+    openClickhouseExpressionFieldAtIndex(newIndex);
+  });
+}
+
+function onClickhouseRegisterExpressionFieldIndex(index: number): void {
+  currentClickhouseExpressionFieldIndex.value = index;
+}
+
+function clickhouseMappingInputRef(
+  index: number,
+  el: InstanceType<typeof ExpressionInput> | null,
+): void {
+  if (el) clickhouseMappingInputRefs.value.set(index, el);
+  else clickhouseMappingInputRefs.value.delete(index);
+}
+
+const clickhouseMappings = computed<Array<{ key: string; value: string }>>(() => {
+  if (!selectedNode.value) return [];
+  return (
+    (selectedNode.value.data.clickhouseMappings as Array<{ key: string; value: string }> | undefined) ||
+    []
+  );
+});
+
+function addClickhouseMapping(): void {
+  if (!selectedNode.value) return;
+  updateNodeData("clickhouseMappings", [...clickhouseMappings.value, { key: "", value: "" }]);
+}
+
+function updateClickhouseMapping(index: number, field: "key" | "value", value: string): void {
+  if (!selectedNode.value) return;
+  const current = [...clickhouseMappings.value];
+  current[index] = { ...current[index], [field]: value };
+  updateNodeData("clickhouseMappings", current);
+}
+
+function removeClickhouseMapping(index: number): void {
+  if (!selectedNode.value) return;
+  const current = [...clickhouseMappings.value];
+  current.splice(index, 1);
+  updateNodeData("clickhouseMappings", current);
+}
+
+function switchClickhouseToRaw(): void {
+  const mappings = clickhouseMappings.value;
+  if (mappings.length > 0) {
+    const row: Record<string, string> = {};
+    for (const m of mappings) {
+      if (m.key) row[m.key] = m.value;
+    }
+    updateNodeData("clickhouseData", JSON.stringify([row], null, 2));
+  }
+  updateNodeData("clickhouseInputMode", "raw");
+}
+
 const supabaseExpressionFieldCount = computed((): number => {
   const n = workflowStore.selectedNode;
   if (!n || n.type !== "supabase") return 1;
@@ -4754,6 +4906,34 @@ const bigQueryOperationOptions = [
   { value: "", label: "Select operation..." },
   { value: "query", label: "Run Query" },
   { value: "insertRows", label: "Insert Rows" },
+];
+
+const clickhouseCredentialOptions = computed(() => {
+  const node = selectedNode.value;
+  const selectedCredentialId =
+    node && node.type === "clickhouse"
+      ? (node.data.credentialId as string | undefined)
+      : undefined;
+
+  return buildCredentialOptions(
+    clickhouseCredentials.value,
+    selectedCredentialId,
+    "Select ClickHouse credential...",
+    "Shared ClickHouse credential (from owner)",
+  );
+});
+
+const clickhouseOperationOptions = [
+  { value: "", label: "Select operation..." },
+  { value: "query", label: "Run SQL Query" },
+  { value: "find", label: "Find Rows" },
+  { value: "getAll", label: "Get All Rows" },
+  { value: "count", label: "Count Rows" },
+  { value: "getById", label: "Get By ID" },
+  { value: "insert", label: "Insert Rows" },
+  { value: "update", label: "Update Rows" },
+  { value: "remove", label: "Remove Rows" },
+  { value: "upsert", label: "Upsert Rows" },
 ];
 
 const supabaseCredentialOptions = computed(() => {
@@ -13577,6 +13757,351 @@ onUnmounted(() => {
               <div class="text-xs font-mono space-y-0.5">
                 <div>${{ selectedNode.data.label }}.rows - Returned row objects</div>
                 <div>${{ selectedNode.data.label }}.count - Number of affected rows</div>
+                <div>${{ selectedNode.data.label }}.success - Boolean success flag</div>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'clickhouse'">
+            <div class="space-y-2">
+              <Label>ClickHouse Credential</Label>
+              <Select
+                :model-value="selectedNode.data.credentialId || ''"
+                :options="clickhouseCredentialOptions"
+                :disabled="!isWorkflowOwner"
+                @update:model-value="updateNodeData('credentialId', $event)"
+              />
+              <div v-if="!selectedNode.data.credentialId">
+                <p class="text-xs text-amber-500 flex items-center gap-1">
+                  <AlertTriangle class="h-3 w-3" />
+                  Credential is required.
+                </p>
+                <p class="text-xs text-muted-foreground mt-1">
+                  <a
+                    href="/?tab=credentials"
+                    class="text-primary hover:underline"
+                    @click.prevent="$router.push('/?tab=credentials')"
+                  >Add credentials</a> in Dashboard
+                </p>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <Label>Operation</Label>
+              <Select
+                :model-value="selectedNode.data.clickhouseOperation || ''"
+                :options="clickhouseOperationOptions"
+                @update:model-value="updateNodeData('clickhouseOperation', $event)"
+              />
+            </div>
+
+            <template v-if="selectedNode.data.clickhouseOperation === 'query'">
+              <div class="space-y-2">
+                <Label>SQL Query</Label>
+                <ExpressionInput
+                  ref="clickhouseQueryExpressionInputRef"
+                  :model-value="selectedNode.data.clickhouseQuery || ''"
+                  placeholder="SELECT * FROM events LIMIT 10"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  field-key="clickhouseQuery"
+                  :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                  :navigation-index="0"
+                  :navigation-total="clickhouseExpressionFieldCount"
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="SQL Query"
+                  @update:model-value="updateNodeData('clickhouseQuery', $event)"
+                  @navigate="handleClickhouseExpressionFieldNavigate"
+                  @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                />
+                <p class="text-xs text-muted-foreground">
+                  SELECT/SHOW return rows; other statements (INSERT, ALTER, DELETE) run as commands.
+                </p>
+              </div>
+            </template>
+
+            <template v-else-if="selectedNode.data.clickhouseOperation">
+              <div class="space-y-2">
+                <Label>Table</Label>
+                <ExpressionInput
+                  ref="clickhouseTableExpressionInputRef"
+                  :model-value="selectedNode.data.clickhouseTable || ''"
+                  placeholder="events"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  field-key="clickhouseTable"
+                  :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                  :navigation-index="0"
+                  :navigation-total="clickhouseExpressionFieldCount"
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Table"
+                  @update:model-value="updateNodeData('clickhouseTable', $event)"
+                  @navigate="handleClickhouseExpressionFieldNavigate"
+                  @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                />
+              </div>
+
+              <div
+                v-if="['find', 'count', 'update', 'remove'].includes(String(selectedNode.data.clickhouseOperation))"
+                class="space-y-2"
+              >
+                <Label>Filter (JSON object)</Label>
+                <ExpressionInput
+                  ref="clickhouseFilterExpressionInputRef"
+                  :model-value="selectedNode.data.clickhouseFilter || '{}'"
+                  placeholder="{&quot;status&quot;:&quot;active&quot;}"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  field-key="clickhouseFilter"
+                  :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                  :navigation-index="selectedNode.data.clickhouseOperation === 'update' ? 2 : 1"
+                  :navigation-total="clickhouseExpressionFieldCount"
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Filter"
+                  @update:model-value="updateNodeData('clickhouseFilter', $event)"
+                  @navigate="handleClickhouseExpressionFieldNavigate"
+                  @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                />
+                <p
+                  v-if="['update', 'remove'].includes(String(selectedNode.data.clickhouseOperation))"
+                  class="text-xs text-amber-500"
+                >
+                  Required. ClickHouse {{ selectedNode.data.clickhouseOperation }} runs as an
+                  asynchronous mutation; a filter prevents a full-table change.
+                </p>
+              </div>
+
+              <div
+                v-if="selectedNode.data.clickhouseOperation === 'getById'"
+                class="space-y-2"
+              >
+                <Label>Row ID</Label>
+                <ExpressionInput
+                  ref="clickhouseRowIdExpressionInputRef"
+                  :model-value="selectedNode.data.clickhouseRowId || ''"
+                  placeholder="$input.id"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  field-key="clickhouseRowId"
+                  :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                  :navigation-index="1"
+                  :navigation-total="clickhouseExpressionFieldCount"
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Row ID"
+                  @update:model-value="updateNodeData('clickhouseRowId', $event)"
+                  @navigate="handleClickhouseExpressionFieldNavigate"
+                  @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Matched against the table's `id` column.
+                </p>
+              </div>
+
+              <div
+                v-if="selectedNode.data.clickhouseOperation === 'find'"
+                class="space-y-2"
+              >
+                <Label>Sort</Label>
+                <ExpressionInput
+                  ref="clickhouseSortExpressionInputRef"
+                  :model-value="selectedNode.data.clickhouseSort || ''"
+                  placeholder="created_at DESC"
+                  single-line
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  field-key="clickhouseSort"
+                  :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                  :navigation-index="2"
+                  :navigation-total="clickhouseExpressionFieldCount"
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Sort"
+                  @update:model-value="updateNodeData('clickhouseSort', $event)"
+                  @navigate="handleClickhouseExpressionFieldNavigate"
+                  @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                />
+              </div>
+
+              <div
+                v-if="['find', 'getAll'].includes(String(selectedNode.data.clickhouseOperation))"
+                class="space-y-2"
+              >
+                <Label>Limit <span class="text-muted-foreground font-normal">(0 = up to 10000)</span></Label>
+                <input
+                  type="number"
+                  min="0"
+                  :value="selectedNode.data.clickhouseLimit ?? '100'"
+                  placeholder="100"
+                  class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  @input="updateNodeData('clickhouseLimit', String(($event.target as HTMLInputElement).value))"
+                >
+              </div>
+
+              <template v-if="selectedNode.data.clickhouseOperation === 'update'">
+                <div class="space-y-2">
+                  <Label>Data (JSON object)</Label>
+                  <ExpressionInput
+                    ref="clickhouseDataExpressionInputRef"
+                    :model-value="selectedNode.data.clickhouseData || '{}'"
+                    placeholder="{&quot;status&quot;:&quot;archived&quot;}"
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    field-key="clickhouseData"
+                    :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                    :navigation-index="1"
+                    :navigation-total="clickhouseExpressionFieldCount"
+                    :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                    dialog-key-label="Data"
+                    @update:model-value="updateNodeData('clickhouseData', $event)"
+                    @navigate="handleClickhouseExpressionFieldNavigate"
+                    @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    JSON object of column values to set on matching rows.
+                  </p>
+                </div>
+              </template>
+
+              <template
+                v-if="['insert', 'upsert'].includes(String(selectedNode.data.clickhouseOperation))"
+              >
+                <div class="flex items-center gap-2 rounded-md border border-input p-1">
+                  <button
+                    :class="[
+                      'flex-1 rounded text-xs py-1 transition-colors',
+                      (selectedNode.data.clickhouseInputMode || 'raw') === 'raw'
+                        ? 'bg-primary text-primary-foreground font-medium'
+                        : 'text-muted-foreground hover:text-foreground'
+                    ]"
+                    @click="switchClickhouseToRaw()"
+                  >
+                    JSON array
+                  </button>
+                  <button
+                    :class="[
+                      'flex-1 rounded text-xs py-1 transition-colors',
+                      selectedNode.data.clickhouseInputMode === 'selective'
+                        ? 'bg-primary text-primary-foreground font-medium'
+                        : 'text-muted-foreground hover:text-foreground'
+                    ]"
+                    @click="updateNodeData('clickhouseInputMode', 'selective')"
+                  >
+                    Key-value
+                  </button>
+                </div>
+
+                <div
+                  v-if="(selectedNode.data.clickhouseInputMode || 'raw') === 'raw'"
+                  class="space-y-2"
+                >
+                  <Label>Rows (JSON array)</Label>
+                  <ExpressionInput
+                    ref="clickhouseDataExpressionInputRef"
+                    :model-value="selectedNode.data.clickhouseData || '[]'"
+                    placeholder="[{&quot;id&quot;: &quot;$input.id&quot;, &quot;event&quot;: &quot;signup&quot;}]"
+                    :nodes="workflowStore.nodes"
+                    :node-results="workflowStore.nodeResults"
+                    :edges="workflowStore.edges"
+                    :current-node-id="selectedNode.id"
+                    field-key="clickhouseData"
+                    :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                    :navigation-index="1"
+                    :navigation-total="clickhouseExpressionFieldCount"
+                    :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                    dialog-key-label="Rows"
+                    @update:model-value="updateNodeData('clickhouseData', $event)"
+                    @navigate="handleClickhouseExpressionFieldNavigate"
+                    @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    JSON array of row objects; each key must match a column in the table.
+                  </p>
+                </div>
+
+                <div
+                  v-else
+                  class="space-y-3"
+                >
+                  <div class="flex items-center justify-between">
+                    <Label>Row fields</Label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-11 min-h-[44px] md:h-7 px-2"
+                      @click="addClickhouseMapping"
+                    >
+                      <Plus class="w-3 h-3 mr-1" />
+                      Add
+                    </Button>
+                  </div>
+                  <div
+                    v-for="(mapping, index) in clickhouseMappings"
+                    :key="index"
+                    class="flex gap-1 items-center"
+                  >
+                    <Input
+                      :model-value="mapping.key"
+                      placeholder="column"
+                      class="w-24 shrink-0 font-mono text-xs"
+                      @update:model-value="updateClickhouseMapping(index, 'key', $event)"
+                    />
+                    <span class="text-muted-foreground text-xs">=</span>
+                    <ExpressionInput
+                      :ref="(el: any) => clickhouseMappingInputRef(index, el)"
+                      :model-value="mapping.value"
+                      :placeholder="exampleRef"
+                      single-line
+                      class="flex-1 text-xs"
+                      :nodes="workflowStore.nodes"
+                      :node-results="workflowStore.nodeResults"
+                      :edges="workflowStore.edges"
+                      :current-node-id="selectedNode.id"
+                      :navigation-enabled="clickhouseExpressionFieldCount > 1"
+                      :navigation-index="index + 1"
+                      :navigation-total="clickhouseExpressionFieldCount"
+                      :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                      :dialog-key-label="mapping.key || `field ${index + 1}`"
+                      @update:model-value="updateClickhouseMapping(index, 'value', $event)"
+                      @navigate="handleClickhouseExpressionFieldNavigate"
+                      @register-field-index="onClickhouseRegisterExpressionFieldIndex"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-10 w-7 text-destructive shrink-0"
+                      @click="removeClickhouseMapping(index)"
+                    >
+                      <Minus class="w-3 h-3" />
+                    </Button>
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    One row is inserted per execution. Add a field for each column.
+                  </p>
+                </div>
+              </template>
+            </template>
+
+            <div class="rounded-md bg-muted/40 border p-3 space-y-1">
+              <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Output
+              </p>
+              <div class="text-xs font-mono space-y-0.5">
+                <div>${{ selectedNode.data.label }}.rows - Returned row objects (read ops)</div>
+                <div>${{ selectedNode.data.label }}.count - Row count (find/getAll/count/insert)</div>
+                <div>${{ selectedNode.data.label }}.row - Single row (getById)</div>
                 <div>${{ selectedNode.data.label }}.success - Boolean success flag</div>
               </div>
             </div>

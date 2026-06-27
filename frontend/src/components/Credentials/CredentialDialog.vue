@@ -61,6 +61,12 @@ const redisHost = ref("");
 const redisPort = ref("6379");
 const redisPassword = ref("");
 const redisDb = ref("0");
+const clickhouseHost = ref("");
+const clickhousePort = ref("8443");
+const clickhouseUsername = ref("default");
+const clickhousePassword = ref("");
+const clickhouseDatabase = ref("default");
+const clickhouseSecure = ref(true);
 const qdrantHost = ref("");
 const qdrantPort = ref("6333");
 const qdrantApiKey = ref("");
@@ -181,6 +187,7 @@ const typeOptions = [
   { value: "google_sheets", label: CREDENTIAL_TYPE_LABELS.google_sheets },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
+  { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
   { value: "notion", label: CREDENTIAL_TYPE_LABELS.notion },
   { value: "s3", label: CREDENTIAL_TYPE_LABELS.s3 },
 ];
@@ -220,6 +227,12 @@ watch(
         redisPort.value = "6379";
         redisPassword.value = "";
         redisDb.value = "0";
+        clickhouseHost.value = "";
+        clickhousePort.value = "8443";
+        clickhouseUsername.value = "default";
+        clickhousePassword.value = "";
+        clickhouseDatabase.value = "default";
+        clickhouseSecure.value = true;
         qdrantHost.value = "";
         qdrantPort.value = "6333";
         qdrantApiKey.value = "";
@@ -303,6 +316,12 @@ watch(
         redisPort.value = "6379";
         redisPassword.value = "";
         redisDb.value = "0";
+        clickhouseHost.value = "";
+        clickhousePort.value = "8443";
+        clickhouseUsername.value = "default";
+        clickhousePassword.value = "";
+        clickhouseDatabase.value = "default";
+        clickhouseSecure.value = true;
         qdrantHost.value = "";
         qdrantPort.value = "6333";
         qdrantApiKey.value = "";
@@ -397,6 +416,8 @@ const isValid = computed(() => {
       !!redisHost.value.trim() &&
       !!redisPort.value.trim()
     ) || isEditing.value;
+  } else if (type.value === "clickhouse") {
+    return !!clickhouseHost.value.trim() || isEditing.value;
   } else if (type.value === "qdrant") {
     return (
       !!qdrantHost.value.trim() &&
@@ -516,6 +537,15 @@ function buildConfig(): CredentialConfig {
       redis_port: redisPort.value,
       redis_password: redisPassword.value,
       redis_db: redisDb.value,
+    };
+  } else if (type.value === "clickhouse") {
+    return {
+      host: clickhouseHost.value,
+      port: Number(clickhousePort.value) || (clickhouseSecure.value ? 8443 : 8123),
+      username: clickhouseUsername.value,
+      password: clickhousePassword.value,
+      database: clickhouseDatabase.value,
+      secure: clickhouseSecure.value,
     };
   } else if (type.value === "qdrant") {
     return {
@@ -1594,6 +1624,95 @@ async function handleSave(): Promise<void> {
           <p class="text-xs text-muted-foreground">
             Redis database number (default: 0)
           </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'clickhouse'">
+        <div class="space-y-2">
+          <Label for="cred-clickhouse-host">Host</Label>
+          <Input
+            id="cred-clickhouse-host"
+            v-model="clickhouseHost"
+            :placeholder="isEditing ? '(re-enter to update)' : 'your-instance.clickhouse.cloud'"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            ClickHouse HTTP host (without scheme), e.g. your-instance.clickhouse.cloud
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-clickhouse-port">Port</Label>
+          <Input
+            id="cred-clickhouse-port"
+            v-model="clickhousePort"
+            placeholder="8443"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            HTTP interface port (8443 for HTTPS, 8123 for HTTP)
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-clickhouse-username">Username</Label>
+          <Input
+            id="cred-clickhouse-username"
+            v-model="clickhouseUsername"
+            placeholder="default"
+            :disabled="saving"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-clickhouse-password">Password</Label>
+          <div class="relative">
+            <Input
+              id="cred-clickhouse-password"
+              v-model="clickhousePassword"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : '(optional)'"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-clickhouse-database">Database</Label>
+          <Input
+            id="cred-clickhouse-database"
+            v-model="clickhouseDatabase"
+            placeholder="default"
+            :disabled="saving"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <label class="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              class="rounded border-input"
+              :checked="clickhouseSecure"
+              :disabled="saving"
+              @change="clickhouseSecure = ($event.target as HTMLInputElement).checked"
+            >
+            Use HTTPS (secure connection)
+          </label>
         </div>
       </template>
 

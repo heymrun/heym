@@ -240,6 +240,7 @@ export type CredentialConfig =
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
   | CredentialConfigSupabase
+  | CredentialConfigClickHouse
   | CredentialConfigNotion
   | CredentialConfigS3
   | CredentialConfigElevenLabs;
