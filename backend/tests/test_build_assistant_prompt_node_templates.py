@@ -104,6 +104,25 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn("listTeamMembers", prompt)
         self.assertIn("createIssue", prompt)
         self.assertIn("createComment", prompt)
+        self.assertIn("listComments", prompt)
+        self.assertIn("updateComment", prompt)
+        self.assertIn("deleteComment", prompt)
+        self.assertIn("resolveComment", prompt)
+        self.assertIn("linearCommentId", prompt)
+
+    def test_includes_notion_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 24B. notion", prompt)
+        self.assertIn('"type": "notion"', prompt)
+        self.assertIn("notionDataSourceId", prompt)
+        self.assertIn("queryDataSource", prompt)
+        self.assertIn("retrieveDataSource", prompt)
+        self.assertIn("createDataSource", prompt)
+        self.assertIn("updateDataSource", prompt)
+        self.assertIn("createDatabase", prompt)
+        self.assertIn("retrieveDatabase", prompt)
+        self.assertIn("updateDatabase", prompt)
 
     def test_includes_filter_map_nested_reference_guidance(self) -> None:
         prompt = build_assistant_prompt()

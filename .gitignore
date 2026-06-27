@@ -65,3 +65,9 @@ data/
 createuserscript.sql
 # Visual brainstorming companion
 .superpowers/
+
+# E2E test artifacts
+frontend/e2e/.auth/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.e2e-artifacts/

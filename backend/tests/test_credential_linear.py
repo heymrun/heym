@@ -22,10 +22,45 @@ class LinearCredentialTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 400)
         self.assertIn("api_key", context.exception.detail)
 
+    def test_validation_accepts_pending_oauth_client(self) -> None:
+        validate_credential_config(
+            CredentialType.linear,
+            {
+                "auth_mode": "oauth",
+                "client_id": "client",
+                "client_secret": "secret",
+            },
+            allow_pending_oauth=True,
+        )
+
+    def test_validation_rejects_pending_oauth_without_allow_flag(self) -> None:
+        with self.assertRaises(HTTPException) as context:
+            validate_credential_config(
+                CredentialType.linear,
+                {
+                    "auth_mode": "oauth",
+                    "client_id": "client",
+                    "client_secret": "secret",
+                },
+            )
+        self.assertIn("completed authorization", str(context.exception.detail))
+
     def test_masked_value_hides_api_key(self) -> None:
         masked = get_masked_value(CredentialType.linear, {"api_key": "lin_api_secret"})
         self.assertIsNotNone(masked)
         self.assertNotEqual(masked, "lin_api_secret")
+
+    def test_masked_value_marks_oauth_connected(self) -> None:
+        self.assertEqual(
+            get_masked_value(CredentialType.linear, {"auth_mode": "oauth", "access_token": "x"}),
+            "connected",
+        )
+
+    def test_masked_value_marks_pending_oauth(self) -> None:
+        self.assertEqual(
+            get_masked_value(CredentialType.linear, {"auth_mode": "oauth"}),
+            "Not connected",
+        )
 
     def test_update_preserves_existing_api_key_when_form_is_blank(self) -> None:
         merged = merge_credential_config_for_update(
@@ -34,6 +69,23 @@ class LinearCredentialTests(unittest.TestCase):
             {"api_key": ""},
         )
         self.assertEqual(merged["api_key"], "lin_api_old")
+
+    def test_update_switches_between_api_key_and_oauth(self) -> None:
+        oauth_config = merge_credential_config_for_update(
+            CredentialType.linear,
+            {"api_key": "lin_api_old"},
+            {"auth_mode": "oauth", "client_id": "client", "client_secret": "secret"},
+        )
+        self.assertNotIn("api_key", oauth_config)
+        self.assertEqual(oauth_config["auth_mode"], "oauth")
+
+        api_config = merge_credential_config_for_update(
+            CredentialType.linear,
+            {"auth_mode": "oauth", "access_token": "oauth-token"},
+            {"auth_mode": "api_key", "api_key": "lin_api_new"},
+        )
+        self.assertNotIn("access_token", api_config)
+        self.assertEqual(api_config["api_key"], "lin_api_new")
 
     def test_merge_linear_test_config_prefers_inline_key(self) -> None:
         merged = _merge_linear_test_config(
@@ -48,6 +100,14 @@ class LinearCredentialTests(unittest.TestCase):
             {"api_key": "lin_api_old"},
         )
         self.assertEqual(merged["api_key"], "lin_api_old")
+
+    def test_merge_linear_test_config_preserves_oauth_token(self) -> None:
+        merged = _merge_linear_test_config(
+            {"auth_mode": "oauth"},
+            {"auth_mode": "oauth", "access_token": "oauth-token"},
+        )
+        self.assertEqual(merged["access_token"], "oauth-token")
+        self.assertEqual(merged["auth_mode"], "oauth")
 
 
 class LinearCredentialConnectionApiTests(unittest.IsolatedAsyncioTestCase):

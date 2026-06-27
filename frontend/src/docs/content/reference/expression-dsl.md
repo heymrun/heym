@@ -37,10 +37,11 @@ $condition
 
 ### Credentials
 
-Use `$credentials.CredentialName` to reference credential values (e.g. API keys) by name. See [Credentials Sharing](./credentials-sharing.md).
+Use `$credentials.CredentialName` to reference credential values (e.g. API keys, bearer tokens, or Notion integration tokens) by name. See [Credentials Sharing](./credentials-sharing.md).
 
 ```
 $credentials.MyBearerToken
+$credentials.MyNotionWorkspace
 ```
 
 ### Global Variables

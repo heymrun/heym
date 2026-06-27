@@ -18,6 +18,8 @@ import type {
   CredentialTestRequest,
   CredentialTestResponse,
   LLMModel,
+  NotionDataSourcesResponse,
+  NotionPagesResponse,
   SupabaseColumnsResponse,
   SupabaseTablesResponse,
   UpdateCredentialRequest,
@@ -1127,6 +1129,44 @@ export const credentialsApi = {
     return response.data;
   },
 
+  listNotionDataSources: async (
+    id: string,
+    query?: string,
+    startCursor?: string,
+    pageSize = 50,
+  ): Promise<NotionDataSourcesResponse> => {
+    const response = await api.get<NotionDataSourcesResponse>(
+      `/credentials/${id}/notion/data-sources`,
+      {
+        params: {
+          ...(query ? { query } : {}),
+          ...(startCursor ? { start_cursor: startCursor } : {}),
+          page_size: pageSize,
+        },
+      },
+    );
+    return response.data;
+  },
+
+  listNotionPages: async (
+    id: string,
+    query?: string,
+    startCursor?: string,
+    pageSize = 50,
+  ): Promise<NotionPagesResponse> => {
+    const response = await api.get<NotionPagesResponse>(
+      `/credentials/${id}/notion/pages`,
+      {
+        params: {
+          ...(query ? { query } : {}),
+          ...(startCursor ? { start_cursor: startCursor } : {}),
+          page_size: pageSize,
+        },
+      },
+    );
+    return response.data;
+  },
+
   listShares: async (id: string): Promise<CredentialShare[]> => {
     const response = await api.get<CredentialShare[]>(
       `/credentials/${id}/shares`,
@@ -1173,6 +1213,22 @@ export const credentialsApi = {
   bigQueryOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
     const response = await api.post<{ auth_url: string }>(
       "/credentials/bigquery/oauth/authorize",
+      { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
+  notionOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/notion/oauth/authorize",
+      { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
+  linearOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/linear/oauth/authorize",
       { credential_id: credentialId },
     );
     return response.data;

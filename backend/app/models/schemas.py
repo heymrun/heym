@@ -466,6 +466,7 @@ class CredentialType(str, Enum):
     google_sheets = "google_sheets"
     bigquery = "bigquery"
     supabase = "supabase"
+    notion = "notion"
     s3 = "s3"
     elevenlabs = "elevenlabs"
 
@@ -484,7 +485,13 @@ class CredentialConfigGitHub(BaseModel):
 
 
 class CredentialConfigLinear(BaseModel):
-    api_key: str
+    api_key: str | None = None
+    auth_mode: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_expiry: str | None = None
 
 
 class CredentialConfigElevenLabs(BaseModel):
@@ -535,6 +542,14 @@ class CredentialConfigSupabase(BaseModel):
     supabase_schema: str | None = "public"
 
 
+class CredentialConfigNotion(BaseModel):
+    api_token: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    access_token: str | None = None
+    auth_mode: str | None = None
+
+
 class CredentialCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: CredentialType
@@ -564,6 +579,32 @@ class SupabaseTablesResponse(BaseModel):
 
 class SupabaseColumnsResponse(BaseModel):
     columns: list[str]
+    success: bool = True
+
+
+class NotionDataSourceItem(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+
+
+class NotionDataSourcesResponse(BaseModel):
+    data_sources: list[NotionDataSourceItem]
+    next_cursor: str | None = None
+    has_more: bool = False
+    success: bool = True
+
+
+class NotionPageItem(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+
+
+class NotionPagesResponse(BaseModel):
+    pages: list[NotionPageItem]
+    next_cursor: str | None = None
+    has_more: bool = False
     success: bool = True
 
 

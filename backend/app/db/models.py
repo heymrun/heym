@@ -50,6 +50,7 @@ class CredentialType(str, PyEnum):
     google_sheets = "google_sheets"
     bigquery = "bigquery"
     supabase = "supabase"
+    notion = "notion"
     s3 = "s3"
     elevenlabs = "elevenlabs"
 

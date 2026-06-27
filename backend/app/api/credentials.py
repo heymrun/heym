@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user
 from app.db.models import (
@@ -27,6 +28,8 @@ from app.models.schemas import (
     CredentialTestResponse,
     CredentialUpdate,
     LLMModel,
+    NotionDataSourcesResponse,
+    NotionPagesResponse,
     SupabaseColumnsResponse,
     SupabaseTablesResponse,
     TeamShareRequest,
@@ -43,7 +46,49 @@ def merge_credential_config_for_update(
     incoming_config: dict,
 ) -> dict:
     """Merge update payload into an existing credential config when needed."""
-    if credential_type not in {CredentialType.github, CredentialType.linear}:
+    if credential_type == CredentialType.notion:
+        merged_config = dict(existing_config)
+        incoming_auth_mode = str(incoming_config.get("auth_mode", "") or "").strip()
+        if incoming_auth_mode == "oauth":
+            merged_config.pop("api_token", None)
+        elif str(incoming_config.get("api_token", "") or "").strip():
+            merged_config.pop("access_token", None)
+            incoming_auth_mode = "token"
+        for key in ("api_token", "client_id", "client_secret", "access_token", "auth_mode"):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
+        if incoming_auth_mode:
+            merged_config["auth_mode"] = incoming_auth_mode
+        return merged_config
+
+    if credential_type == CredentialType.linear:
+        merged_config = dict(existing_config)
+        incoming_auth_mode = str(incoming_config.get("auth_mode", "") or "").strip()
+        if incoming_auth_mode == "oauth":
+            merged_config.pop("api_key", None)
+        elif str(incoming_config.get("api_key", "") or "").strip():
+            merged_config.pop("access_token", None)
+            merged_config.pop("refresh_token", None)
+            merged_config.pop("token_expiry", None)
+            incoming_auth_mode = "api_key"
+        for key in (
+            "api_key",
+            "client_id",
+            "client_secret",
+            "access_token",
+            "refresh_token",
+            "token_expiry",
+            "auth_mode",
+        ):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
+        if incoming_auth_mode:
+            merged_config["auth_mode"] = incoming_auth_mode
+        return merged_config
+
+    if credential_type != CredentialType.github:
         return incoming_config
 
     merged_config = dict(existing_config)
@@ -92,7 +137,6 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.openai,
         CredentialType.google,
         CredentialType.github,
-        CredentialType.linear,
         CredentialType.custom,
         CredentialType.elevenlabs,
     ):
@@ -126,6 +170,26 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         if supabase_url:
             return f"{supabase_url} ({supabase_schema})"
         return None
+    elif credential_type == CredentialType.notion:
+        auth_mode = str(config.get("auth_mode", "")).strip()
+        access_token = str(config.get("access_token", "")).strip()
+        api_token = str(config.get("api_token", "")).strip()
+        if access_token:
+            workspace_name = str(config.get("workspace_name", "")).strip()
+            if workspace_name:
+                return f"connected ({workspace_name})"
+            return "connected"
+        if auth_mode == "oauth":
+            return "Not connected"
+        return mask_api_key(api_token)
+    elif credential_type == CredentialType.linear:
+        auth_mode = str(config.get("auth_mode", "")).strip()
+        access_token = str(config.get("access_token", "")).strip()
+        if access_token:
+            return "connected"
+        if auth_mode == "oauth":
+            return "Not connected"
+        return mask_api_key(str(config.get("api_key", "") or ""))
     elif credential_type == CredentialType.s3:
         access_key = str(config.get("aws_access_key_id", "")).strip()
         region = str(config.get("aws_region", "")).strip()
@@ -152,6 +216,16 @@ def get_public_credential_fields(
             "supabase_url": supabase_url,
             "supabase_schema": supabase_schema,
         }
+    if credential_type == CredentialType.notion:
+        auth_mode = str(config.get("auth_mode", "token")).strip() or "token"
+        fields: dict[str, str | None] = {"auth_mode": auth_mode}
+        if auth_mode == "oauth":
+            workspace_name = str(config.get("workspace_name", "")).strip()
+            fields["workspace_name"] = workspace_name or None
+        return fields
+    if credential_type == CredentialType.linear:
+        auth_mode = str(config.get("auth_mode", "api_key")).strip() or "api_key"
+        return {"auth_mode": auth_mode}
     return {}
 
 
@@ -227,12 +301,27 @@ def _merge_supabase_update_config(
 def _merge_linear_test_config(
     inline_config: dict,
     stored_config: dict,
-) -> dict[str, str]:
+) -> dict:
     """Merge inline form values with stored secrets for Linear connection tests."""
     merged = dict(stored_config)
-    inline_key = str(inline_config.get("api_key", "")).strip()
-    if inline_key:
-        merged["api_key"] = inline_key
+    incoming_auth_mode = str(inline_config.get("auth_mode", "") or "").strip()
+    if incoming_auth_mode:
+        merged["auth_mode"] = incoming_auth_mode
+    for key in ("api_key", "client_id", "client_secret", "access_token", "refresh_token"):
+        inline_value = str(inline_config.get(key, "") or "").strip()
+        if inline_value:
+            merged[key] = inline_value
+    return merged
+
+
+def _merge_notion_test_config(inline_config: dict, stored_config: dict) -> dict:
+    """Merge inline form values with stored secrets for Notion connection tests."""
+    merged = dict(inline_config)
+    for key in ("api_token", "client_id", "client_secret", "access_token", "auth_mode"):
+        if not str(merged.get(key, "")).strip():
+            stored_value = stored_config.get(key, "")
+            if stored_value:
+                merged[key] = stored_value
     return merged
 
 
@@ -599,7 +688,11 @@ async def create_credential(
             detail="Credential with this name already exists",
         )
 
-    validate_credential_config(credential_data.type, credential_data.config)
+    validate_credential_config(
+        credential_data.type,
+        credential_data.config,
+        allow_pending_oauth=True,
+    )
     encrypted = encrypt_config(credential_data.config)
 
     credential = Credential(
@@ -634,7 +727,11 @@ async def run_credential_connection_test(
     db: AsyncSession = Depends(get_db),
 ) -> CredentialTestResponse:
     """Test whether a credential configuration can reach the external service."""
-    if test_data.type not in {CredentialType.supabase, CredentialType.linear}:
+    if test_data.type not in {
+        CredentialType.supabase,
+        CredentialType.linear,
+        CredentialType.notion,
+    }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Connection test is not supported for this credential type",
@@ -656,35 +753,121 @@ async def run_credential_connection_test(
         stored_config = decrypt_config(credential.encrypted_config)
         if test_data.type == CredentialType.supabase:
             config = _merge_supabase_test_config(config, stored_config)
-        else:
+        elif test_data.type == CredentialType.linear:
             config = _merge_linear_test_config(config, stored_config)
+        else:
+            config = _merge_notion_test_config(config, stored_config)
 
     validate_credential_config(test_data.type, config)
 
-    if test_data.type == CredentialType.supabase:
-        from app.services.supabase_service import SupabaseService
-
-        try:
-            SupabaseService(config).test_connection()
-        except ValueError as exc:
-            return CredentialTestResponse(success=False, message=str(exc))
-
-        return CredentialTestResponse(success=True, message="Connection successful")
-
-    from app.services.linear_service import LinearService
-
     try:
-        viewer = LinearService(config).test_connection()
+        if test_data.type == CredentialType.supabase:
+            from app.services.supabase_service import SupabaseService
+
+            SupabaseService(config).test_connection()
+            return CredentialTestResponse(success=True, message="Connection successful")
+
+        if test_data.type == CredentialType.linear:
+            from app.services.linear_service import LinearService
+
+            viewer = LinearService(config).test_connection()
+            viewer_name = str(
+                viewer.get("displayName") or viewer.get("name") or viewer.get("email") or ""
+            )
+            if viewer_name:
+                return CredentialTestResponse(
+                    success=True,
+                    message=f"Connected as {viewer_name}",
+                )
+            return CredentialTestResponse(success=True, message="Connection successful")
+
+        from app.services.notion_service import NotionService
+
+        with NotionService(config) as service:
+            await run_in_threadpool(service.test_connection)
+        return CredentialTestResponse(success=True, message="Connection successful")
     except ValueError as exc:
         return CredentialTestResponse(success=False, message=str(exc))
 
-    viewer_name = str(viewer.get("displayName") or viewer.get("name") or viewer.get("email") or "")
-    if viewer_name:
-        return CredentialTestResponse(
-            success=True,
-            message=f"Connected as {viewer_name}",
+
+@router.get(
+    "/{credential_id}/notion/data-sources",
+    response_model=NotionDataSourcesResponse,
+)
+async def list_notion_data_sources(
+    credential_id: uuid.UUID,
+    query: str = "",
+    start_cursor: str | None = None,
+    page_size: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotionDataSourcesResponse:
+    """List Notion data sources available to an accessible credential."""
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
         )
-    return CredentialTestResponse(success=True, message="Connection successful")
+    if credential.type != CredentialType.notion:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential type does not support Notion data source discovery",
+        )
+
+    from app.services.notion_service import NotionService
+
+    try:
+        with NotionService(decrypt_config(credential.encrypted_config)) as service:
+            result = await run_in_threadpool(
+                service.list_data_sources,
+                query,
+                start_cursor=start_cursor,
+                page_size=page_size,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return NotionDataSourcesResponse(**result)
+
+
+@router.get(
+    "/{credential_id}/notion/pages",
+    response_model=NotionPagesResponse,
+)
+async def list_notion_pages(
+    credential_id: uuid.UUID,
+    query: str = "",
+    start_cursor: str | None = None,
+    page_size: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotionPagesResponse:
+    """List ordinary Notion pages available as page parents."""
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.notion:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential type does not support Notion page discovery",
+        )
+
+    from app.services.notion_service import NotionService
+
+    try:
+        with NotionService(decrypt_config(credential.encrypted_config)) as service:
+            result = await run_in_threadpool(
+                service.list_pages,
+                query,
+                start_cursor=start_cursor,
+                page_size=page_size,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return NotionPagesResponse(**result)
 
 
 @router.get("/{credential_id}/supabase/tables", response_model=SupabaseTablesResponse)
@@ -855,7 +1038,11 @@ async def update_credential(
                 credential_data.config,
             )
         )
-        validate_credential_config(credential.type, config)
+        validate_credential_config(
+            credential.type,
+            config,
+            allow_pending_oauth=credential.type in {CredentialType.linear, CredentialType.notion},
+        )
         credential.encrypted_config = encrypt_config(config)
 
     await db.flush()
@@ -958,7 +1145,12 @@ async def get_credential_models(
     return models
 
 
-def validate_credential_config(credential_type: CredentialType, config: dict) -> None:
+def validate_credential_config(
+    credential_type: CredentialType,
+    config: dict,
+    *,
+    allow_pending_oauth: bool = False,
+) -> None:
     if credential_type == CredentialType.openai:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(
@@ -986,10 +1178,26 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
                     detail="GitHub credential base_url must be a valid http(s) URL",
                 )
     elif credential_type == CredentialType.linear:
-        if "api_key" not in config or not str(config["api_key"]).strip():
+        has_token = bool(str(config.get("api_key") or config.get("access_token") or "").strip())
+        uses_oauth = str(config.get("auth_mode", "")).strip() == "oauth"
+        has_oauth_client = bool(
+            str(config.get("client_id", "")).strip()
+            and str(config.get("client_secret", "")).strip()
+        )
+        if uses_oauth and not has_oauth_client:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Linear credential requires api_key",
+                detail="Linear OAuth requires client_id and client_secret",
+            )
+        if not has_token and not uses_oauth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Linear credential requires api_key or OAuth client credentials",
+            )
+        if uses_oauth and not has_token and not allow_pending_oauth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Linear OAuth credential requires a completed authorization",
             )
     elif credential_type == CredentialType.custom:
         if "api_key" not in config or not config["api_key"]:
@@ -1141,6 +1349,28 @@ def validate_credential_config(credential_type: CredentialType, config: dict) ->
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Supabase credential requires supabase_key",
+            )
+    elif credential_type == CredentialType.notion:
+        has_token = bool(str(config.get("api_token") or config.get("access_token") or "").strip())
+        uses_oauth = str(config.get("auth_mode", "")).strip() == "oauth"
+        has_oauth_client = bool(
+            str(config.get("client_id", "")).strip()
+            and str(config.get("client_secret", "")).strip()
+        )
+        if uses_oauth and not has_oauth_client:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Notion OAuth requires client_id and client_secret",
+            )
+        if not has_token and not uses_oauth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Notion credential requires api_token or OAuth client credentials",
+            )
+        if uses_oauth and not has_token and not allow_pending_oauth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Notion OAuth credential requires a completed authorization",
             )
     elif credential_type == CredentialType.s3:
         if "aws_access_key_id" not in config or not str(config["aws_access_key_id"]).strip():

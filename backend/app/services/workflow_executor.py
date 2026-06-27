@@ -8827,6 +8827,9 @@ class WorkflowExecutor:
                     after = _linear_field("linearAfter")
                     return after or None
 
+                def _linear_return_all() -> bool:
+                    return bool(node_data.get("linearReturnAll"))
+
                 def _linear_list_output(
                     result: dict[str, Any],
                     field_name: str,
@@ -8841,7 +8844,7 @@ class WorkflowExecutor:
                         "pageInfo": result["pageInfo"],
                     }
 
-                service = LinearService(linear_config)
+                service = LinearService(linear_config, credential_id=str(credential_id))
                 try:
                     if operation == "getViewer":
                         viewer = service.get_viewer()
@@ -8852,13 +8855,21 @@ class WorkflowExecutor:
                         }
                     elif operation == "listTeams":
                         output = _linear_list_output(
-                            service.list_teams(_linear_limit(), after=_linear_after()),
+                            service.list_teams(
+                                _linear_limit(),
+                                after=_linear_after(),
+                                fetch_all=_linear_return_all(),
+                            ),
                             "teams",
                             operation,
                         )
                     elif operation == "listProjects":
                         output = _linear_list_output(
-                            service.list_projects(_linear_limit(), after=_linear_after()),
+                            service.list_projects(
+                                _linear_limit(),
+                                after=_linear_after(),
+                                fetch_all=_linear_return_all(),
+                            ),
                             "projects",
                             operation,
                         )
@@ -8869,6 +8880,7 @@ class WorkflowExecutor:
                                 team_id=_linear_field("linearTeamId") or None,
                                 project_id=_linear_field("linearProjectId") or None,
                                 after=_linear_after(),
+                                fetch_all=_linear_return_all(),
                             ),
                             "issues",
                             operation,
@@ -8893,6 +8905,7 @@ class WorkflowExecutor:
                                 team_id,
                                 _linear_limit(),
                                 after=_linear_after(),
+                                fetch_all=_linear_return_all(),
                             ),
                             "members",
                             operation,
@@ -8920,6 +8933,7 @@ class WorkflowExecutor:
                             description=_linear_field("linearDescription") or None,
                             project_id=_linear_field("linearProjectId") or None,
                             assignee_id=_linear_field("linearAssigneeId") or None,
+                            state_id=_linear_field("linearStateId") or None,
                             priority=_linear_priority(),
                         )
                         output = {
@@ -8938,6 +8952,7 @@ class WorkflowExecutor:
                         update_fields = {
                             "title": _linear_update_field("linearTitle"),
                             "description": _linear_update_field("linearDescription"),
+                            "team_id": _linear_update_field("linearTeamId"),
                             "state_id": _linear_update_field("linearStateId"),
                             "project_id": _linear_update_field("linearProjectId"),
                             "assignee_id": _linear_update_field("linearAssigneeId"),
@@ -8962,6 +8977,31 @@ class WorkflowExecutor:
                             "identifier": issue.get("identifier"),
                             "url": issue.get("url"),
                         }
+                    elif operation == "deleteIssue":
+                        issue_id = _linear_field("linearIssueId")
+                        if not issue_id:
+                            raise ValueError(
+                                "Linear deleteIssue requires an issue ID or identifier"
+                            )
+                        deleted = service.delete_issue(issue_id)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "deleted": bool(deleted.get("success")),
+                        }
+                    elif operation == "addIssueLink":
+                        issue_id = _linear_field("linearIssueId")
+                        link_url = _linear_field("linearIssueLinkUrl")
+                        if not issue_id or not link_url:
+                            raise ValueError(
+                                "Linear addIssueLink requires an issue ID and link URL"
+                            )
+                        link = service.add_issue_link(issue_id, link_url)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "link": link,
+                        }
                     elif operation == "createComment":
                         issue_id = _linear_field("linearIssueId")
                         body = _linear_field("linearCommentBody")
@@ -8969,7 +9009,71 @@ class WorkflowExecutor:
                             raise ValueError(
                                 "Linear createComment requires an issue ID and comment body"
                             )
-                        comment = service.create_comment(issue_id, body)
+                        comment = service.create_comment(
+                            issue_id,
+                            body,
+                            parent_id=_linear_field("linearParentCommentId") or None,
+                        )
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "comment": comment,
+                        }
+                    elif operation == "listComments":
+                        issue_id = _linear_field("linearIssueId")
+                        if not issue_id:
+                            raise ValueError(
+                                "Linear listComments requires an issue ID or identifier"
+                            )
+                        output = _linear_list_output(
+                            service.list_comments(
+                                issue_id,
+                                _linear_limit(),
+                                after=_linear_after(),
+                                fetch_all=_linear_return_all(),
+                            ),
+                            "comments",
+                            operation,
+                        )
+                    elif operation == "updateComment":
+                        comment_id = _linear_field("linearCommentId")
+                        body = _linear_field("linearCommentBody")
+                        if not comment_id or not body:
+                            raise ValueError(
+                                "Linear updateComment requires a comment ID and comment body"
+                            )
+                        comment = service.update_comment(comment_id, body)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "comment": comment,
+                        }
+                    elif operation == "deleteComment":
+                        comment_id = _linear_field("linearCommentId")
+                        if not comment_id:
+                            raise ValueError("Linear deleteComment requires a comment ID")
+                        deleted = service.delete_comment(comment_id)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "deleted": bool(deleted.get("success")),
+                            "entityId": deleted.get("entityId"),
+                        }
+                    elif operation == "resolveComment":
+                        comment_id = _linear_field("linearCommentId")
+                        if not comment_id:
+                            raise ValueError("Linear resolveComment requires a comment ID")
+                        comment = service.resolve_comment(comment_id)
+                        output = {
+                            "success": True,
+                            "operation": operation,
+                            "comment": comment,
+                        }
+                    elif operation == "unresolveComment":
+                        comment_id = _linear_field("linearCommentId")
+                        if not comment_id:
+                            raise ValueError("Linear unresolveComment requires a comment ID")
+                        comment = service.unresolve_comment(comment_id)
                         output = {
                             "success": True,
                             "operation": operation,
@@ -9902,6 +10006,214 @@ class WorkflowExecutor:
                         raise ValueError(f"Unknown GitHub operation: {operation}")
                 finally:
                     service.close()
+
+            elif node_type == "notion":
+                from app.db.session import SessionLocal
+                from app.services.encryption import decrypt_config
+                from app.services.notion_service import NotionService
+
+                credential_id = node_data.get("credentialId")
+                if not credential_id:
+                    raise ValueError("Notion node requires a credential")
+
+                notion_config: dict = {}
+                with SessionLocal() as db:
+                    cred = self._get_accessible_credential(db, credential_id)
+                    if cred:
+                        from app.db.models import CredentialType
+
+                        if cred.type != CredentialType.notion:
+                            raise ValueError("Credential type must be notion")
+                        notion_config = decrypt_config(cred.encrypted_config)
+                if not notion_config:
+                    raise ValueError("Notion credential not found or invalid")
+
+                operation = str(node_data.get("notionOperation", "") or "").strip()
+                if not operation:
+                    raise ValueError("Notion node requires an operation")
+
+                service = NotionService(notion_config)
+
+                def _notion_text(field_name: str, default: str = "") -> str:
+                    return self.evaluate_nonempty_message_template(
+                        str(node_data.get(field_name, default) or default),
+                        inputs,
+                        node_id,
+                    ).strip()
+
+                def _notion_object(field_name: str, default: str = "{}") -> dict[str, Any]:
+                    raw_value = str(node_data.get(field_name, default) or default).strip()
+                    if self._is_single_dollar_expression(raw_value):
+                        resolved = self.resolve_expression(
+                            raw_value,
+                            inputs,
+                            node_id,
+                            preserve_type=True,
+                        )
+                        if not isinstance(resolved, dict):
+                            raise ValueError(f"{field_name} must resolve to a JSON object")
+                        return resolved
+                    evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+                    return NotionService.parse_json_object(evaluated, field_name)
+
+                def _notion_array(field_name: str, default: str = "[]") -> list[Any]:
+                    raw_value = str(node_data.get(field_name, default) or default).strip()
+                    if self._is_single_dollar_expression(raw_value):
+                        resolved = self.resolve_expression(
+                            raw_value,
+                            inputs,
+                            node_id,
+                            preserve_type=True,
+                        )
+                        if not isinstance(resolved, list):
+                            raise ValueError(f"{field_name} must resolve to a JSON array")
+                        return resolved
+                    evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+                    return NotionService.parse_json_array(evaluated, field_name)
+
+                def _required_notion_text(field_name: str, label: str) -> str:
+                    value = _notion_text(field_name)
+                    if not value:
+                        raise ValueError(f"Notion {operation} requires {label}")
+                    return value
+
+                def _notion_page_size() -> tuple[int, bool]:
+                    raw_value = _notion_text("notionPageSize", "100")
+                    try:
+                        value = int(float(raw_value or "100"))
+                    except (TypeError, ValueError):
+                        value = 100
+                    return (100 if value == 0 else value, value == 0)
+
+                if operation == "search":
+                    page_size, fetch_all = _notion_page_size()
+                    filter_object = _notion_object("notionFilter")
+                    sort = _notion_object("notionSort")
+                    output = service.search(
+                        query=_notion_text("notionQuery"),
+                        filter_object=filter_object or None,
+                        sort=sort or None,
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "getPage":
+                    output = service.retrieve_page(
+                        _required_notion_text("notionPageId", "a page ID")
+                    )
+                elif operation == "createPage":
+                    properties = _notion_object("notionProperties")
+                    if not properties:
+                        raise ValueError("Notion createPage requires properties")
+                    data_source_id = _notion_text("notionDataSourceId")
+                    parent_page_id = _notion_text("notionParentPageId")
+                    if not data_source_id and not parent_page_id:
+                        raise ValueError(
+                            "Notion createPage requires a data source ID or parent page ID"
+                        )
+                    icon = _notion_object("notionIcon")
+                    cover = _notion_object("notionCover")
+                    output = service.create_page(
+                        properties=properties,
+                        data_source_id=data_source_id,
+                        parent_page_id=parent_page_id,
+                        children=_notion_array("notionChildren"),
+                        icon=icon or None,
+                        cover=cover or None,
+                    )
+                elif operation == "updatePage":
+                    page_id = _required_notion_text("notionPageId", "a page ID")
+                    properties = _notion_object("notionProperties")
+                    icon = _notion_object("notionIcon")
+                    cover = _notion_object("notionCover")
+                    if not properties and not icon and not cover:
+                        raise ValueError("Notion updatePage requires properties, icon, or cover")
+                    output = service.update_page(
+                        page_id,
+                        properties=properties or None,
+                        icon=icon or None,
+                        cover=cover or None,
+                    )
+                elif operation == "trashPage":
+                    output = service.update_page(
+                        _required_notion_text("notionPageId", "a page ID"),
+                        in_trash=True,
+                    )
+                elif operation == "restorePage":
+                    output = service.update_page(
+                        _required_notion_text("notionPageId", "a page ID"),
+                        in_trash=False,
+                    )
+                elif operation == "createDatabase":
+                    output = service.create_database(_notion_object("notionDatabase"))
+                elif operation == "retrieveDatabase":
+                    output = service.retrieve_database(
+                        _required_notion_text("notionDatabaseId", "a database ID")
+                    )
+                elif operation == "updateDatabase":
+                    database = _notion_object("notionDatabase")
+                    if not database:
+                        raise ValueError("Notion updateDatabase requires at least one field")
+                    output = service.update_database(
+                        _required_notion_text("notionDatabaseId", "a database ID"),
+                        database,
+                    )
+                elif operation == "retrieveDataSource":
+                    output = service.retrieve_data_source(
+                        _required_notion_text("notionDataSourceId", "a data source ID")
+                    )
+                elif operation == "createDataSource":
+                    output = service.create_data_source(_notion_object("notionDataSource"))
+                elif operation == "updateDataSource":
+                    data_source = _notion_object("notionDataSource")
+                    if not data_source:
+                        raise ValueError("Notion updateDataSource requires at least one field")
+                    output = service.update_data_source(
+                        _required_notion_text("notionDataSourceId", "a data source ID"),
+                        data_source,
+                    )
+                elif operation == "queryDataSource":
+                    page_size, fetch_all = _notion_page_size()
+                    output = service.query_data_source(
+                        _required_notion_text("notionDataSourceId", "a data source ID"),
+                        filter_object=_notion_object("notionFilter") or None,
+                        sorts=_notion_array("notionSorts") or None,
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "getBlockChildren":
+                    page_size, fetch_all = _notion_page_size()
+                    output = service.retrieve_block_children(
+                        _required_notion_text("notionBlockId", "a block or page ID"),
+                        page_size=page_size,
+                        start_cursor=_notion_text("notionStartCursor") or None,
+                        fetch_all=fetch_all,
+                    )
+                elif operation == "updateBlock":
+                    output = service.update_block(
+                        _required_notion_text("notionBlockId", "a block ID"),
+                        _notion_object("notionBlock"),
+                    )
+                elif operation == "deleteBlock":
+                    output = service.delete_block(
+                        _required_notion_text("notionBlockId", "a block ID")
+                    )
+                elif operation == "appendBlocks":
+                    children = _notion_array("notionChildren")
+                    if not children:
+                        raise ValueError("Notion appendBlocks requires child blocks")
+                    after_block_id = _notion_text("notionAfterBlockId") or None
+                    output = service.append_block_children(
+                        _required_notion_text("notionBlockId", "a block or page ID"),
+                        children,
+                        position=_notion_text("notionAppendPosition", "end") or "end",
+                        after=after_block_id,
+                    )
+                else:
+                    raise ValueError(f"Unknown Notion operation: {operation}")
+                service.close()
+                output["operation"] = operation
 
             elif node_type == "supabase":
                 from app.db.session import SessionLocal

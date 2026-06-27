@@ -44,7 +44,8 @@ class LinearServiceTests(unittest.TestCase):
 
         service.get_viewer()
 
-        self.assertEqual(service._api_key, "lin_api_test")
+        auth_header = client.post.call_args.kwargs["headers"]["Authorization"]
+        self.assertEqual(auth_header, "lin_api_test")
 
     def test_empty_api_key_raises_before_request(self) -> None:
         client = MagicMock()
@@ -151,6 +152,40 @@ class LinearServiceTests(unittest.TestCase):
 
         self.assertEqual(states[0]["name"], "Done")
 
+    def test_list_teams_fetch_all_follows_cursors(self) -> None:
+        client = MagicMock()
+        client.post.side_effect = [
+            _response(
+                {
+                    "data": {
+                        "teams": {
+                            "nodes": [{"id": "team-1"}],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "cursor-1"},
+                        }
+                    }
+                }
+            ),
+            _response(
+                {
+                    "data": {
+                        "teams": {
+                            "nodes": [{"id": "team-2"}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            ),
+        ]
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        result = service.list_teams(fetch_all=True)
+
+        self.assertEqual([node["id"] for node in result["nodes"]], ["team-1", "team-2"])
+        self.assertEqual(client.post.call_count, 2)
+        self.assertEqual(
+            client.post.call_args_list[1].kwargs["json"]["variables"]["after"], "cursor-1"
+        )
+
     def test_list_team_members_returns_paginated_members(self) -> None:
         client = MagicMock()
         client.post.return_value = _response(
@@ -189,6 +224,7 @@ class LinearServiceTests(unittest.TestCase):
             "team-1",
             "Fix it",
             project_id="project-1",
+            state_id="state-1",
             priority=2,
         )
 
@@ -199,6 +235,7 @@ class LinearServiceTests(unittest.TestCase):
                 "teamId": "team-1",
                 "title": "Fix it",
                 "projectId": "project-1",
+                "stateId": "state-1",
                 "priority": 2,
             },
         )
@@ -246,6 +283,167 @@ class LinearServiceTests(unittest.TestCase):
 
         issue_input = client.post.call_args.kwargs["json"]["variables"]["input"]
         self.assertEqual(issue_input, {"title": "Updated"})
+
+    def test_update_issue_can_change_team(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "issueUpdate": {
+                        "success": True,
+                        "issue": {"id": "issue-1", "identifier": "ENG-1"},
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        service.update_issue("ENG-1", team_id="team-2")
+
+        issue_input = client.post.call_args.kwargs["json"]["variables"]["input"]
+        self.assertEqual(issue_input, {"teamId": "team-2"})
+
+    def test_delete_issue_returns_mutation_payload(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response({"data": {"issueDelete": {"success": True}}})
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        result = service.delete_issue("ENG-1")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(client.post.call_args.kwargs["json"]["variables"], {"id": "ENG-1"})
+
+    def test_add_issue_link_returns_mutation_payload(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response({"data": {"attachmentLinkURL": {"success": True}}})
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        result = service.add_issue_link("ENG-1", "https://example.com/spec")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            client.post.call_args.kwargs["json"]["variables"],
+            {"issueId": "ENG-1", "url": "https://example.com/spec"},
+        )
+
+    def test_create_comment_includes_optional_parent_id(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "commentCreate": {
+                        "success": True,
+                        "comment": {"id": "comment-1", "body": "Reply"},
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        comment = service.create_comment("ENG-1", "Reply", parent_id="comment-parent")
+
+        self.assertEqual(comment["id"], "comment-1")
+        self.assertEqual(
+            client.post.call_args.kwargs["json"]["variables"]["input"],
+            {"issueId": "ENG-1", "body": "Reply", "parentId": "comment-parent"},
+        )
+
+    def test_list_comments_returns_issue_comment_connection(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "issue": {
+                        "comments": {
+                            "nodes": [{"id": "comment-1", "body": "First"}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        result = service.list_comments("ENG-1", limit=25, after="cursor-1")
+
+        self.assertEqual(result["nodes"][0]["body"], "First")
+        self.assertEqual(
+            client.post.call_args.kwargs["json"]["variables"],
+            {"id": "ENG-1", "first": 25, "after": "cursor-1"},
+        )
+
+    def test_update_comment_sends_body_input(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "commentUpdate": {
+                        "success": True,
+                        "comment": {"id": "comment-1", "body": "Updated"},
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        comment = service.update_comment("comment-1", "Updated")
+
+        self.assertEqual(comment["body"], "Updated")
+        self.assertEqual(
+            client.post.call_args.kwargs["json"]["variables"],
+            {"id": "comment-1", "input": {"body": "Updated"}},
+        )
+
+    def test_delete_comment_returns_entity_id(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {"data": {"commentDelete": {"success": True, "entityId": "comment-1"}}}
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        result = service.delete_comment("comment-1")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["entityId"], "comment-1")
+        self.assertEqual(client.post.call_args.kwargs["json"]["variables"], {"id": "comment-1"})
+
+    def test_resolve_comment_returns_comment(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "commentResolve": {
+                        "success": True,
+                        "comment": {"id": "comment-1", "resolvedAt": "2026-01-01T00:00:00Z"},
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        comment = service.resolve_comment("comment-1")
+
+        self.assertEqual(comment["id"], "comment-1")
+        self.assertEqual(client.post.call_args.kwargs["json"]["variables"], {"id": "comment-1"})
+
+    def test_unresolve_comment_returns_comment(self) -> None:
+        client = MagicMock()
+        client.post.return_value = _response(
+            {
+                "data": {
+                    "commentUnresolve": {
+                        "success": True,
+                        "comment": {"id": "comment-1", "resolvedAt": None},
+                    }
+                }
+            }
+        )
+        service = LinearService({"api_key": "lin_api_test"}, client=client)
+
+        comment = service.unresolve_comment("comment-1")
+
+        self.assertEqual(comment["id"], "comment-1")
+        self.assertEqual(client.post.call_args.kwargs["json"]["variables"], {"id": "comment-1"})
 
     def test_graphql_errors_raise_readable_value_error(self) -> None:
         client = MagicMock()
@@ -315,6 +513,7 @@ class LinearExecutorBranchTests(unittest.TestCase):
                 "linearTitle": "Issue: $input.text",
                 "linearDescription": "$input.text",
                 "linearAssigneeId": "",
+                "linearStateId": "state-1",
                 "linearPriority": "2",
             }
         )
@@ -355,9 +554,358 @@ class LinearExecutorBranchTests(unittest.TestCase):
             description="hello",
             project_id="project-1",
             assignee_id=None,
+            state_id="state-1",
             priority=2,
         )
         self.assertEqual(result.status, "success")
+
+    def test_update_issue_can_change_team_in_executor(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "updateIssue",
+                "linearIssueId": "ENG-1",
+                "linearTeamId": "team-2",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.update_issue",
+                    return_value={"id": "issue-1", "identifier": "ENG-1"},
+                ) as mock_update:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_update.assert_called_once_with("ENG-1", team_id="team-2")
+        self.assertEqual(result.status, "success")
+
+    def test_delete_issue_calls_service(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "deleteIssue",
+                "linearIssueId": "ENG-1",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.delete_issue",
+                    return_value={"success": True},
+                ) as mock_delete:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_delete.assert_called_once_with("ENG-1")
+        self.assertEqual(result.status, "success")
+        linear_result = next(
+            item for item in result.node_results if item["node_label"] == "linearNode"
+        )
+        self.assertTrue(linear_result["output"]["deleted"])
+
+    def test_add_issue_link_resolves_expressions_and_calls_service(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "addIssueLink",
+                "linearIssueId": "ENG-1",
+                "linearIssueLinkUrl": "https://example.com/$input.text",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.add_issue_link",
+                    return_value={"success": True},
+                ) as mock_add_link:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_add_link.assert_called_once_with("ENG-1", "https://example.com/hello")
+        self.assertEqual(result.status, "success")
+
+    def test_create_comment_passes_parent_comment_id(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "createComment",
+                "linearIssueId": "ENG-1",
+                "linearCommentBody": "$input.text",
+                "linearParentCommentId": "comment-parent",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.create_comment",
+                    return_value={"id": "comment-1", "body": "hello"},
+                ) as mock_comment:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_comment.assert_called_once_with("ENG-1", "hello", parent_id="comment-parent")
+        self.assertEqual(result.status, "success")
+
+    def test_list_comments_calls_service_with_pagination(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "listComments",
+                "linearIssueId": "ENG-1",
+                "linearAfter": "cursor-1",
+                "linearLimit": "10",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.list_comments",
+                    return_value={
+                        "nodes": [{"id": "comment-1", "body": "hello"}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    },
+                ) as mock_list:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_list.assert_called_once_with("ENG-1", 10, after="cursor-1", fetch_all=False)
+        self.assertEqual(result.status, "success")
+        linear_result = next(
+            item for item in result.node_results if item["node_label"] == "linearNode"
+        )
+        self.assertEqual(linear_result["output"]["comments"][0]["id"], "comment-1")
+
+    def test_update_comment_resolves_expressions_and_calls_service(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "updateComment",
+                "linearCommentId": "comment-1",
+                "linearCommentBody": "Updated $input.text",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.update_comment",
+                    return_value={"id": "comment-1", "body": "Updated hello"},
+                ) as mock_update:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_update.assert_called_once_with("comment-1", "Updated hello")
+        self.assertEqual(result.status, "success")
+
+    def test_delete_comment_calls_service(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "deleteComment",
+                "linearCommentId": "comment-1",
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.delete_comment",
+                    return_value={"success": True, "entityId": "comment-1"},
+                ) as mock_delete:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_delete.assert_called_once_with("comment-1")
+        self.assertEqual(result.status, "success")
+        linear_result = next(
+            item for item in result.node_results if item["node_label"] == "linearNode"
+        )
+        self.assertTrue(linear_result["output"]["deleted"])
+        self.assertEqual(linear_result["output"]["entityId"], "comment-1")
+
+    def test_resolve_and_unresolve_comment_call_service(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        for operation, method_name in [
+            ("resolveComment", "resolve_comment"),
+            ("unresolveComment", "unresolve_comment"),
+        ]:
+            with self.subTest(operation=operation):
+                nodes, edges, inputs = _make_linear_workflow(
+                    {
+                        "credentialId": "cred-1",
+                        "linearOperation": operation,
+                        "linearCommentId": "comment-1",
+                    }
+                )
+                with patch("app.db.session.SessionLocal") as mock_session:
+                    mock_db = MagicMock()
+                    mock_db.__enter__ = MagicMock(return_value=mock_db)
+                    mock_db.__exit__ = MagicMock(return_value=False)
+                    mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                        encrypted_config="{}",
+                        type=CredentialType.linear,
+                    )
+                    mock_session.return_value = mock_db
+                    with patch(
+                        "app.services.encryption.decrypt_config",
+                        return_value={"api_key": "lin_api_test"},
+                    ):
+                        with patch(
+                            f"app.services.linear_service.LinearService.{method_name}",
+                            return_value={"id": "comment-1"},
+                        ) as mock_mutation:
+                            executor = WorkflowExecutor(
+                                nodes=nodes,
+                                edges=edges,
+                                actor_user_id=uuid.uuid4(),
+                            )
+                            result = executor.execute(
+                                workflow_id=uuid.uuid4(),
+                                initial_inputs=inputs,
+                            )
+
+                mock_mutation.assert_called_once_with("comment-1")
+                self.assertEqual(result.status, "success")
 
     def test_list_teams_returns_page_info(self) -> None:
         from app.services.workflow_executor import WorkflowExecutor
@@ -399,7 +947,7 @@ class LinearExecutorBranchTests(unittest.TestCase):
                         initial_inputs=inputs,
                     )
 
-        mock_list.assert_called_once_with(50, after="cursor-1")
+        mock_list.assert_called_once_with(50, after="cursor-1", fetch_all=False)
         self.assertEqual(result.status, "success")
         linear_result = next(
             item for item in result.node_results if item["node_label"] == "linearNode"
@@ -494,12 +1042,55 @@ class LinearExecutorBranchTests(unittest.TestCase):
                         initial_inputs=inputs,
                     )
 
-        mock_list.assert_called_once_with("team-1", 25, after="cursor-1")
+        mock_list.assert_called_once_with("team-1", 25, after="cursor-1", fetch_all=False)
         self.assertEqual(result.status, "success")
         linear_result = next(
             item for item in result.node_results if item["node_label"] == "linearNode"
         )
         self.assertEqual(linear_result["output"]["members"][0]["user"]["name"], "Ada")
+
+    def test_list_teams_return_all_calls_service_with_fetch_all(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_linear_workflow(
+            {
+                "credentialId": "cred-1",
+                "linearOperation": "listTeams",
+                "linearReturnAll": True,
+            }
+        )
+        with patch("app.db.session.SessionLocal") as mock_session:
+            mock_db = MagicMock()
+            mock_db.__enter__ = MagicMock(return_value=mock_db)
+            mock_db.__exit__ = MagicMock(return_value=False)
+            mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+                encrypted_config="{}",
+                type=CredentialType.linear,
+            )
+            mock_session.return_value = mock_db
+            with patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "lin_api_test"},
+            ):
+                with patch(
+                    "app.services.linear_service.LinearService.list_teams",
+                    return_value={
+                        "nodes": [{"id": "team-1"}, {"id": "team-2"}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    },
+                ) as mock_list:
+                    executor = WorkflowExecutor(
+                        nodes=nodes,
+                        edges=edges,
+                        actor_user_id=uuid.uuid4(),
+                    )
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs=inputs,
+                    )
+
+        mock_list.assert_called_once_with(50, after=None, fetch_all=True)
+        self.assertEqual(result.status, "success")
 
     def test_update_issue_null_expression_clears_assignee(self) -> None:
         from app.services.workflow_executor import WorkflowExecutor

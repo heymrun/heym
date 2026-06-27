@@ -2263,7 +2263,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
         if (
           (operation === "getIssue" ||
             operation === "updateIssue" ||
-            operation === "createComment") &&
+            operation === "deleteIssue" ||
+            operation === "addIssueLink" ||
+            operation === "createComment" ||
+            operation === "listComments") &&
           !node.data.linearIssueId?.trim()
         ) {
           errors.push({
@@ -2279,6 +2282,36 @@ export const useWorkflowStore = defineStore("workflow", () => {
             nodeLabel: node.data.label,
             nodeType: "Linear",
             message: "Comment body is required",
+          });
+        }
+        if (
+          (operation === "updateComment" ||
+            operation === "deleteComment" ||
+            operation === "resolveComment" ||
+            operation === "unresolveComment") &&
+          !node.data.linearCommentId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Comment ID is required for this operation",
+          });
+        }
+        if (operation === "updateComment" && !node.data.linearCommentBody?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Comment body is required",
+          });
+        }
+        if (operation === "addIssueLink" && !node.data.linearIssueLinkUrl?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Linear",
+            message: "Link URL is required",
           });
         }
       }

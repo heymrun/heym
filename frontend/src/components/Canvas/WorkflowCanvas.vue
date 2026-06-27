@@ -31,6 +31,7 @@ import {
 } from "@/lib/canvasConnectionRules";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
+import { shouldUseNativeTextClipboard } from "@/lib/keyboardTargets";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 import { evalsApi, templatesApi } from "@/services/api";
@@ -666,6 +667,7 @@ function handleNodeDoubleClick(event: {
       nodeType?: NodeType;
       ragOperation?: string;
       githubOperation?: string;
+      notionOperation?: string;
     };
   };
 }): void {
@@ -708,6 +710,42 @@ function handleNodeDoubleClick(event: {
       fieldToFocus = "githubWorkflowInputs";
     } else {
       fieldToFocus = "githubOwner";
+    }
+  } else if (nodeType === "notion") {
+    const notionOperation = event.node.data?.notionOperation;
+    if (notionOperation === "search") {
+      fieldToFocus = "notionQuery";
+    } else if (
+      notionOperation === "getPage" ||
+      notionOperation === "updatePage" ||
+      notionOperation === "trashPage" ||
+      notionOperation === "restorePage"
+    ) {
+      fieldToFocus = "notionPageId";
+    } else if (notionOperation === "createPage") {
+      fieldToFocus = "notionProperties";
+    } else if (notionOperation === "createDatabase") {
+      fieldToFocus = "notionDatabase";
+    } else if (
+      notionOperation === "retrieveDatabase" ||
+      notionOperation === "updateDatabase"
+    ) {
+      fieldToFocus = "notionDatabaseId";
+    } else if (
+      notionOperation === "retrieveDataSource" ||
+      notionOperation === "queryDataSource" ||
+      notionOperation === "updateDataSource"
+    ) {
+      fieldToFocus = "notionDataSourceId";
+    } else if (notionOperation === "createDataSource") {
+      fieldToFocus = "notionDataSource";
+    } else if (
+      notionOperation === "getBlockChildren" ||
+      notionOperation === "updateBlock" ||
+      notionOperation === "deleteBlock" ||
+      notionOperation === "appendBlocks"
+    ) {
+      fieldToFocus = "notionBlockId";
     }
   } else if (nodeType === "throwError") {
     fieldToFocus = "errorMessage";
@@ -959,10 +997,11 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     rag: { label: "rag", vectorStoreId: "", ragOperation: undefined, documentContent: "$input.text", documentMetadata: "{}", queryText: "$input.text", searchLimit: 5, metadataFilters: "{}" },
     grist: { label: "grist", credentialId: "", gristOperation: undefined, gristDocId: "", gristTableId: "", gristRecordId: "", gristRecordData: "{}", gristRecordsData: "[]", gristFilter: "{}", gristSort: "", gristLimit: 100, gristRecordIds: "[]" },
     github: { label: "github", credentialId: "", githubOperation: "getRepository", githubOwner: "", githubRepo: "", githubOrganization: "", githubInviteEmail: "", githubIssueNumber: "", githubTitle: undefined, githubBody: undefined, githubCommentBody: "$input.text", githubState: undefined, githubStateReason: undefined, githubAssignee: "", githubCreator: "", githubMentioned: "", githubLabelsFilter: "", githubSince: "", githubSort: "", githubDirection: "", githubLabels: undefined, githubAssignees: undefined, githubLockReason: "", githubHead: "", githubBase: "main", githubPullRequestNumber: "", githubReviewId: "", githubReviewEvent: "APPROVE", githubReviewBody: "", githubCommitId: "", githubDraft: undefined, githubPrerelease: undefined, githubFilePath: "", githubFileContent: "$input.text", githubCommitMessage: "", githubBranch: "", githubPerPage: "30", githubTagName: "", githubReleaseId: "", githubWorkflowId: "", githubWorkflowInputs: undefined, githubWaitTimeoutSeconds: "600", githubPollIntervalSeconds: "5" },
-    linear: { label: "linear", credentialId: "", linearOperation: "listIssues", linearTeamId: "", linearProjectId: "", linearIssueId: "", linearTitle: "", linearDescription: "$input.text", linearStateId: "", linearAssigneeId: "", linearPriority: "", linearCommentBody: "$input.text", linearLimit: "50" },
+    linear: { label: "linear", credentialId: "", linearOperation: "listIssues", linearTeamId: "", linearProjectId: "", linearIssueId: "", linearIssueLinkUrl: "", linearTitle: "", linearDescription: "$input.text", linearStateId: "", linearAssigneeId: "", linearPriority: "", linearCommentId: "", linearCommentBody: "$input.text", linearParentCommentId: "", linearLimit: "50", linearReturnAll: false },
     googleSheets: { label: "googleSheets", credentialId: "", gsOperation: undefined, gsSpreadsheetId: "", gsSheetName: "Sheet1", gsStartRow: "1", gsUpdateRow: "1", gsMaxRows: "0", gsHasHeader: true, gsRowCount: "1", gsKeepHeader: false, gsAppendPlacement: "append", gsValuesInputMode: "raw", gsValuesSelectiveRows: "1", gsValuesSelectiveCols: "3", gsValues: "[]" },
     bigquery: { label: "bigquery", credentialId: "", bqOperation: undefined, bqProjectId: "", bqQuery: "", bqMaxResults: "1000", bqDatasetId: "", bqTableId: "", bqRowsInputMode: "raw", bqRows: "[]", bqMappings: [{ key: "field", value: "$input.text" }] },
     supabase: { label: "supabase", credentialId: "", supabaseOperation: undefined, supabaseSchema: "public", supabaseTable: "", supabaseSelectColumns: "*", supabaseFilter: "{}", supabaseLimit: "100", supabaseOrderBy: "", supabaseAscending: true, supabaseRows: "[]", supabaseOnConflict: "", supabaseData: "{}" },
+    notion: { label: "notion", credentialId: "", notionOperation: undefined, notionQuery: "", notionPageId: "", notionDatabaseId: "", notionDatabase: "{}", notionDataSourceId: "", notionDataSource: "{}", notionDataSourceInputMode: "select", notionParentPageId: "", notionParentPageInputMode: "select", notionBlockId: "", notionBlock: "{}", notionProperties: "{}", notionChildren: "[]", notionFilter: "{}", notionSort: "{}", notionSorts: "[]", notionIcon: "{}", notionCover: "{}", notionPageSize: "100", notionStartCursor: "", notionAppendPosition: "end", notionAfterBlockId: "" },
     s3: { label: "amazonS3", credentialId: "", s3Operation: "putObject", s3Bucket: "", s3Key: "$input.filename || 'output.txt'", s3SourceBucket: "", s3SourceKey: "", s3Prefix: "", s3ContinuationToken: "", s3Body: "$input.text", s3ContentType: "text/plain", s3MaxKeys: "100", s3IncludeBinary: false },
     throwError: { label: "throwError", errorMessage: "$input.text", httpStatusCode: 400 },
     rabbitmq: { label: "rabbitmq", credentialId: "", rabbitmqOperation: undefined, rabbitmqExchange: "", rabbitmqRoutingKey: "", rabbitmqQueueName: "", rabbitmqMessageBody: "$input", rabbitmqDelayMs: undefined },
@@ -1332,8 +1371,7 @@ function handleKeyDown(event: KeyboardEvent): void {
   if (agentMemoryDialogOpen.value) {
     return;
   }
-  const target = event.target as HTMLElement;
-  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
+  if (shouldUseNativeTextClipboard(event)) {
     return;
   }
 

@@ -1418,6 +1418,106 @@ class CredentialContextTeamShareTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context, {"GitHub Token": "github_pat_123"})
 
+    async def test_workflow_credentials_context_includes_notion_token(self) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Notion Token",
+            type=CredentialType.notion,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with patch(
+            "app.api.workflows.decrypt_config",
+            return_value={"api_token": "ntn_secret"},
+        ):
+            context = await get_credentials_context(db, user_id)
+
+        self.assertEqual(context, {"Notion Token": "ntn_secret"})
+
+    async def test_workflow_credentials_context_includes_notion_oauth_token(self) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Notion OAuth",
+            type=CredentialType.notion,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with patch(
+            "app.api.workflows.decrypt_config",
+            return_value={"auth_mode": "oauth", "access_token": "oauth-secret"},
+        ):
+            context = await get_credentials_context(db, user_id)
+
+        self.assertEqual(context, {"Notion OAuth": "oauth-secret"})
+
+    async def test_mcp_credentials_context_includes_notion_token(self) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Notion Token",
+            type=CredentialType.notion,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with patch(
+            "app.api.mcp.decrypt_config",
+            return_value={"api_token": "ntn_secret"},
+        ):
+            context = await get_credentials_context_for_user(db, user_id)
+
+        self.assertEqual(context, {"Notion Token": "ntn_secret"})
+
+    async def test_mcp_credentials_context_includes_notion_oauth_token(self) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Notion OAuth",
+            type=CredentialType.notion,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with patch(
+            "app.api.mcp.decrypt_config",
+            return_value={"auth_mode": "oauth", "access_token": "oauth-secret"},
+        ):
+            context = await get_credentials_context_for_user(db, user_id)
+
+        self.assertEqual(context, {"Notion OAuth": "oauth-secret"})
+
     async def test_mcp_credentials_context_includes_github_token(self) -> None:
         user_id = uuid.uuid4()
         credential = SimpleNamespace(

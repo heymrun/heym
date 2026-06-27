@@ -8,19 +8,27 @@ The **Linear** node connects workflows to the Linear GraphQL API for issue and w
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Credential | Linear personal API key |
+| Credential | Linear personal API key or OAuth2 |
 | Output | `$nodeLabel.*` |
 
 ## Credential
 
-Create a **Linear** credential in the [Credentials Tab](../tabs/credentials-tab.md):
+Create a **Linear** credential in the [Credentials Tab](../tabs/credentials-tab.md). Choose one
+authentication mode:
+
+**Personal API key**
 
 1. In Linear, open **Settings → Security & Access → Personal API keys**.
 2. Create a key with access to the workspace you want to automate.
 3. Paste the key into a new Linear credential in Heym and use **Test Connection** to verify it.
 
-Personal API keys act as the user who created them. Keep the key scoped to the workspaces and
-teams the workflow needs.
+**OAuth2**
+
+1. Create a Linear OAuth application.
+2. Register `{FRONTEND_URL}/api/credentials/linear/oauth/callback` as the redirect URI.
+3. In Heym, choose **OAuth2**, enter the Client ID and Client Secret, then click **Connect**.
+
+Personal API keys and OAuth tokens act as the user who created or authorized them.
 
 ## Operations
 
@@ -35,23 +43,38 @@ teams the workflow needs.
 | Get Issue | Issue ID or identifier such as `ENG-123` | `issue`, `identifier`, `url` |
 | Create Issue | Team ID, Title | `issue`, `identifier`, `url` |
 | Update Issue | Issue ID or identifier and at least one changed field | `issue`, `identifier`, `url` |
+| Delete Issue | Issue ID or identifier | `deleted` |
+| Add Issue Link | Issue ID or identifier, Link URL | `link` |
 | Create Comment | Issue ID or identifier, Comment Body | `comment` |
+| List Comments | Issue ID or identifier, Limit; optional After Cursor | `comments`, `count`, `pageInfo` |
+| Update Comment | Comment ID, Comment Body | `comment` |
+| Delete Comment | Comment ID | `deleted`, `entityId` |
+| Resolve Comment | Comment ID | `comment` |
+| Unresolve Comment | Comment ID | `comment` |
 
 All text fields support [expressions](../reference/expression-dsl.md).
 
 ## Issue fields
 
 - **Team ID** and **Project ID** are Linear UUIDs. Use List Teams or List Projects to discover them.
-- **State ID** is the workflow-state UUID used when updating an issue. Use List Workflow States to discover it.
+- **State ID** is the workflow-state UUID used when creating or updating an issue. Use List Workflow States to discover it.
 - **Assignee ID** is a Linear user UUID. Use List Team Members to discover it.
 - **Priority** accepts `0` through `4`: no priority, urgent, high, normal, and low.
 - Leave optional update fields empty to preserve their current values.
 - Set an update field to `null` to clear description, project, assignee, or state.
+- **Link URL** adds an external attachment link to an issue.
+- **Comment ID** is the Linear UUID for an existing comment. Use List Comments to discover it.
+- **Parent Comment ID** replies to an existing Linear comment when creating a comment.
 
 ## Pagination
 
-List operations return `pageInfo.hasNextPage` and `pageInfo.endCursor`. Pass the cursor into
-**After Cursor** on the next node run to fetch the next page.
+List operations can either return one page or automatically fetch every page:
+
+- Leave **Return All** off to use `Limit` and `After Cursor` manually.
+- Turn **Return All** on to follow Linear cursors server-side, up to 10,000 results.
+
+Paged results return `pageInfo.hasNextPage` and `pageInfo.endCursor`. Pass the cursor into
+**After Cursor** on the next node run to fetch the next page when **Return All** is off.
 
 ## Examples
 
@@ -68,6 +91,18 @@ Add a comment to a created issue:
 - Operation: `Create Comment`
 - Issue ID: `$createLinearIssue.issue.id`
 - Comment Body: `$input.comment`
+- Parent Comment ID: optional, when replying to another comment
+
+Resolve a comment thread:
+
+- Operation: `Resolve Comment`
+- Comment ID: `$listComments.comments[0].id`
+
+Add an external link to an issue:
+
+- Operation: `Add Issue Link`
+- Issue ID: `$createLinearIssue.issue.id`
+- Link URL: `$input.url`
 
 Paginate through team members:
 
@@ -91,6 +126,8 @@ Every successful operation sets:
 
 List operations also expose `count` and, where applicable, `pageInfo`. Issue operations expose the
 complete Linear issue payload and convenience fields such as `identifier` and `url`.
+Comment mutations expose the complete `comment` payload, except Delete Comment, which exposes
+`deleted` and `entityId`.
 
 ## Related
 

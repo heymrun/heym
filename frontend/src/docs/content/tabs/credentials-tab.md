@@ -13,6 +13,7 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **Google** | Google AI (Gemini) API key |
 | **GitHub** | GitHub personal access token (PAT) for GitHub API, GitHub node workflows, MCP servers, and agent workflows; optional GitHub Enterprise `base_url` |
 | **Linear** | Linear personal API key for teams, projects, issues, and comments |
+| **Notion** | Internal integration token or public-integration OAuth workspace authorization |
 | **Custom** | Custom LLM endpoints |
 | **Bearer** | Bearer token for HTTP auth |
 | **Header** | Custom header key-value for HTTP requests |
@@ -40,7 +41,10 @@ For Linear, create a personal API key under **Settings → Security & Access →
 The credential acts with the permissions of the Linear user who created it. Use **Test Connection**
 in the credential dialog to verify the key before saving.
 
-Supabase credentials also expose **Test Connection** to validate the project URL and API key.
+For **Notion**, choose **Internal token** or **OAuth** in the dialog. OAuth uses the Client ID and
+Client Secret from your Notion public integration; Heym stores them encrypted in the credential.
+Use **Test Connection** to verify Supabase, Linear, or Notion credentials before saving a workflow. See
+[Third-Party Integrations](../reference/integrations.md#notion) for Notion setup details.
 
 ## Editing and Deleting
 
@@ -65,6 +69,7 @@ Reference credentials by name in node configuration. For example:
 - [Agent node](../nodes/agent-node.md) – Pass GitHub tokens into MCP server env vars such as `GITHUB_PERSONAL_ACCESS_TOKEN`
 - [GitHub node](../nodes/github-node.md) – Run native GitHub repository, user, issue, review, release, workflow, traffic, and file operations
 - [Linear node](../nodes/linear-node.md) – Read workspace metadata and automate Linear issues and comments
+- [Notion node](../nodes/notion-node.md) – Manage Notion databases, data sources, pages, and blocks
 - [RAG node](../nodes/rag-node.md) – Use a Qdrant or Postgres (pgvector) credential for the vector store
 - [Telegram Trigger node](../nodes/telegram-trigger-node.md) – Receive Telegram bot webhooks
 - [Telegram node](../nodes/telegram-node.md) – Send Telegram bot messages

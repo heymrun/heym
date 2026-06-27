@@ -2085,6 +2085,7 @@ function sanitizeIntegrationCredentialFields(node: WorkflowNode): WorkflowNode {
     "discordTrigger",
     "bigquery",
     "supabase",
+    "notion",
   ]);
   if (!integrationTypes.has(t) && t !== "playwright") {
     return node;
