@@ -671,6 +671,8 @@ function handleNodeDoubleClick(event: {
     };
   };
 }): void {
+  const shouldOpenExpressionDialog =
+    workflowStore.propertiesPanelVisible && workflowStore.propertiesPanelTab === "properties";
   workflowStore.selectNode(event.node.id);
   if (event.node.data?.nodeType === "sticky") return;
   const nodeType = event.node.data?.nodeType;
@@ -754,7 +756,9 @@ function handleNodeDoubleClick(event: {
   } else if (nodeType === "playwright") {
     fieldToFocus = "playwrightSteps";
   }
-  workflowStore.openPropertiesPanel(fieldToFocus);
+  workflowStore.openPropertiesPanel(fieldToFocus, {
+    skipPrimaryExpand: !shouldOpenExpressionDialog,
+  });
 }
 
 function handleEdgeDoubleClick(event: { edge: { id: string } }): void {

@@ -146,9 +146,10 @@ test("configures a Notion node with a saved credential and operation", async ({ 
     await page.goto(`/workflows/${workflow.id}`);
     const notionNode = page.locator('.vue-flow__node[data-id="notion-node"]');
     await expect(notionNode).toBeVisible();
+    const searchQueryDialogHeading = page.getByRole("heading", { name: "notion – Search Query" });
+
     await notionNode.dblclick();
-    await expect(page.getByRole("heading", { name: "notion – Search Query" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(searchQueryDialogHeading).toBeHidden();
 
     const propertiesPanel = page.locator(".properties-panel");
     await expect(propertiesPanel.getByText("Notion", { exact: true })).toBeVisible();
@@ -156,6 +157,10 @@ test("configures a Notion node with a saved credential and operation", async ({ 
     await expect(selects.nth(0)).toHaveValue(credential.id);
     await expect(selects.nth(1)).toHaveValue("search");
     await expect(propertiesPanel.getByText("Search Query", { exact: true })).toBeVisible();
+
+    await notionNode.dblclick();
+    await expect(searchQueryDialogHeading).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await selects.nth(1).selectOption("getPage");
     await expect(propertiesPanel.getByText("Page ID", { exact: true })).toBeVisible();

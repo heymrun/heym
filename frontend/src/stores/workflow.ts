@@ -65,6 +65,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const hasUnsavedChanges = ref(false);
   const runningNodeId = ref<string | null>(null);
   const propertiesPanelOpen = ref(false);
+  const propertiesPanelVisible = ref(false);
   const analysisPanelOpen = ref(false);
   /** When true, workflow canvas global key handlers and editor undo should stay inactive (agent memory graph modal). */
   const agentMemoryGraphDialogOpen = ref(false);
@@ -1467,6 +1468,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
     skipPrimaryExpandOnNextPropertiesOpen.value = false;
   }
 
+  function setPropertiesPanelVisible(value: boolean): void {
+    propertiesPanelVisible.value = value;
+  }
+
   function clearFocusField(): void {
     focusField.value = null;
   }
@@ -2671,6 +2676,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     fetchExecutionHistory,
     fetchMoreExecutionHistory,
     propertiesPanelOpen,
+    propertiesPanelVisible,
+    setPropertiesPanelVisible,
     analysisPanelOpen,
     agentMemoryGraphDialogOpen,
     setAgentMemoryGraphDialogOpen,

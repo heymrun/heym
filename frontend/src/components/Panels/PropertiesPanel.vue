@@ -4557,7 +4557,8 @@ watch(
         nextTick(() => openPrimaryExpandDialogForSelectedNode());
       }
     }
-  }
+  },
+  { immediate: true },
 );
 
 function buildCredentialOptions(
@@ -7493,6 +7494,7 @@ function handleKeyDown(e: KeyboardEvent): void {
 let unsubDismissOverlays: (() => void) | null = null;
 
 onMounted(() => {
+  workflowStore.setPropertiesPanelVisible(true);
   unsubDismissOverlays = onDismissOverlays(() => {
     isLastOutputExpanded.value = false;
     isOutputExpanded.value = false;
@@ -7511,6 +7513,7 @@ onUnmounted(() => {
   unsubDismissOverlays?.();
   unsubDismissOverlays = null;
   window.removeEventListener("keydown", handleKeyDown, true);
+  workflowStore.setPropertiesPanelVisible(false);
   workflowStore.setExpressionGraphNavigateHandler(null);
 });
 </script>

@@ -67,6 +67,28 @@ class TestClickHouseReads(unittest.TestCase):
         svc = self._svc_with_client(client)
         out = svc.query("ALTER TABLE events DELETE WHERE id = 1")
         client.command.assert_called_once()
+        self.assertEqual(out["result"], "OK")
+        self.assertTrue(out["success"])
+
+    def test_query_non_select_returns_json_safe_summary(self) -> None:
+        client = MagicMock()
+        summary = MagicMock()
+        summary.summary = {"written_rows": "1", "written_bytes": "12", "query_id": "q-1"}
+        summary.written_rows = 1
+        summary.written_bytes.return_value = 12
+        summary.query_id.return_value = "q-1"
+        client.command.return_value = summary
+        svc = self._svc_with_client(client)
+        out = svc.query("INSERT INTO events (id) VALUES ('1')")
+        self.assertEqual(
+            out["result"],
+            {
+                "summary": {"written_rows": "1", "written_bytes": "12", "query_id": "q-1"},
+                "written_rows": 1,
+                "written_bytes": 12,
+                "query_id": "q-1",
+            },
+        )
         self.assertTrue(out["success"])
 
     def test_find_builds_parameterized_where(self) -> None:

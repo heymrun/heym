@@ -40,6 +40,22 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _command_summary_result(summary: Any) -> Any:
+    """Return a JSON-safe command result instead of a driver object repr."""
+    raw_summary = getattr(summary, "summary", None)
+    if not isinstance(raw_summary, dict):
+        return _json_safe(summary)
+
+    result: dict[str, Any] = {"summary": _json_safe(raw_summary)}
+    for field_name in ("written_rows", "written_bytes", "query_id"):
+        value = getattr(summary, field_name, None)
+        if callable(value):
+            value = value()
+        if value not in (None, ""):
+            result[field_name] = _json_safe(value)
+    return result
+
+
 def _validate_identifier(value: str, kind: str) -> str:
     """Validate a table/column identifier; raise ValueError if unsafe."""
     normalized = str(value or "").strip()
@@ -139,7 +155,7 @@ class ClickHouseService:
             rows = self._rows_to_dicts(result)
             return {"rows": rows, "count": len(rows), "success": True}
         summary = client.command(sql, parameters=parameters or {})
-        return {"result": str(summary), "success": True}
+        return {"result": _command_summary_result(summary), "success": True}
 
     def _sanitize_sort(self, sort: str) -> str:
         """Allow 'col' or 'col ASC|DESC'; validate the column identifier."""
