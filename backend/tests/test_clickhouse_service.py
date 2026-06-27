@@ -98,6 +98,30 @@ class TestClickHouseReads(unittest.TestCase):
         out = svc.get_by_id("events", "7")
         self.assertEqual(out["row"], {"id": 7, "name": "x"})
 
+    def test_find_unlimited_when_limit_zero(self) -> None:
+        client = MagicMock()
+        client.query.return_value = self._mock_query_result([], [])
+        svc = self._svc_with_client(client)
+        svc.find("events", filters={}, limit=0, sort="")
+        sql = client.query.call_args[0][0]
+        self.assertNotIn("LIMIT", sql)
+
+    def test_find_honors_large_limit_without_cap(self) -> None:
+        client = MagicMock()
+        client.query.return_value = self._mock_query_result([], [])
+        svc = self._svc_with_client(client)
+        svc.find("events", filters={}, limit=50000, sort="")
+        sql = client.query.call_args[0][0]
+        self.assertIn("LIMIT 50000", sql)
+
+    def test_get_all_unlimited_when_limit_zero(self) -> None:
+        client = MagicMock()
+        client.query.return_value = self._mock_query_result([], [])
+        svc = self._svc_with_client(client)
+        svc.get_all("events", limit=0)
+        sql = client.query.call_args[0][0]
+        self.assertNotIn("LIMIT", sql)
+
 
 class TestClickHouseWrites(unittest.TestCase):
     def _svc_with_client(self, mock_client):

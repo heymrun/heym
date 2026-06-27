@@ -13957,7 +13957,7 @@ onUnmounted(() => {
                 v-if="['find', 'getAll'].includes(String(selectedNode.data.clickhouseOperation))"
                 class="space-y-2"
               >
-                <Label>Limit <span class="text-muted-foreground font-normal">(0 = up to 10000)</span></Label>
+                <Label>Limit <span class="text-muted-foreground font-normal">(0 = unlimited)</span></Label>
                 <input
                   type="number"
                   min="0"

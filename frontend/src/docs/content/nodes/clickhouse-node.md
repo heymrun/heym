@@ -20,7 +20,7 @@ The **ClickHouse** node runs CRUD, count, and raw SQL operations against an exte
 | `clickhouseTable` | expression | Simple table name. Required for every operation except `query`. |
 | `clickhouseQuery` | expression | Raw SQL for `query`. `SELECT`/`SHOW`/`DESCRIBE` return rows; other statements run as commands. |
 | `clickhouseFilter` | expression | JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, and `remove`. Values are parameterized. |
-| `clickhouseLimit` | string | Maximum rows for `find` / `getAll` (`0` = up to 10000). Default `100`. |
+| `clickhouseLimit` | string | Maximum rows for `find` / `getAll` (`0` = unlimited, no LIMIT clause). Default `100`. |
 | `clickhouseSort` | expression | Optional `column` or `column ASC\|DESC` for `find` |
 | `clickhouseRowId` | expression | Value matched against the table's `id` column for `getById` |
 | `clickhouseInputMode` | string | For `insert`/`upsert`: `raw` JSON array mode or `selective` key/value field mode |

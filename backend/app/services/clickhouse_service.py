@@ -39,7 +39,6 @@ class ClickHouseService:
 
     _CONNECT_TIMEOUT_SECONDS = 15
     _QUERY_LIMIT_DEFAULT = 100
-    _QUERY_LIMIT_MAX = 10_000
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = dict(config)
@@ -111,11 +110,6 @@ class ClickHouseService:
         summary = client.command(sql, parameters=parameters or {})
         return {"result": str(summary), "success": True}
 
-    def _clamp_limit(self, limit: int) -> int:
-        if limit <= 0:
-            return self._QUERY_LIMIT_MAX
-        return min(limit, self._QUERY_LIMIT_MAX)
-
     def _sanitize_sort(self, sort: str) -> str:
         """Allow 'col' or 'col ASC|DESC'; validate the column identifier."""
         parts = sort.split()
@@ -132,7 +126,9 @@ class ClickHouseService:
         sort = str(sort or "").strip()
         if sort:
             sql += f" ORDER BY {self._sanitize_sort(sort)}"
-        sql += f" LIMIT {self._clamp_limit(int(limit))}"
+        limit_int = int(limit)
+        if limit_int > 0:  # 0 (or negative) means unlimited — emit no LIMIT clause
+            sql += f" LIMIT {limit_int}"
         result = self._client().query(sql, parameters=params)
         rows = self._rows_to_dicts(result)
         return {"rows": rows, "count": len(rows), "success": True}
