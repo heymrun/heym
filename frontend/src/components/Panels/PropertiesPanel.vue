@@ -2032,6 +2032,7 @@ function closeAllExpressionExpandDialogs(): void {
   googleSheetsSheetNameExpressionInputRef.value?.closeExpandDialog();
   googleSheetsValuesInputRef.value?.closeExpandDialog();
   closeBigQueryExpressionDialogs();
+  closeClickhouseExpressionDialogs();
   closeNotionExpressionDialogs();
   closeS3ExpressionDialogs();
   closeMCPCallExpressionDialogs();
@@ -2644,6 +2645,24 @@ function openPrimaryExpandDialogForSelectedNode(): void {
       }
     };
     nextTick(() => tryOpenDialog());
+  } else if (nodeType === "clickhouse") {
+    currentClickhouseExpressionFieldIndex.value = 0;
+    const tryOpenDialog = (attempts = 0): void => {
+      if (attempts > 20) return;
+      const n = workflowStore.selectedNode;
+      if (!n || n.type !== "clickhouse") return;
+      const op = (n.data.clickhouseOperation as string | undefined) || "";
+      const firstRef =
+        op === "query"
+          ? clickhouseQueryExpressionInputRef.value
+          : clickhouseTableExpressionInputRef.value;
+      if (firstRef) {
+        nextTick(() => openClickhouseExpressionFieldAtIndex(0));
+      } else {
+        setTimeout(() => tryOpenDialog(attempts + 1), 100);
+      }
+    };
+    nextTick(() => tryOpenDialog());
   } else if (nodeType === "drive") {
     currentDriveExpressionFieldIndex.value = 0;
     const tryOpenDialog = (attempts = 0): void => {
@@ -2747,6 +2766,7 @@ function selectedNodeHasPrimaryEvaluateExpandTarget(): boolean {
     case "googleSheets":
     case "bigquery":
     case "supabase":
+    case "clickhouse":
     case "dataTable":
     case "drive":
     case "s3":
