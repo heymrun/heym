@@ -52,6 +52,7 @@ class CredentialType(str, PyEnum):
     notion = "notion"
     s3 = "s3"
     elevenlabs = "elevenlabs"
+    clickhouse = "clickhouse"
 
 
 class WorkflowAuthType(str, PyEnum):
