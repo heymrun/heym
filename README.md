@@ -75,16 +75,6 @@ The demos below illustrate an **agent–subagent** layout instead of a purely st
 
 You can still answer with **two separate LLM calls** (one per question) or run **several calls in sequence** and merge the results in a final step—those patterns work—but for this kind of multi-part ask they are usually **slower** than parallel subagents behind an orchestrator.
 
-### Watch Heym Tutorials
-
-<div align="center">
-
-<a href="https://www.youtube.com/playlist?list=PLPXd_ZbA4wgEHP5PXoaRqbsDJdat7OSd4">
-  <img src="./docs/readme-assets/tutorial-videos-playlist.png" width="100%" alt="Watch Heym tutorial videos on YouTube"/>
-</a>
-
-</div>
-
 ### Generate Workflows from Natural Language
 
 Describe the agents, orchestration pattern, and user-facing result you want; Heym builds the workflow on the canvas.
@@ -159,7 +149,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 
 </div>
 
-- **Visual Workflow Editor** — Drag-and-drop canvas powered by Vue Flow with 30+ node types
+- **Visual Workflow Editor** — Drag-and-drop canvas powered by Vue Flow with a broad node library
 - **AI Assistant** — Describe what you want in natural language (or voice) and the assistant generates and wires nodes on the canvas automatically
 - **Chat with Docs** — Ask context-aware questions directly from the documentation header while the current article path is prioritized in the prompt
 - **AI Skill Builder** — Create new Agent skills or revise existing ones from a modal chat with live `SKILL.md` and Python file previews
@@ -407,7 +397,7 @@ cp .env.example .env
 
 ## 🧩 Node Library
 
-**30+ nodes** across six categories:
+**A broad node library** across workflow categories:
 
 | Category | Nodes |
 |----------|-------|
@@ -635,6 +625,18 @@ cd backend  && uv run ruff check . && uv run ruff format .
 This project is licensed under the **[MIT License](LICENSE)** with the **[Commons Clause](COMMONS-CLAUSE.md)** condition applied. In other words, Heym is **source-available** rather than OSI-open-source. See both files for details.
 
 **TL;DR:** You are free to use, modify, distribute, and self-host this software — but you may **not sell** it or offer it as a paid service. Commercial licensing is available for teams that need those rights.
+
+---
+
+## Watch Heym Tutorials
+
+<div align="center">
+
+<a href="https://www.youtube.com/playlist?list=PLPXd_ZbA4wgEHP5PXoaRqbsDJdat7OSd4">
+  <img src="./docs/readme-assets/tutorial-videos-playlist.png" width="100%" alt="Watch Heym tutorial videos on YouTube"/>
+</a>
+
+</div>
 
 ---
 
