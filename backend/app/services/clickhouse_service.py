@@ -4,13 +4,42 @@ Uses the official synchronous clickhouse-connect HTTP client, matching the
 executor's sync-service-in-threadpool integration pattern (cf. SupabaseService).
 """
 
+import datetime as _dt
 import re
+from decimal import Decimal
+from ipaddress import IPv4Address, IPv6Address
 from typing import Any
+from uuid import UUID
 
 import clickhouse_connect
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _READ_PREFIXES = ("SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "EXISTS")
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce ClickHouse driver values into JSON-serializable types.
+
+    clickhouse-connect returns rich Python objects (datetime, Decimal, UUID,
+    IP addresses, bytes, and nested Array/Tuple/Map containers). The workflow
+    executor serializes node output with ``json.dumps``, so anything that is not
+    natively JSON-serializable must be normalized here at the service boundary.
+    """
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (UUID, IPv4Address, IPv6Address)):
+        return str(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return str(value)
 
 
 def _validate_identifier(value: str, kind: str) -> str:
@@ -79,7 +108,9 @@ class ClickHouseService:
     @staticmethod
     def _rows_to_dicts(result) -> list[dict[str, Any]]:
         columns = list(result.column_names)
-        return [dict(zip(columns, row)) for row in result.result_rows]
+        return [
+            {col: _json_safe(val) for col, val in zip(columns, row)} for row in result.result_rows
+        ]
 
     def _build_where(self, filters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Build a parameterized WHERE clause from a {column: value} dict."""

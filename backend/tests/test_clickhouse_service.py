@@ -122,6 +122,37 @@ class TestClickHouseReads(unittest.TestCase):
         sql = client.query.call_args[0][0]
         self.assertNotIn("LIMIT", sql)
 
+    def test_rows_coerced_to_json_safe(self) -> None:
+        import datetime as dt
+        import json
+        from decimal import Decimal
+        from uuid import UUID
+
+        client = MagicMock()
+        client.query.return_value = self._mock_query_result(
+            [
+                (
+                    "evt-1",
+                    dt.datetime(2026, 6, 27, 20, 33, 19),
+                    dt.date(2026, 6, 27),
+                    Decimal("12.50"),
+                    UUID("12345678-1234-5678-1234-567812345678"),
+                    ["a", "b"],
+                )
+            ],
+            ["id", "ts", "day", "amount", "uid", "tags"],
+        )
+        svc = self._svc_with_client(client)
+        out = svc.find("events", filters={}, limit=0, sort="")
+        # The whole payload must be JSON serializable (the reported bug).
+        json.dumps(out)
+        row = out["rows"][0]
+        self.assertEqual(row["ts"], "2026-06-27T20:33:19")
+        self.assertEqual(row["day"], "2026-06-27")
+        self.assertEqual(row["amount"], 12.5)
+        self.assertEqual(row["uid"], "12345678-1234-5678-1234-567812345678")
+        self.assertEqual(row["tags"], ["a", "b"])
+
 
 class TestClickHouseWrites(unittest.TestCase):
     def _svc_with_client(self, mock_client):
