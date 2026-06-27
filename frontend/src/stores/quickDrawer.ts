@@ -520,7 +520,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
         );
 
         runState.value = {
-          status: result.status,
+          status: result.status === "awaiting_file_upload" ? "pending" : result.status,
           executionId: null,
           outputs: normalizedOutputs,
           executionTimeMs: result.execution_time_ms,

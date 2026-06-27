@@ -514,5 +514,115 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         )
 
 
+class TestConditionEvalRejectsDunderTraversal(unittest.TestCase):
+    """Regression test for security advisory GHSA-pm6h-x3h5-j38h, finding C1.
+
+    The condition evaluator must NOT execute Python attribute traversal. Payloads
+    that reach `object.__subclasses__()` via any Python type's `__class__.__bases__`
+    must raise rather than execute. Before the fix, `eval()` with `__builtins__: {}`
+    was used and the subclasses gadget achieved RCE.
+
+    Note: the simpler `len.__init__.__globals__` payload does NOT fire because
+    builtin slot wrappers have no `__globals__` — only the subclasses gadget works.
+    The maintainer confirmed this during review.
+    """
+
+    DUNDER_PAYLOADS = [
+        # The verified RCE gadget — subclasses traversal to reach __import__.
+        "str.__class__.__bases__[0].__subclasses__()",
+        '"".__class__.__bases__[0].__subclasses__()',
+        "[].__class__.__mro__",
+        # Realistic attack shape: legitimate-looking condition with traversal after `or`.
+        # Left side must be False so simpleeval actually evaluates the right side
+        # (Python `or` short-circuits — if left is True, right is never evaluated
+        # and the dunder traversal never fires).
+        "$input.x == 999 or (str.__class__.__bases__[0].__subclasses__())",
+        # Format-string escape via __class__.
+        '"{0.__class__.__bases__[0].__subclasses__}".format("")',
+    ]
+
+    def _make_executor(self) -> WorkflowExecutor:
+        # Constructor signature: WorkflowExecutor(nodes=..., edges=...)
+        # See test_workflow_executor_branching.py:144 for the established pattern.
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_payloads_raise(self) -> None:
+        executor = self._make_executor()
+        for payload in self.DUNDER_PAYLOADS:
+            with self.subTest(payload=payload):
+                with self.assertRaises(Exception, msg=f"Payload should have raised: {payload}"):
+                    # evaluate_condition_strict propagates the underlying error.
+                    # evaluate_condition swallows it and returns False, which is also
+                    # safe, but we want to assert the eval path itself rejects.
+                    executor.evaluate_condition_strict(payload, {"input": {"x": 1}}, None)
+
+    def test_normal_conditions_still_work(self) -> None:
+        """Make sure the fix doesn't break legitimate condition evaluation."""
+        executor = self._make_executor()
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                '$tradingAgent.action == "buy"',
+                {"tradingAgent": {"action": "buy"}},
+                None,
+            )
+        )
+        self.assertFalse(
+            executor.evaluate_condition_strict(
+                '$tradingAgent.action == "sell"',
+                {"tradingAgent": {"action": "buy"}},
+                None,
+            )
+        )
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                '$tradingAgent.action == "buy" || $tradingAgent.action == "sell"',
+                {"tradingAgent": {"action": "sell"}},
+                None,
+            )
+        )
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                "$node.count > 5",
+                {"node": {"count": 10}},
+                None,
+            )
+        )
+
+    def test_js_style_literal_aliases_still_work(self) -> None:
+        """simpleeval doesn't recognise `true`/`false`/`null`/`undefined` as Python
+        literals — they must be passed via `names`. Regression for the maintainer's
+        feedback that `names={}` breaks `$x == true` with NameNotDefined.
+        """
+        executor = self._make_executor()
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                "$node.active == true",
+                {"node": {"active": True}},
+                None,
+            )
+        )
+        self.assertFalse(
+            executor.evaluate_condition_strict(
+                "$node.active == false",
+                {"node": {"active": True}},
+                None,
+            )
+        )
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                "$node.value == null",
+                {"node": {"value": None}},
+                None,
+            )
+        )
+        self.assertTrue(
+            executor.evaluate_condition_strict(
+                "$node.value == undefined",
+                {"node": {"value": None}},
+                None,
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

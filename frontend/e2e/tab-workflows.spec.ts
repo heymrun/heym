@@ -187,6 +187,76 @@ test("renders multiple connected nodes and persists the edge", async ({ page }) 
   await deleteWorkflow(page, workflow.id);
 });
 
+test("shows the workflow name without overflow on small screens", async ({ page }) => {
+  const longName = `Small Screen Workflow ${Date.now()} With A Very Long Name That Should Truncate`;
+  const workflow = await createWorkflow(page, longName);
+
+  try {
+    // Emulate a small / narrow viewport where the header has little horizontal room.
+    await page.setViewportSize({ width: 380, height: 720 });
+    await page.goto(`/workflows/${workflow.id}`);
+
+    const title = page.getByTestId("workflow-title");
+    // The name must remain visible on small screens, not hidden away.
+    await expect(title).toBeVisible();
+    await expect(title).toHaveText(longName);
+
+    // The title must stay within the viewport (truncated), never overflowing horizontally.
+    const box = await title.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(380);
+
+    // The element is actually clipped (truncated) rather than rendering its full width.
+    const overflow = await title.evaluate(
+      (el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }),
+    );
+    expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
+
+    // Inline editing must not blow out the header width either.
+    await title.dispatchEvent("mousedown");
+    const titleInput = page.locator("[data-heym-inline-edit] input").first();
+    await expect(titleInput).toBeVisible();
+    const inputBox = await titleInput.boundingBox();
+    expect(inputBox).not.toBeNull();
+    expect(inputBox!.x + inputBox!.width).toBeLessThanOrEqual(380);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("collapses toolbar labels to icons when tight and keeps them when wide, with tooltips", async ({ page }) => {
+  const workflow = await createWorkflow(page, `Toolbar Workflow ${Date.now()}`);
+  const historyLabel = page
+    .locator("header.editor-header span")
+    .filter({ hasText: /^History$/ });
+
+  try {
+    // Wide screen that comfortably fits both the toolbar labels and the name:
+    // the text labels stay visible (nothing changes for screens that fit).
+    await page.setViewportSize({ width: 1700, height: 800 });
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.getByTestId("workflow-title")).toBeVisible();
+    await expect(historyLabel).toBeVisible();
+
+    // Tighter screen: the workflow name must still be fully visible, and the
+    // toolbar text labels collapse to icons to make room.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.getByTestId("workflow-title")).toBeVisible();
+    await expect(historyLabel).toBeHidden();
+
+    // Hovering an icon-only button reveals its name in a tooltip popup.
+    const themeButton = page
+      .locator("header.editor-header button")
+      .filter({ has: page.locator("svg.lucide-sun, svg.lucide-moon") })
+      .first();
+    await themeButton.hover();
+    await expect(page.getByRole("tooltip")).toContainText(/mode/i);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
 test("shows a failed workflow execution", async ({ page }) => {
   const workflow = await createWorkflow(page, `Failing Workflow ${Date.now()}`);
 

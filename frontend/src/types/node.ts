@@ -74,6 +74,21 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       retryWaitSeconds: 5,
     },
   },
+  fileUploadTrigger: {
+    type: "fileUploadTrigger",
+    label: "File Upload Trigger",
+    description: "Return a single-use upload curl; run when a file is uploaded",
+    color: "node-websocket",
+    icon: "Upload",
+    inputs: 0,
+    outputs: 1,
+    defaultData: {
+      label: "fileUpload",
+      ttlMinutes: 60,
+      maxSizeMb: 100,
+      allowedTypes: "",
+    },
+  },
   output: {
     type: "output",
     label: "Output",
@@ -391,8 +406,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "sendEmail",
       credentialId: "",
       to: "",
+      cc: "",
+      bcc: "",
       subject: "",
       emailBody: "$input.text",
+      attachments: "",
     },
   },
   errorHandler: {
@@ -739,6 +757,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "drive",
       driveOperation: undefined,
       driveFileId: "",
+      driveFilename: "",
+      driveBase64Content: "",
     },
   },
   s3: {

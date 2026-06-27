@@ -1259,5 +1259,99 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertIsInstance(response, ExpressionEvaluateResponse)
 
 
+class TestConditionEvalRejectsDunderTraversalService(unittest.TestCase):
+    """Service-path coverage for GHSA-pm6h-x3h5-j38h finding C1.
+
+    Per AGENTS.md, executor-vs-dialog drift is a hard constraint: the canvas
+    expression evaluate dialog (ExpressionEvaluatorService) and workflow execution
+    (WorkflowExecutor) must agree on the same semantics. The executor raises on
+    dunder-traversal payloads; the service catches that exception and returns
+    a safe response (result is None or the literal string, no code execution).
+
+    This test exercises the service API directly (ExpressionEvaluatorService().evaluate(...))
+    and asserts the safety property: the payload is NOT executed. The service may
+    return the payload as a literal string (for payloads without $) or return
+    result=None (for payloads with $ that route through HeymExpressionEval, which
+    blocks dunder access). Either way, no Python attribute traversal occurs.
+    """
+
+    DUNDER_PAYLOADS = [
+        "str.__class__.__bases__[0].__subclasses__()",
+        '"".__class__.__bases__[0].__subclasses__()',
+        "[].__class__.__mro__",
+        "$input.x == 999 or (str.__class__.__bases__[0].__subclasses__())",
+        '"{0.__class__.__bases__[0].__subclasses__}".format("")',
+    ]
+
+    def _service(self) -> ExpressionEvaluatorService:
+        return ExpressionEvaluatorService()
+
+    def test_payloads_do_not_execute(self) -> None:
+        """Dunder payloads must not execute through the service path.
+
+        The service routes $-prefixed payloads through resolve_expression (which
+        uses HeymExpressionEval, a simpleeval subclass that blocks dunder access).
+        Non-$ payloads are returned as literal strings via evaluate_message_template.
+
+        For each payload, we assert the result is NOT a list/type/object that would
+        indicate the dunder traversal actually executed. Acceptable safe outcomes:
+        - result is None (eval was attempted and blocked)
+        - result is a string (the literal payload, possibly with $ substituted)
+        - error is populated (eval raised and the service surfaced it)
+        """
+        service = self._service()
+        for payload in self.DUNDER_PAYLOADS:
+            with self.subTest(payload=payload):
+                response = service.evaluate(payload, {"input": {"x": 1}})
+                # The result must not be a list, type, or class instance that would
+                # indicate the dunder traversal executed. str.__subclasses__() returns
+                # a list; __mro__ returns a tuple of types; __class__ returns a type.
+                self.assertNotIsInstance(
+                    response.result,
+                    (list, tuple, type),
+                    f"Payload executed and returned a dangerous type: {payload} -> {response.result!r}",
+                )
+                # If the result is a string, it should be the literal payload (or a
+                # substituted version), not the output of executing the traversal.
+                if isinstance(response.result, str):
+                    # The string should still contain the dunder pattern (unevaluated).
+                    # If the traversal had executed, the string would be a repr of the
+                    # result (e.g. "[<class 'type'>, ...]"), not the original payload.
+                    self.assertIn(
+                        "__class__",
+                        response.result,
+                        f"Payload string does not contain the original dunder pattern — may have been executed: {payload} -> {response.result!r}",
+                    )
+
+    def test_js_style_literal_aliases_via_service(self) -> None:
+        """JS-style aliases (true/false/null/undefined) must work through the service.
+
+        The service delegates to the executor which passes these via `names` to
+        HeymExpressionEval. Valid boolean conditions should return result_type="boolean"
+        with no error.
+        """
+        service = self._service()
+
+        response_true = service.evaluate("$node.active == true", {"node": {"active": True}})
+        self.assertIsNone(response_true.error)
+        self.assertEqual(response_true.result_type, "boolean")
+        self.assertTrue(response_true.result)
+
+        response_false = service.evaluate("$node.active == false", {"node": {"active": True}})
+        self.assertIsNone(response_false.error)
+        self.assertEqual(response_false.result_type, "boolean")
+        self.assertFalse(response_false.result)
+
+        response_null = service.evaluate("$node.value == null", {"node": {"value": None}})
+        self.assertIsNone(response_null.error)
+        self.assertEqual(response_null.result_type, "boolean")
+        self.assertTrue(response_null.result)
+
+        response_undefined = service.evaluate("$node.value == undefined", {"node": {"value": None}})
+        self.assertIsNone(response_undefined.error)
+        self.assertEqual(response_undefined.result_type, "boolean")
+        self.assertTrue(response_undefined.result)
+
+
 if __name__ == "__main__":
     unittest.main()

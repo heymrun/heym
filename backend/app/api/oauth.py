@@ -4,7 +4,7 @@ import hmac
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,6 +25,88 @@ router = APIRouter()
 _CSRF_MAX_AGE_SECONDS = 600  # 10-minute window
 _SUPPORTED_TOKEN_AUTH_METHODS = {"client_secret_post", "client_secret_basic", "none"}
 _SUPPORTED_PKCE_METHOD = "S256"
+
+# SECURITY: Hostnames allowed to use http:// (not https://) for redirect_uri.
+# Local development only -- anything else must be https://.
+# See security advisory GHSA-pm6h-x3h5-j38h, finding H3.
+_LOCALHOST_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _validate_redirect_uri(uri: str) -> None:
+    """Validate an OAuth ``redirect_uri`` per RFC 6749 section 3.1.2.
+
+    Rejects:
+    - Non-string or empty values.
+    - Non-http(s) schemes (``javascript:``, ``data:``, ``file:``, etc.) -- these
+      enable auth-code interception in clients/browsers that follow such redirects.
+    - Protocol-relative URLs (``//attacker.com``) -- these resolve to the page
+      scheme, which can be ``https:`` in production but ``file:`` in some clients.
+    - URLs without a hostname (``http://`` alone).
+    - URLs with a fragment (RFC 6749 section 3.1.2 forbids fragments in redirect_uri).
+    - Non-https schemes for non-localhost hosts (must be HTTPS in production).
+
+    Local development exemption: ``http://`` is allowed for ``localhost``,
+    ``127.0.0.1``, and ``::1`` only.
+
+    Raises HTTPException(400) on any invalid URI.
+    """
+    if not isinstance(uri, str) or not uri:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": "redirect_uri is required",
+            },
+        )
+    parsed = urlparse(uri)
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+
+    # Reject protocol-relative URLs (//attacker.com/path) -- urlparse parses these
+    # with scheme="" and netloc="attacker.com", which would otherwise pass the
+    # http/https check below.
+    if not scheme:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": "redirect_uri must include an http or https scheme",
+            },
+        )
+    if scheme not in {"http", "https"}:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": f"redirect_uri scheme {scheme!r} is not allowed; use http or https",
+            },
+        )
+    if not host:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": "redirect_uri must include a hostname",
+            },
+        )
+    if parsed.fragment:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": "redirect_uri must not contain a fragment",
+            },
+        )
+    # Require HTTPS in production. http:// is allowed only for localhost / 127.0.0.1 / ::1
+    # to support local development.
+    if scheme == "http" and host not in _LOCALHOST_HOSTNAMES:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "invalid_client_metadata",
+                "error_description": "redirect_uri must use https except for localhost development",
+            },
+        )
 
 
 def _generate_csrf_token(client_id: str) -> str:
@@ -313,6 +395,15 @@ async def register_client(
     if not redirect_uris:
         raise HTTPException(400, detail="redirect_uris required")
 
+    # SECURITY: validate every redirect_uri scheme/host before storing the client.
+    # See security advisory GHSA-pm6h-x3h5-j38h, finding H3. Without this check,
+    # a client can register a javascript: or data: redirect_uri and the authorize
+    # endpoint will return it in the 302 Location with the auth code.
+    if not isinstance(redirect_uris, list) or not all(isinstance(u, str) for u in redirect_uris):
+        raise HTTPException(400, detail="redirect_uris must be a list of strings")
+    for uri in redirect_uris:
+        _validate_redirect_uri(uri)
+
     client_id = secrets.token_urlsafe(24)
     client_secret = None
     client_secret_hash = None
@@ -379,6 +470,11 @@ async def authorize_get(
     if response_type != "code":
         raise HTTPException(400, detail="Only response_type=code is supported")
 
+    # SECURITY: validate the redirect_uri even though we also check it at
+    # registration. This covers clients registered before the fix and prevents
+    # authorize-time injection of unsafe URIs. See GHSA-pm6h-x3h5-j38h, finding H3.
+    _validate_redirect_uri(redirect_uri)
+
     client = await _get_client(db, client_id)
     if client is None or redirect_uri not in client.redirect_uris:
         raise HTTPException(400, detail="Invalid client_id or redirect_uri")
@@ -419,6 +515,11 @@ async def authorize_post(
     code_challenge = str(form.get("code_challenge", "")) or ""
     code_challenge_method = str(form.get("code_challenge_method", "")) or ""
     csrf_token = str(form.get("csrf_token", ""))
+
+    # SECURITY: validate the redirect_uri at authorize_post time too. This is the
+    # path that issues the auth code and returns the 302. Defense-in-depth for
+    # legacy clients registered before the fix. See GHSA-pm6h-x3h5-j38h, finding H3.
+    _validate_redirect_uri(redirect_uri)
 
     # Validate client
     client = await _get_client(db, client_id)

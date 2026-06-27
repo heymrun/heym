@@ -14,6 +14,7 @@ Start nodes (no incoming edges) that initiate execution:
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
 | [WebSocket Trigger](../nodes/websocket-trigger-node.md) | Opens an outbound client connection to an external socket and starts on selected socket events. |
+| [File Upload Trigger](../nodes/file-upload-trigger-node.md) | Mints a single-use upload URL and starts when a caller posts a large multipart file. |
 | [RabbitMQ](../nodes/rabbitmq-node.md) (receive) | Starts when a message is consumed from a RabbitMQ queue. |
 | [Slack Trigger](../nodes/slack-trigger-node.md) | Starts when Slack sends an event via the Events API webhook. |
 
@@ -27,6 +28,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
 | **IMAP** | IMAP trigger manager (leader worker, per-node polling interval) | IMAP username/password |
 | **WebSocket** | Outbound WebSocket trigger manager (leader worker, persistent client connections) | Optional per-node headers |
+| **File Upload** | `POST /api/file-intake/u/{token}` after a slot is minted | Single-use capability token |
 | **RabbitMQ** | RabbitMQ consumer (leader worker) | N/A |
 | **Slack** | `POST /api/slack/webhook/{node_id}` | HMAC-SHA256 signing secret |
 | **Discord** | `POST /api/discord/webhook/{node_id}` | Ed25519 application public key |
@@ -62,6 +64,14 @@ The IMAP trigger manager runs in the leader worker and checks active `imapTrigge
 
 The WebSocket trigger manager runs in the leader worker and keeps one outbound client connection per active [WebSocket Trigger](../nodes/websocket-trigger-node.md) node. It can emit runs for `onMessage`, `onConnected`, and `onClosed`. Input includes `eventName`, `url`, `triggered_by: "websocket"`, `trigger_node_id`, and one of `message`, `connection`, or `close`.
 
+### File Upload
+
+The [File Upload Trigger](../nodes/file-upload-trigger-node.md) mints a TTL-bounded, single-use
+upload slot when the workflow is invoked through the API, MCP, or canvas. Uploading multipart form
+data to `POST /api/file-intake/u/{token}` consumes the slot, stores the file as a Drive file, and
+starts the workflow synchronously. Input includes `file`, `uploaded_at`,
+`triggered_by: "file_upload"`, and upload metadata.
+
 ### Telegram
 
 Telegram sends bot webhook updates to `POST /api/telegram/webhook/{node_id}`. The payload is passed into the workflow as `update`, `message`, optional `callback_query`, sanitized `headers`, `triggered_by`, `trigger_node_id`, and `triggered_at`. If the selected credential has a secret token, Heym verifies `x-telegram-bot-api-secret-token` before execution.
@@ -86,6 +96,7 @@ Execution history records `trigger_source` for every entry point:
 | `"cron"` | Cron scheduler |
 | `"imap"` | IMAP trigger manager |
 | `"websocket"` | Outbound WebSocket trigger manager |
+| `"file_upload"` | File Upload Trigger upload endpoint |
 | `"telegram"` | Telegram bot webhook |
 | `"Discord"` | Discord interactions webhook |
 | `"MCP"` | MCP tool call |
@@ -104,6 +115,7 @@ Execution history records `trigger_source` for every entry point:
 - **Discord**: `interaction` + `type` + `data` + sanitized `headers` + `triggered_by: "Discord"` + `trigger_node_id` + `triggered_at`
 - **IMAP**: `email` + `triggered_by: "imap"` + `trigger_node_id` + `triggered_at`
 - **WebSocket**: `eventName` + `url` + `triggered_by: "websocket"` + `message` / `connection` / `close`
+- **File Upload**: `file` + `uploaded_at` + `triggered_by: "file_upload"`
 - **RabbitMQ**: `message_data` + `triggered_by: "rabbitmq"`
 - **Slack**: `event` (full Slack event object) + `headers` (sanitized) + `triggered_by: "Slack"` + `trigger_node_id`
 - **Portal**: `body.inputs` + optional `conversation_history`
@@ -112,7 +124,7 @@ Execution history records `trigger_source` for every entry point:
 
 - [Webhooks](./webhooks.md) – Webhook TTL, cache, rate limit, auth
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges
-- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
+- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
 - [Discord Trigger](../nodes/discord-trigger-node.md) – Discord interactions webhook trigger
 - [Quick Start](../getting-started/quick-start.md) – Build a workflow with Input
 - [Portal](./portal.md) – Portal trigger and chat UI

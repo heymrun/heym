@@ -34,6 +34,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "discord-trigger-node", title: "Discord Trigger" },
       { slug: "imap-trigger-node", title: "IMAP Trigger" },
       { slug: "websocket-trigger-node", title: "WebSocket Trigger" },
+      { slug: "file-upload-trigger-node", title: "File Upload Trigger" },
       { slug: "rabbitmq-node", title: "RabbitMQ" },
       { slug: "llm-node", title: "LLM" },
       { slug: "rag-node", title: "RAG / Vector Store" },

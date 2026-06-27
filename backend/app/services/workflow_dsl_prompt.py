@@ -359,6 +359,32 @@ In workflow expressions:
 }
 ```
 
+### 3e. fileUploadTrigger (Large File Upload Entry Point)
+- **Purpose**: Accept a large file (audio/video) that cannot fit in base64 JSON. When the workflow is invoked (HTTP/MCP/canvas), it returns a prefilled single-use `curl` upload link instead of running. The multipart upload to that link starts the run with the file attached.
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When a caller must send a large binary file (e.g. a 20 MB voice recording, a 75 MB video) to the workflow. Do NOT use base64 in a textInput for large files.
+- **Data fields**:
+  - `label`: Node identifier (e.g., "audio")
+  - `ttlMinutes`: Upload-link lifetime in minutes (default 60, 1-10080)
+  - `maxSizeMb`: Max accepted file size in MB (default 100, hard ceiling 100)
+  - `allowedTypes`: Optional comma-separated mime/extension allowlist (e.g. `audio/*, .wav`); empty = any
+- **Output fields available downstream**:
+  - `$<label>.file.id` — stored file UUID
+  - `$<label>.file.name` — original filename
+  - `$<label>.file.mime` — content type
+  - `$<label>.file.size` — size in bytes
+  - `$<label>.file.download_url` — authenticated download URL for downstream nodes
+  - `$<label>.uploaded_at` — ISO timestamp of the upload
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "fileUploadTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "audio", "ttlMinutes": 60, "maxSizeMb": 100, "allowedTypes": "audio/*"}}
+```
+
+**Example downstream expressions:**
+- Transcribe input file id: `$audio.file.id`
+- LLM context: `"Transcript of $audio.file.name"`
+
 ### 3d. websocketSend (Outbound WebSocket Send)
 - **Purpose**: Open an outbound WebSocket client connection, send one message, and close it
 - **Inputs**: 1 | **Outputs**: 1
@@ -1409,8 +1435,11 @@ You can enable both retry AND error branching. The node will first exhaust all r
   - `label`: Node identifier
   - `credentialId`: UUID of the SMTP credential
   - `to`: Recipient email address (supports expressions, comma-separated for multiple recipients)
+  - `cc`: (optional) Carbon-copy recipient(s) (supports expressions, comma-separated for multiple)
+  - `bcc`: (optional) Blind carbon-copy recipient(s) (supports expressions, comma-separated); hidden from other recipients
   - `subject`: Email subject line (supports expressions)
   - `emailBody`: Email body content (supports expressions)
+  - `attachments`: (optional) Comma-separated Drive file IDs to attach (supports expressions). Reference an upstream `drive` node's `id` output, e.g. `$drive.id`. Only files owned by the workflow owner can be attached.
 
 **SETUP**: Requires an SMTP credential with server, port, email, and password configured. Common SMTP servers:
 - Gmail: `smtp.gmail.com`, port `587` (requires App Password)
@@ -1422,7 +1451,10 @@ You can enable both retry AND error branching. The node will first exhaust all r
 {
   "status": "sent",
   "to": "recipient@example.com",
-  "subject": "Email Subject"
+  "cc": "",
+  "bcc": "",
+  "subject": "Email Subject",
+  "attachment_count": 0
 }
 ```
 
@@ -1434,8 +1466,11 @@ You can enable both retry AND error branching. The node will first exhaust all r
     "label": "notifyUser",
     "credentialId": "smtp-credential-uuid",
     "to": "$userInput.body.email",
+    "cc": "manager@example.com",
+    "bcc": "audit@example.com",
     "subject": "Your request has been processed",
-    "emailBody": "Hello,\n\nYour request for $userInput.body.text has been completed.\n\nBest regards"
+    "emailBody": "Hello,\n\nYour request for $userInput.body.text has been completed.\n\nBest regards",
+    "attachments": "$drive.id"
   }
 }
 ```
@@ -3042,10 +3077,12 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 - **No credential required** — operates on files owned by the workflow owner
 - **Data fields**:
   - `label`: Node identifier
-  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"convertFile"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"`
-  - `driveFileId`: UUID of the Drive file (supports expressions, e.g. `$agentLabel._generated_files[0].id`; all operations except getAll/downloadUrl)
+  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"save"` | `"convertFile"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"`
+  - `driveFileId`: UUID of the Drive file (supports expressions, e.g. `$agentLabel._generated_files[0].id`; all operations except getAll/downloadUrl/save)
   - `driveLimit`: Optional max number of files to return (getAll only; omit for no limit)
   - `driveSourceUrl`: URL to fetch and store as a Drive file (downloadUrl only, supports expressions)
+  - `driveFilename`: Full filename including extension (save only, supports expressions, e.g. `"1.mp3"` or `$userInput.body.filename`)
+  - `driveBase64Content`: Base64 string or data URL to decode and store (save only, supports expressions)
   - `driveIncludeBinary`: Boolean to include base64 file contents in `file_base64` (get only)
   - `drivePassword`: Password string (setPassword only, supports expressions)
   - `driveTtlHours`: Hours until expiry as integer (setTtl only)
@@ -3062,6 +3099,7 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 | `get` | driveFileId | Return file metadata and download URL; optionally include base64 content with driveIncludeBinary |
 | `getAll` | none | List the workflow owner's Drive files as metadata objects |
 | `downloadUrl` | driveSourceUrl | Download an external URL and store it as a Drive file |
+| `save` | driveFilename, driveBase64Content | Decode base64 content and store it as a Drive file |
 | `delete` | driveFileId | Delete the file and all its access tokens from disk and database |
 | `setPassword` | driveFileId, drivePassword | Replace default public token with a password-protected token |
 | `setTtl` | driveFileId, driveTtlHours | Replace default public token with one that expires after N hours |
@@ -3069,6 +3107,22 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 | `convertFile` | driveFileId, driveConvertTargetFormat | Convert file to a new format; stores result as a new Drive file (original unchanged). Inputs: docx/html/md/txt/csv/pdf + json (array of objects). Doc outputs: pdf/docx/html/md/txt/epub via pandoc; csv output: json→csv via Python csv module; image outputs: jpg/png/bmp/webp via Pillow. Same-format conversion not allowed. |
 
 **⚠️ CRITICAL: File ID comes from the agent/skill output**: When an Agent node runs a skill that generates files, the output contains `_generated_files` — an array of file objects. Each object has an `id` field. Reference it with `$agentLabel._generated_files[0].id`.
+
+**Example - Save Base64 Input to Drive**:
+```json
+{
+  "id": "drive-save",
+  "type": "drive",
+  "position": {"x": 600, "y": 200},
+  "data": {
+    "label": "saveAudio",
+    "driveOperation": "save",
+    "driveFilename": "$userInput.body.filename",
+    "driveBase64Content": "$userInput.body.base64"
+  }
+}
+```
+Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 
 **Example - Delete File After Delivery**:
 ```json

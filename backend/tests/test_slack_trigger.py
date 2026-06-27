@@ -272,5 +272,96 @@ class TestSlackUnknownNode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 404)
 
 
+class TestSlackFailClosedNoCredential(unittest.IsolatedAsyncioTestCase):
+    """Regression for GHSA-pm6h-x3h5-j38h finding H1.
+
+    Slack webhook must reject with 400 when the trigger node has no credentialId.
+    Previously this case fell through and triggered the workflow with the owner's
+    credentials. Client-facing message is the generic
+    "invalid webhook credential configuration" so probing the webhook URL doesn't
+    reveal which nodes are misconfigured.
+    """
+
+    async def test_no_credential_id_returns_400(self) -> None:
+        from app.api.slack import slack_webhook
+
+        node_id = str(uuid.uuid4())
+        raw_body = json.dumps({"type": "message", "event": {}}).encode()
+        request = _make_request(raw_body, {"content-type": "application/json"})
+
+        mock_workflow = MagicMock()
+        mock_workflow.id = uuid.uuid4()
+        mock_workflow.nodes = [
+            {
+                "id": node_id,
+                "type": "slackTrigger",
+                "data": {},  # no credentialId
+            }
+        ]
+
+        with (
+            patch(
+                "app.api.slack._find_workflow_by_node_id",
+                new=AsyncMock(return_value=mock_workflow),
+            ),
+            patch(
+                "app.api.slack._execute_workflow_background",
+                new=AsyncMock(return_value=None),
+            ) as mock_execute_background,
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await slack_webhook(node_id, request)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "invalid webhook credential configuration")
+        mock_execute_background.assert_not_awaited()
+
+
+class TestSlackFailClosedEmptySecret(unittest.IsolatedAsyncioTestCase):
+    """Slack webhook must reject with 400 when the credential exists but has an
+    empty signing_secret. Previously this case fell through and triggered the
+    workflow with the owner's credentials.
+    """
+
+    async def test_empty_signing_secret_returns_400(self) -> None:
+        from app.api.slack import slack_webhook
+
+        node_id = str(uuid.uuid4())
+        credential_id = str(uuid.uuid4())
+        raw_body = json.dumps({"type": "message", "event": {}}).encode()
+        request = _make_request(raw_body, {"content-type": "application/json"})
+
+        mock_workflow = MagicMock()
+        mock_workflow.id = uuid.uuid4()
+        mock_workflow.nodes = [
+            {
+                "id": node_id,
+                "type": "slackTrigger",
+                "data": {"credentialId": credential_id},
+            }
+        ]
+
+        with (
+            patch(
+                "app.api.slack._find_workflow_by_node_id",
+                new=AsyncMock(return_value=mock_workflow),
+            ),
+            patch(
+                "app.api.slack._get_signing_secret",
+                new=AsyncMock(return_value=""),  # empty secret
+            ),
+            patch(
+                "app.api.slack._execute_workflow_background",
+                new=AsyncMock(return_value=None),
+            ) as mock_execute_background,
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await slack_webhook(node_id, request)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "invalid webhook credential configuration")
+        mock_execute_background.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()

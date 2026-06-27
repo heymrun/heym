@@ -2,6 +2,7 @@ import asyncio
 import json
 import secrets
 import uuid
+from collections.abc import AsyncGenerator
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, TypeVar
@@ -46,6 +47,7 @@ from app.models.schemas import (
     MCPToolsListResponse,
     MCPWorkflowItem,
 )
+from app.services import file_intake_service
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
@@ -54,6 +56,7 @@ from app.services.execution_cancellation import (
     register_execution,
 )
 from app.services.global_variables_service import get_global_variables_context
+from app.services.hitl_service import build_public_base_url
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import oauth_token_lookup_values
 from app.services.workflow_executor import execute_workflow
@@ -61,6 +64,21 @@ from app.services.workflow_executor import execute_workflow
 router = APIRouter()
 T = TypeVar("T")
 _MCP_PROTOCOL_SEMAPHORE = asyncio.Semaphore(max(1, settings.mcp_protocol_max_concurrency))
+_MCP_PROGRESS_INTERVAL_SECONDS = 30.0
+_MCP_STREAM_PADDING_BYTES = 2048
+
+
+def _mcp_stream_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "Pragma": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+
+
+def _mcp_keepalive_comment() -> str:
+    return ": keep-alive" + (" " * _MCP_STREAM_PADDING_BYTES) + "\n\n"
 
 
 async def _run_mcp_protocol_limited(operation: Callable[[], Awaitable[T]]) -> T:
@@ -76,6 +94,208 @@ async def _run_mcp_protocol_limited(operation: Callable[[], Awaitable[T]]) -> T:
         return await operation()
     finally:
         _MCP_PROTOCOL_SEMAPHORE.release()
+
+
+async def _run_mcp_protocol_limited_with_session(
+    operation: Callable[[AsyncSession], Awaitable[T]],
+) -> T:
+    async def run_with_session() -> T:
+        async with async_session_maker() as db:
+            try:
+                result = await operation(db)
+                await db.commit()
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return await _run_mcp_protocol_limited(run_with_session)
+
+
+def _sanitize_workflow_tool_name(name: str) -> str:
+    tool_name = name.lower().replace(" ", "_").replace("-", "_")
+    return "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
+
+
+def _mcp_tool_result_jsonrpc_response(
+    msg_id: int | str,
+    output_text: str,
+    *,
+    is_error: bool = False,
+) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": {
+            "content": [{"type": "text", "text": output_text}],
+            "isError": is_error,
+        },
+    }
+
+
+def _mcp_jsonrpc_error_response(msg_id: int | str, message: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "error": {"code": -32603, "message": message},
+    }
+
+
+def _mcp_progress_token(msg: MCPJSONRPCRequest) -> str | int | None:
+    meta = msg.params.get("_meta")
+    if not isinstance(meta, dict):
+        return None
+    progress_token = meta.get("progressToken")
+    if isinstance(progress_token, bool):
+        return None
+    if isinstance(progress_token, (str, int)):
+        return progress_token
+    return None
+
+
+def _mcp_progress_notification(
+    progress_token: str | int,
+    sequence: int,
+) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {
+            "progressToken": progress_token,
+            "progress": sequence,
+            "message": "Workflow is still running",
+        },
+    }
+
+
+def _is_mcp_tool_call_with_response(msg: MCPJSONRPCRequest) -> bool:
+    return msg.id is not None and msg.method == "tools/call"
+
+
+def _format_sse_jsonrpc_message(payload: dict[str, Any]) -> str:
+    return f"event: message\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _run_mcp_operation_with_progress(
+    operation: Callable[[], Awaitable[dict[str, Any]]],
+    *,
+    progress_token: str | int | None,
+    send_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    send_heartbeat: Callable[[], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    operation_task = asyncio.create_task(operation())
+    sequence = 0
+
+    if send_heartbeat is not None:
+        await send_heartbeat()
+    if progress_token is not None and send_progress is not None:
+        await send_progress(_mcp_progress_notification(progress_token, sequence))
+
+    try:
+        while True:
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(operation_task),
+                    timeout=_MCP_PROGRESS_INTERVAL_SECONDS,
+                )
+            except TimeoutError:
+                sequence += 1
+                if send_heartbeat is not None:
+                    await send_heartbeat()
+                if progress_token is not None and send_progress is not None:
+                    await send_progress(_mcp_progress_notification(progress_token, sequence))
+    finally:
+        if not operation_task.done():
+            operation_task.cancel()
+
+
+async def _send_legacy_sse_jsonrpc_response(
+    *,
+    session_token: str,
+    msg: MCPJSONRPCRequest,
+    operation_factory: Callable[[AsyncSession], Awaitable[dict[str, Any]]],
+) -> None:
+    async def send_progress(payload: dict[str, Any]) -> None:
+        await mcp_sse_channels.send(session_token, json.dumps(payload, ensure_ascii=False))
+
+    async with async_session_maker() as bg_db:
+        try:
+            response = await _run_mcp_operation_with_progress(
+                lambda: operation_factory(bg_db),
+                progress_token=_mcp_progress_token(msg),
+                send_progress=send_progress,
+            )
+            await bg_db.commit()
+        except Exception as exc:
+            await bg_db.rollback()
+            if msg.id is None:
+                return
+            response = _mcp_jsonrpc_error_response(msg.id, f"Execution error: {exc}")
+
+    await mcp_sse_channels.send(session_token, json.dumps(response, ensure_ascii=False))
+
+
+def _schedule_legacy_sse_jsonrpc_response(
+    *,
+    session_token: str,
+    msg: MCPJSONRPCRequest,
+    operation_factory: Callable[[AsyncSession], Awaitable[dict[str, Any]]],
+) -> None:
+    asyncio.create_task(
+        _send_legacy_sse_jsonrpc_response(
+            session_token=session_token,
+            msg=msg,
+            operation_factory=operation_factory,
+        )
+    )
+
+
+def _stream_mcp_jsonrpc_response(
+    *,
+    msg: MCPJSONRPCRequest,
+    operation: Callable[[], Awaitable[dict[str, Any]]],
+) -> StreamingResponse:
+    async def event_generator() -> AsyncGenerator[str, None]:
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def send_progress(payload: dict[str, Any]) -> None:
+            await queue.put(_format_sse_jsonrpc_message(payload))
+
+        async def send_heartbeat() -> None:
+            await queue.put(_mcp_keepalive_comment())
+
+        async def worker() -> None:
+            try:
+                response = await _run_mcp_operation_with_progress(
+                    operation,
+                    progress_token=_mcp_progress_token(msg),
+                    send_progress=send_progress,
+                    send_heartbeat=send_heartbeat,
+                )
+            except Exception as exc:
+                if msg.id is None:
+                    response = {"jsonrpc": "2.0"}
+                else:
+                    response = _mcp_jsonrpc_error_response(msg.id, f"Execution error: {exc}")
+            await queue.put(_format_sse_jsonrpc_message(response))
+            await queue.put(None)
+
+        worker_task = asyncio.create_task(worker())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not worker_task.done():
+                worker_task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=_mcp_stream_headers(),
+    )
 
 
 def _session_user_from_id(user_id_str: str) -> User:
@@ -195,7 +415,7 @@ async def get_mcp_user_for_sse(
     x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
 ) -> User:
     """
-    Authenticate MCP SSE without holding a DB dependency for the stream lifetime.
+    Authenticate MCP streaming routes without holding a DB dependency for the stream lifetime.
 
     FastAPI finalizes yield dependencies after a StreamingResponse completes, so
     using get_db() directly on long-lived SSE routes can pin pooled DB
@@ -263,12 +483,8 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
         )
         required.append(field.key)
 
-    # Use workflow name directly, sanitized for MCP tool naming
-    tool_name = workflow.name.lower().replace(" ", "_").replace("-", "_")
-    tool_name = "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
-
     return MCPTool(
-        name=tool_name,
+        name=_sanitize_workflow_tool_name(workflow.name),
         description=workflow.description or f"Execute workflow: {workflow.name}",
         inputSchema=MCPToolInputSchema(
             type="object",
@@ -331,6 +547,65 @@ async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID)
         except Exception:
             pass
     return context
+
+
+async def _mint_file_upload_tool_payload(
+    request: Request,
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    workflow: Workflow,
+    upload_node: dict[str, Any],
+) -> dict[str, Any]:
+    slot, token = await file_intake_service.mint_slot(
+        db,
+        workflow_id=workflow.id,
+        node=upload_node,
+        created_by_user_id=user_id,
+        mint_source="mcp",
+    )
+    await file_intake_service.write_audit(
+        db,
+        event="minted",
+        slot_id=slot.id,
+        workflow_id=workflow.id,
+        client_ip=None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    await db.commit()
+    return file_intake_service.build_mint_payload(
+        base_url=build_public_base_url(request),
+        token=token,
+        expires_at_iso=slot.expires_at.isoformat(),
+        max_size_bytes=slot.max_size_bytes,
+        allowed_mime=slot.allowed_mime,
+        slot_id=str(slot.id),
+    )
+
+
+async def _maybe_mint_file_upload_jsonrpc_response(
+    request: Request,
+    db: AsyncSession,
+    *,
+    msg_id: int | str,
+    user_id: uuid.UUID,
+    workflow: Workflow,
+) -> dict[str, Any] | None:
+    upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
+    if upload_node is None:
+        return None
+
+    mint_payload = await _mint_file_upload_tool_payload(
+        request,
+        db,
+        user_id=user_id,
+        workflow=workflow,
+        upload_node=upload_node,
+    )
+    return _mcp_tool_result_jsonrpc_response(
+        msg_id,
+        json.dumps(mint_payload, indent=2, ensure_ascii=False),
+    )
 
 
 def _json_compatible(value: Any) -> Any:
@@ -425,6 +700,7 @@ async def get_mcp_config(
                 description=w.description,
                 mcp_enabled=mcp_enabled,
                 input_fields=input_fields,
+                updated_at=w.updated_at,
             )
         )
 
@@ -512,6 +788,7 @@ async def toggle_workflow_mcp(
         description=workflow.description,
         mcp_enabled=mcp_enabled,
         input_fields=input_fields,
+        updated_at=workflow.updated_at,
     )
 
 
@@ -590,9 +867,7 @@ async def call_mcp_tool(
 
     for w in workflows:
         # Match by sanitized workflow name
-        w_tool_name = w.name.lower().replace(" ", "_").replace("-", "_")
-        w_tool_name = "".join(c if c.isalnum() or c == "_" else "" for c in w_tool_name)
-        if w_tool_name == tool_name:
+        if _sanitize_workflow_tool_name(w.name) == tool_name:
             target_workflow = w
             break
 
@@ -607,6 +882,17 @@ async def call_mcp_tool(
             content=[MCPTextContent(text="Workflow has no nodes")],
             isError=True,
         )
+
+    upload_node = file_intake_service.find_file_upload_trigger(target_workflow.nodes)
+    if upload_node is not None:
+        mint_payload = await _mint_file_upload_tool_payload(
+            request,
+            db,
+            user_id=mcp_user.id,
+            workflow=target_workflow,
+            upload_node=upload_node,
+        )
+        return MCPToolResult(content=[MCPTextContent(text=json.dumps(mint_payload, indent=2))])
 
     enriched_inputs = {
         "headers": {},
@@ -760,9 +1046,7 @@ async def _dispatch_mcp_jsonrpc(
 
         for w in workflows:
             # Match by sanitized workflow name
-            w_tool_name = w.name.lower().replace(" ", "_").replace("-", "_")
-            w_tool_name = "".join(c if c.isalnum() or c == "_" else "" for c in w_tool_name)
-            if w_tool_name == tool_name:
+            if _sanitize_workflow_tool_name(w.name) == tool_name:
                 target_workflow = w
                 break
 
@@ -779,6 +1063,16 @@ async def _dispatch_mcp_jsonrpc(
                 "id": msg.id,
                 "error": {"code": -32602, "message": "Workflow has no nodes"},
             }
+
+        upload_response = await _maybe_mint_file_upload_jsonrpc_response(
+            request,
+            db,
+            msg_id=msg.id,
+            user_id=mcp_user.id,
+            workflow=target_workflow,
+        )
+        if upload_response is not None:
+            return upload_response
 
         enriched_inputs = {
             "headers": {},
@@ -860,14 +1154,11 @@ async def _dispatch_mcp_jsonrpc(
 
             output_text = json.dumps(execution_result.outputs, indent=2, ensure_ascii=False)
 
-            return {
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "result": {
-                    "content": [{"type": "text", "text": output_text}],
-                    "isError": execution_result.status == "error",
-                },
-            }
+            return _mcp_tool_result_jsonrpc_response(
+                msg.id,
+                output_text,
+                is_error=execution_result.status == "error",
+            )
         except Exception as e:
             _add_mcp_workflow_trace(
                 db,
@@ -900,6 +1191,19 @@ async def handle_mcp_message(
     db: AsyncSession = Depends(get_db),
 ) -> dict | Response:
     _reject_if_sse_channel_missing(request)
+    body = await request.json()
+    msg = MCPJSONRPCRequest(**body)
+    session_token = request.query_params.get("session")
+    if session_token and _is_mcp_tool_call_with_response(msg):
+        _schedule_legacy_sse_jsonrpc_response(
+            session_token=session_token,
+            msg=msg,
+            operation_factory=lambda bg_db: _run_mcp_protocol_limited(
+                lambda: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=bg_db)
+            ),
+        )
+        return Response("Accepted", status_code=status.HTTP_202_ACCEPTED)
+
     response = await _run_mcp_protocol_limited(
         lambda: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
     )
@@ -907,14 +1211,27 @@ async def handle_mcp_message(
     return sse_response or response
 
 
-@router.post("/sse")
+@router.post("/sse", response_model=None)
 async def mcp_sse_post_endpoint(
     request: Request,
-    mcp_user: User = Depends(get_mcp_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    return await _run_mcp_protocol_limited(
-        lambda: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=db)
+    mcp_user: User = Depends(get_mcp_user_for_sse),
+) -> dict[str, Any] | StreamingResponse:
+    body = await request.json()
+    msg = MCPJSONRPCRequest(**body)
+    if _is_mcp_tool_call_with_response(msg):
+        return _stream_mcp_jsonrpc_response(
+            msg=msg,
+            operation=lambda: _run_mcp_protocol_limited_with_session(
+                lambda bg_db: _dispatch_mcp_jsonrpc(
+                    request=request,
+                    mcp_user=mcp_user,
+                    db=bg_db,
+                )
+            ),
+        )
+
+    return await _run_mcp_protocol_limited_with_session(
+        lambda bg_db: _dispatch_mcp_jsonrpc(request=request, mcp_user=mcp_user, db=bg_db)
     )
 
 
@@ -945,7 +1262,7 @@ async def mcp_sse_endpoint(
                 try:
                     payload = await asyncio.wait_for(response_queue.get(), timeout=15)
                 except TimeoutError:
-                    yield ": keep-alive\n\n"
+                    yield _mcp_keepalive_comment()
                     continue
                 yield f"event: message\ndata: {payload}\n\n"
         finally:
@@ -954,9 +1271,5 @@ async def mcp_sse_endpoint(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_mcp_stream_headers(),
     )

@@ -1268,6 +1268,196 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
         self.assertIn("404", nr["error"])
 
 
+class DriveNodeSaveTests(unittest.TestCase):
+    """Drive node save operation."""
+
+    def _run_save_workflow(
+        self,
+        drive_data: dict,
+        owner_id: uuid.UUID,
+        db_mock: MagicMock,
+        storage_path_mock: MagicMock,
+    ) -> dict:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges = _make_workflow(drive_data)
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+        executor.trace_user_id = owner_id
+
+        with (
+            patch("app.db.session.SessionLocal", return_value=db_mock),
+            patch("app.services.file_storage._safe_storage_path", return_value=storage_path_mock),
+            patch(
+                "app.services.file_storage.build_download_url",
+                return_value="https://heym.run/api/files/dl/savetoken",
+            ),
+            patch("secrets.token_urlsafe", return_value="savetoken"),
+        ):
+            result = executor.execute(
+                workflow_id=uuid.uuid4(),
+                initial_inputs={"headers": {}, "query": {}, "body": {"text": "hi"}},
+            )
+
+        nr = next((r for r in result.node_results if r["node_type"] == "drive"), None)
+        if nr is None:
+            raise AssertionError(f"Drive node result not found. Status={result.status}")
+        return nr
+
+    def _make_storage_path(self) -> MagicMock:
+        mock_path = MagicMock()
+        mock_path.parent.mkdir = MagicMock()
+        mock_path.write_bytes = MagicMock()
+        return mock_path
+
+    def _make_db_mock(self) -> MagicMock:
+        db = MagicMock()
+        db.__enter__ = MagicMock(return_value=db)
+        db.__exit__ = MagicMock(return_value=False)
+        db.flush = MagicMock()
+        db.commit = MagicMock()
+        db.add = MagicMock()
+        return db
+
+    def test_save_stores_decoded_base64(self) -> None:
+        """save decodes base64, stores file, and returns metadata with download_url."""
+        import base64
+
+        owner_id = uuid.uuid4()
+        file_bytes = b"fake-audio-content"
+        b64 = base64.b64encode(file_bytes).decode("ascii")
+
+        nr = self._run_save_workflow(
+            {
+                "label": "save",
+                "driveOperation": "save",
+                "driveFilename": "1.mp3",
+                "driveBase64Content": b64,
+            },
+            owner_id,
+            self._make_db_mock(),
+            self._make_storage_path(),
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["operation"], "save")
+        self.assertEqual(nr["output"]["filename"], "1.mp3")
+        self.assertEqual(nr["output"]["mime_type"], "audio/mpeg")
+        self.assertEqual(nr["output"]["size_bytes"], len(file_bytes))
+        self.assertIn("download_url", nr["output"])
+        self.assertIn("id", nr["output"])
+
+    def test_save_accepts_data_url_prefix(self) -> None:
+        """save accepts data:...;base64,... payloads."""
+        import base64
+
+        owner_id = uuid.uuid4()
+        file_bytes = b"audio-bytes"
+        b64 = base64.b64encode(file_bytes).decode("ascii")
+        data_url = f"data:audio/mpeg;base64,{b64}"
+
+        nr = self._run_save_workflow(
+            {
+                "label": "save",
+                "driveOperation": "save",
+                "driveFilename": "track.mp3",
+                "driveBase64Content": data_url,
+            },
+            owner_id,
+            self._make_db_mock(),
+            self._make_storage_path(),
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["size_bytes"], len(file_bytes))
+
+    def test_save_rejects_invalid_base64(self) -> None:
+        """Invalid base64 content results in an error."""
+        owner_id = uuid.uuid4()
+
+        nr = self._run_save_workflow(
+            {
+                "label": "save",
+                "driveOperation": "save",
+                "driveFilename": "1.mp3",
+                "driveBase64Content": "not-valid-base64!!!",
+            },
+            owner_id,
+            self._make_db_mock(),
+            self._make_storage_path(),
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("base64", nr["error"].lower())
+
+    def test_save_requires_filename(self) -> None:
+        """Empty driveFilename results in an error."""
+        import base64
+
+        owner_id = uuid.uuid4()
+        b64 = base64.b64encode(b"data").decode("ascii")
+
+        nr = self._run_save_workflow(
+            {
+                "label": "save",
+                "driveOperation": "save",
+                "driveFilename": "",
+                "driveBase64Content": b64,
+            },
+            owner_id,
+            self._make_db_mock(),
+            self._make_storage_path(),
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("filename", nr["error"].lower())
+
+    def test_save_rejects_unsafe_filename(self) -> None:
+        """Path traversal filenames are rejected."""
+        import base64
+
+        owner_id = uuid.uuid4()
+        b64 = base64.b64encode(b"evil").decode("ascii")
+
+        nr = self._run_save_workflow(
+            {
+                "label": "save",
+                "driveOperation": "save",
+                "driveFilename": "../evil.mp3",
+                "driveBase64Content": b64,
+            },
+            owner_id,
+            self._make_db_mock(),
+            self._make_storage_path(),
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("path", nr["error"].lower())
+
+    def test_save_rejects_oversized_file(self) -> None:
+        """Files larger than the configured limit are rejected."""
+        import base64
+
+        owner_id = uuid.uuid4()
+        file_bytes = b"x" * (2 * 1024 * 1024)
+        b64 = base64.b64encode(file_bytes).decode("ascii")
+
+        with patch("app.config.settings.file_max_size_mb", 1):
+            nr = self._run_save_workflow(
+                {
+                    "label": "save",
+                    "driveOperation": "save",
+                    "driveFilename": "big.bin",
+                    "driveBase64Content": b64,
+                },
+                owner_id,
+                self._make_db_mock(),
+                self._make_storage_path(),
+            )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("size limit", nr["error"].lower())
+
+
 # ---------------------------------------------------------------------------
 # Task — Drive convertFile helper functions
 # ---------------------------------------------------------------------------

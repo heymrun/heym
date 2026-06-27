@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
-from app.services.workflow_executor import WorkflowExecutor
+from app.services.workflow_executor import WorkflowExecutor, _coerce_boolean
 
 
 def _make_executor(nodes: dict, edges: list) -> WorkflowExecutor:
@@ -102,6 +102,34 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         schemas = ex._build_node_tool_schemas(agent_id)
         self.assertEqual(schemas, [])
 
+    def test_new_integration_fields_are_exposed_as_tool_parameters(self) -> None:
+        """Integration inputs selected in the UI are retained in each node tool schema."""
+        agent_id = "agent-1"
+        fields_by_node = {
+            "discord-1": ["message", "username", "avatarUrl"],
+            "github-1": ["githubOwner", "githubRepo", "githubTitle", "githubDraft"],
+            "supabase-1": ["supabaseTable", "supabaseRows", "supabaseLimit", "supabaseAscending"],
+            "notion-1": ["notionDataSourceId", "notionProperties", "notionPageSize"],
+            "s3-1": ["s3Bucket", "s3Key", "s3MaxKeys", "s3IncludeBinary"],
+        }
+        nodes = {agent_id: {"type": "agent", "data": {"label": "Agent"}}}
+        edges = []
+        for node_id, fields in fields_by_node.items():
+            nodes[node_id] = {
+                "type": node_id.split("-", maxsplit=1)[0],
+                "data": {"label": node_id, "agentProvidedFields": fields},
+            }
+            edges.append({"source": node_id, "target": agent_id, "targetHandle": "tool-input"})
+
+        schemas = _make_executor(nodes, edges)._build_node_tool_schemas(agent_id)
+        fields_by_tool = {
+            schema["_node_id"]: set(schema["parameters"]["properties"]) for schema in schemas
+        }
+
+        self.assertEqual(len(fields_by_tool), len(fields_by_node))
+        for node_id, fields in fields_by_node.items():
+            self.assertEqual(fields_by_tool[node_id], set(fields))
+
 
 class TestExecuteNodeTool(unittest.TestCase):
     def _make_executor_with_execute(
@@ -184,6 +212,44 @@ class TestExecuteNodeTool(unittest.TestCase):
         result = ex._execute_node_tool(tool_def, {})
         self.assertIn("error", result)
 
+    def test_preserves_agent_argument_types_when_merging_node_data(self) -> None:
+        from app.services.workflow_executor import NodeResult
+
+        node_id = "s3-1"
+        ex = self._make_executor_with_execute(
+            {
+                node_id: {
+                    "type": "s3",
+                    "data": {
+                        "label": "Archive",
+                        "agentProvidedFields": ["s3MaxKeys", "s3IncludeBinary"],
+                    },
+                }
+            },
+            [],
+        )
+        captured_data: list[dict] = []
+
+        def fake_execute_node(executed_node_id: str, inputs: dict, **kwargs) -> NodeResult:
+            captured_data.append(dict(ex.nodes[executed_node_id]["data"]))
+            return NodeResult(
+                node_id=executed_node_id,
+                node_label="Archive",
+                node_type="s3",
+                status="success",
+                output={},
+                execution_time_ms=1.0,
+            )
+
+        ex.execute_node = fake_execute_node  # type: ignore[assignment]
+        ex._execute_node_tool(
+            {"_source": "node_tool", "_node_id": node_id},
+            {"s3MaxKeys": 25, "s3IncludeBinary": False},
+        )
+
+        self.assertEqual(captured_data[0]["s3MaxKeys"], 25)
+        self.assertIs(captured_data[0]["s3IncludeBinary"], False)
+
     def test_restores_original_data_on_exception(self) -> None:
         http_id = "http-1"
         original_curl = "curl https://original.com"
@@ -209,6 +275,14 @@ class TestExecuteNodeTool(unittest.TestCase):
             ex._execute_node_tool(tool_def, {"curl": "curl https://other.com"})
 
         self.assertEqual(ex.nodes[http_id]["data"]["curl"], original_curl)
+
+
+class TestAgentProvidedBooleanValues(unittest.TestCase):
+    def test_coerces_agent_provided_boolean_strings(self) -> None:
+        self.assertTrue(_coerce_boolean("true"))
+        self.assertFalse(_coerce_boolean("false", default=True))
+        self.assertTrue(_coerce_boolean("1"))
+        self.assertFalse(_coerce_boolean("0", default=True))
 
 
 class TestAgentNodeToolIntegration(unittest.TestCase):

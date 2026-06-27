@@ -239,19 +239,57 @@ async def telegram_webhook(node_id: str, request: Request) -> dict[str, Any]:
     if trigger_node:
         credential_id = trigger_node.get("data", {}).get("credentialId") or None
 
-    if credential_id:
-        async with async_session_maker() as db:
-            telegram_config = await _get_telegram_config(db, credential_id)
+    # SECURITY: Telegram webhook secret-token verification must fail closed.
+    # See security advisory GHSA-pm6h-x3h5-j38h, finding H2. Previously, a missing
+    # credential_id, missing config, or empty secret_token caused verification to
+    # be skipped entirely, allowing anyone with the webhook URL to trigger the
+    # workflow with the owner's credentials.
+    #
+    # Client-facing error is a single generic message so probing the webhook URL
+    # does not reveal which nodes are misconfigured. The specific reason is logged
+    # server-side only.
+    if not credential_id:
+        logger.warning(
+            "Telegram webhook rejected: no credential_id on trigger node_id=%s",
+            node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
 
-        if telegram_config:
-            secret_token = str(telegram_config.get("secret_token") or "").strip()
-            if secret_token:
-                incoming_secret = request.headers.get("x-telegram-bot-api-secret-token", "")
-                if not incoming_secret or not hmac.compare_digest(secret_token, incoming_secret):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Invalid Telegram secret token",
-                    )
+    async with async_session_maker() as db:
+        telegram_config = await _get_telegram_config(db, credential_id)
+
+    if not telegram_config:
+        logger.warning(
+            "Telegram webhook rejected: credential_id=%s not found (node_id=%s)",
+            credential_id,
+            node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
+
+    secret_token = str(telegram_config.get("secret_token") or "").strip()
+    if not secret_token:
+        logger.warning(
+            "Telegram webhook rejected: credential_id=%s has no secret_token (node_id=%s)",
+            credential_id,
+            node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
+
+    incoming_secret = request.headers.get("x-telegram-bot-api-secret-token", "")
+    if not incoming_secret or not hmac.compare_digest(secret_token, incoming_secret):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid Telegram secret token",
+        )
 
     safe_headers = _sanitize_headers(request.headers)
     asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))

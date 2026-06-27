@@ -178,7 +178,14 @@ class TestTelegramTriggerWebhook(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
 
-    async def test_missing_secret_configuration_allows_request(self) -> None:
+    async def test_missing_secret_configuration_rejects_request(self) -> None:
+        """Regression for GHSA-pm6h-x3h5-j38h finding H2.
+
+        Telegram webhook must reject with 400 when the credential exists but has
+        an empty secret_token. Previously this case fell through and triggered
+        the workflow with the owner's credentials. This test was previously
+        asserting the allow behavior; it now asserts the fail-closed behavior.
+        """
         from app.api.telegram import telegram_webhook
 
         node_id = str(uuid.uuid4())
@@ -209,11 +216,49 @@ class TestTelegramTriggerWebhook(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=None),
             ) as mock_execute_background,
         ):
-            response = await telegram_webhook(node_id, request)
-            await asyncio.sleep(0)
+            with self.assertRaises(HTTPException) as ctx:
+                await telegram_webhook(node_id, request)
 
-        self.assertEqual(response, {"ok": True})
-        mock_execute_background.assert_awaited_once()
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "invalid webhook credential configuration")
+        mock_execute_background.assert_not_awaited()
+
+    async def test_no_credential_id_rejects_request(self) -> None:
+        """Telegram webhook must reject with 400 when the trigger node has no
+        credentialId. Previously this case fell through and triggered the workflow.
+        """
+        from app.api.telegram import telegram_webhook
+
+        node_id = str(uuid.uuid4())
+        raw_body = json.dumps({"message": {"chat": {"id": 1}, "text": "hello"}}).encode()
+        request = _make_request(raw_body, {"content-type": "application/json"})
+
+        mock_workflow = MagicMock()
+        mock_workflow.id = uuid.uuid4()
+        mock_workflow.nodes = [
+            {
+                "id": node_id,
+                "type": "telegramTrigger",
+                "data": {},  # no credentialId
+            }
+        ]
+
+        with (
+            patch(
+                "app.api.telegram._find_workflow_by_node_id",
+                new=AsyncMock(return_value=mock_workflow),
+            ),
+            patch(
+                "app.api.telegram._execute_workflow_background",
+                new=AsyncMock(return_value=None),
+            ) as mock_execute_background,
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await telegram_webhook(node_id, request)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "invalid webhook credential configuration")
+        mock_execute_background.assert_not_awaited()
 
     async def test_unknown_node_id_returns_404(self) -> None:
         from app.api.telegram import telegram_webhook

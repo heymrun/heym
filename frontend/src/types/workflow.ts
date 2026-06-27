@@ -128,6 +128,7 @@ export type NodeType =
   | "cron"
   | "telegramTrigger"
   | "websocketTrigger"
+  | "fileUploadTrigger"
   | "llm"
   | "agent"
   | "condition"
@@ -332,6 +333,9 @@ export interface NodeData {
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
+  ttlMinutes?: number;
+  maxSizeMb?: number;
+  allowedTypes?: string;
   curl?: string;
   websocketUrl?: string;
   websocketHeaders?: string;
@@ -394,8 +398,11 @@ export interface NodeData {
   isGlobal?: boolean;
   arrayExpression?: string;
   to?: string;
+  cc?: string;
+  bcc?: string;
   subject?: string;
   emailBody?: string;
+  attachments?: string;
   targetNodeLabel?: string;
   redisOperation?: RedisOperation;
   redisKey?: string;
@@ -593,6 +600,7 @@ export interface NodeData {
     | "setTtl"
     | "setMaxDownloads"
     | "downloadUrl"
+    | "save"
     | "convertFile";
   driveFileId?: string;
   driveLimit?: number;
@@ -601,6 +609,8 @@ export interface NodeData {
   driveMaxDownloads?: number;
   driveIncludeBinary?: boolean;
   driveSourceUrl?: string;
+  driveFilename?: string;
+  driveBase64Content?: string;
   driveConvertTargetFormat?: string;
   s3Operation?: "putObject" | "getObject" | "deleteObject" | "listObjects" | "createBucket" | "deleteBucket" | "createFolder" | "deleteFolder" | "getAllFolder" | "listBuckets" | "copyObject";
   s3Bucket?: string;
@@ -744,11 +754,23 @@ export interface ExecutionToken {
 
 export interface ExecutionResult {
   workflow_id: string;
-  status: "success" | "error" | "pending";
+  status: "success" | "error" | "pending" | "awaiting_file_upload";
   outputs: Record<string, unknown>;
   execution_time_ms: number;
   node_results: NodeResult[];
   execution_history_id?: string | null;
+}
+
+export interface FileUploadSlotStatus {
+  status: "pending" | "consumed" | "expired";
+  run_id: string | null;
+  run: {
+    status: string;
+    outputs: Record<string, unknown>;
+    node_results: NodeResult[];
+    execution_time_ms: number;
+    execution_history_id: string;
+  } | null;
 }
 
 export interface ExecutionHistoryEntry {

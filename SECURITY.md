@@ -74,3 +74,7 @@ vulnerabilities in Heym:
 
 - [@jashidsany](https://github.com/jashidsany) for reporting an authenticated
   sandbox escape in user-defined Python tools (GHSA-wcgw-9hfw-f6f2).
+- [@okcomputerfan](https://github.com/okcomputerfan) (also known as pixileaf)
+  for reporting multiple authentication and RCE vulnerabilities in the workflow
+  condition evaluator, Slack/Telegram webhooks, OAuth redirect_uri validation,
+  and token-at-rest storage (GHSA-pm6h-x3h5-j38h).

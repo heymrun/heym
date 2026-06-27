@@ -59,6 +59,7 @@ from app.models.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
 )
+from app.services import file_intake_service
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.encryption import decrypt_config
@@ -2298,6 +2299,43 @@ async def execute_workflow_endpoint(
             detail="Workflow has no nodes",
         )
 
+    upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
+    if upload_node is not None:
+        minter_id = current_user.id if current_user else workflow.owner_id
+        slot, token = await file_intake_service.mint_slot(
+            db,
+            workflow_id=workflow.id,
+            node=upload_node,
+            created_by_user_id=minter_id,
+            mint_source="http",
+        )
+        await file_intake_service.write_audit(
+            db,
+            event="minted",
+            slot_id=slot.id,
+            workflow_id=workflow.id,
+            client_ip=client_ip,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await db.commit()
+        mint_payload = file_intake_service.build_mint_payload(
+            base_url=build_public_base_url(request),
+            token=token,
+            expires_at_iso=slot.expires_at.isoformat(),
+            max_size_bytes=slot.max_size_bytes,
+            allowed_mime=slot.allowed_mime,
+            slot_id=str(slot.id),
+        )
+        if simple_response:
+            return JSONResponse(content=mint_payload)
+        return WorkflowExecuteResponse(
+            workflow_id=workflow.id,
+            status="awaiting_file_upload",
+            outputs=mint_payload,
+            execution_time_ms=0,
+            execution_history_id=None,
+        )
+
     workflow_cache = await collect_referenced_workflows(
         db, workflow.nodes, actor_user_id=current_user.id if current_user else workflow.owner_id
     )
@@ -2858,6 +2896,47 @@ async def execute_workflow_stream(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workflow has no nodes",
+        )
+
+    upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
+    if upload_node is not None:
+        minter_id = current_user.id if current_user else workflow.owner_id
+        slot, token = await file_intake_service.mint_slot(
+            db,
+            workflow_id=workflow.id,
+            node=upload_node,
+            created_by_user_id=minter_id,
+            mint_source="canvas",
+        )
+        await file_intake_service.write_audit(
+            db,
+            event="minted",
+            slot_id=slot.id,
+            workflow_id=workflow.id,
+            client_ip=client_ip,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await db.commit()
+        mint_payload = file_intake_service.build_mint_payload(
+            base_url=build_public_base_url(request),
+            token=token,
+            expires_at_iso=slot.expires_at.isoformat(),
+            max_size_bytes=slot.max_size_bytes,
+            allowed_mime=slot.allowed_mime,
+            slot_id=str(slot.id),
+        )
+
+        async def mint_event_generator():
+            yield "data: " + json.dumps({"type": "file_upload_required", **mint_payload}) + "\n\n"
+
+        return StreamingResponse(
+            mint_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     workflow_cache = await collect_referenced_workflows(

@@ -986,6 +986,7 @@ class MCPWorkflowItem(BaseModel):
     description: str | None = None
     mcp_enabled: bool = False
     input_fields: list[InputFieldSchema] = Field(default_factory=list)
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -1282,6 +1283,17 @@ class FileAccessTokenResponse(BaseModel):
     download_count: int = 0
     max_downloads: int | None = None
     created_at: datetime
+
+
+class FileUploadMintResponse(BaseModel):
+    file_upload_required: bool = True
+    curl: str
+    upload_url: str
+    expires_at: str
+    max_size_mb: int
+    allowed_types: list[str]
+    slot_id: str
+    instructions: str
 
 
 class CreateFileShareRequest(BaseModel):

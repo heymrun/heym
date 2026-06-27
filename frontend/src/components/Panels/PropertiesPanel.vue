@@ -68,6 +68,7 @@ import {
   Terminal,
   Trash2,
   Type,
+  Upload,
   Variable,
   X,
   XCircle,
@@ -152,6 +153,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   textInput: Type,
   cron: CalendarClock,
   websocketTrigger: Radio,
+  fileUploadTrigger: Upload,
   llm: Brain,
   agent: Bot,
   condition: GitBranch,
@@ -202,6 +204,7 @@ const nodeColorMap: Record<NodeType, string> = {
   textInput: "node-input",
   cron: "node-cron",
   websocketTrigger: "node-websocket",
+  fileUploadTrigger: "node-websocket",
   llm: "node-llm",
   agent: "node-agent",
   condition: "node-condition",
@@ -252,6 +255,7 @@ const nodeDocSlugMap: Record<NodeType, string> = {
   textInput: "input-node",
   cron: "cron-node",
   websocketTrigger: "websocket-trigger-node",
+  fileUploadTrigger: "file-upload-trigger-node",
   llm: "llm-node",
   agent: "agent-node",
   condition: "condition-node",
@@ -445,7 +449,13 @@ const slackMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(nu
 const discordMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const discordUsernameInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const discordAvatarUrlInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sendEmailToInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sendEmailCcInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sendEmailBccInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sendEmailSubjectInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const sendEmailBodyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sendEmailAttachmentsInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const currentSendEmailExpressionFieldIndex = ref(0);
 const conditionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const redisKeyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const setMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
@@ -670,6 +680,8 @@ const dataTableSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput>
 const currentDataTableExpressionFieldIndex = ref(0);
 const driveFileIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const drivePasswordExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const driveFilenameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const driveBase64ContentExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const currentDriveExpressionFieldIndex = ref(0);
 const s3BucketExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const s3KeyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -1980,7 +1992,12 @@ function closeAllExpressionExpandDialogs(): void {
   discordMessageInputRef.value?.closeExpandDialog();
   discordUsernameInputRef.value?.closeExpandDialog();
   discordAvatarUrlInputRef.value?.closeExpandDialog();
+  sendEmailToInputRef.value?.closeExpandDialog();
+  sendEmailCcInputRef.value?.closeExpandDialog();
+  sendEmailBccInputRef.value?.closeExpandDialog();
+  sendEmailSubjectInputRef.value?.closeExpandDialog();
   sendEmailBodyInputRef.value?.closeExpandDialog();
+  sendEmailAttachmentsInputRef.value?.closeExpandDialog();
   conditionInputRef.value?.closeExpandDialog();
   redisKeyInputRef.value?.closeExpandDialog();
   variableValueInputRef.value?.closeExpandDialog();
@@ -2013,6 +2030,8 @@ function closeAllExpressionExpandDialogs(): void {
   }
   driveFileIdExpressionInputRef.value?.closeExpandDialog();
   drivePasswordExpressionInputRef.value?.closeExpandDialog();
+  driveFilenameExpressionInputRef.value?.closeExpandDialog();
+  driveBase64ContentExpressionInputRef.value?.closeExpandDialog();
   closeAllPlaywrightExpressionDialogs();
   llmSystemInstructionInputRef.value?.closeExpandDialog();
   llmImageExpressionInputRef.value?.closeExpandDialog();
@@ -2330,10 +2349,11 @@ function openPrimaryExpandDialogForSelectedNode(): void {
     };
     nextTick(() => tryOpenDialog());
   } else if (nodeType === "sendEmail") {
+    currentSendEmailExpressionFieldIndex.value = 0;
     const tryOpenDialog = (attempts = 0): void => {
       if (attempts > 20) return;
-      if (sendEmailBodyInputRef.value) {
-        nextTick(() => sendEmailBodyInputRef.value?.openExpandDialog());
+      if (sendEmailToInputRef.value) {
+        nextTick(() => openSendEmailExpressionFieldAtIndex(0));
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -2663,8 +2683,13 @@ function openPrimaryExpandDialogForSelectedNode(): void {
     currentDriveExpressionFieldIndex.value = 0;
     const tryOpenDialog = (attempts = 0): void => {
       if (attempts > 20) return;
-      if (driveFileIdExpressionInputRef.value) {
-        nextTick(() => driveFileIdExpressionInputRef.value?.openExpandDialog());
+      const operation = workflowStore.selectedNode?.data.driveOperation;
+      const firstRef =
+        operation === "save"
+          ? driveFilenameExpressionInputRef.value
+          : driveFileIdExpressionInputRef.value;
+      if (firstRef) {
+        nextTick(() => openDriveExpressionFieldAtIndex(0));
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -2897,6 +2922,54 @@ function handleLlmExpressionFieldNavigate(direction: "prev" | "next"): void {
   nextTick(() => {
     openLlmExpressionFieldAtIndex(newIndex);
   });
+}
+
+const sendEmailExpressionFieldRefs = computed(
+  (): (InstanceType<typeof ExpressionInput> | null)[] => [
+    sendEmailToInputRef.value,
+    sendEmailCcInputRef.value,
+    sendEmailBccInputRef.value,
+    sendEmailSubjectInputRef.value,
+    sendEmailBodyInputRef.value,
+    sendEmailAttachmentsInputRef.value,
+  ],
+);
+
+const sendEmailExpressionFieldCount = computed((): number => 6);
+
+function openSendEmailExpressionFieldAtIndex(index: number): void {
+  const n = selectedNode.value;
+  if (!n || n.type !== "sendEmail") {
+    return;
+  }
+  currentSendEmailExpressionFieldIndex.value = index;
+  sendEmailExpressionFieldRefs.value[index]?.openExpandDialog();
+}
+
+function handleSendEmailExpressionFieldNavigate(direction: "prev" | "next"): void {
+  const n = selectedNode.value;
+  if (!n || n.type !== "sendEmail") {
+    return;
+  }
+  const total = sendEmailExpressionFieldCount.value;
+  const newIndex =
+    direction === "prev"
+      ? currentSendEmailExpressionFieldIndex.value - 1
+      : currentSendEmailExpressionFieldIndex.value + 1;
+  if (newIndex < 0 || newIndex >= total) {
+    return;
+  }
+  for (const inputRef of sendEmailExpressionFieldRefs.value) {
+    inputRef?.closeExpandDialog();
+  }
+  currentSendEmailExpressionFieldIndex.value = newIndex;
+  nextTick(() => {
+    openSendEmailExpressionFieldAtIndex(newIndex);
+  });
+}
+
+function onSendEmailRegisterExpressionFieldIndex(index: number): void {
+  currentSendEmailExpressionFieldIndex.value = index;
 }
 
 function openAgentExpressionFieldAtIndex(index: number): void {
@@ -4228,7 +4301,10 @@ const driveExpressionFieldCount = computed((): number => {
   if (n.data.driveOperation === "getAll") {
     return 0;
   }
-  return n.data.driveOperation === "setPassword" ? 2 : 1;
+  if (n.data.driveOperation === "setPassword" || n.data.driveOperation === "save") {
+    return 2;
+  }
+  return 1;
 });
 
 const isDriveFileIdAgentProvided = computed((): boolean => {
@@ -4256,12 +4332,24 @@ function openDriveExpressionFieldAtIndex(index: number): void {
     }
     return;
   }
+  if (n.data.driveOperation === "save") {
+    if (index === 0) {
+      driveFilenameExpressionInputRef.value?.openExpandDialog();
+    } else {
+      driveBase64ContentExpressionInputRef.value?.openExpandDialog();
+    }
+    return;
+  }
   driveFileIdExpressionInputRef.value?.openExpandDialog();
 }
 
 function handleDriveExpressionFieldNavigate(direction: "prev" | "next"): void {
   const n = selectedNode.value;
-  if (!n || n.type !== "drive" || n.data.driveOperation !== "setPassword") {
+  if (
+    !n
+    || n.type !== "drive"
+    || (n.data.driveOperation !== "setPassword" && n.data.driveOperation !== "save")
+  ) {
     return;
   }
   const total = driveExpressionFieldCount.value;
@@ -4274,6 +4362,8 @@ function handleDriveExpressionFieldNavigate(direction: "prev" | "next"): void {
   }
   driveFileIdExpressionInputRef.value?.closeExpandDialog();
   drivePasswordExpressionInputRef.value?.closeExpandDialog();
+  driveFilenameExpressionInputRef.value?.closeExpandDialog();
+  driveBase64ContentExpressionInputRef.value?.closeExpandDialog();
   currentDriveExpressionFieldIndex.value = newIndex;
   nextTick(() => {
     openDriveExpressionFieldAtIndex(newIndex);
@@ -5134,6 +5224,7 @@ const driveOperationOptions = [
   { value: "get", label: "Get File" },
   { value: "getAll", label: "Get All Files" },
   { value: "downloadUrl", label: "Download from URL" },
+  { value: "save", label: "Save from Base64" },
   { value: "convertFile", label: "Convert File" },
   { value: "delete", label: "Delete File" },
   { value: "setPassword", label: "Set Password" },
@@ -7608,6 +7699,58 @@ onUnmounted(() => {
               <p class="text-xs text-muted-foreground">
                 Use standard cron format to define the schedule.
               </p>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'fileUploadTrigger'">
+            <div class="space-y-4">
+              <p class="text-xs text-muted-foreground">
+                Running this workflow returns a single-use <code>curl</code> upload link.
+                Uploading a file to that link starts the run with the file available as
+                <code>${{ selectedNode.data.label || "fileUpload" }}.file</code>.
+              </p>
+
+              <div class="space-y-2">
+                <Label>Link TTL (minutes)</Label>
+                <Input
+                  type="number"
+                  :min="1"
+                  :max="10080"
+                  :model-value="selectedNode.data.ttlMinutes ?? 60"
+                  placeholder="60"
+                  @update:model-value="updateNodeData('ttlMinutes', Number($event) || 60)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  How long the upload link stays valid (1–10080 minutes). Default 60.
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <Label>Max file size (MB)</Label>
+                <Input
+                  type="number"
+                  :min="1"
+                  :max="100"
+                  :model-value="selectedNode.data.maxSizeMb ?? 100"
+                  placeholder="100"
+                  @update:model-value="updateNodeData('maxSizeMb', Number($event) || 100)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Hard ceiling is 100 MB. Larger uploads are rejected.
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <Label>Allowed types (optional)</Label>
+                <Input
+                  :model-value="selectedNode.data.allowedTypes || ''"
+                  placeholder="audio/*, .wav"
+                  @update:model-value="updateNodeData('allowedTypes', $event)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Comma-separated MIME types or extensions. Leave empty to allow any type.
+                </p>
+              </div>
             </div>
           </template>
 
@@ -10420,6 +10563,7 @@ onUnmounted(() => {
             <div class="space-y-2">
               <Label>To</Label>
               <ExpressionInput
+                ref="sendEmailToInputRef"
                 :model-value="selectedNode.data.to || ''"
                 placeholder="recipient@example.com"
                 :rows="1"
@@ -10427,10 +10571,17 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                expandable
+                dialog-title="Edit To"
+                navigation-enabled
+                :navigation-index="0"
+                :navigation-total="sendEmailExpressionFieldCount"
                 :dialog-node-label="selectedNodeEvaluateDialogLabel"
                 dialog-key-label="To"
                 field-key="to"
                 @update:model-value="updateNodeData('to', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
               />
               <p class="text-xs text-muted-foreground">
                 Recipient email (comma-separated for multiple)
@@ -10438,8 +10589,65 @@ onUnmounted(() => {
             </div>
 
             <div class="space-y-2">
+              <Label>Cc</Label>
+              <ExpressionInput
+                ref="sendEmailCcInputRef"
+                :model-value="selectedNode.data.cc || ''"
+                placeholder="cc@example.com"
+                :rows="1"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                expandable
+                dialog-title="Edit Cc"
+                navigation-enabled
+                :navigation-index="1"
+                :navigation-total="sendEmailExpressionFieldCount"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Cc"
+                field-key="cc"
+                @update:model-value="updateNodeData('cc', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
+              />
+              <p class="text-xs text-muted-foreground">
+                Carbon copy (comma-separated for multiple)
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label>Bcc</Label>
+              <ExpressionInput
+                ref="sendEmailBccInputRef"
+                :model-value="selectedNode.data.bcc || ''"
+                placeholder="bcc@example.com"
+                :rows="1"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                expandable
+                dialog-title="Edit Bcc"
+                navigation-enabled
+                :navigation-index="2"
+                :navigation-total="sendEmailExpressionFieldCount"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Bcc"
+                field-key="bcc"
+                @update:model-value="updateNodeData('bcc', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
+              />
+              <p class="text-xs text-muted-foreground">
+                Blind carbon copy — hidden from other recipients
+              </p>
+            </div>
+
+            <div class="space-y-2">
               <Label>Subject</Label>
               <ExpressionInput
+                ref="sendEmailSubjectInputRef"
                 :model-value="selectedNode.data.subject || ''"
                 placeholder="Email Subject"
                 :rows="1"
@@ -10447,10 +10655,17 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                expandable
+                dialog-title="Edit Subject"
+                navigation-enabled
+                :navigation-index="3"
+                :navigation-total="sendEmailExpressionFieldCount"
                 :dialog-node-label="selectedNodeEvaluateDialogLabel"
                 dialog-key-label="Subject"
                 field-key="subject"
                 @update:model-value="updateNodeData('subject', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
               />
             </div>
 
@@ -10467,13 +10682,46 @@ onUnmounted(() => {
                 :current-node-id="selectedNode.id"
                 expandable
                 dialog-title="Edit Email Body"
+                navigation-enabled
+                :navigation-index="4"
+                :navigation-total="sendEmailExpressionFieldCount"
                 :dialog-node-label="selectedNodeEvaluateDialogLabel"
                 dialog-key-label="Body"
                 field-key="emailBody"
                 @update:model-value="updateNodeData('emailBody', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
               />
               <p class="text-xs text-muted-foreground">
                 Use $ expressions like {{ exampleRef }}
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label>Attachments</Label>
+              <ExpressionInput
+                ref="sendEmailAttachmentsInputRef"
+                :model-value="selectedNode.data.attachments || ''"
+                placeholder="$drive.id"
+                :rows="1"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                expandable
+                dialog-title="Edit Attachments"
+                navigation-enabled
+                :navigation-index="5"
+                :navigation-total="sendEmailExpressionFieldCount"
+                :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                dialog-key-label="Attachments"
+                field-key="attachments"
+                @update:model-value="updateNodeData('attachments', $event)"
+                @navigate="handleSendEmailExpressionFieldNavigate"
+                @register-field-index="onSendEmailRegisterExpressionFieldIndex"
+              />
+              <p class="text-xs text-muted-foreground">
+                Comma-separated Drive file IDs. Use $ expressions, e.g. an upstream Drive node's id.
               </p>
             </div>
           </template>
@@ -12031,6 +12279,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubOwner"
                   v-bind="githubExpressionNavBindings('githubOwner')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12051,6 +12300,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubRepo"
                   v-bind="githubExpressionNavBindings('githubRepo')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12071,6 +12321,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubOrganization"
                   v-bind="githubExpressionNavBindings('githubOrganization')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12088,6 +12339,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubInviteEmail"
                   v-bind="githubExpressionNavBindings('githubInviteEmail')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12108,6 +12360,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubIssueNumber"
                   v-bind="githubExpressionNavBindings('githubIssueNumber')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12122,7 +12375,13 @@ onUnmounted(() => {
                 :class="usesGitHubPerPage(selectedNode.data.githubOperation) ? 'grid-cols-2' : 'grid-cols-1'"
               >
                 <div class="space-y-2">
-                  <Label>State</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>State</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubState"
+                    />
+                  </div>
                   <Select
                     :model-value="selectedNode.data.githubOperation === 'updateIssue' ? (selectedNode.data.githubState ?? '') : (selectedNode.data.githubState || 'open')"
                     :options="selectedNode.data.githubOperation === 'updateIssue' ? githubUpdateIssueStateOptions : githubStateOptions"
@@ -12133,7 +12392,13 @@ onUnmounted(() => {
                   v-if="usesGitHubPerPage(selectedNode.data.githubOperation)"
                   class="space-y-2"
                 >
-                  <Label>Per Page</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Per Page</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubPerPage"
+                    />
+                  </div>
                   <Input
                     type="number"
                     min="1"
@@ -12162,6 +12427,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubAssignee"
                     v-bind="githubExpressionNavBindings('githubAssignee')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12182,6 +12448,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubCreator"
                     v-bind="githubExpressionNavBindings('githubCreator')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12201,6 +12468,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubMentioned"
                     v-bind="githubExpressionNavBindings('githubMentioned')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12225,6 +12493,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubLabelsFilter"
                     v-bind="githubExpressionNavBindings('githubLabelsFilter')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12243,6 +12512,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubSince"
                   v-bind="githubExpressionNavBindings('githubSince')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12254,7 +12524,13 @@ onUnmounted(() => {
             <template v-if="selectedNode.data.githubOperation === 'listIssues' || selectedNode.data.githubOperation === 'getRepositoryIssues' || selectedNode.data.githubOperation === 'getUserIssues' || selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests'">
               <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-2">
-                  <Label>Sort</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Sort</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubSort"
+                    />
+                  </div>
                   <Select
                     :model-value="selectedNode.data.githubSort || ''"
                     :options="selectedNode.data.githubOperation === 'listPullRequests' || selectedNode.data.githubOperation === 'getRepositoryPullRequests' ? githubPullRequestSortOptions : githubIssueSortOptions"
@@ -12262,7 +12538,13 @@ onUnmounted(() => {
                   />
                 </div>
                 <div class="space-y-2">
-                  <Label>Direction</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Direction</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubDirection"
+                    />
+                  </div>
                   <Select
                     :model-value="selectedNode.data.githubDirection || ''"
                     :options="githubDirectionOptions"
@@ -12274,7 +12556,13 @@ onUnmounted(() => {
 
             <template v-if="selectedNode.data.githubOperation === 'updateIssue'">
               <div class="space-y-2">
-                <Label>State Reason</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>State Reason</Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="githubStateReason"
+                  />
+                </div>
                 <Select
                   :model-value="selectedNode.data.githubStateReason ?? ''"
                   :options="githubIssueStateReasonOptions"
@@ -12285,7 +12573,13 @@ onUnmounted(() => {
 
             <template v-if="usesGitHubPerPage(selectedNode.data.githubOperation) && selectedNode.data.githubOperation !== 'listIssues' && selectedNode.data.githubOperation !== 'listPullRequests'">
               <div class="space-y-2">
-                <Label>Per Page</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Per Page</Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="githubPerPage"
+                  />
+                </div>
                 <Input
                   type="number"
                   min="1"
@@ -12309,6 +12603,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubTitle"
                   v-bind="githubExpressionNavBindings('githubTitle')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12328,6 +12623,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubBody"
                   v-bind="githubExpressionNavBindings('githubBody')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12347,6 +12643,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubCommentBody"
                   v-bind="githubExpressionNavBindings('githubCommentBody')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12368,6 +12665,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubLabels"
                     v-bind="githubExpressionNavBindings('githubLabels')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12385,6 +12683,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubAssignees"
                     v-bind="githubExpressionNavBindings('githubAssignees')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12396,7 +12695,13 @@ onUnmounted(() => {
 
             <template v-if="selectedNode.data.githubOperation === 'lockIssue'">
               <div class="space-y-2">
-                <Label>Lock Reason</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Lock Reason</Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="githubLockReason"
+                  />
+                </div>
                 <Select
                   :model-value="selectedNode.data.githubLockReason ?? ''"
                   :options="githubLockReasonOptions"
@@ -12418,6 +12723,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubHead"
                     v-bind="githubExpressionNavBindings('githubHead')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12435,6 +12741,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubBase"
                     v-bind="githubExpressionNavBindings('githubBase')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12454,6 +12761,10 @@ onUnmounted(() => {
                   for="github-draft-pr"
                   class="text-sm cursor-pointer select-none"
                 >Create as draft pull request</label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="githubDraft"
+                />
               </div>
             </template>
 
@@ -12469,6 +12780,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubPullRequestNumber"
                   v-bind="githubExpressionNavBindings('githubPullRequestNumber')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12489,6 +12801,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubReviewId"
                   v-bind="githubExpressionNavBindings('githubReviewId')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12499,7 +12812,13 @@ onUnmounted(() => {
 
             <template v-if="selectedNode.data.githubOperation === 'createReview'">
               <div class="space-y-2">
-                <Label>Review Event</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Review Event</Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="githubReviewEvent"
+                  />
+                </div>
                 <Select
                   :model-value="selectedNode.data.githubReviewEvent || 'APPROVE'"
                   :options="githubReviewEventOptions"
@@ -12519,6 +12838,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubReviewBody"
                   v-bind="githubExpressionNavBindings('githubReviewBody')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12545,6 +12865,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubCommitId"
                   v-bind="githubExpressionNavBindings('githubCommitId')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12565,6 +12886,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubReleaseId"
                   v-bind="githubExpressionNavBindings('githubReleaseId')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12586,6 +12908,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubTagName"
                     v-bind="githubExpressionNavBindings('githubTagName')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12603,6 +12926,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="githubBranch"
                     v-bind="githubExpressionNavBindings('githubBranch')"
                     @navigate="handleGitHubExpressionFieldNavigate"
                     @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12621,6 +12945,10 @@ onUnmounted(() => {
                   >
                   <span>Draft release</span>
                 </label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="githubDraft"
+                />
                 <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input
                     id="github-release-prerelease"
@@ -12631,6 +12959,10 @@ onUnmounted(() => {
                   >
                   <span>Prerelease</span>
                 </label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="githubPrerelease"
+                />
               </div>
             </template>
 
@@ -12646,6 +12978,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubWorkflowId"
                   v-bind="githubExpressionNavBindings('githubWorkflowId')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12666,6 +12999,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubBranch"
                   v-bind="githubExpressionNavBindings('githubBranch')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12683,6 +13017,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubWorkflowInputs"
                   v-bind="githubExpressionNavBindings('githubWorkflowInputs')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12694,7 +13029,13 @@ onUnmounted(() => {
             <template v-if="selectedNode.data.githubOperation === 'dispatchWorkflowAndWait'">
               <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-2">
-                  <Label>Wait Timeout (seconds)</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Wait Timeout (seconds)</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubWaitTimeoutSeconds"
+                    />
+                  </div>
                   <Input
                     type="number"
                     min="1"
@@ -12703,7 +13044,13 @@ onUnmounted(() => {
                   />
                 </div>
                 <div class="space-y-2">
-                  <Label>Poll Interval (seconds)</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Poll Interval (seconds)</Label>
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="githubPollIntervalSeconds"
+                    />
+                  </div>
                   <Input
                     type="number"
                     min="0.1"
@@ -12727,6 +13074,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubFilePath"
                   v-bind="githubExpressionNavBindings('githubFilePath')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12744,6 +13092,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubBranch"
                   v-bind="githubExpressionNavBindings('githubBranch')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12764,6 +13113,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubCommitMessage"
                   v-bind="githubExpressionNavBindings('githubCommitMessage')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -12783,6 +13133,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="githubFileContent"
                   v-bind="githubExpressionNavBindings('githubFileContent')"
                   @navigate="handleGitHubExpressionFieldNavigate"
                   @register-field-index="onGitHubRegisterExpressionFieldIndex"
@@ -13498,6 +13849,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="supabaseSchema"
                 :navigation-enabled="supabaseExpressionFieldCount > 1"
                 :navigation-index="0"
                 :navigation-total="supabaseExpressionFieldCount"
@@ -13520,6 +13872,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="supabaseTable"
                 :navigation-enabled="supabaseExpressionFieldCount > 1"
                 :navigation-index="1"
                 :navigation-total="supabaseExpressionFieldCount"
@@ -13562,6 +13915,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseSelectColumns"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="2"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13628,6 +13982,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseFilter"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="3"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13640,7 +13995,13 @@ onUnmounted(() => {
               </div>
 
               <div class="space-y-2">
-                <Label>Limit <span class="text-muted-foreground font-normal">(0 = unlimited)</span></Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Limit <span class="text-muted-foreground font-normal">(0 = unlimited)</span></Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="supabaseLimit"
+                  />
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -13662,6 +14023,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseOrderBy"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="4"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13671,15 +14033,21 @@ onUnmounted(() => {
                   @navigate="handleSupabaseExpressionFieldNavigate"
                   @register-field-index="onSupabaseRegisterExpressionFieldIndex"
                 />
-                <label class="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    class="rounded border-input"
-                    :checked="selectedNode.data.supabaseAscending !== false"
-                    @change="updateNodeData('supabaseAscending', ($event.target as HTMLInputElement).checked)"
-                  >
-                  Ascending sort
-                </label>
+                <div class="flex items-center justify-between gap-2">
+                  <label class="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      class="rounded border-input"
+                      :checked="selectedNode.data.supabaseAscending !== false"
+                      @change="updateNodeData('supabaseAscending', ($event.target as HTMLInputElement).checked)"
+                    >
+                    Ascending sort
+                  </label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="supabaseAscending"
+                  />
+                </div>
               </div>
             </template>
 
@@ -13720,6 +14088,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="supabaseRows"
                     :navigation-enabled="supabaseExpressionFieldCount > 1"
                     :navigation-index="2"
                     :navigation-total="supabaseExpressionFieldCount"
@@ -13737,7 +14106,13 @@ onUnmounted(() => {
                     of objects or upstream <code class="font-mono">rows</code> arrays become many rows.
                   </p>
                   <div class="space-y-2">
-                    <Label class="text-xs text-muted-foreground">Ignore fields</Label>
+                    <div class="flex items-center justify-between gap-2">
+                      <Label class="text-xs text-muted-foreground">Ignore fields</Label>
+                      <AgentFieldToggle
+                        :node-id="selectedNode.id"
+                        field-key="supabaseIgnoredInputFields"
+                      />
+                    </div>
                     <Input
                       :model-value="String(selectedNode.data.supabaseIgnoredInputFields || '')"
                       placeholder="id, created_at"
@@ -13761,6 +14136,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseOnConflict"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="(selectedNode.data.supabaseRowsInputMode || 'raw') === 'raw' ? 3 : 2"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13814,6 +14190,7 @@ onUnmounted(() => {
                     :node-results="workflowStore.nodeResults"
                     :edges="workflowStore.edges"
                     :current-node-id="selectedNode.id"
+                    field-key="supabaseData"
                     :navigation-enabled="supabaseExpressionFieldCount > 1"
                     :navigation-index="2"
                     :navigation-total="supabaseExpressionFieldCount"
@@ -13831,7 +14208,13 @@ onUnmounted(() => {
                     do not want to write.
                   </p>
                   <div class="space-y-2">
-                    <Label class="text-xs text-muted-foreground">Ignore fields</Label>
+                    <div class="flex items-center justify-between gap-2">
+                      <Label class="text-xs text-muted-foreground">Ignore fields</Label>
+                      <AgentFieldToggle
+                        :node-id="selectedNode.id"
+                        field-key="supabaseIgnoredInputFields"
+                      />
+                    </div>
                     <Input
                       :model-value="String(selectedNode.data.supabaseIgnoredInputFields || '')"
                       placeholder="id, created_at"
@@ -13851,6 +14234,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseFilter"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="(selectedNode.data.supabaseDataInputMode || 'raw') === 'raw' ? 3 : 2"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13880,6 +14264,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="supabaseFilter"
                   :navigation-enabled="supabaseExpressionFieldCount > 1"
                   :navigation-index="2"
                   :navigation-total="supabaseExpressionFieldCount"
@@ -13944,6 +14329,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionQuery"
                 v-bind="notionExpressionNavBindings('notionQuery')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -13965,6 +14351,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionPageId"
                 v-bind="notionExpressionNavBindings('notionPageId')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -13986,6 +14373,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionDatabaseId"
                 v-bind="notionExpressionNavBindings('notionDatabaseId')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14008,6 +14396,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionDatabase"
                 v-bind="notionExpressionNavBindings('notionDatabase')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14029,6 +14418,10 @@ onUnmounted(() => {
               <div class="flex items-center justify-between gap-2">
                 <Label>Data Source</Label>
                 <div class="flex items-center gap-1">
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="notionDataSourceId"
+                  />
                   <Button
                     v-if="(selectedNode.data.notionDataSourceInputMode || 'select') === 'select'"
                     type="button"
@@ -14099,6 +14492,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionDataSourceId"
                 v-bind="notionExpressionNavBindings('notionDataSourceId')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14139,6 +14533,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionDataSource"
                 v-bind="notionExpressionNavBindings('notionDataSource')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14158,6 +14553,10 @@ onUnmounted(() => {
                 <div class="flex items-center justify-between gap-2">
                   <Label>Parent Page</Label>
                   <div class="flex items-center gap-1">
+                    <AgentFieldToggle
+                      :node-id="selectedNode.id"
+                      field-key="notionParentPageId"
+                    />
                     <Button
                       v-if="(selectedNode.data.notionParentPageInputMode || 'select') === 'select'"
                       type="button"
@@ -14228,6 +14627,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="notionParentPageId"
                   v-bind="notionExpressionNavBindings('notionParentPageId')"
                   @navigate="handleNotionExpressionFieldNavigate"
                   @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14262,6 +14662,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionBlockId"
                 v-bind="notionExpressionNavBindings('notionBlockId')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14282,6 +14683,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionBlock"
                 v-bind="notionExpressionNavBindings('notionBlock')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14302,6 +14704,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionProperties"
                 v-bind="notionExpressionNavBindings('notionProperties')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14322,6 +14725,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionIcon"
                 v-bind="notionExpressionNavBindings('notionIcon')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14342,6 +14746,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionCover"
                 v-bind="notionExpressionNavBindings('notionCover')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14362,6 +14767,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionChildren"
                 v-bind="notionExpressionNavBindings('notionChildren')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14382,6 +14788,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionFilter"
                 v-bind="notionExpressionNavBindings('notionFilter')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14402,6 +14809,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionSort"
                 v-bind="notionExpressionNavBindings('notionSort')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14422,6 +14830,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionSorts"
                 v-bind="notionExpressionNavBindings('notionSorts')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14433,7 +14842,13 @@ onUnmounted(() => {
               v-if="['search', 'queryDataSource', 'getBlockChildren'].includes(selectedNode.data.notionOperation || '')"
               class="space-y-2"
             >
-              <Label>Page Size <span class="font-normal text-muted-foreground">(0 = fetch all)</span></Label>
+              <div class="flex items-center justify-between gap-2">
+                <Label>Page Size <span class="font-normal text-muted-foreground">(0 = fetch all)</span></Label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="notionPageSize"
+                />
+              </div>
               <Input
                 type="number"
                 min="0"
@@ -14451,6 +14866,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionStartCursor"
                 v-bind="notionExpressionNavBindings('notionStartCursor')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14462,7 +14878,13 @@ onUnmounted(() => {
               v-if="selectedNode.data.notionOperation === 'appendBlocks'"
               class="space-y-2"
             >
-              <Label>Position</Label>
+              <div class="flex items-center justify-between gap-2">
+                <Label>Position</Label>
+                <AgentFieldToggle
+                  :node-id="selectedNode.id"
+                  field-key="notionAppendPosition"
+                />
+              </div>
               <Select
                 :model-value="selectedNode.data.notionAppendPosition || (selectedNode.data.notionAfterBlockId ? 'after_block' : 'end')"
                 :options="notionAppendPositionOptions"
@@ -14483,6 +14905,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="notionAfterBlockId"
                 v-bind="notionExpressionNavBindings('notionAfterBlockId')"
                 @navigate="handleNotionExpressionFieldNavigate"
                 @register-field-index="onNotionRegisterExpressionFieldIndex"
@@ -14898,6 +15321,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="s3Bucket"
                 :navigation-enabled="s3ExpressionFieldCount > 1"
                 :navigation-index="0"
                 :navigation-total="s3ExpressionFieldCount"
@@ -14946,6 +15370,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3Prefix"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="1"
                   :navigation-total="s3ExpressionFieldCount"
@@ -14957,7 +15382,13 @@ onUnmounted(() => {
                 />
               </div>
               <div class="space-y-2">
-                <Label>Max Keys</Label>
+                <div class="flex items-center justify-between gap-2">
+                  <Label>Max Keys</Label>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="s3MaxKeys"
+                  />
+                </div>
                 <Input
                   :model-value="selectedNode.data.s3MaxKeys || '100'"
                   type="number"
@@ -14990,6 +15421,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3ContinuationToken"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="2"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15017,6 +15449,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3Key"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="1"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15066,6 +15499,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3SourceBucket"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="1"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15087,6 +15521,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3SourceKey"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="2"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15115,6 +15550,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3Key"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="3"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15146,6 +15582,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3Key"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="1"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15177,6 +15614,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3Body"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="2"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15201,6 +15639,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="s3ContentType"
                   :navigation-enabled="s3ExpressionFieldCount > 1"
                   :navigation-index="3"
                   :navigation-total="s3ExpressionFieldCount"
@@ -15217,20 +15656,26 @@ onUnmounted(() => {
                 class="space-y-2"
               >
                 <Label>Options</Label>
-                <div class="flex items-center gap-2">
-                  <input
-                    id="s3-include-binary"
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-input bg-background"
-                    :checked="!!selectedNode.data.s3IncludeBinary"
-                    @change="updateNodeData('s3IncludeBinary', ($event.target as HTMLInputElement).checked)"
-                  >
-                  <Label
-                    for="s3-include-binary"
-                    class="font-normal text-sm"
-                  >
-                    Return binary as base64
-                  </Label>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <input
+                      id="s3-include-binary"
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-input bg-background"
+                      :checked="!!selectedNode.data.s3IncludeBinary"
+                      @change="updateNodeData('s3IncludeBinary', ($event.target as HTMLInputElement).checked)"
+                    >
+                    <Label
+                      for="s3-include-binary"
+                      class="font-normal text-sm"
+                    >
+                      Return binary as base64
+                    </Label>
+                  </div>
+                  <AgentFieldToggle
+                    :node-id="selectedNode.id"
+                    field-key="s3IncludeBinary"
+                  />
                 </div>
               </div>
             </template>
@@ -15345,7 +15790,65 @@ onUnmounted(() => {
             </div>
 
             <div
-              v-if="selectedNode.data.driveOperation && !['downloadUrl', 'getAll'].includes(selectedNode.data.driveOperation)"
+              v-if="selectedNode.data.driveOperation === 'save'"
+              class="space-y-4"
+            >
+              <div class="space-y-2">
+                <Label>Filename</Label>
+                <ExpressionInput
+                  ref="driveFilenameExpressionInputRef"
+                  :model-value="selectedNode.data.driveFilename || ''"
+                  placeholder="1.mp3"
+                  :rows="1"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  expandable
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Drive save · Filename"
+                  field-key="driveFilename"
+                  :navigation-enabled="true"
+                  :navigation-index="0"
+                  :navigation-total="driveExpressionFieldCount"
+                  @navigate="handleDriveExpressionFieldNavigate"
+                  @register-field-index="onDriveRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('driveFilename', $event)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Full filename including extension (for example, 1.mp3)
+                </p>
+              </div>
+              <div class="space-y-2">
+                <Label>Base64 Content</Label>
+                <ExpressionInput
+                  ref="driveBase64ContentExpressionInputRef"
+                  :model-value="selectedNode.data.driveBase64Content || ''"
+                  placeholder="$userInput.body.base64"
+                  :rows="3"
+                  :nodes="workflowStore.nodes"
+                  :node-results="workflowStore.nodeResults"
+                  :edges="workflowStore.edges"
+                  :current-node-id="selectedNode.id"
+                  expandable
+                  :dialog-node-label="selectedNodeEvaluateDialogLabel"
+                  dialog-key-label="Drive save · Base64 Content"
+                  field-key="driveBase64Content"
+                  :navigation-enabled="true"
+                  :navigation-index="1"
+                  :navigation-total="driveExpressionFieldCount"
+                  @navigate="handleDriveExpressionFieldNavigate"
+                  @register-field-index="onDriveRegisterExpressionFieldIndex"
+                  @update:model-value="updateNodeData('driveBase64Content', $event)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Raw base64 string or data URL to decode and store in Drive
+                </p>
+              </div>
+            </div>
+
+            <div
+              v-if="selectedNode.data.driveOperation && !['downloadUrl', 'getAll', 'save'].includes(selectedNode.data.driveOperation)"
               class="space-y-2"
             >
               <div class="flex items-center justify-between gap-2">
@@ -15563,6 +16066,13 @@ onUnmounted(() => {
                   <div>${{ selectedNode.data.label }}.files[0].download_url - public download URL</div>
                 </template>
                 <template v-else-if="selectedNode.data.driveOperation === 'downloadUrl'">
+                  <div>${{ selectedNode.data.label }}.id - new file UUID</div>
+                  <div>${{ selectedNode.data.label }}.filename - file name</div>
+                  <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>
+                  <div>${{ selectedNode.data.label }}.size_bytes - file size</div>
+                  <div>${{ selectedNode.data.label }}.download_url - Drive download URL</div>
+                </template>
+                <template v-else-if="selectedNode.data.driveOperation === 'save'">
                   <div>${{ selectedNode.data.label }}.id - new file UUID</div>
                   <div>${{ selectedNode.data.label }}.filename - file name</div>
                   <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>

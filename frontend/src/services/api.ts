@@ -44,6 +44,7 @@ import type {
   ExpressionEvaluateRequest,
   ExpressionEvaluateResponse,
   ExecutionResult,
+  FileUploadSlotStatus,
   Folder,
   FolderTree,
   FolderWithContents,
@@ -821,6 +822,25 @@ export const workflowApi = {
                 onNodeComplete(data);
               } else if (data.type === "final_output" && onFinalOutput) {
                 onFinalOutput(data);
+              } else if (data.type === "file_upload_required") {
+                completionReceived = true;
+                onComplete({
+                  workflow_id: data.workflow_id ?? "",
+                  status: "awaiting_file_upload",
+                  outputs: {
+                    file_upload_required: true,
+                    curl: data.curl,
+                    upload_url: data.upload_url,
+                    expires_at: data.expires_at,
+                    max_size_mb: data.max_size_mb,
+                    allowed_types: data.allowed_types,
+                    slot_id: data.slot_id,
+                    instructions: data.instructions,
+                  },
+                  execution_time_ms: 0,
+                  node_results: [],
+                  execution_history_id: null,
+                });
               } else if (data.type === "execution_complete") {
                 completionReceived = true;
                 onComplete({
@@ -851,6 +871,10 @@ export const workflowApi = {
   },
   cancelExecution: async (workflowId: string, executionId: string): Promise<void> => {
     await api.post(`/workflows/${workflowId}/executions/${executionId}/cancel`);
+  },
+  getFileUploadSlot: async (slotId: string): Promise<FileUploadSlotStatus> => {
+    const response = await api.get<FileUploadSlotStatus>(`/file-intake/slots/${slotId}`);
+    return response.data;
   },
   getActiveExecutions: async (): Promise<ActiveExecutionItem[]> => {
     const response = await api.get<ActiveExecutionItem[]>(
@@ -1804,6 +1828,7 @@ export interface MCPWorkflowItem {
   description: string | null;
   mcp_enabled: boolean;
   input_fields: MCPInputField[];
+  updated_at?: string | null;
 }
 
 export interface MCPConfigResponse {

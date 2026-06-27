@@ -78,6 +78,14 @@ Frontend: Playwright E2E specs live in `frontend/e2e/`; run them with `./run_e2e
 **New UI behavior should include Playwright E2E coverage when practical.** E2E tests run as a separate required job in PR checks and are intentionally excluded from `./check.sh` to keep the default local check path fast.
 If the local environment does not export `SECRET_KEY`, prefix full-suite commands with `SECRET_KEY=test-secret-key-for-tests-only-32-bytes` (test-only value; never use it for runtime/prod).
 
+### Node and operation integration
+When adding a new node type, operation, or operation-specific field, keep the canvas affordances in sync with the schema:
+
+- Update the node/operation DSL(workflow_dsl_prompt.py) and schema metadata as the source of truth for new fields, including labels, defaults, dynamic/expression eligibility, and AI autofill hints.
+- Agent node tool fields must be available to AI autofill. If a field can be configured on a tool attached to an agent node, clicking the agent icon should be able to populate that field automatically.
+- Dynamic/expression-capable fields must be exposed to the expression dialog metadata. When a node is double-clicked, the expression dialog should be able to show `1/n` navigation and dynamically fill every eligible field for that node/operation.
+- Add or extend frontend tests for meaningful UI behavior changes when practical, especially for autofill eligibility and expression dialog field discovery.
+
 ### Expression evaluation (avoid executor vs dialog drift)
 The canvas **expression evaluate** dialog (`/expressions/evaluate`, `ExpressionEvaluatorService`) and **workflow execution** (`WorkflowExecutor`) must agree on the same semantics for `$…` templates.
 

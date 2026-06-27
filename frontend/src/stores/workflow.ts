@@ -12,6 +12,7 @@ import type {
   AllExecutionHistoryEntryLight,
   ExecutionHistoryEntry,
   ExecutionResult,
+  FileUploadSlotStatus,
   LLMBatchProgressEntry,
   NodeResult,
   ServerExecutionHistory,
@@ -1076,6 +1077,53 @@ export const useWorkflowStore = defineStore("workflow", () => {
     runningNodeId.value = null;
   }
 
+  /**
+   * After a fileUploadTrigger workflow mints an upload link, the canvas run ends
+   * with status "awaiting_file_upload". The actual file upload happens out of band
+   * (the caller runs the returned curl) and triggers a separate run. Poll the slot
+   * so the canvas advances to show that run's results once the file arrives.
+   */
+  async function pollFileUploadSlot(
+    slotId: string,
+    signal: AbortSignal,
+    workflowId: string,
+  ): Promise<void> {
+    const deadlineMs = Date.now() + 30 * 60 * 1000;
+    while (!signal.aborted && Date.now() < deadlineMs) {
+      await new Promise((r) => setTimeout(r, 2500));
+      if (signal.aborted) return;
+      // Stop if the user started another run or cleared the result.
+      if (executionResult.value?.status !== "awaiting_file_upload") return;
+
+      let slot: FileUploadSlotStatus;
+      try {
+        slot = await workflowApi.getFileUploadSlot(slotId);
+      } catch {
+        continue;
+      }
+
+      if (slot.run) {
+        const finalRows = (slot.run.node_results || []) as NodeResult[];
+        nodeResults.value = finalRows;
+        executionResult.value = {
+          workflow_id: workflowId,
+          status: (slot.run.status as ExecutionResult["status"]) ?? "success",
+          outputs: slot.run.outputs,
+          node_results: finalRows,
+          execution_time_ms: slot.run.execution_time_ms,
+          execution_history_id: slot.run.execution_history_id,
+        };
+        for (const nodeResult of finalRows) {
+          setNodeStatus(
+            nodeResult.node_id,
+            nodeResult.status as "pending" | "running" | "success" | "error" | "skipped",
+          );
+        }
+        return;
+      }
+    }
+  }
+
   async function executeWorkflow(
     body: unknown,
   ): Promise<void> {
@@ -1167,6 +1215,25 @@ export const useWorkflowStore = defineStore("workflow", () => {
             }
           },
           (result) => {
+            if (result.status === "awaiting_file_upload") {
+              // The run minted an upload link; reset node states and poll for the
+              // upload-triggered run so the canvas advances once the file arrives.
+              timelinePickedNodeResultIndex.value = null;
+              nodeResults.value = [];
+              executionResult.value = { ...result, node_results: [] };
+              clearNodeStatuses();
+              isExecuting.value = false;
+              runningNodeId.value = null;
+              abortController.value = null;
+              currentExecutionId.value = null;
+              const slotId = (result.outputs as Record<string, unknown>)?.slot_id;
+              if (typeof slotId === "string") {
+                void pollFileUploadSlot(slotId, streamAbort.signal, wf.id);
+              }
+              settle(() => resolve());
+              return;
+            }
+
             const finalRows = (result.node_results || []) as NodeResult[];
             timelinePickedNodeResultIndex.value = null;
             nodeResults.value = finalRows;

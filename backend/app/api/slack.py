@@ -256,27 +256,46 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
     if trigger_node:
         credential_id = trigger_node.get("data", {}).get("credentialId") or None
 
-    # Verify Slack signature if credential is configured
-    if credential_id:
-        async with async_session_maker() as db:
-            signing_secret = await _get_signing_secret(db, credential_id)
-
-        if signing_secret:
-            timestamp = request.headers.get("x-slack-request-timestamp", "")
-            signature = request.headers.get("x-slack-signature", "")
-            if not _verify_slack_signature(signing_secret, raw_body, timestamp, signature):
-                logger.warning(
-                    "Invalid Slack signature for node_id=%s",
-                    node_id,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Invalid Slack signature",
-                )
-    else:
+    # SECURITY: Slack webhook signature verification must fail closed.
+    # See security advisory GHSA-pm6h-x3h5-j38h, finding H1. Previously, a missing
+    # credential_id or empty signing_secret caused verification to be skipped
+    # entirely, allowing anyone with the webhook URL to trigger the workflow with
+    # the owner's credentials.
+    #
+    # Client-facing error is a single generic message so probing the webhook URL
+    # does not reveal which nodes are misconfigured. The specific reason is logged
+    # server-side only.
+    if not credential_id:
         logger.warning(
-            "No credential configured for Slack trigger node_id=%s — running without verification",
+            "Slack webhook rejected: no credential_id on trigger node_id=%s",
             node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
+
+    async with async_session_maker() as db:
+        signing_secret = await _get_signing_secret(db, credential_id)
+
+    if not signing_secret:
+        logger.warning(
+            "Slack webhook rejected: credential_id=%s has no signing_secret (node_id=%s)",
+            credential_id,
+            node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
+
+    timestamp = request.headers.get("x-slack-request-timestamp", "")
+    signature = request.headers.get("x-slack-signature", "")
+    if not _verify_slack_signature(signing_secret, raw_body, timestamp, signature):
+        logger.warning("Invalid Slack signature for node_id=%s", node_id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid Slack signature",
         )
 
     # Build safe headers (strip sensitive ones)

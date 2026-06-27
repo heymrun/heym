@@ -36,6 +36,7 @@ import {
   Table2,
   Terminal,
   Type,
+  Upload,
   Variable,
   XCircle,
 } from "lucide-vue-next";
@@ -47,6 +48,7 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   cron: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
+  fileUploadTrigger: Upload,
   llm: Brain,
   agent: Bot,
   condition: GitBranch,
@@ -99,6 +101,7 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   cron: "text-node-cron",
   telegramTrigger: "text-node-telegram",
   websocketTrigger: "text-node-websocket",
+  fileUploadTrigger: "text-node-websocket",
   llm: "text-node-llm",
   agent: "text-node-agent",
   condition: "text-node-condition",

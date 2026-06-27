@@ -68,6 +68,20 @@ def _slugify_tool_name(label: str) -> str:
     return slug[:64] or "node_tool"
 
 
+def _coerce_boolean(value: object, *, default: bool = False) -> bool:
+    """Coerce configured or agent-provided boolean values without treating ``"false"`` as true."""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+        return default
+    if value is None:
+        return default
+    return bool(value)
+
+
 def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     """Build SQLAlchemy filter clauses for a DataTable Mongo-style filter.
 
@@ -6219,21 +6233,46 @@ class WorkflowExecutor:
         *,
         coerce_bool: bool,
     ) -> Any:
-        """Evaluate Python text after ``$...`` spans were replaced (shared by condition vs value)."""
+        """Evaluate Python text after ``$...`` spans were replaced (shared by condition vs value).
+
+        SECURITY: This must NEVER use Python's built-in `eval()`. Clearing `__builtins__`
+        does not stop attribute traversal — exposing real Python types (`str`, `int`,
+        `len`) in the locals lets a workflow author reach `object.__subclasses__()`
+        and from there any class loaded in the interpreter (sandbox escape -> RCE).
+        The verified gadget is `str.__class__.__bases__[0].__subclasses__()` -> pick a
+        class whose `__init__.__globals__` exposes `__builtins__["__import__"]`.
+
+        We route through `HeymExpressionEval` (a `simpleeval.EvalWithCompoundTypes`
+        subclass) which walks an AST and refuses dunder attribute access. The JS-style
+        literal aliases (`true`/`false`/`null`/`undefined`) are passed via `names`
+        because simpleeval only recognises Python's `True`/`False`/`None` natively;
+        without them, conditions like `$x == true` raise `NameNotDefined`.
+
+        See security advisory GHSA-pm6h-x3h5-j38h, finding C1.
+        """
         processed = _normalize_js_logical_ops_for_eval(processed)
-        local_vars = {
-            "len": len,
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "None": None,
-            "null": None,
-            "undefined": None,
-            "true": True,
-            "false": False,
-        }
-        result = eval(processed, {"__builtins__": {}}, local_vars)
+        evaluator = HeymExpressionEval(
+            functions=self._get_evaluator_functions(),
+            names={
+                # JS-style literal aliases — simpleeval doesn't recognise these
+                # as Python literals, so they must be in `names`. `True`/`False`/
+                # `None` are Python literals and simpleeval handles them natively.
+                "true": True,
+                "false": False,
+                "null": None,
+                "undefined": None,
+            },
+        )
+        try:
+            result = evaluator.eval(processed)
+        except Exception as exc:
+            # Re-raise as ValueError so callers (evaluate_condition) can fall back
+            # to False without surfacing internal exception types. The service path
+            # (ExpressionEvaluatorService.evaluate) catches this ValueError and
+            # returns ExpressionEvaluateResponse(result=None, result_type="null",
+            # error=str(exc)) -- so the executor raises and the service returns an
+            # error response, but both reject the same payloads.
+            raise ValueError(f"Invalid condition expression: {exc}") from exc
         return bool(result) if coerce_bool else result
 
     def evaluate_expression_tail_strict(
@@ -6826,6 +6865,12 @@ class WorkflowExecutor:
                     "message": trigger_inputs.get("message"),
                     "connection": trigger_inputs.get("connection"),
                     "close": trigger_inputs.get("close"),
+                }
+            elif node_type == "fileUploadTrigger":
+                trigger_inputs = node_data.get("_initial_inputs", {})
+                output = {
+                    "file": trigger_inputs.get("file", {}),
+                    "uploaded_at": trigger_inputs.get("uploaded_at"),
                 }
             elif node_type == "llm":
                 combined_input = ""
@@ -7596,23 +7641,45 @@ class WorkflowExecutor:
 
             elif node_type == "sendEmail":
                 import smtplib
+                import uuid as _uuid
+                from email.mime.application import MIMEApplication
                 from email.mime.multipart import MIMEMultipart
                 from email.mime.text import MIMEText
 
+                from app.db.models import GeneratedFile
+                from app.db.session import SessionLocal
+                from app.services.encryption import decrypt_config
+                from app.services.file_storage import _storage_root
+
                 to_template = node_data.get("to", "")
+                cc_template = node_data.get("cc", "")
+                bcc_template = node_data.get("bcc", "")
                 subject_template = node_data.get("subject", "")
                 body_template = node_data.get("emailBody", "$input.text")
+                attachments_template = node_data.get("attachments", "")
 
                 to_address = self.evaluate_message_template(to_template, inputs, node_id)
+                cc_address = (
+                    self.evaluate_message_template(cc_template, inputs, node_id)
+                    if cc_template
+                    else ""
+                )
+                bcc_address = (
+                    self.evaluate_message_template(bcc_template, inputs, node_id)
+                    if bcc_template
+                    else ""
+                )
                 subject = self.evaluate_message_template(subject_template, inputs, node_id)
                 body = self.evaluate_message_template(body_template, inputs, node_id)
+                attachments_value = (
+                    self.evaluate_message_template(attachments_template, inputs, node_id)
+                    if attachments_template
+                    else ""
+                )
 
                 credential_id = node_data.get("credentialId")
                 if not credential_id:
                     raise ValueError("Send Email node requires an SMTP credential")
-
-                from app.db.session import SessionLocal
-                from app.services.encryption import decrypt_config
 
                 smtp_config: dict = {}
                 with SessionLocal() as db:
@@ -7631,9 +7698,11 @@ class WorkflowExecutor:
                 if not to_address:
                     raise ValueError("Email recipient (to) is required")
 
-                msg = MIMEMultipart("alternative")
+                msg = MIMEMultipart("mixed")
                 msg["From"] = smtp_email
                 msg["To"] = to_address
+                if cc_address:
+                    msg["Cc"] = cc_address
                 msg["Subject"] = subject
 
                 body_lower = body.strip().lower()
@@ -7649,33 +7718,92 @@ class WorkflowExecutor:
                     or "<br />" in body_lower
                 )
 
+                body_part = MIMEMultipart("alternative")
                 if is_html:
                     import re
 
                     plain_text = re.sub(r"<[^>]+>", "", body)
                     plain_text = re.sub(r"\s+", " ", plain_text).strip()
-                    msg.attach(MIMEText(plain_text, "plain"))
-                    msg.attach(MIMEText(body, "html"))
+                    body_part.attach(MIMEText(plain_text, "plain"))
+                    body_part.attach(MIMEText(body, "html"))
                 else:
-                    msg.attach(MIMEText(body, "plain"))
+                    body_part.attach(MIMEText(body, "plain"))
+                msg.attach(body_part)
+
+                attachment_count = 0
+                attachment_ids = [
+                    token.strip() for token in attachments_value.split(",") if token.strip()
+                ]
+                if attachment_ids:
+                    owner_id = self.trace_user_id
+                    if not owner_id:
+                        raise ValueError("Send Email: no owner context available for attachments")
+                    with SessionLocal() as db:
+                        for token in attachment_ids:
+                            try:
+                                file_uuid = _uuid.UUID(token)
+                            except ValueError as exc:
+                                raise ValueError(
+                                    f"Send Email: invalid attachment file ID '{token}'"
+                                ) from exc
+                            file_row = (
+                                db.query(GeneratedFile)
+                                .filter(
+                                    GeneratedFile.id == file_uuid,
+                                    GeneratedFile.owner_id == owner_id,
+                                )
+                                .first()
+                            )
+                            if not file_row:
+                                raise ValueError(
+                                    "Send Email: attachment file not found or "
+                                    f"access denied: {file_uuid}"
+                                )
+                            disk_path = _storage_root() / file_row.storage_path
+                            if not disk_path.exists():
+                                raise ValueError(
+                                    "Send Email: attachment file missing on disk: "
+                                    f"{file_row.filename}"
+                                )
+                            file_bytes = disk_path.read_bytes()
+                            mime_type = file_row.mime_type or "application/octet-stream"
+                            _, _, subtype = mime_type.partition("/")
+                            part = MIMEApplication(file_bytes, _subtype=subtype or "octet-stream")
+                            part.add_header(
+                                "Content-Disposition",
+                                "attachment",
+                                filename=file_row.filename,
+                            )
+                            msg.attach(part)
+                            attachment_count += 1
+
+                all_recipients = [
+                    addr.strip()
+                    for group in (to_address, cc_address, bcc_address)
+                    for addr in group.split(",")
+                    if addr.strip()
+                ]
 
                 try:
                     if smtp_port == 465:
                         with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
                             server.login(smtp_email, smtp_password)
-                            server.sendmail(smtp_email, to_address.split(","), msg.as_string())
+                            server.sendmail(smtp_email, all_recipients, msg.as_string())
                     else:
                         with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
                             server.starttls()
                             server.login(smtp_email, smtp_password)
-                            server.sendmail(smtp_email, to_address.split(","), msg.as_string())
+                            server.sendmail(smtp_email, all_recipients, msg.as_string())
                 except smtplib.SMTPException as e:
                     raise ValueError(f"Failed to send email: {e}")
 
                 output = {
                     "status": "sent",
                     "to": to_address,
+                    "cc": cc_address,
+                    "bcc": bcc_address,
                     "subject": subject,
+                    "attachment_count": attachment_count,
                 }
 
             elif node_type == "redis":
@@ -9462,7 +9590,7 @@ class WorkflowExecutor:
                         body = self.evaluate_message_template(
                             str(node_data.get("githubBody", "") or ""), inputs, node_id
                         )
-                        draft = bool(node_data.get("githubDraft", False))
+                        draft = _coerce_boolean(node_data.get("githubDraft"), default=False)
                         pull_request = service.create_pull_request(
                             owner,
                             repo,
@@ -9646,8 +9774,10 @@ class WorkflowExecutor:
                             name=name or None,
                             body=body or None,
                             target_commitish=target_commitish or None,
-                            draft=bool(node_data.get("githubDraft", False)),
-                            prerelease=bool(node_data.get("githubPrerelease", False)),
+                            draft=_coerce_boolean(node_data.get("githubDraft"), default=False),
+                            prerelease=_coerce_boolean(
+                                node_data.get("githubPrerelease"), default=False
+                            ),
                         )
                         output = {
                             "success": True,
@@ -9685,12 +9815,12 @@ class WorkflowExecutor:
                             if target_commitish_provided
                             else None,
                             draft=(
-                                bool(node_data.get("githubDraft"))
+                                _coerce_boolean(node_data.get("githubDraft"))
                                 if node_data.get("githubDraft") is not None
                                 else None
                             ),
                             prerelease=(
-                                bool(node_data.get("githubPrerelease"))
+                                _coerce_boolean(node_data.get("githubPrerelease"))
                                 if node_data.get("githubPrerelease") is not None
                                 else None
                             ),
@@ -10324,7 +10454,7 @@ class WorkflowExecutor:
                         if raw_order_by_template
                         else ""
                     )
-                    ascending = bool(node_data.get("supabaseAscending", True))
+                    ascending = _coerce_boolean(node_data.get("supabaseAscending"), default=True)
                     output = service.select_rows(
                         table,
                         schema=schema,
@@ -10471,7 +10601,9 @@ class WorkflowExecutor:
                         output = service.get_object(
                             bucket,
                             key,
-                            include_binary=bool(node_data.get("s3IncludeBinary", False)),
+                            include_binary=_coerce_boolean(
+                                node_data.get("s3IncludeBinary"), default=False
+                            ),
                         )
                     elif operation == "createBucket":
                         output = service.create_bucket(
@@ -11216,7 +11348,7 @@ class WorkflowExecutor:
                 if not owner_id:
                     raise ValueError("Drive Node: no owner context available")
 
-                if operation not in ("downloadUrl", "getAll"):
+                if operation not in ("downloadUrl", "getAll", "save"):
                     file_id_str = self._resolve_template(
                         node_data.get("driveFileId", ""), inputs, node_id
                     )
@@ -11227,7 +11359,91 @@ class WorkflowExecutor:
                     except ValueError as exc:
                         raise ValueError(f"Drive Node: invalid file ID '{file_id_str}'") from exc
 
-                if operation == "downloadUrl":
+                if operation == "save":
+                    import base64 as _base64
+                    import mimetypes as _mimetypes
+                    import secrets as _secrets
+
+                    from app.config import settings as _settings
+
+                    filename = self._resolve_template(
+                        node_data.get("driveFilename", ""), inputs, node_id
+                    )
+                    if not filename or not str(filename).strip():
+                        raise ValueError("Drive Node: filename is required for save")
+
+                    base64_content = self._resolve_template(
+                        node_data.get("driveBase64Content", ""), inputs, node_id
+                    )
+                    if not base64_content or not str(base64_content).strip():
+                        raise ValueError("Drive Node: base64 content is required for save")
+
+                    filename = _normalize_storage_filename(str(filename).strip())
+                    base64_payload = str(base64_content).strip()
+                    if base64_payload.startswith("data:"):
+                        _comma_idx = base64_payload.find(",")
+                        if _comma_idx == -1:
+                            raise ValueError("Drive Node: invalid base64 data URL")
+                        base64_payload = base64_payload[_comma_idx + 1 :].strip()
+
+                    try:
+                        file_bytes = _base64.b64decode(base64_payload, validate=True)
+                    except Exception as exc:
+                        raise ValueError("Drive Node: invalid base64 content") from exc
+
+                    mime_type = _mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+                    _max_bytes = _settings.file_max_size_mb * 1024 * 1024
+                    if len(file_bytes) > _max_bytes:
+                        raise ValueError(
+                            f"Drive Node: file exceeds size limit ({_settings.file_max_size_mb} MB)"
+                        )
+
+                    with SessionLocal() as db:
+                        _file_uuid = uuid.uuid4()
+                        _rel_path = f"{owner_id}/{_file_uuid}/{filename}"
+                        _abs_path = _safe_storage_path(_rel_path)
+                        _abs_path.parent.mkdir(parents=True, exist_ok=True)
+                        _abs_path.write_bytes(file_bytes)
+
+                        _row = GeneratedFile(
+                            id=_file_uuid,
+                            owner_id=owner_id,
+                            workflow_id=self.workflow_id,
+                            filename=filename,
+                            storage_path=_rel_path,
+                            mime_type=mime_type,
+                            size_bytes=len(file_bytes),
+                            source_node_id=node_id,
+                            source_node_label=node_data.get("label"),
+                            metadata_json={},
+                        )
+                        db.add(_row)
+                        db.flush()
+
+                        _token_str = _secrets.token_urlsafe(32)
+                        db.add(
+                            FileAccessToken(
+                                file_id=_file_uuid,
+                                token=_token_str,
+                                created_by_id=owner_id,
+                            )
+                        )
+                        db.commit()
+
+                    base_url = self._base_url
+                    dl_url = build_download_url(base_url, _token_str)
+                    output = {
+                        "status": "success",
+                        "operation": "save",
+                        "id": str(_file_uuid),
+                        "filename": filename,
+                        "mime_type": mime_type,
+                        "size_bytes": len(file_bytes),
+                        "download_url": dl_url,
+                    }
+
+                elif operation == "downloadUrl":
                     import mimetypes as _mimetypes
                     import secrets as _secrets
                     import urllib.parse as _urllib_parse
