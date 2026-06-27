@@ -21,6 +21,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
+| **ClickHouse** | [ClickHouse node](../nodes/clickhouse-node.md) | `host`, `port`, `username`, `password`, `database`, `secure` |
 | **Notion** | [Notion node](../nodes/notion-node.md) | `api_token`, or `client_id` + `client_secret` OAuth |
 | **Amazon S3** | [Amazon S3 node](../nodes/amazon-s3-node.md) | `aws_access_key_id`, `aws_secret_access_key`, `aws_region` |
 | **SMTP** | [Send Email](../nodes/send-email-node.md) | `host`, `port`, `email`, `password` |
@@ -238,6 +239,32 @@ The Supabase credential connects Heym to a Supabase project's PostgREST API so w
 ### Used By
 
 - [Supabase node](../nodes/supabase-node.md)
+
+## ClickHouse
+
+The ClickHouse credential connects Heym to an external ClickHouse database over its HTTP interface so workflows can run SQL, CRUD, and count operations against OLAP tables.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `host` | HTTP host without scheme, for example `your-instance.clickhouse.cloud` |
+| `port` | HTTP interface port (`8443` for HTTPS, `8123` for HTTP) |
+| `username` | ClickHouse user (defaults to `default`) |
+| `password` | User password (optional) |
+| `database` | Target database (defaults to `default`) |
+| `secure` | Use HTTPS when `true` (required for ClickHouse Cloud) |
+
+### Notes
+
+- The [ClickHouse node](../nodes/clickhouse-node.md) uses the official `clickhouse-connect` HTTP client and parameterizes filter and value bindings.
+- `update` and `remove` map to `ALTER TABLE ... UPDATE` and `DELETE FROM`, which are asynchronous ClickHouse mutations; both require a filter.
+- `upsert` performs an `INSERT` and assumes a `ReplacingMergeTree` table for merge-on-key behavior.
+- Use **Test connection** in the credential dialog to verify reachability.
+
+### Used By
+
+- [ClickHouse node](../nodes/clickhouse-node.md)
 
 ## Notion
 
