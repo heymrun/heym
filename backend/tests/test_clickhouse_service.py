@@ -99,3 +99,66 @@ class TestClickHouseReads(unittest.TestCase):
         svc = self._svc_with_client(client)
         out = svc.get_by_id("events", "7")
         self.assertEqual(out["row"], {"id": 7, "name": "x"})
+
+
+class TestClickHouseWrites(unittest.TestCase):
+    def _svc_with_client(self, mock_client):
+        from app.services.clickhouse_service import ClickHouseService
+
+        svc = ClickHouseService(_make_config())
+        svc._client = MagicMock(return_value=mock_client)
+        return svc
+
+    def test_insert_aligns_columns(self) -> None:
+        client = MagicMock()
+        svc = self._svc_with_client(client)
+        out = svc.insert("events", [{"id": 1, "name": "a"}, {"name": "b"}])
+        table, data = client.insert.call_args[0][0], client.insert.call_args[0][1]
+        column_names = client.insert.call_args[1]["column_names"]
+        self.assertEqual(table, "events")
+        self.assertEqual(sorted(column_names), ["id", "name"])
+        # missing keys become None, aligned to column order
+        self.assertEqual(len(data), 2)
+        self.assertEqual(out["count"], 2)
+        self.assertTrue(out["success"])
+
+    def test_insert_rejects_empty(self) -> None:
+        svc = self._svc_with_client(MagicMock())
+        with self.assertRaises(ValueError):
+            svc.insert("events", [])
+
+    def test_update_builds_alter(self) -> None:
+        client = MagicMock()
+        svc = self._svc_with_client(client)
+        svc.update("events", data={"name": "z"}, filters={"id": 1})
+        sql = client.command.call_args[0][0]
+        params = client.command.call_args[1]["parameters"]
+        self.assertIn("ALTER TABLE events UPDATE", sql)
+        self.assertIn("name = {", sql)
+        self.assertIn("WHERE", sql)
+        self.assertEqual(params["set_name"], "z")
+        self.assertEqual(params["v_id"], 1)
+
+    def test_update_requires_filter(self) -> None:
+        svc = self._svc_with_client(MagicMock())
+        with self.assertRaises(ValueError):
+            svc.update("events", data={"name": "z"}, filters={})
+
+    def test_remove_builds_delete(self) -> None:
+        client = MagicMock()
+        svc = self._svc_with_client(client)
+        svc.remove("events", filters={"id": 1})
+        sql = client.command.call_args[0][0]
+        self.assertIn("DELETE FROM events WHERE", sql)
+
+    def test_remove_requires_filter(self) -> None:
+        svc = self._svc_with_client(MagicMock())
+        with self.assertRaises(ValueError):
+            svc.remove("events", filters={})
+
+    def test_upsert_delegates_to_insert(self) -> None:
+        client = MagicMock()
+        svc = self._svc_with_client(client)
+        out = svc.upsert("events", [{"id": 1}])
+        client.insert.assert_called_once()
+        self.assertTrue(out["success"])

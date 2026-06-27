@@ -160,3 +160,56 @@ class ClickHouseService:
         )
         rows = self._rows_to_dicts(result)
         return {"row": rows[0] if rows else None, "success": True}
+
+    def insert(self, table: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        tbl = _validate_identifier(table, "table")
+        if not rows:
+            raise ValueError("ClickHouse insert requires at least one row")
+        if not all(isinstance(r, dict) for r in rows):
+            raise ValueError("ClickHouse insert rows must be JSON objects")
+        column_set: list[str] = []
+        for row in rows:
+            for key in row:
+                col = _validate_identifier(key, "column")
+                if col not in column_set:
+                    column_set.append(col)
+        data = [[row.get(col) for col in column_set] for row in rows]
+        self._client().insert(tbl, data, column_names=column_set)
+        return {"count": len(rows), "success": True}
+
+    def upsert(self, table: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        # ClickHouse upsert relies on a ReplacingMergeTree table; an INSERT is the upsert.
+        return self.insert(table, rows)
+
+    def update(
+        self, table: str, *, data: dict[str, Any], filters: dict[str, Any]
+    ) -> dict[str, Any]:
+        tbl = _validate_identifier(table, "table")
+        if not data:
+            raise ValueError("ClickHouse update requires data")
+        if not filters:
+            raise ValueError(
+                "ClickHouse update requires a filter to avoid a full-table mutation"
+            )
+        set_parts: list[str] = []
+        params: dict[str, Any] = {}
+        for column, value in data.items():
+            col = _validate_identifier(column, "column")
+            name = f"set_{col}"
+            set_parts.append(f"{col} = {{{name}:{_ch_param_type(value)}}}")
+            params[name] = value
+        where, where_params = self._build_where(filters)
+        params.update(where_params)
+        sql = f"ALTER TABLE {tbl} UPDATE " + ", ".join(set_parts) + where
+        self._client().command(sql, parameters=params)
+        return {"success": True}
+
+    def remove(self, table: str, *, filters: dict[str, Any]) -> dict[str, Any]:
+        tbl = _validate_identifier(table, "table")
+        if not filters:
+            raise ValueError(
+                "ClickHouse remove requires a filter to avoid deleting all rows"
+            )
+        where, params = self._build_where(filters)
+        self._client().command(f"DELETE FROM {tbl}{where}", parameters=params)
+        return {"success": True}
