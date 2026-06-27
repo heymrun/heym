@@ -11,8 +11,6 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 from uuid import UUID
 
-import clickhouse_connect
-
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _READ_PREFIXES = ("SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "EXISTS")
 
@@ -87,7 +85,9 @@ class ClickHouseService:
             self._port = 8443 if self._secure else 8123
 
     def _client(self):
-        return clickhouse_connect.get_client(
+        from app.services.clickhouse_pool import get_clickhouse_client
+
+        return get_clickhouse_client(
             host=self._host,
             port=self._port,
             username=self._username,

@@ -328,3 +328,33 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 executor._run_clickhouse_node(node_data, {}, "node-1")
+
+
+class TestClickHousePool(unittest.TestCase):
+    def setUp(self) -> None:
+        from app.services import clickhouse_pool
+
+        clickhouse_pool._clients.clear()
+
+    def test_client_is_cached_per_connection(self) -> None:
+        from app.services import clickhouse_pool
+
+        created: list = []
+
+        def fake_get_client(**kwargs):
+            obj = object()
+            created.append(kwargs)
+            return obj
+
+        conn = dict(username="u", password="p", database="d", secure=False)
+        with patch(
+            "app.services.clickhouse_pool.clickhouse_connect.get_client",
+            side_effect=fake_get_client,
+        ):
+            c1 = clickhouse_pool.get_clickhouse_client(host="h", port=8123, **conn)
+            c2 = clickhouse_pool.get_clickhouse_client(host="h", port=8123, **conn)
+            c3 = clickhouse_pool.get_clickhouse_client(host="h2", port=8123, **conn)
+
+        self.assertIs(c1, c2)  # same connection reused
+        self.assertIsNot(c1, c3)  # different host -> new client
+        self.assertEqual(len(created), 2)

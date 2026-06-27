@@ -57,6 +57,8 @@ from app.http_identity import HEYM_SERVER_AGENT
 from app.middleware.request_body_limit import RequestBodySizeLimitMiddleware
 from app.models.schemas import AppVersionResponse
 from app.observability.tracing import setup_tracing, shutdown_tracing
+from app.services.clickhouse_pool import close_all_clients as close_clickhouse_clients
+from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
 from app.services.cron_scheduler import cron_scheduler
 from app.services.distributed_lock import lock_service
 from app.services.execution_cancellation import active_execution_registry
@@ -130,6 +132,10 @@ async def lifespan(app: FastAPI):
     if qdrant_count > 0:
         logger.info("Qdrant pools warmed up: %d", qdrant_count)
 
+    clickhouse_count = warm_up_clickhouse_pools()
+    if clickhouse_count > 0:
+        logger.info("ClickHouse pools warmed up: %d", clickhouse_count)
+
     await active_execution_registry.start()
     await cron_scheduler.start()
     await imap_trigger_manager.start()
@@ -147,6 +153,7 @@ async def lifespan(app: FastAPI):
     close_redis_pools()
     close_grist_clients()
     close_qdrant_clients()
+    close_clickhouse_clients()
     NotionService.close_shared_client()
     close_http_client()
 
