@@ -157,6 +157,7 @@ export type NodeType =
   | "googleSheets"
   | "bigquery"
   | "supabase"
+  | "clickhouse"
   | "notion"
   | "throwError"
   | "rabbitmq"
@@ -235,6 +236,17 @@ export type GristOperation =
   | "listColumns";
 
 export type DataTableOperation =
+  | "find"
+  | "getAll"
+  | "count"
+  | "getById"
+  | "insert"
+  | "update"
+  | "remove"
+  | "upsert";
+
+export type ClickHouseOperation =
+  | "query"
   | "find"
   | "getAll"
   | "count"
@@ -612,6 +624,16 @@ export interface NodeData {
   supabaseRows?: string;
   supabaseOnConflict?: string;
   supabaseData?: string;
+  clickhouseOperation?: ClickHouseOperation;
+  clickhouseTable?: string;
+  clickhouseQuery?: string;
+  clickhouseFilter?: string;
+  clickhouseLimit?: string;
+  clickhouseSort?: string;
+  clickhouseRowId?: string;
+  clickhouseInputMode?: "raw" | "selective";
+  clickhouseData?: string;
+  clickhouseMappings?: Array<{ key: string; value: string }>;
   notionOperation?:
     | "search"
     | "getPage"
