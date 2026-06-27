@@ -53,9 +53,7 @@ class ClickHouseService:
         raw_port = self._config.get("port")
         try:
             self._port = (
-                int(raw_port)
-                if raw_port not in (None, "")
-                else (8443 if self._secure else 8123)
+                int(raw_port) if raw_port not in (None, "") else (8443 if self._secure else 8123)
             )
         except (TypeError, ValueError):
             self._port = 8443 if self._secure else 8123
@@ -127,9 +125,7 @@ class ClickHouseService:
             direction = " " + parts[1].upper()
         return f"{col}{direction}"
 
-    def find(
-        self, table: str, *, filters: dict[str, Any], limit: int, sort: str
-    ) -> dict[str, Any]:
+    def find(self, table: str, *, filters: dict[str, Any], limit: int, sort: str) -> dict[str, Any]:
         tbl = _validate_identifier(table, "table")
         where, params = self._build_where(filters or {})
         sql = f"SELECT * FROM {tbl}{where}"
@@ -188,9 +184,7 @@ class ClickHouseService:
         if not data:
             raise ValueError("ClickHouse update requires data")
         if not filters:
-            raise ValueError(
-                "ClickHouse update requires a filter to avoid a full-table mutation"
-            )
+            raise ValueError("ClickHouse update requires a filter to avoid a full-table mutation")
         set_parts: list[str] = []
         params: dict[str, Any] = {}
         for column, value in data.items():
@@ -207,9 +201,7 @@ class ClickHouseService:
     def remove(self, table: str, *, filters: dict[str, Any]) -> dict[str, Any]:
         tbl = _validate_identifier(table, "table")
         if not filters:
-            raise ValueError(
-                "ClickHouse remove requires a filter to avoid deleting all rows"
-            )
+            raise ValueError("ClickHouse remove requires a filter to avoid deleting all rows")
         where, params = self._build_where(filters)
         self._client().command(f"DELETE FROM {tbl}{where}", parameters=params)
         return {"success": True}

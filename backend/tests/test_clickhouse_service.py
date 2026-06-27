@@ -54,9 +54,7 @@ class TestClickHouseReads(unittest.TestCase):
 
     def test_query_select_returns_rows(self) -> None:
         client = MagicMock()
-        client.query.return_value = self._mock_query_result(
-            [(1, "a"), (2, "b")], ["id", "name"]
-        )
+        client.query.return_value = self._mock_query_result([(1, "a"), (2, "b")], ["id", "name"])
         svc = self._svc_with_client(client)
         out = svc.query("SELECT id, name FROM events")
         self.assertEqual(out["rows"], [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}])
@@ -195,16 +193,20 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
         executor.evaluate_nonempty_message_template = lambda tpl, inputs, node_id: tpl
         fake_service = MagicMock()
         fake_service.find.return_value = {"rows": [], "count": 0, "success": True}
-        with patch.object(
-            WorkflowExecutor,
-            "_get_accessible_credential",
-            return_value=MagicMock(encrypted_config="x"),
-        ), patch(
-            "app.services.encryption.decrypt_config",
-            return_value={"host": "h", "database": "d"},
-        ), patch(
-            "app.services.clickhouse_service.ClickHouseService",
-            return_value=fake_service,
+        with (
+            patch.object(
+                WorkflowExecutor,
+                "_get_accessible_credential",
+                return_value=MagicMock(encrypted_config="x"),
+            ),
+            patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"host": "h", "database": "d"},
+            ),
+            patch(
+                "app.services.clickhouse_service.ClickHouseService",
+                return_value=fake_service,
+            ),
         ):
             output = executor._run_clickhouse_node(node_data, {}, "node-1")
         fake_service.find.assert_called_once()
@@ -225,16 +227,20 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
         executor.evaluate_nonempty_message_template = lambda tpl, inputs, node_id: tpl
         fake_service = MagicMock()
         fake_service.insert.return_value = {"count": 1, "success": True}
-        with patch.object(
-            WorkflowExecutor,
-            "_get_accessible_credential",
-            return_value=MagicMock(encrypted_config="x"),
-        ), patch(
-            "app.services.encryption.decrypt_config",
-            return_value={"host": "h", "database": "d"},
-        ), patch(
-            "app.services.clickhouse_service.ClickHouseService",
-            return_value=fake_service,
+        with (
+            patch.object(
+                WorkflowExecutor,
+                "_get_accessible_credential",
+                return_value=MagicMock(encrypted_config="x"),
+            ),
+            patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"host": "h", "database": "d"},
+            ),
+            patch(
+                "app.services.clickhouse_service.ClickHouseService",
+                return_value=fake_service,
+            ),
         ):
             output = executor._run_clickhouse_node(node_data, {}, "node-1")
         fake_service.insert.assert_called_once_with("events", [{"name": "Alice"}])
@@ -250,16 +256,20 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
         executor = self._executor()
         executor.evaluate_message_template = lambda tpl, inputs, node_id: tpl
         fake_service = MagicMock()
-        with patch.object(
-            WorkflowExecutor,
-            "_get_accessible_credential",
-            return_value=MagicMock(encrypted_config="x"),
-        ), patch(
-            "app.services.encryption.decrypt_config",
-            return_value={"host": "h", "database": "d"},
-        ), patch(
-            "app.services.clickhouse_service.ClickHouseService",
-            return_value=fake_service,
+        with (
+            patch.object(
+                WorkflowExecutor,
+                "_get_accessible_credential",
+                return_value=MagicMock(encrypted_config="x"),
+            ),
+            patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"host": "h", "database": "d"},
+            ),
+            patch(
+                "app.services.clickhouse_service.ClickHouseService",
+                return_value=fake_service,
+            ),
         ):
             with self.assertRaises(ValueError):
                 executor._run_clickhouse_node(node_data, {}, "node-1")
