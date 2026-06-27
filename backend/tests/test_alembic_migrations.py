@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["083_add_file_upload_slots"])
+        self.assertEqual(self.script.get_heads(), ["084_add_clickhouse_cred_type"])
 
     def test_github_and_supabase_revisions_are_merged(self) -> None:
         merge_revision = self.script.get_revision("080_merge_github_supabase_heads")

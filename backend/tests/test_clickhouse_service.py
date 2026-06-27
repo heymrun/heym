@@ -164,6 +164,15 @@ class TestClickHouseWrites(unittest.TestCase):
         self.assertTrue(out["success"])
 
 
+class TestClickHouseDslPrompt(unittest.TestCase):
+    def test_prompt_mentions_clickhouse(self) -> None:
+        from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
+
+        self.assertIn('"type": "clickhouse"', WORKFLOW_DSL_SYSTEM_PROMPT)
+        self.assertIn("clickhouseOperation", WORKFLOW_DSL_SYSTEM_PROMPT)
+        self.assertIn("clickhouseQuery", WORKFLOW_DSL_SYSTEM_PROMPT)
+
+
 class TestClickHouseExecutorBranch(unittest.TestCase):
     def _executor(self):
         from app.services.workflow_executor import WorkflowExecutor

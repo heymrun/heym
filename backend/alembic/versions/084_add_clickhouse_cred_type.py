@@ -7,7 +7,7 @@ Create Date: 2026-06-27
 
 from alembic import op
 
-revision: str = "084_add_clickhouse_credential_type"
+revision: str = "084_add_clickhouse_cred_type"
 down_revision: str | None = "083_add_file_upload_slots"
 branch_labels = None
 depends_on = None
