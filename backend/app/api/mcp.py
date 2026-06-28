@@ -907,7 +907,13 @@ async def call_mcp_tool(
     global_variables_context = await get_global_variables_context(db, mcp_user.id)
 
     execution_id = uuid.uuid4()
-    cancel_event = register_execution(workflow_id=target_workflow.id, execution_id=execution_id)
+    cancel_event = register_execution(
+        workflow_id=target_workflow.id,
+        execution_id=execution_id,
+        inputs=enriched_inputs,
+        trigger_source="mcp",
+        actor_user_id=mcp_user.id,
+    )
     try:
         execution_result = await asyncio.to_thread(
             execute_workflow,
@@ -1086,7 +1092,13 @@ async def _dispatch_mcp_jsonrpc(
         credentials_context = await get_credentials_context_for_user(db, mcp_user.id)
 
         execution_id = uuid.uuid4()
-        cancel_event = register_execution(workflow_id=target_workflow.id, execution_id=execution_id)
+        cancel_event = register_execution(
+            workflow_id=target_workflow.id,
+            execution_id=execution_id,
+            inputs=enriched_inputs,
+            trigger_source="mcp",
+            actor_user_id=mcp_user.id,
+        )
         try:
             execution_result = await asyncio.to_thread(
                 execute_workflow,

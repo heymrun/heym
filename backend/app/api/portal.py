@@ -406,7 +406,13 @@ async def portal_execute_stream(
     global_variables_context = await get_global_variables_context(db, workflow.owner_id)
     public_base_url = build_public_base_url(request)
     execution_id = uuid.uuid4()
-    cancel_event = register_execution(workflow_id=workflow.id, execution_id=execution_id)
+    cancel_event = register_execution(
+        workflow_id=workflow.id,
+        execution_id=execution_id,
+        inputs=enriched_inputs,
+        trigger_source="portal",
+        actor_user_id=workflow.owner_id,
+    )
 
     conversation_history_dicts = [
         {"role": msg.role, "content": msg.content} for msg in execute_data.conversation_history

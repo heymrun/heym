@@ -488,7 +488,13 @@ async def _dispatch_named_server_jsonrpc(
         global_variables_context = await get_global_variables_context(db, user.id)
 
         execution_id = uuid.uuid4()
-        cancel_event = register_execution(workflow_id=target_workflow.id, execution_id=execution_id)
+        cancel_event = register_execution(
+            workflow_id=target_workflow.id,
+            execution_id=execution_id,
+            inputs=enriched_inputs,
+            trigger_source="mcp",
+            actor_user_id=user.id,
+        )
         try:
             execution_result = await asyncio.to_thread(
                 execute_workflow,

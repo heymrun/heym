@@ -139,17 +139,31 @@ async def _execute_workflow_background(
                 db, fresh_workflow.owner_id
             )
 
-            result = execute_workflow(
+            from app.services.execution_cancellation import clear_execution, register_execution
+
+            execution_id = uuid.uuid4()
+            cancel_event = register_execution(
                 workflow_id=fresh_workflow.id,
-                nodes=fresh_workflow.nodes,
-                edges=fresh_workflow.edges,
+                execution_id=execution_id,
                 inputs=inputs,
-                workflow_cache=workflow_cache,
-                credentials_context=credentials_context,
-                global_variables_context=global_variables_context,
-                trace_user_id=fresh_workflow.owner_id,
+                trigger_source="slack",
                 actor_user_id=fresh_workflow.owner_id,
             )
+            try:
+                result = execute_workflow(
+                    workflow_id=fresh_workflow.id,
+                    nodes=fresh_workflow.nodes,
+                    edges=fresh_workflow.edges,
+                    inputs=inputs,
+                    workflow_cache=workflow_cache,
+                    credentials_context=credentials_context,
+                    global_variables_context=global_variables_context,
+                    trace_user_id=fresh_workflow.owner_id,
+                    actor_user_id=fresh_workflow.owner_id,
+                    cancel_event=cancel_event,
+                )
+            finally:
+                clear_execution(execution_id)
 
             history_entry = ExecutionHistory(
                 workflow_id=fresh_workflow.id,

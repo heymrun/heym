@@ -156,18 +156,32 @@ class CronScheduler:
             enriched_inputs = {"triggered_by": "cron"}
             public_base_url = build_default_public_base_url()
 
-            result = execute_workflow(
+            from app.services.execution_cancellation import clear_execution, register_execution
+
+            execution_id = uuid.uuid4()
+            cancel_event = register_execution(
                 workflow_id=workflow.id,
-                nodes=workflow.nodes,
-                edges=workflow.edges,
+                execution_id=execution_id,
                 inputs=enriched_inputs,
-                workflow_cache=workflow_cache,
-                credentials_context=credentials_context,
-                global_variables_context=global_variables_context,
-                trace_user_id=workflow.owner_id,
+                trigger_source="schedule",
                 actor_user_id=workflow.owner_id,
-                public_base_url=public_base_url,
             )
+            try:
+                result = execute_workflow(
+                    workflow_id=workflow.id,
+                    nodes=workflow.nodes,
+                    edges=workflow.edges,
+                    inputs=enriched_inputs,
+                    workflow_cache=workflow_cache,
+                    credentials_context=credentials_context,
+                    global_variables_context=global_variables_context,
+                    trace_user_id=workflow.owner_id,
+                    actor_user_id=workflow.owner_id,
+                    public_base_url=public_base_url,
+                    cancel_event=cancel_event,
+                )
+            finally:
+                clear_execution(execution_id)
             if result.allow_downstream_pending:
                 result.join_allow_downstream()
 
