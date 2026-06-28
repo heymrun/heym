@@ -32,6 +32,7 @@ export interface Workflow {
   rate_limit_window_seconds: number | null;
   sse_enabled: boolean;
   sse_node_config: Record<string, SseNodeConfig>;
+  auto_recover_runs: boolean;
   created_at: string;
   updated_at: string;
 }

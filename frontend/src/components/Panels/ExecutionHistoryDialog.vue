@@ -356,6 +356,7 @@ function getStatusIcon(status: string): typeof CheckCircle2 {
     case "success":
       return CheckCircle2;
     case "error":
+    case "failed":
       return XCircle;
     case "pending":
       return Clock;
@@ -371,11 +372,12 @@ function getStatusColor(status: string): string {
     case "success":
       return "text-emerald-500";
     case "error":
+    case "failed":
       return "text-red-500";
     case "pending":
       return "text-amber-500";
     case "skipped":
-      return "text-amber-500";
+      return "text-gray-400";
     default:
       return "text-muted-foreground";
   }

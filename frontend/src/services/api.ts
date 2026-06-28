@@ -511,6 +511,7 @@ export const workflowApi = {
         | "rate_limit_window_seconds"
         | "sse_enabled"
         | "sse_node_config"
+        | "auto_recover_runs"
       >
     >,
   ): Promise<Workflow> => {
