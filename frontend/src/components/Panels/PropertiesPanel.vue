@@ -12145,23 +12145,17 @@ onUnmounted(() => {
               />
             </div>
 
-            <div
+            <label
               v-if="isLinearPaginatedOperation()"
-              class="flex items-center justify-between gap-2"
+              class="flex items-center gap-2 text-sm"
             >
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  :checked="!!selectedNode.data.linearReturnAll"
-                  @change="updateNodeData('linearReturnAll', ($event.target as HTMLInputElement).checked)"
-                >
-                <span>Return All</span>
-              </label>
-              <AgentFieldToggle
-                :node-id="selectedNode.id"
-                field-key="linearReturnAll"
-              />
-            </div>
+              <input
+                type="checkbox"
+                :checked="!!selectedNode.data.linearReturnAll"
+                @change="updateNodeData('linearReturnAll', ($event.target as HTMLInputElement).checked)"
+              >
+              <span>Return All</span>
+            </label>
 
             <div
               v-if="isLinearPaginatedOperation() && !selectedNode.data.linearReturnAll"
@@ -13103,10 +13097,6 @@ onUnmounted(() => {
                   for="github-draft-pr"
                   class="text-sm cursor-pointer select-none"
                 >Create as draft pull request</label>
-                <AgentFieldToggle
-                  :node-id="selectedNode.id"
-                  field-key="githubDraft"
-                />
               </div>
             </template>
 
@@ -13287,10 +13277,6 @@ onUnmounted(() => {
                   >
                   <span>Draft release</span>
                 </label>
-                <AgentFieldToggle
-                  :node-id="selectedNode.id"
-                  field-key="githubDraft"
-                />
                 <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input
                     id="github-release-prerelease"
@@ -13301,10 +13287,6 @@ onUnmounted(() => {
                   >
                   <span>Prerelease</span>
                 </label>
-                <AgentFieldToggle
-                  :node-id="selectedNode.id"
-                  field-key="githubPrerelease"
-                />
               </div>
             </template>
 
@@ -14375,21 +14357,15 @@ onUnmounted(() => {
                   @navigate="handleSupabaseExpressionFieldNavigate"
                   @register-field-index="onSupabaseRegisterExpressionFieldIndex"
                 />
-                <div class="flex items-center justify-between gap-2">
-                  <label class="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      class="rounded border-input"
-                      :checked="selectedNode.data.supabaseAscending !== false"
-                      @change="updateNodeData('supabaseAscending', ($event.target as HTMLInputElement).checked)"
-                    >
-                    Ascending sort
-                  </label>
-                  <AgentFieldToggle
-                    :node-id="selectedNode.id"
-                    field-key="supabaseAscending"
-                  />
-                </div>
+                <label class="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    class="rounded border-input"
+                    :checked="selectedNode.data.supabaseAscending !== false"
+                    @change="updateNodeData('supabaseAscending', ($event.target as HTMLInputElement).checked)"
+                  >
+                  Ascending sort
+                </label>
               </div>
             </template>
 
@@ -16329,26 +16305,20 @@ onUnmounted(() => {
                 class="space-y-2"
               >
                 <Label>Options</Label>
-                <div class="flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-2">
-                    <input
-                      id="s3-include-binary"
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-input bg-background"
-                      :checked="!!selectedNode.data.s3IncludeBinary"
-                      @change="updateNodeData('s3IncludeBinary', ($event.target as HTMLInputElement).checked)"
-                    >
-                    <Label
-                      for="s3-include-binary"
-                      class="font-normal text-sm"
-                    >
-                      Return binary as base64
-                    </Label>
-                  </div>
-                  <AgentFieldToggle
-                    :node-id="selectedNode.id"
-                    field-key="s3IncludeBinary"
-                  />
+                <div class="flex items-center gap-2">
+                  <input
+                    id="s3-include-binary"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-input bg-background"
+                    :checked="!!selectedNode.data.s3IncludeBinary"
+                    @change="updateNodeData('s3IncludeBinary', ($event.target as HTMLInputElement).checked)"
+                  >
+                  <Label
+                    for="s3-include-binary"
+                    class="font-normal text-sm"
+                  >
+                    Return binary as base64
+                  </Label>
                 </div>
               </div>
             </template>

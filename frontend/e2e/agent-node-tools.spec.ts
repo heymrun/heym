@@ -18,11 +18,11 @@ const toolNodeCases: ToolNodeCase[] = [
   },
   {
     id: "node_1782319488123_linear01",
-    expectedToggles: 5,
+    expectedToggles: 4,
   },
   {
     id: "node_1782319357334_hlkt3kgd3",
-    expectedToggles: 7,
+    expectedToggles: 6,
   },
   {
     id: "node_1782319423257_frrvfmc3q",

@@ -107,17 +107,16 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         agent_id = "agent-1"
         fields_by_node = {
             "discord-1": ["message", "username", "avatarUrl"],
-            "github-1": ["githubOwner", "githubRepo", "githubTitle", "githubDraft"],
+            "github-1": ["githubOwner", "githubRepo", "githubTitle"],
             "linear-1": [
                 "linearTeamId",
                 "linearProjectId",
                 "linearLimit",
                 "linearAfter",
-                "linearReturnAll",
             ],
-            "supabase-1": ["supabaseTable", "supabaseRows", "supabaseLimit", "supabaseAscending"],
+            "supabase-1": ["supabaseTable", "supabaseRows", "supabaseLimit"],
             "notion-1": ["notionDataSourceId", "notionProperties", "notionPageSize"],
-            "s3-1": ["s3Bucket", "s3Key", "s3MaxKeys", "s3IncludeBinary"],
+            "s3-1": ["s3Bucket", "s3Key", "s3MaxKeys"],
         }
         nodes = {agent_id: {"type": "agent", "data": {"label": "Agent"}}}
         edges = []
