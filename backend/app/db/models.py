@@ -279,6 +279,13 @@ class Workflow(Base):
     sse_node_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mcp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auto_recover_runs: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    error_workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    minutes_saved_per_run: Mapped[float | None] = mapped_column(Float, nullable=True)
     scheduled_for_deletion: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
