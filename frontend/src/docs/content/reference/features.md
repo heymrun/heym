@@ -100,6 +100,8 @@ Pairs with [Condition](../nodes/condition-node.md), [Error Handler](../nodes/err
 
 The Error Handler node runs automatically when any node in the workflow fails. No incoming edges are needed; it is triggered by the engine. Output includes error message, failed node label, node type, and timestamp. Use it to send notifications through [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), or [Send Email](../nodes/send-email-node.md), log errors, or return custom error responses.
 
+As an alternative to handling errors on the canvas, a workflow can also delegate failures to a separate workflow — see [Error Workflow](#error-workflow). If the canvas already contains an Error Handler node, the error workflow is **not** called (the local handler takes precedence).
+
 Common notification targets are [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), and [Send Email](../nodes/send-email-node.md); run details are easier to inspect in [Execution History](./execution-history.md).
 
 ### AI
@@ -521,6 +523,14 @@ Edit History tracks saved versions of a workflow (each Save creates a version). 
 
 See also [Execution History](./execution-history.md), [Workflow Structure](./workflow-structure.md), and [Canvas Features](./canvas-features.md).
 
+### Error Workflow
+
+A workflow can designate another workflow to run when it fails. Configure it in the workflow-level **Properties** panel (shown when no node is selected) under **On error, run workflow**. When a top-level run ends with an unhandled failure, the selected error workflow runs and receives the failure context (failed workflow id and name, run id, error message, failed node label and type, and a timestamp). If the canvas already contains an [Error Handler](../nodes/error-handler-node.md) node, the local handler takes precedence and the error workflow is **not** called. The error workflow itself runs directly, so it never triggers its own error workflow.
+
+### Time Saved
+
+Each workflow can record an **estimated time saved per run** (in minutes), set in the workflow-level **Properties** panel. The [Analytics](../tabs/analytics-tab.md) tab aggregates this across the selected range as a total **Time Saved** stat (sum of each workflow's estimate × its successful runs). The [Workflow Analysis](./workflow-analysis.md) report recommends setting an estimate when none is configured.
+
 ### [Settings](./user-settings.md)
 
 The Settings dialog (opened from the gear icon in the header) has four tabs: Profile (display name, User Rules), [Security](./security.md) (change password), Voice ([ElevenLabs TTS/STT](./chat-voice.md)), and Observability (read-only [OpenTelemetry](./opentelemetry.md) status). User Rules are custom instructions injected into every AI request, including the workflow builder and [Chat](../tabs/chat-tab.md), so you can set language, tone, coding style, or workflow conventions once. Password policy and [MCP](../tabs/mcp-tab.md) API key management are also available.
@@ -663,7 +673,7 @@ See also [Execution History](./execution-history.md), [Agent Node](../nodes/agen
 
 ### [Analytics](../tabs/analytics-tab.md)
 
-The Analytics tab shows execution metrics and trends. Summary stats include total executions, success rate, error rate, and latency breakdowns. Select a base time range (24h, 7d, 30d, or all), optionally filter by workflow, then drag across any chart to drill into a selected date range. Charts and workflow tables refresh to the selection, and auto refresh keeps metrics updated. It complements [Execution History](./execution-history.md) and the [Scheduled](../tabs/scheduled-tab.md) view when you need both past results and upcoming runs.
+The Analytics tab shows execution metrics and trends. Summary stats include total executions, success rate, error rate, latency breakdowns, and total **Time Saved** (from each workflow's estimated minutes saved per run × its successful runs). Select a base time range (24h, 7d, 30d, or all), optionally filter by workflow, then drag across any chart to drill into a selected date range. Charts and workflow tables refresh to the selection, and auto refresh keeps metrics updated. It complements [Execution History](./execution-history.md) and the [Scheduled](../tabs/scheduled-tab.md) view when you need both past results and upcoming runs.
 
 See also [Execution History](./execution-history.md), [Scheduled](../tabs/scheduled-tab.md), and [Evals](../tabs/evals-tab.md).
 

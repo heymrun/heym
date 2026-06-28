@@ -10,6 +10,7 @@ The **Analytics** tab shows execution metrics and trends for your workflows. Mon
 - **Total executions** – Count of workflow runs in the selected period
 - **Success rate** – Percentage of successful runs
 - **Average duration** – Mean execution time
+- **Time saved** – Total estimated time saved: each workflow's configured minutes-saved-per-run × its successful runs
 - **Trends** – Up/down indicators vs previous period
 
 ## Time Range

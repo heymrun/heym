@@ -43,6 +43,16 @@ Both actions first **run the workflow** (when it is valid and runnable) and incl
 
 The generated report covers three sections, in order: **Improvement areas** (concrete suggestions, including a **security** angle whenever the workflow touches credentials, user input, external requests, or data exposure), the workflow's **Purpose**, and **What it does** (a step-by-step walk through the nodes).
 
+The **Improvement areas** section always runs three explicit checks:
+
+1. **Error coverage** — if the canvas has no [Error Handler](../nodes/error-handler-node.md) node and no error workflow is configured, the report calls this out and recommends adding error handling.
+2. **Time saved** — if no estimated time saved per run is set, the report recommends configuring one so the [Analytics](../tabs/analytics-tab.md) **Time Saved** metric can populate.
+3. **Network nodes** — for nodes that make network calls (such as [HTTP](../nodes/http-node.md) and integration nodes), the report recommends node-specific error handling (retry and/or continue-on-error) on those nodes.
+
+### Run Analyzer from Properties
+
+When a workflow has nodes on the canvas but no analysis document yet, a **Run Analyzer** button appears in the workflow-level [Properties](./canvas-features.md) panel (shown when no node is selected). It opens this Workflow Analysis panel so you can pick a credential and model and generate the report.
+
 Each analysis run is recorded in [Traces](../tabs/traces-tab.md) under the **Workflow Analysis** source.
 
 If no LLM credential is configured, the Analyze button is disabled — add one in the [Credentials Tab](../tabs/credentials-tab.md).
