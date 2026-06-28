@@ -1165,6 +1165,7 @@ class AnalyticsStatsResponse(BaseModel):
     success_count_24h: int
     error_count_24h: int
     avg_latency_24h_ms: float
+    time_saved_minutes: float = 0.0
 
 
 class TimeSeriesMetricsResponse(BaseModel):

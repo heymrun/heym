@@ -77,6 +77,21 @@ def calculate_percentile(values: list[float], percentile: float) -> float:
     return sorted_values[index]
 
 
+def compute_time_saved_minutes(
+    success_by_workflow: dict[uuid.UUID | None, int],
+    rate_by_workflow: dict[uuid.UUID, float],
+) -> float:
+    """Σ (minutes_saved_per_run × successful runs) over workflows with a known rate."""
+    total = 0.0
+    for wid, success_count in success_by_workflow.items():
+        if wid is None:
+            continue
+        rate = rate_by_workflow.get(wid)
+        if rate:
+            total += rate * success_count
+    return total
+
+
 def normalize_bucket_start(dt: datetime) -> datetime:
     dt_utc = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     return dt_utc.replace(minute=0, second=0, microsecond=0)
@@ -406,6 +421,24 @@ async def compute_analytics_stats(
         total_latency_ms_24h / latency_sample_count_24h if latency_sample_count_24h > 0 else 0.0
     )
 
+    success_by_workflow: dict[uuid.UUID | None, int] = {}
+    for row in all_rows:
+        success_by_workflow[row.workflow_id] = (
+            success_by_workflow.get(row.workflow_id, 0) + row.success_count
+        )
+    rate_by_workflow: dict[uuid.UUID, float] = {}
+    rate_ids = [wid for wid in success_by_workflow if wid is not None]
+    if rate_ids:
+        rate_rows = await db.execute(
+            select(Workflow.id, Workflow.minutes_saved_per_run).where(
+                Workflow.id.in_(rate_ids)
+            )
+        )
+        for rid, rate in rate_rows.all():
+            if rate:
+                rate_by_workflow[rid] = float(rate)
+    time_saved_minutes = compute_time_saved_minutes(success_by_workflow, rate_by_workflow)
+
     return AnalyticsStatsResponse(
         total_executions=total_executions,
         success_count=success_count,
@@ -420,6 +453,7 @@ async def compute_analytics_stats(
         success_count_24h=success_count_24h,
         error_count_24h=error_count_24h,
         avg_latency_24h_ms=avg_latency_24h_ms,
+        time_saved_minutes=time_saved_minutes,
     )
 
 
