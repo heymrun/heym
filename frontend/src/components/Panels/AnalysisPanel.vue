@@ -216,6 +216,7 @@ async function save(baseRevision?: number): Promise<void> {
     updatedBy.value = note.updated_by;
     updatedAt.value = note.updated_at;
     conflict.value = null;
+    void workflowStore.refreshAnalysisNoteEmpty();
   } catch (err) {
     if (isAxiosError(err) && err.response?.status === 409) {
       conflict.value = err.response.data as AnalysisNoteResponse;

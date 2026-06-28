@@ -67,6 +67,21 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
   const analysisPanelOpen = ref(false);
+  const analysisNoteEmpty = ref(true);
+
+  async function refreshAnalysisNoteEmpty(): Promise<void> {
+    const id = currentWorkflow.value?.id;
+    if (!id) {
+      analysisNoteEmpty.value = true;
+      return;
+    }
+    try {
+      const note = await workflowApi.getAnalysisNote(id);
+      analysisNoteEmpty.value = note.content.trim() === "";
+    } catch {
+      analysisNoteEmpty.value = true;
+    }
+  }
   /** When true, workflow canvas global key handlers and editor undo should stay inactive (agent memory graph modal). */
   const agentMemoryGraphDialogOpen = ref(false);
   const propertiesPanelTab = ref<"properties" | "config">("config");
@@ -520,6 +535,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentWorkflow.value = { ...workflow, nodes: loadedNodes, edges: loadedEdges };
     nodes.value = loadedNodes;
     edges.value = loadedEdges;
+    void refreshAnalysisNoteEmpty();
     resetRunInputJsonFromMode();
     hasUnsavedChanges.value = false;
     executionResult.value = null;
@@ -2765,6 +2781,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     propertiesPanelVisible,
     setPropertiesPanelVisible,
     analysisPanelOpen,
+    analysisNoteEmpty,
+    refreshAnalysisNoteEmpty,
     agentMemoryGraphDialogOpen,
     setAgentMemoryGraphDialogOpen,
     propertiesPanelTab,
