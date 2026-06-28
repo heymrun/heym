@@ -752,7 +752,7 @@ function bringToCanvas(): void {
               <component
                 :is="getStatusIcon(entry.status)"
                 class="w-3.5 h-3.5 shrink-0"
-                :class="entry.status === 'success' ? 'text-emerald-500' : entry.status === 'error' ? 'text-red-500' : 'text-amber-500'"
+                :class="getStatusColor(entry.status)"
               />
               <span class="text-xs font-medium truncate flex-1">{{ formatTime(entry.started_at) }}</span>
             </div>
@@ -760,6 +760,13 @@ function bringToCanvas(): void {
               <span class="text-[10px] text-muted-foreground">
                 <template v-if="entry.status === 'pending'">Pending review</template>
                 <template v-else>{{ entry.execution_time_ms.toFixed(2) }}ms</template>
+              </span>
+              <span
+                v-if="entry.status === 'skipped' || entry.status === 'failed'"
+                class="px-1 py-0 text-[9px] font-semibold rounded uppercase"
+                :class="entry.status === 'skipped' ? 'bg-gray-500/20 text-gray-400' : 'bg-red-500/20 text-red-400'"
+              >
+                {{ entry.status }}
               </span>
               <span
                 v-if="entry.trigger_source"

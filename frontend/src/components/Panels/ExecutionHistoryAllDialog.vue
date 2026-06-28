@@ -923,6 +923,13 @@ function bringToCanvas(): void {
                 <Clock class="w-4 h-4 text-muted-foreground shrink-0" />
                 <span class="text-sm font-medium truncate">{{ formatTime(entry.started_at) }}</span>
                 <span
+                  v-if="entry.status === 'skipped' || entry.status === 'failed'"
+                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase shrink-0 hidden sm:inline"
+                  :class="entry.status === 'skipped' ? 'bg-gray-500/20 text-gray-400' : 'bg-red-500/20 text-red-400'"
+                >
+                  {{ entry.status }}
+                </span>
+                <span
                   v-if="entry.trigger_source"
                   class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase shrink-0 hidden sm:inline"
                 >
