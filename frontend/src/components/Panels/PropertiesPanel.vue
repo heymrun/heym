@@ -12145,17 +12145,23 @@ onUnmounted(() => {
               />
             </div>
 
-            <label
+            <div
               v-if="isLinearPaginatedOperation()"
-              class="flex items-center gap-2 text-sm"
+              class="flex items-center justify-between gap-2"
             >
-              <input
-                type="checkbox"
-                :checked="!!selectedNode.data.linearReturnAll"
-                @change="updateNodeData('linearReturnAll', ($event.target as HTMLInputElement).checked)"
-              >
-              <span>Return All</span>
-            </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  :checked="!!selectedNode.data.linearReturnAll"
+                  @change="updateNodeData('linearReturnAll', ($event.target as HTMLInputElement).checked)"
+                >
+                <span>Return All</span>
+              </label>
+              <AgentFieldToggle
+                :node-id="selectedNode.id"
+                field-key="linearReturnAll"
+              />
+            </div>
 
             <div
               v-if="isLinearPaginatedOperation() && !selectedNode.data.linearReturnAll"
@@ -12172,6 +12178,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearLimit"
                 v-bind="linearExpressionNavBindings('linearLimit')"
                 @update:model-value="updateNodeData('linearLimit', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12194,6 +12201,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearAfter"
                 v-bind="linearExpressionNavBindings('linearAfter')"
                 @update:model-value="updateNodeData('linearAfter', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12219,6 +12227,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearTeamId"
                 v-bind="linearExpressionNavBindings('linearTeamId')"
                 @update:model-value="updateNodeData('linearTeamId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12240,6 +12249,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearProjectId"
                 v-bind="linearExpressionNavBindings('linearProjectId')"
                 @update:model-value="updateNodeData('linearProjectId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12265,6 +12275,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearIssueId"
                 v-bind="linearExpressionNavBindings('linearIssueId')"
                 @update:model-value="updateNodeData('linearIssueId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12289,6 +12300,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearTitle"
                 v-bind="linearExpressionNavBindings('linearTitle')"
                 @update:model-value="updateNodeData('linearTitle', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12309,6 +12321,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearDescription"
                 v-bind="linearExpressionNavBindings('linearDescription')"
                 @update:model-value="updateNodeData('linearDescription', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12330,6 +12343,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearStateId"
                 v-bind="linearExpressionNavBindings('linearStateId')"
                 @update:model-value="updateNodeData('linearStateId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12354,6 +12368,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearIssueLinkUrl"
                 v-bind="linearExpressionNavBindings('linearIssueLinkUrl')"
                 @update:model-value="updateNodeData('linearIssueLinkUrl', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12376,6 +12391,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="linearAssigneeId"
                   v-bind="linearExpressionNavBindings('linearAssigneeId')"
                   @update:model-value="updateNodeData('linearAssigneeId', $event)"
                   @navigate="handleLinearExpressionFieldNavigate"
@@ -12393,6 +12409,7 @@ onUnmounted(() => {
                   :node-results="workflowStore.nodeResults"
                   :edges="workflowStore.edges"
                   :current-node-id="selectedNode.id"
+                  field-key="linearPriority"
                   v-bind="linearExpressionNavBindings('linearPriority')"
                   @update:model-value="updateNodeData('linearPriority', $event)"
                   @navigate="handleLinearExpressionFieldNavigate"
@@ -12427,6 +12444,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearCommentId"
                 v-bind="linearExpressionNavBindings('linearCommentId')"
                 @update:model-value="updateNodeData('linearCommentId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12448,6 +12466,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearCommentBody"
                 v-bind="linearExpressionNavBindings('linearCommentBody')"
                 @update:model-value="updateNodeData('linearCommentBody', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"
@@ -12470,6 +12489,7 @@ onUnmounted(() => {
                 :node-results="workflowStore.nodeResults"
                 :edges="workflowStore.edges"
                 :current-node-id="selectedNode.id"
+                field-key="linearParentCommentId"
                 v-bind="linearExpressionNavBindings('linearParentCommentId')"
                 @update:model-value="updateNodeData('linearParentCommentId', $event)"
                 @navigate="handleLinearExpressionFieldNavigate"

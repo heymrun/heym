@@ -667,6 +667,7 @@ function handleNodeDoubleClick(event: {
       nodeType?: NodeType;
       ragOperation?: string;
       githubOperation?: string;
+      linearOperation?: string;
       notionOperation?: string;
     };
   };
@@ -712,6 +713,23 @@ function handleNodeDoubleClick(event: {
       fieldToFocus = "githubWorkflowInputs";
     } else {
       fieldToFocus = "githubOwner";
+    }
+  } else if (nodeType === "linear") {
+    const linearOperation = event.node.data?.linearOperation;
+    if (linearOperation === "createComment" || linearOperation === "updateComment") {
+      fieldToFocus = "linearCommentBody";
+    } else if (linearOperation === "createIssue" || linearOperation === "updateIssue") {
+      fieldToFocus = "linearDescription";
+    } else if (linearOperation === "addIssueLink") {
+      fieldToFocus = "linearIssueLinkUrl";
+    } else if (
+      linearOperation === "getIssue" ||
+      linearOperation === "deleteIssue" ||
+      linearOperation === "listComments"
+    ) {
+      fieldToFocus = "linearIssueId";
+    } else {
+      fieldToFocus = "linearTeamId";
     }
   } else if (nodeType === "notion") {
     const notionOperation = event.node.data?.notionOperation;

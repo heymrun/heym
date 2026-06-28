@@ -17,6 +17,10 @@ const toolNodeCases: ToolNodeCase[] = [
     expectedToggles: 2,
   },
   {
+    id: "node_1782319488123_linear01",
+    expectedToggles: 5,
+  },
+  {
     id: "node_1782319357334_hlkt3kgd3",
     expectedToggles: 7,
   },
@@ -163,9 +167,34 @@ function integrationToolDsl(): Record<string, unknown> {
         },
       },
       {
+        id: "node_1782319488123_linear01",
+        type: "linear",
+        position: { x: 495, y: 60 },
+        data: {
+          label: "linear",
+          credentialId: "",
+          linearOperation: "listIssues",
+          linearTeamId: "",
+          linearProjectId: "",
+          linearIssueId: "",
+          linearTitle: "",
+          linearDescription: "",
+          linearStateId: "",
+          linearAssigneeId: "",
+          linearPriority: "",
+          linearIssueLinkUrl: "",
+          linearCommentId: "",
+          linearCommentBody: "",
+          linearParentCommentId: "",
+          linearLimit: "50",
+          linearAfter: "",
+          linearReturnAll: false,
+        },
+      },
+      {
         id: "node_1782319457181_rqtkfzboq",
         type: "s3",
-        position: { x: 645, y: 60 },
+        position: { x: 795, y: 60 },
         data: {
           label: "amazonS3",
           credentialId: "",
@@ -185,7 +214,7 @@ function integrationToolDsl(): Record<string, unknown> {
       {
         id: "node_1782319471465_xcu6o8kqh",
         type: "discord",
-        position: { x: 945, y: 60 },
+        position: { x: 1095, y: 60 },
         data: {
           label: "discord",
           credentialId: "",
@@ -225,7 +254,7 @@ test("exposes integration inputs to an agent tool", async ({ page }) => {
   await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]+$/);
 
   try {
-    await expect(page.locator(".vue-flow__node")).toHaveCount(6);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(7);
     const propertiesPanel = page.locator(".properties-panel");
     await page.getByRole("button", { name: "Properties", exact: true }).click();
     await expect(propertiesPanel).toBeVisible();

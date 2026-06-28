@@ -108,6 +108,13 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         fields_by_node = {
             "discord-1": ["message", "username", "avatarUrl"],
             "github-1": ["githubOwner", "githubRepo", "githubTitle", "githubDraft"],
+            "linear-1": [
+                "linearTeamId",
+                "linearProjectId",
+                "linearLimit",
+                "linearAfter",
+                "linearReturnAll",
+            ],
             "supabase-1": ["supabaseTable", "supabaseRows", "supabaseLimit", "supabaseAscending"],
             "notion-1": ["notionDataSourceId", "notionProperties", "notionPageSize"],
             "s3-1": ["s3Bucket", "s3Key", "s3MaxKeys", "s3IncludeBinary"],

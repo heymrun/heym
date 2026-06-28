@@ -9061,7 +9061,7 @@ class WorkflowExecutor:
                     return after or None
 
                 def _linear_return_all() -> bool:
-                    return bool(node_data.get("linearReturnAll"))
+                    return _coerce_boolean(node_data.get("linearReturnAll"), default=False)
 
                 def _linear_list_output(
                     result: dict[str, Any],
