@@ -26,9 +26,7 @@ def upgrade() -> None:
         "workflows",
         sa.Column("minutes_saved_per_run", sa.Float(), nullable=True),
     )
-    op.create_index(
-        "ix_workflows_error_workflow_id", "workflows", ["error_workflow_id"]
-    )
+    op.create_index("ix_workflows_error_workflow_id", "workflows", ["error_workflow_id"])
     op.create_foreign_key(
         "fk_workflows_error_workflow_id",
         "workflows",
@@ -40,9 +38,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_workflows_error_workflow_id", "workflows", type_="foreignkey"
-    )
+    op.drop_constraint("fk_workflows_error_workflow_id", "workflows", type_="foreignkey")
     op.drop_index("ix_workflows_error_workflow_id", table_name="workflows")
     op.drop_column("workflows", "minutes_saved_per_run")
     op.drop_column("workflows", "error_workflow_id")

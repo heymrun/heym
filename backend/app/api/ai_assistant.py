@@ -3539,9 +3539,7 @@ async def analyze_workflow_stream(
         )
         analysis_context = {
             "hasErrorHandler": has_error_handler,
-            "errorWorkflowConfigured": bool(
-                request.current_workflow.get("error_workflow_id")
-            ),
+            "errorWorkflowConfigured": bool(request.current_workflow.get("error_workflow_id")),
             "minutesSavedPerRun": request.current_workflow.get("minutes_saved_per_run"),
         }
         system_prompt += (

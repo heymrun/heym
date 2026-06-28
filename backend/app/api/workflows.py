@@ -1161,9 +1161,7 @@ async def update_workflow(
             workflow.error_workflow_id = workflow_data.error_workflow_id
     if workflow_data.minutes_saved_per_run is not None:
         workflow.minutes_saved_per_run = (
-            workflow_data.minutes_saved_per_run
-            if workflow_data.minutes_saved_per_run > 0
-            else None
+            workflow_data.minutes_saved_per_run if workflow_data.minutes_saved_per_run > 0 else None
         )
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow

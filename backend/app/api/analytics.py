@@ -430,9 +430,7 @@ async def compute_analytics_stats(
     rate_ids = [wid for wid in success_by_workflow if wid is not None]
     if rate_ids:
         rate_rows = await db.execute(
-            select(Workflow.id, Workflow.minutes_saved_per_run).where(
-                Workflow.id.in_(rate_ids)
-            )
+            select(Workflow.id, Workflow.minutes_saved_per_run).where(Workflow.id.in_(rate_ids))
         )
         for rid, rate in rate_rows.all():
             if rate:

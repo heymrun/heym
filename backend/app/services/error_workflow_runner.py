@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def _has_local_error_handler(nodes: list[dict[str, Any]] | None) -> bool:
-    return any(
-        isinstance(n, dict) and n.get("type") == "errorHandler" for n in (nodes or [])
-    )
+    return any(isinstance(n, dict) and n.get("type") == "errorHandler" for n in (nodes or []))
 
 
 def should_run_error_workflow(workflow: Any, status: str) -> bool:
@@ -50,11 +48,7 @@ def build_error_context(
 ) -> dict[str, Any]:
     """Build the payload passed to the error workflow as input ``body``."""
     failed = next(
-        (
-            r
-            for r in (node_results or [])
-            if isinstance(r, dict) and r.get("status") == "error"
-        ),
+        (r for r in (node_results or []) if isinstance(r, dict) and r.get("status") == "error"),
         None,
     )
     return {
@@ -127,7 +121,5 @@ async def maybe_run_error_workflow(
         await db.flush()
         return True
     except Exception:  # noqa: BLE001 — error workflow must never mask the original failure
-        logger.exception(
-            "Error workflow execution failed for %s", getattr(workflow, "id", "?")
-        )
+        logger.exception("Error workflow execution failed for %s", getattr(workflow, "id", "?"))
         return False
