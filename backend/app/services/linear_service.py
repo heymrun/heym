@@ -275,11 +275,15 @@ class LinearService:
         try:
             response = self._client.post(
                 LINEAR_OAUTH_TOKEN_URL,
-                json={
+                data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": client_id,
                     "client_secret": client_secret,
+                },
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
                 },
             )
             response.raise_for_status()

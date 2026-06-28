@@ -179,14 +179,17 @@ async def callback(
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 _LINEAR_TOKEN_URL,
-                json={
+                data={
                     "grant_type": "authorization_code",
                     "code": code,
                     "redirect_uri": payload["redirect_uri"],
                     "client_id": client_id,
                     "client_secret": client_secret,
                 },
-                headers={"Accept": "application/json"},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
             )
         response.raise_for_status()
         token_data = response.json()

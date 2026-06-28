@@ -133,6 +133,19 @@ class LinearOAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["refresh_token"], "oauth-refresh-token")
         self.assertEqual(stored["auth_mode"], "oauth")
         post_kwargs = http_client.__aenter__.return_value.post.call_args.kwargs
-        self.assertNotIn("data", post_kwargs)
-        self.assertEqual(post_kwargs["json"]["grant_type"], "authorization_code")
+        self.assertNotIn("json", post_kwargs)
+        self.assertEqual(
+            post_kwargs["data"],
+            {
+                "grant_type": "authorization_code",
+                "code": "code",
+                "redirect_uri": redirect_uri,
+                "client_id": "linear-client",
+                "client_secret": "linear-secret",
+            },
+        )
+        self.assertEqual(
+            post_kwargs["headers"]["Content-Type"],
+            "application/x-www-form-urlencoded",
+        )
         db.commit.assert_awaited_once()

@@ -43,7 +43,7 @@ class LinearServiceTests(unittest.TestCase):
 
         self.assertEqual(viewer["displayName"], "Ada Lovelace")
 
-    def test_refresh_oauth_token_posts_json_payload(self) -> None:
+    def test_refresh_oauth_token_posts_form_payload_and_persists_tokens(self) -> None:
         client = MagicMock()
         client.post.side_effect = [
             httpx.Response(
@@ -58,6 +58,11 @@ class LinearServiceTests(unittest.TestCase):
             _response({"data": {"viewer": {"id": "user-1", "name": "Ada"}}}),
         ]
         expired = datetime.now(timezone.utc) - timedelta(minutes=5)
+        credential = MagicMock(encrypted_config="{}")
+        db = MagicMock()
+        db.__enter__ = MagicMock(return_value=db)
+        db.__exit__ = MagicMock(return_value=False)
+        db.query.return_value.filter.return_value.first.return_value = credential
         service = LinearService(
             {
                 "auth_mode": "oauth",
@@ -68,15 +73,17 @@ class LinearServiceTests(unittest.TestCase):
                 "token_expiry": expired.isoformat(),
             },
             client=client,
+            credential_id="credential-1",
         )
 
-        service.get_viewer()
+        with patch("app.db.session.SessionLocal", return_value=db):
+            service.get_viewer()
 
         refresh_call = client.post.call_args_list[0]
         self.assertEqual(refresh_call.args[0], LINEAR_OAUTH_TOKEN_URL)
-        self.assertNotIn("data", refresh_call.kwargs)
+        self.assertNotIn("json", refresh_call.kwargs)
         self.assertEqual(
-            refresh_call.kwargs["json"],
+            refresh_call.kwargs["data"],
             {
                 "grant_type": "refresh_token",
                 "refresh_token": "old-refresh-token",
@@ -84,6 +91,15 @@ class LinearServiceTests(unittest.TestCase):
                 "client_secret": "linear-secret",
             },
         )
+        self.assertEqual(
+            refresh_call.kwargs["headers"]["Content-Type"],
+            "application/x-www-form-urlencoded",
+        )
+        self.assertEqual(service._config["access_token"], "new-access-token")
+        self.assertEqual(service._config["refresh_token"], "new-refresh-token")
+        self.assertIn("token_expiry", service._config)
+        self.assertNotEqual(credential.encrypted_config, "{}")
+        db.commit.assert_called_once()
 
     def test_strips_bearer_prefix_from_api_key(self) -> None:
         client = MagicMock()
