@@ -600,7 +600,15 @@ function formatTimeSaved(minutes: number): string {
   const total = Math.round(minutes);
   const hrs = Math.floor(total / 60);
   const mins = total % 60;
-  if (hrs > 0) return `${hrs}h ${mins}m`;
+  // Large hour counts get compact units (K, M, B…) to avoid overflowing the card.
+  if (hrs >= 10000) {
+    const compact = new Intl.NumberFormat("en-US", {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(hrs);
+    return `${compact}h`;
+  }
+  if (hrs > 0) return `${hrs.toLocaleString("en-US")}h ${mins}m`;
   return `${mins}m`;
 }
 
@@ -737,7 +745,7 @@ function goToWorkflow(): void {
       v-else-if="stats"
       class="space-y-6"
     >
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Card class="p-4">
           <div class="flex items-center justify-between">
             <div>
