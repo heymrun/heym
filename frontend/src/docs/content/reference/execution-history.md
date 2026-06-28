@@ -11,7 +11,7 @@ Each execution stores:
 | **Inputs** | Request body or run inputs (e.g. `text` for Input node) |
 | **Outputs** | Workflow-level outputs |
 | **Node results** | Per-node outputs, status, and execution time |
-| **Status** | `success`, `error`, or `pending` |
+| **Status** | `success`, `error`, `pending`, `skipped`, or `failed` (see [Crash Recovery](#crash-recovery)) |
 | **trigger_source** | How the run was triggered (see [Triggers](./triggers.md)) |
 
 ## Accessing History
@@ -60,6 +60,24 @@ Both history dialogs show **currently running executions** at the top of the lis
 - Cancelling from any dialog (Editor or Dashboard) also closes the active SSE stream in any open canvas tab for that workflow, so the editor state resets cleanly
 - After cancellation, the running entry disappears on the next refresh; press **Refresh** to update the list manually
 - If you cancel a run that has already finished, the request is a no-op
+
+## Crash Recovery
+
+If the server restarts (deploy, container restart, or crash) while a workflow is running, that run's worker stops mid-execution. Heym automatically recovers these interrupted runs instead of leaving them stuck as **Running**.
+
+- On the next startup, the elected leader process detects orphaned runs — instantly for a graceful restart, or within ~60 seconds for a hard crash (once heartbeats clearly stop).
+- Recovered runs are **re-run from scratch with the same inputs** (not resumed from where they stopped), using the current workflow definition. On completion they record a normal terminal entry (e.g. `success`), so history shows the run as completed.
+- A run is retried **once**. If the recovery attempt is also interrupted — or the workflow has since been deleted — the entry is recorded as `failed`.
+- This works the same across a single container and multi-worker deployments; only the leader performs recovery, so a run is never recovered twice by different workers.
+
+### Auto-recover toggle
+
+The editor **Execution Log** (run) panel has an **Auto-recover** checkbox, **on by default** per workflow.
+
+- **On**: interrupted runs of this workflow are re-run as described above.
+- **Off**: interrupted runs are not re-run and are recorded with status `skipped`.
+
+> Sub-workflow runs are not recovered independently — they are re-driven by their recovered parent run. Triggers with their own redelivery (RabbitMQ, scheduled/cron, IMAP) may also redeliver on restart, so a recovered run can occasionally execute twice.
 
 ## Pending Human Review
 
