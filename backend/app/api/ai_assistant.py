@@ -155,7 +155,12 @@ WORKFLOW_ANALYZE_SYSTEM_PROMPT = """You analyze an automation workflow and produ
 Given the workflow's nodes and edges, write Markdown with these sections, in this exact order:
 
 ## Improvement areas
-A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). If the workflow already looks solid, say so and suggest small refinements.
+A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these three checks explicitly:
+1. **Error handling** — Inspect the provided `analysisContext`. If `hasErrorHandler` is false AND `errorWorkflowConfigured` is false, call out that this workflow has no error handling at all (no errorHandler node on the canvas and no error workflow configured) and recommend adding an errorHandler node and/or configuring an "on error, run workflow".
+2. **Time saved** — If `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is set, acknowledge the configured value.
+3. **Network nodes** — For any node that performs network I/O (e.g. `httpRequest` and integration/API nodes such as slack, drive, notion, etc.), recommend node-specific error handling (enable retry and/or onError "continue on error") on those specific nodes by label.
+
+If the workflow already looks solid, say so and suggest small refinements.
 
 ## Purpose
 One or two sentences on what this workflow is for.
@@ -3528,6 +3533,22 @@ async def analyze_workflow_stream(
     if request.current_workflow:
         wf_summary = json.dumps(request.current_workflow, ensure_ascii=False)
         system_prompt += f"\n\nWorkflow:\n```json\n{wf_summary}\n```"
+        nodes = request.current_workflow.get("nodes") or []
+        has_error_handler = any(
+            isinstance(n, dict) and n.get("type") == "errorHandler" for n in nodes
+        )
+        analysis_context = {
+            "hasErrorHandler": has_error_handler,
+            "errorWorkflowConfigured": bool(
+                request.current_workflow.get("error_workflow_id")
+            ),
+            "minutesSavedPerRun": request.current_workflow.get("minutes_saved_per_run"),
+        }
+        system_prompt += (
+            "\n\nanalysisContext:\n```json\n"
+            + json.dumps(analysis_context, ensure_ascii=False)
+            + "\n```"
+        )
     system_prompt = _append_execution_log_to_prompt(system_prompt, request.execution_log)
 
     workflow_id = None
