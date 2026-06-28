@@ -40,9 +40,7 @@ class MarkOwnExecutionsOrphanedTests(unittest.IsolatedAsyncioTestCase):
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=session)
         cm.__aexit__ = AsyncMock(return_value=False)
-        with patch(
-            "app.services.execution_cancellation.async_session_maker", return_value=cm
-        ):
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
             count = await mark_own_executions_orphaned()
         self.assertEqual(count, 2)
         session.execute.assert_awaited_once()
@@ -88,9 +86,7 @@ class ClaimOrphanedExecutionsTests(unittest.IsolatedAsyncioTestCase):
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=session)
         cm.__aexit__ = AsyncMock(return_value=False)
-        with patch(
-            "app.services.execution_cancellation.async_session_maker", return_value=cm
-        ):
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
             claimed = await claim_orphaned_executions(now=now)
         self.assertEqual([c.execution_id for c in claimed], [ex_won])
         self.assertEqual(claimed[0].attempt, 1)
@@ -115,11 +111,13 @@ class RecoverOneTests(unittest.IsolatedAsyncioTestCase):
 
         svc = ExecutionRecoveryService()
         orphan = _orphan(attempt=1)
-        with patch.object(
-            svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=False))
-        ), patch.object(svc, "_finalize", AsyncMock()) as finalize, patch.object(
-            svc, "_rerun", AsyncMock()
-        ) as rerun:
+        with (
+            patch.object(
+                svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=False))
+            ),
+            patch.object(svc, "_finalize", AsyncMock()) as finalize,
+            patch.object(svc, "_rerun", AsyncMock()) as rerun,
+        ):
             await svc._recover_one(orphan)
         finalize.assert_awaited_once()
         self.assertEqual(finalize.await_args.kwargs["status"], "skipped")
@@ -130,11 +128,13 @@ class RecoverOneTests(unittest.IsolatedAsyncioTestCase):
 
         svc = ExecutionRecoveryService()
         orphan = _orphan(attempt=2)
-        with patch.object(
-            svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=True))
-        ), patch.object(svc, "_finalize", AsyncMock()) as finalize, patch.object(
-            svc, "_rerun", AsyncMock()
-        ) as rerun:
+        with (
+            patch.object(
+                svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=True))
+            ),
+            patch.object(svc, "_finalize", AsyncMock()) as finalize,
+            patch.object(svc, "_rerun", AsyncMock()) as rerun,
+        ):
             await svc._recover_one(orphan)
         self.assertEqual(finalize.await_args.kwargs["status"], "failed")
         rerun.assert_not_called()
@@ -144,9 +144,11 @@ class RecoverOneTests(unittest.IsolatedAsyncioTestCase):
 
         svc = ExecutionRecoveryService()
         orphan = _orphan(attempt=1)
-        with patch.object(svc, "_load_workflow", AsyncMock(return_value=None)), patch.object(
-            svc, "_finalize", AsyncMock()
-        ) as finalize, patch.object(svc, "_rerun", AsyncMock()) as rerun:
+        with (
+            patch.object(svc, "_load_workflow", AsyncMock(return_value=None)),
+            patch.object(svc, "_finalize", AsyncMock()) as finalize,
+            patch.object(svc, "_rerun", AsyncMock()) as rerun,
+        ):
             await svc._recover_one(orphan)
         self.assertEqual(finalize.await_args.kwargs["status"], "failed")
         rerun.assert_not_called()
@@ -156,11 +158,13 @@ class RecoverOneTests(unittest.IsolatedAsyncioTestCase):
 
         svc = ExecutionRecoveryService()
         orphan = _orphan(attempt=1)
-        with patch.object(
-            svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=True))
-        ), patch.object(svc, "_finalize", AsyncMock()) as finalize, patch.object(
-            svc, "_rerun", AsyncMock()
-        ) as rerun:
+        with (
+            patch.object(
+                svc, "_load_workflow", AsyncMock(return_value=MagicMock(auto_recover_runs=True))
+            ),
+            patch.object(svc, "_finalize", AsyncMock()) as finalize,
+            patch.object(svc, "_rerun", AsyncMock()) as rerun,
+        ):
             await svc._recover_one(orphan)
         rerun.assert_awaited_once()
         finalize.assert_not_called()
