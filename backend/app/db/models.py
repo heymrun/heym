@@ -512,6 +512,7 @@ class ExecutionHistory(Base):
     trigger_source: Mapped[str | None] = mapped_column(
         String(50), nullable=True, default=None, index=True
     )
+    recovered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(

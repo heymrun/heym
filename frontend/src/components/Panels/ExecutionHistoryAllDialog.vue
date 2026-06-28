@@ -10,6 +10,7 @@ import {
   Trash2,
   CheckCircle2,
   XCircle,
+  RotateCcw,
   SkipForward,
   Circle,
   Copy,
@@ -926,6 +927,14 @@ function bringToCanvas(): void {
                   class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase shrink-0 hidden sm:inline"
                 >
                   {{ entry.trigger_source }}
+                </span>
+                <span
+                  v-if="entry.recovered"
+                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-500/20 text-amber-400 uppercase shrink-0 hidden sm:inline-flex items-center gap-0.5"
+                  title="This run was automatically re-run after a server restart"
+                >
+                  <RotateCcw class="w-3 h-3" />
+                  Recovered
                 </span>
               </div>
               <component

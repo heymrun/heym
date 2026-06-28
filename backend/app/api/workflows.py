@@ -797,6 +797,7 @@ async def get_execution_history_entry(
             execution_time_ms=history.execution_time_ms,
             started_at=history.started_at,
             trigger_source=history.trigger_source,
+            recovered=history.recovered,
         )
     # Try RunHistory
     run_result = await db.execute(
@@ -848,6 +849,7 @@ async def list_all_execution_history(
             ExecutionHistory.status,
             ExecutionHistory.execution_time_ms,
             ExecutionHistory.trigger_source,
+            ExecutionHistory.recovered,
         )
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
         .where(
@@ -897,6 +899,7 @@ async def list_all_execution_history(
             RunHistory.status,
             RunHistory.execution_time_ms,
             RunHistory.trigger_source,
+            literal(False).label("recovered"),
         ).where(RunHistory.user_id == current_user.id)
         if trigger_source:
             run_subq = run_subq.where(RunHistory.trigger_source == trigger_source)
@@ -931,6 +934,7 @@ async def list_all_execution_history(
             status=row.status,
             execution_time_ms=row.execution_time_ms,
             trigger_source=row.trigger_source,
+            recovered=row.recovered,
         )
         for row in items_result.all()
     ]
@@ -2748,6 +2752,7 @@ async def get_execution_history(
             status=h.status,
             execution_time_ms=h.execution_time_ms,
             trigger_source=h.trigger_source,
+            recovered=h.recovered,
         )
         for h in history
     ]

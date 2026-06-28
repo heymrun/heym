@@ -803,6 +803,7 @@ export interface ExecutionHistoryEntry {
   status: "running" | "success" | "error" | "pending";
   result: ExecutionResult | null;
   trigger_source?: string | null;
+  recovered?: boolean;
 }
 
 export interface AllExecutionHistoryEntry {
@@ -817,6 +818,7 @@ export interface AllExecutionHistoryEntry {
   execution_time_ms: number;
   started_at: string;
   trigger_source?: string | null;
+  recovered?: boolean;
 }
 
 /** Lightweight list item without inputs/outputs/node_results. */
@@ -829,6 +831,7 @@ export interface AllExecutionHistoryEntryLight {
   status: string;
   execution_time_ms: number;
   trigger_source?: string | null;
+  recovered?: boolean;
 }
 
 export interface HistoryListResponse<T = AllExecutionHistoryEntryLight> {
@@ -853,6 +856,7 @@ export interface ServerExecutionHistory {
   execution_time_ms: number;
   started_at: string;
   trigger_source?: string | null;
+  recovered?: boolean;
 }
 
 export interface NodeResult {

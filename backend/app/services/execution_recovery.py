@@ -113,6 +113,7 @@ class ExecutionRecoveryService:
                     status=status,
                     execution_time_ms=0.0,
                     trigger_source=orphan.trigger_source,
+                    recovered=True,
                 )
             )
             await session.execute(
@@ -189,6 +190,7 @@ class ExecutionRecoveryService:
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
                     trigger_source=orphan.trigger_source,
+                    recovered=True,
                 )
             )
             await upsert_workflow_analytics_snapshot(

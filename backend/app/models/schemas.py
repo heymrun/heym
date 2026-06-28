@@ -362,6 +362,7 @@ class ExecutionHistoryResponse(BaseModel):
     execution_time_ms: float
     started_at: datetime
     trigger_source: str | None = None
+    recovered: bool = False
 
     class Config:
         from_attributes = True
@@ -379,6 +380,7 @@ class ExecutionHistoryWithWorkflowResponse(BaseModel):
     execution_time_ms: float
     started_at: datetime
     trigger_source: str | None = None
+    recovered: bool = False
 
 
 class ExecutionHistoryListResponse(BaseModel):
@@ -392,6 +394,7 @@ class ExecutionHistoryListResponse(BaseModel):
     status: str
     execution_time_ms: float
     trigger_source: str | None = None
+    recovered: bool = False
 
 
 class HistoryListResponse(BaseModel):
