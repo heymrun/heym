@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import sqlalchemy as sa
 from fastapi import FastAPI, HTTPException
@@ -62,7 +62,11 @@ from app.services.clickhouse_pool import close_all_clients as close_clickhouse_c
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
 from app.services.cron_scheduler import cron_scheduler
 from app.services.distributed_lock import lock_service
-from app.services.execution_cancellation import active_execution_registry
+from app.services.execution_cancellation import (
+    active_execution_registry,
+    mark_own_executions_orphaned,
+)
+from app.services.execution_recovery import execution_recovery_service
 from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
 from app.services.hitl_service import build_public_base_url, build_review_url
@@ -138,6 +142,7 @@ async def lifespan(app: FastAPI):
         logger.info("ClickHouse pools warmed up: %d", clickhouse_count)
 
     await active_execution_registry.start()
+    await execution_recovery_service.start()
     await cron_scheduler.start()
     await imap_trigger_manager.start()
     await rabbitmq_consumer_manager.start()
@@ -149,7 +154,10 @@ async def lifespan(app: FastAPI):
     await imap_trigger_manager.stop()
     await RabbitMQPool.close_all()
     await cron_scheduler.stop()
+    await execution_recovery_service.stop()
     await active_execution_registry.stop()
+    with suppress(Exception):
+        await mark_own_executions_orphaned()
     await lock_service.stop()
     close_redis_pools()
     close_grist_clients()
