@@ -2444,6 +2444,57 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
 - `$activeUsers.count` — number of returned or affected rows
 - `$activeUsers.success` — boolean success indicator
 
+### 24A2. clickhouse (ClickHouse Database Operations)
+- **Purpose**: Run CRUD, count, and raw SQL operations against an external ClickHouse database via the official HTTP client.
+- **Credential required**: `clickhouse` credential type (`host`, `port`, `username`, `password`, `database`, `secure`).
+- **Fields**:
+  - `credentialId`: UUID of the ClickHouse credential.
+  - `clickhouseOperation`: `"query"` | `"find"` | `"getAll"` | `"count"` | `"getById"` | `"insert"` | `"update"` | `"remove"` | `"upsert"`.
+  - `clickhouseTable`: Table name (simple identifier; supports expressions). Required for all ops except `query`.
+  - `clickhouseQuery`: Raw SQL for `query` (SELECT returns rows; other statements run as commands). Supports expressions.
+  - `clickhouseFilter`: JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, `remove`. Values are parameterized.
+  - `clickhouseLimit`: Max rows for `find` / `getAll` (`"0"` = unlimited, no LIMIT clause). Default `100`.
+  - `clickhouseSort`: Optional `column` or `column ASC|DESC` for `find`.
+  - `clickhouseRowId`: Value matched against the `id` column for `getById`.
+  - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
+  - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update`. Supports expressions.
+  - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns.
+- **Operation → required fields → output**:
+
+| Operation | Required | Output |
+| --- | --- | --- |
+| `query` | `clickhouseQuery` | `{rows, count, success}` (SELECT) or `{result, success}` |
+| `find` | `clickhouseTable` | `{rows, count, success}` |
+| `getAll` | `clickhouseTable` | `{rows, count, success}` |
+| `count` | `clickhouseTable` | `{count, success}` |
+| `getById` | `clickhouseTable`, `clickhouseRowId` | `{row, success}` |
+| `insert` (raw) | `clickhouseTable`, `clickhouseData` | `{count, success}` |
+| `insert` (selective) | `clickhouseTable`, `clickhouseMappings` | `{count, success}` |
+| `update` | `clickhouseTable`, `clickhouseData`, `clickhouseFilter` | `{success}` |
+| `remove` | `clickhouseTable`, `clickhouseFilter` | `{success}` |
+| `upsert` | `clickhouseTable`, `clickhouseData` | `{count, success}` |
+
+- **Notes**:
+  - `update` (`ALTER TABLE ... UPDATE`) and `remove` (`DELETE FROM`) are asynchronous ClickHouse mutations — they are eventually applied and are costly; prefer batch writes.
+  - `upsert` assumes a `ReplacingMergeTree` table; it performs an `INSERT`.
+  - `getById` assumes an `id` column.
+  - `update` and `remove` require a non-empty `clickhouseFilter` to avoid full-table mutations.
+
+Example:
+```json
+{
+  "id": "ch_1",
+  "type": "clickhouse",
+  "data": {
+    "credentialId": "<clickhouse-credential-uuid>",
+    "clickhouseOperation": "insert",
+    "clickhouseTable": "events",
+    "clickhouseInputMode": "raw",
+    "clickhouseData": "[{\\"id\\": \\"{{$json.id}}\\", \\"event\\": \\"signup\\"}]"
+  }
+}
+```
+
 ### 24B. notion (Notion Databases, Data Sources, Pages, and Blocks)
 - **Purpose**: Search and manage content through the Notion API
 - **Inputs**: 1 | **Outputs**: 1

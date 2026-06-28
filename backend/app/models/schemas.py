@@ -469,6 +469,7 @@ class CredentialType(str, Enum):
     notion = "notion"
     s3 = "s3"
     elevenlabs = "elevenlabs"
+    clickhouse = "clickhouse"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -542,6 +543,15 @@ class CredentialConfigSupabase(BaseModel):
     supabase_schema: str | None = "public"
 
 
+class CredentialConfigClickHouse(BaseModel):
+    host: str
+    port: int | None = None
+    username: str | None = "default"
+    password: str | None = ""
+    database: str | None = "default"
+    secure: bool | None = False
+
+
 class CredentialConfigNotion(BaseModel):
     api_token: str | None = None
     client_id: str | None = None
@@ -579,6 +589,16 @@ class SupabaseTablesResponse(BaseModel):
 
 class SupabaseColumnsResponse(BaseModel):
     columns: list[str]
+    success: bool = True
+
+
+class ClickHouseColumn(BaseModel):
+    name: str
+    type: str
+
+
+class ClickHouseColumnsResponse(BaseModel):
+    columns: list[ClickHouseColumn]
     success: bool = True
 
 

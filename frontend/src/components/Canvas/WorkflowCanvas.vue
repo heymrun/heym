@@ -671,6 +671,8 @@ function handleNodeDoubleClick(event: {
     };
   };
 }): void {
+  const shouldOpenExpressionDialog =
+    workflowStore.propertiesPanelVisible && workflowStore.propertiesPanelTab === "properties";
   workflowStore.selectNode(event.node.id);
   if (event.node.data?.nodeType === "sticky") return;
   const nodeType = event.node.data?.nodeType;
@@ -754,7 +756,9 @@ function handleNodeDoubleClick(event: {
   } else if (nodeType === "playwright") {
     fieldToFocus = "playwrightSteps";
   }
-  workflowStore.openPropertiesPanel(fieldToFocus);
+  workflowStore.openPropertiesPanel(fieldToFocus, {
+    skipPrimaryExpand: !shouldOpenExpressionDialog,
+  });
 }
 
 function handleEdgeDoubleClick(event: { edge: { id: string } }): void {
@@ -1007,6 +1011,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     googleSheets: { label: "googleSheets", credentialId: "", gsOperation: undefined, gsSpreadsheetId: "", gsSheetName: "Sheet1", gsStartRow: "1", gsUpdateRow: "1", gsMaxRows: "0", gsHasHeader: true, gsRowCount: "1", gsKeepHeader: false, gsAppendPlacement: "append", gsValuesInputMode: "raw", gsValuesSelectiveRows: "1", gsValuesSelectiveCols: "3", gsValues: "[]" },
     bigquery: { label: "bigquery", credentialId: "", bqOperation: undefined, bqProjectId: "", bqQuery: "", bqMaxResults: "1000", bqDatasetId: "", bqTableId: "", bqRowsInputMode: "raw", bqRows: "[]", bqMappings: [{ key: "field", value: "$input.text" }] },
     supabase: { label: "supabase", credentialId: "", supabaseOperation: undefined, supabaseSchema: "public", supabaseTable: "", supabaseSelectColumns: "*", supabaseFilter: "{}", supabaseLimit: "100", supabaseOrderBy: "", supabaseAscending: true, supabaseRows: "[]", supabaseOnConflict: "", supabaseData: "{}" },
+    clickhouse: { label: "clickhouse", credentialId: "", clickhouseOperation: undefined, clickhouseTable: "", clickhouseQuery: "", clickhouseFilter: "{}", clickhouseLimit: "100", clickhouseSort: "", clickhouseRowId: "", clickhouseInputMode: "raw", clickhouseData: "[]", clickhouseMappings: [] },
     notion: { label: "notion", credentialId: "", notionOperation: undefined, notionQuery: "", notionPageId: "", notionDatabaseId: "", notionDatabase: "{}", notionDataSourceId: "", notionDataSource: "{}", notionDataSourceInputMode: "select", notionParentPageId: "", notionParentPageInputMode: "select", notionBlockId: "", notionBlock: "{}", notionProperties: "{}", notionChildren: "[]", notionFilter: "{}", notionSort: "{}", notionSorts: "[]", notionIcon: "{}", notionCover: "{}", notionPageSize: "100", notionStartCursor: "", notionAppendPosition: "end", notionAfterBlockId: "" },
     s3: { label: "amazonS3", credentialId: "", s3Operation: "putObject", s3Bucket: "", s3Key: "$input.filename || 'output.txt'", s3SourceBucket: "", s3SourceKey: "", s3Prefix: "", s3ContinuationToken: "", s3Body: "$input.text", s3ContentType: "text/plain", s3MaxKeys: "100", s3IncludeBinary: false },
     throwError: { label: "throwError", errorMessage: "$input.text", httpStatusCode: 400 },

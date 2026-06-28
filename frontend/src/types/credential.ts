@@ -25,7 +25,8 @@ export type CredentialType =
   | "supabase"
   | "notion"
   | "s3"
-  | "elevenlabs";
+  | "elevenlabs"
+  | "clickhouse";
 
 export interface Credential {
   id: string;
@@ -210,6 +211,15 @@ export interface CredentialConfigSupabase {
   supabase_schema?: string;
 }
 
+export interface CredentialConfigClickHouse {
+  host: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  database?: string;
+  secure?: boolean;
+}
+
 export interface CredentialConfigNotion {
   api_token?: string;
   client_id?: string;
@@ -242,6 +252,7 @@ export type CredentialConfig =
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
   | CredentialConfigSupabase
+  | CredentialConfigClickHouse
   | CredentialConfigNotion
   | CredentialConfigS3
   | CredentialConfigElevenLabs;
@@ -275,6 +286,16 @@ export interface SupabaseTablesResponse {
 
 export interface SupabaseColumnsResponse {
   columns: string[];
+  success: boolean;
+}
+
+export interface ClickHouseColumn {
+  name: string;
+  type: string;
+}
+
+export interface ClickHouseColumnsResponse {
+  columns: ClickHouseColumn[];
   success: boolean;
 }
 
@@ -329,6 +350,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_sheets: "Google Sheets (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
+  clickhouse: "ClickHouse",
   notion: "Notion (Token or OAuth)",
   s3: "Amazon S3",
   elevenlabs: "ElevenLabs (Voice)",
@@ -360,6 +382,8 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
+  clickhouse:
+    "Connect to ClickHouse — run SQL and CRUD over OLAP tables via the HTTP interface",
   notion: "Connect to Notion with an internal token or user-authorized OAuth workspace",
   s3: "Connect to Amazon S3 — manage buckets, folders, and objects",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",

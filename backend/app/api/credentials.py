@@ -18,6 +18,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.models.schemas import (
+    ClickHouseColumnsResponse,
     CredentialCreate,
     CredentialForIntellisense,
     CredentialListResponse,
@@ -196,6 +197,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         if access_key and region:
             return f"{mask_api_key(access_key)} ({region})"
         return mask_api_key(access_key) if access_key else None
+    elif credential_type == CredentialType.clickhouse:
+        host = str(config.get("host", "")).strip()
+        database = str(config.get("database", "default")).strip() or "default"
+        if host:
+            return f"{host} ({database})"
+        return None
     return None
 
 
@@ -276,6 +283,21 @@ def _merge_supabase_test_config(
         inline_value = str(inline_config.get(key, "")).strip()
         if inline_value:
             merged[key] = inline_value
+    return merged
+
+
+def _merge_clickhouse_test_config(
+    inline_config: dict,
+    stored_config: dict,
+) -> dict:
+    """Merge inline ClickHouse form values with stored secrets for connection tests."""
+    merged = dict(stored_config)
+    for key in ("host", "port", "username", "database", "secure"):
+        if key in inline_config and inline_config.get(key) not in (None, ""):
+            merged[key] = inline_config[key]
+    inline_password = str(inline_config.get("password", "") or "")
+    if inline_password:
+        merged["password"] = inline_password
     return merged
 
 
@@ -731,6 +753,7 @@ async def run_credential_connection_test(
         CredentialType.supabase,
         CredentialType.linear,
         CredentialType.notion,
+        CredentialType.clickhouse,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -755,6 +778,8 @@ async def run_credential_connection_test(
             config = _merge_supabase_test_config(config, stored_config)
         elif test_data.type == CredentialType.linear:
             config = _merge_linear_test_config(config, stored_config)
+        elif test_data.type == CredentialType.clickhouse:
+            config = _merge_clickhouse_test_config(config, stored_config)
         else:
             config = _merge_notion_test_config(config, stored_config)
 
@@ -783,6 +808,12 @@ async def run_credential_connection_test(
                     success=True,
                     message=f"Connected as {viewer_name}",
                 )
+            return CredentialTestResponse(success=True, message="Connection successful")
+
+        if test_data.type == CredentialType.clickhouse:
+            from app.services.clickhouse_service import ClickHouseService
+
+            await run_in_threadpool(ClickHouseService(config).test_connection)
             return CredentialTestResponse(success=True, message="Connection successful")
 
         from app.services.notion_service import NotionService
@@ -938,6 +969,36 @@ async def list_supabase_columns(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return SupabaseColumnsResponse(**result)
+
+
+@router.get("/{credential_id}/clickhouse/columns", response_model=ClickHouseColumnsResponse)
+async def list_clickhouse_columns(
+    credential_id: uuid.UUID,
+    table: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClickHouseColumnsResponse:
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.clickhouse:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential type does not support ClickHouse column discovery",
+        )
+
+    config = decrypt_config(credential.encrypted_config)
+    from app.services.clickhouse_service import ClickHouseService
+
+    try:
+        result = await run_in_threadpool(ClickHouseService(config).list_columns, table)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ClickHouseColumnsResponse(**result)
 
 
 @router.get("/{credential_id}", response_model=CredentialResponse)
@@ -1400,6 +1461,12 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="FlareSolverr credential requires flaresolverr_url",
+            )
+    elif credential_type == CredentialType.clickhouse:
+        if "host" not in config or not str(config["host"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ClickHouse credential requires host",
             )
 
 

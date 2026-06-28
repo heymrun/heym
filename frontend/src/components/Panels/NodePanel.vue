@@ -181,6 +181,7 @@ const icons = {
   googleSheets: Sheet,
   bigquery: Database,
   supabase: Database,
+  clickhouse: Database,
   notion: FileText,
   throwError: XCircle,
   rabbitmq: Rabbit,

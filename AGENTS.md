@@ -84,6 +84,7 @@ When adding a new node type, operation, or operation-specific field, keep the ca
 - Update the node/operation DSL(workflow_dsl_prompt.py) and schema metadata as the source of truth for new fields, including labels, defaults, dynamic/expression eligibility, and AI autofill hints.
 - Agent node tool fields must be available to AI autofill. If a field can be configured on a tool attached to an agent node, clicking the agent icon should be able to populate that field automatically.
 - Dynamic/expression-capable fields must be exposed to the expression dialog metadata. When a node is double-clicked, the expression dialog should be able to show `1/n` navigation and dynamically fill every eligible field for that node/operation.
+- When adding a **new node type**, update the docs that enumerate nodes: add the node page under `frontend/src/docs/content/nodes/`, register it in `frontend/src/docs/manifest.ts`, and add the node to the reference docs — including `frontend/src/docs/content/reference/features.md` (both the per-node section and the node-types summary list), plus `node-types.md` and, for credential-backed nodes, `integrations.md` / `credentials.md` / `credentials-sharing.md`. 
 - Add or extend frontend tests for meaningful UI behavior changes when practical, especially for autofill eligibility and expression dialog field discovery.
 
 ### Expression evaluation (avoid executor vs dialog drift)
