@@ -31,6 +31,11 @@ import type {
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Select from "@/components/ui/Select.vue";
+import AutoRefreshControl from "@/components/ui/AutoRefreshControl.vue";
+import {
+  AUTO_REFRESH_MAX_SECONDS,
+  HISTORY_AUTO_REFRESH_MIN_SECONDS,
+} from "@/composables/useAutoRefresh";
 import { buildDisplayNodeResults, type DisplayNodeResult } from "@/lib/executionLog";
 import { cn } from "@/lib/utils";
 import { workflowApi } from "@/services/api";
@@ -68,6 +73,13 @@ const selectedTriggerSource = ref<string | undefined>(undefined);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_MS = 500;
+
+const HISTORY_AUTO_REFRESH_PRESETS = [
+  { value: "off", label: "Off" },
+  { value: "1", label: "1s" },
+  { value: "5", label: "5s" },
+  { value: "custom", label: "Custom" },
+] as const;
 const activeExecutions = ref<ActiveExecutionItem[]>([]);
 const isCancellingId = ref<string | null>(null);
 const loadingMore = ref(false);
@@ -770,7 +782,17 @@ function bringToCanvas(): void {
             clear-aria-label="Clear tag filter"
           />
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap justify-end">
+          <AutoRefreshControl
+            :active="open"
+            :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
+            :bounds="{
+              minSeconds: HISTORY_AUTO_REFRESH_MIN_SECONDS,
+              maxSeconds: AUTO_REFRESH_MAX_SECONDS,
+            }"
+            default-custom-seconds="10"
+            @refresh="refreshHistory"
+          />
           <Button
             variant="ghost"
             size="sm"

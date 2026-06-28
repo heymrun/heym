@@ -2,16 +2,28 @@ import { onUnmounted, ref, type Ref } from "vue";
 
 export const AUTO_REFRESH_MIN_SECONDS = 10;
 export const AUTO_REFRESH_MAX_SECONDS = 3600;
+export const HISTORY_AUTO_REFRESH_MIN_SECONDS = 1;
 
-export function validateAutoRefreshSeconds(seconds: number): string | null {
+export interface AutoRefreshBounds {
+  minSeconds?: number;
+  maxSeconds?: number;
+}
+
+export function validateAutoRefreshSeconds(
+  seconds: number,
+  bounds: AutoRefreshBounds = {},
+): string | null {
+  const minSeconds = bounds.minSeconds ?? AUTO_REFRESH_MIN_SECONDS;
+  const maxSeconds = bounds.maxSeconds ?? AUTO_REFRESH_MAX_SECONDS;
+
   if (!Number.isFinite(seconds) || !Number.isInteger(seconds)) {
     return "Enter a whole number of seconds";
   }
-  if (seconds < AUTO_REFRESH_MIN_SECONDS) {
-    return `Minimum interval is ${AUTO_REFRESH_MIN_SECONDS}s`;
+  if (seconds < minSeconds) {
+    return `Minimum interval is ${minSeconds}s`;
   }
-  if (seconds > AUTO_REFRESH_MAX_SECONDS) {
-    return `Maximum interval is ${AUTO_REFRESH_MAX_SECONDS}s`;
+  if (seconds > maxSeconds) {
+    return `Maximum interval is ${maxSeconds}s`;
   }
   return null;
 }
@@ -32,7 +44,10 @@ interface UseAutoRefreshResult {
   stop: () => void;
 }
 
-export function useAutoRefresh(onTick: () => void): UseAutoRefreshResult {
+export function useAutoRefresh(
+  onTick: () => void,
+  bounds: AutoRefreshBounds = {},
+): UseAutoRefreshResult {
   const secondsRemaining = ref<number | null>(null);
   const validationError = ref<string | null>(null);
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -69,7 +84,7 @@ export function useAutoRefresh(onTick: () => void): UseAutoRefreshResult {
     }
 
     const seconds = Math.round(ms / 1000);
-    const error = validateAutoRefreshSeconds(seconds);
+    const error = validateAutoRefreshSeconds(seconds, bounds);
     if (error !== null) {
       validationError.value = error;
       secondsRemaining.value = null;
