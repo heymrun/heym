@@ -33,6 +33,8 @@ export interface Workflow {
   sse_enabled: boolean;
   sse_node_config: Record<string, SseNodeConfig>;
   auto_recover_runs: boolean;
+  error_workflow_id: string | null;
+  minutes_saved_per_run: number | null;
   created_at: string;
   updated_at: string;
 }

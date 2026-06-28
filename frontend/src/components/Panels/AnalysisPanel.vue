@@ -23,6 +23,8 @@ interface AnalysisWorkflowPayload {
   description?: string | null;
   nodes: unknown[];
   edges: unknown[];
+  error_workflow_id?: string | null;
+  minutes_saved_per_run?: number | null;
 }
 
 const props = defineProps<{

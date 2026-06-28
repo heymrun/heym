@@ -512,6 +512,8 @@ export const workflowApi = {
         | "sse_enabled"
         | "sse_node_config"
         | "auto_recover_runs"
+        | "error_workflow_id"
+        | "minutes_saved_per_run"
       >
     >,
   ): Promise<Workflow> => {

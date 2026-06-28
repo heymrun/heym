@@ -278,6 +278,8 @@ const analysisWorkflowPayload = computed(() => ({
   description: workflowStore.currentWorkflow?.description ?? null,
   nodes: workflowStore.nodes,
   edges: workflowStore.edges,
+  error_workflow_id: workflowStore.currentWorkflow?.error_workflow_id ?? null,
+  minutes_saved_per_run: workflowStore.currentWorkflow?.minutes_saved_per_run ?? null,
 }));
 
 function toggleAnalysisPanel(): void {

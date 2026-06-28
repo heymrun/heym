@@ -12,6 +12,7 @@ export interface AnalyticsStats {
   success_count_24h: number;
   error_count_24h: number;
   avg_latency_24h_ms: number;
+  time_saved_minutes: number;
 }
 
 export interface TimeSeriesMetrics {
