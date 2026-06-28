@@ -61,6 +61,37 @@ class RegisterExecutionTests(unittest.TestCase):
         self.assertLessEqual(handle.started_at, after)
 
 
+class RegisterExecutionRecoveryFieldsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _flush()
+
+    def test_handle_carries_recovery_fields(self) -> None:
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+        actor = uuid.uuid4()
+        register_execution(
+            workflow_id=wf_id,
+            execution_id=ex_id,
+            inputs={"a": 1},
+            trigger_source="schedule",
+            actor_user_id=actor,
+            recoverable=True,
+        )
+        handle = _ACTIVE_EXECUTIONS[ex_id]
+        self.assertEqual(handle.inputs, {"a": 1})
+        self.assertEqual(handle.trigger_source, "schedule")
+        self.assertEqual(handle.actor_user_id, actor)
+        self.assertTrue(handle.recoverable)
+
+    def test_defaults_are_safe(self) -> None:
+        register_execution(workflow_id=uuid.uuid4(), execution_id=uuid.uuid4())
+        handle = next(iter(_ACTIVE_EXECUTIONS.values()))
+        self.assertEqual(handle.inputs, {})
+        self.assertIsNone(handle.trigger_source)
+        self.assertIsNone(handle.actor_user_id)
+        self.assertTrue(handle.recoverable)
+
+
 class CancelExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         _flush()

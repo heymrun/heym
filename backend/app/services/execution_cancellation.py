@@ -33,6 +33,10 @@ class ExecutionCancellationHandle:
     execution_id: uuid.UUID
     event: threading.Event
     started_at: datetime = field(default_factory=_utcnow)
+    inputs: dict = field(default_factory=dict)
+    trigger_source: str | None = None
+    actor_user_id: uuid.UUID | None = None
+    recoverable: bool = True
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,10 @@ class _RegistryCommand:
     execution_id: uuid.UUID
     workflow_id: uuid.UUID | None = None
     started_at: datetime | None = None
+    inputs: dict | None = None
+    trigger_source: str | None = None
+    actor_user_id: uuid.UUID | None = None
+    recoverable: bool = True
 
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
@@ -63,6 +71,10 @@ def register_execution(
     execution_id: uuid.UUID,
     event: threading.Event | None = None,
     started_at: datetime | None = None,
+    inputs: dict | None = None,
+    trigger_source: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    recoverable: bool = True,
 ) -> threading.Event:
     if event is None:
         event = threading.Event()
@@ -72,6 +84,10 @@ def register_execution(
         execution_id=execution_id,
         event=event,
         started_at=started_at,
+        inputs=inputs or {},
+        trigger_source=trigger_source,
+        actor_user_id=actor_user_id,
+        recoverable=recoverable,
     )
     with _LOCK:
         _ACTIVE_EXECUTIONS[execution_id] = handle
@@ -143,6 +159,10 @@ class ActiveExecutionRegistry:
                 execution_id=handle.execution_id,
                 workflow_id=handle.workflow_id,
                 started_at=handle.started_at,
+                inputs=handle.inputs,
+                trigger_source=handle.trigger_source,
+                actor_user_id=handle.actor_user_id,
+                recoverable=handle.recoverable,
             )
         )
         self._wake()
@@ -216,15 +236,26 @@ class ActiveExecutionRegistry:
                         started_at=started_at,
                         heartbeat_at=now,
                         cancel_requested_at=None,
+                        inputs=command.inputs or {},
+                        trigger_source=command.trigger_source,
+                        actor_user_id=command.actor_user_id,
+                        attempt=0,
+                        recoverable=command.recoverable,
                     )
                     .on_conflict_do_update(
                         index_elements=["execution_id"],
+                        # set_ intentionally omits `attempt` and `recoverable` so a
+                        # recovery re-run (re-registering the same execution_id)
+                        # preserves the claimed attempt count and recoverable flag.
                         set_={
                             "workflow_id": command.workflow_id,
                             "worker_id": _WORKER_ID,
                             "started_at": started_at,
                             "heartbeat_at": now,
                             "cancel_requested_at": None,
+                            "inputs": command.inputs or {},
+                            "trigger_source": command.trigger_source,
+                            "actor_user_id": command.actor_user_id,
                         },
                     )
                 )
