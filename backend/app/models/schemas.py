@@ -186,6 +186,7 @@ class WorkflowUpdate(BaseModel):
     rate_limit_window_seconds: int | None = None
     sse_enabled: bool | None = None
     sse_node_config: dict | None = None
+    auto_recover_runs: bool | None = None
 
 
 class WorkflowShareRequest(BaseModel):
@@ -221,6 +222,7 @@ class WorkflowResponse(BaseModel):
     rate_limit_window_seconds: int | None = None
     sse_enabled: bool = False
     sse_node_config: dict | None = None
+    auto_recover_runs: bool = True
     created_at: datetime
     updated_at: datetime
 

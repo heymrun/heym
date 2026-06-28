@@ -1134,6 +1134,8 @@ async def update_workflow(
         workflow.sse_enabled = workflow_data.sse_enabled
     if workflow_data.sse_node_config is not None:
         workflow.sse_node_config = sanitized_sse_node_config
+    if workflow_data.auto_recover_runs is not None:
+        workflow.auto_recover_runs = workflow_data.auto_recover_runs
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow
     # is edited on the canvas (canvas -> dashboard direction).

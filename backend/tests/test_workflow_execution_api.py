@@ -1837,3 +1837,19 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
         execution_history_ctor.assert_not_called()
         db.add.assert_not_called()
         db.commit.assert_not_called()
+
+
+class AutoRecoverRunsSchemaTests(unittest.TestCase):
+    def test_workflow_response_defaults_auto_recover_true(self) -> None:
+        from app.models.schemas import WorkflowResponse
+
+        fields = WorkflowResponse.model_fields
+        self.assertIn("auto_recover_runs", fields)
+        self.assertEqual(fields["auto_recover_runs"].default, True)
+
+    def test_workflow_update_accepts_auto_recover(self) -> None:
+        from app.models.schemas import WorkflowUpdate
+
+        self.assertIn("auto_recover_runs", WorkflowUpdate.model_fields)
+        update = WorkflowUpdate(auto_recover_runs=False)
+        self.assertFalse(update.auto_recover_runs)
