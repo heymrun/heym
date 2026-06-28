@@ -2494,6 +2494,17 @@ async def execute_workflow_endpoint(
             execution_time_ms=execution_result.execution_time_ms,
         )
         await db.flush()
+        if execution_result.status == "error":
+            from app.services.error_workflow_runner import maybe_run_error_workflow
+
+            await maybe_run_error_workflow(
+                db,
+                workflow,
+                status=execution_result.status,
+                node_results=execution_result.node_results,
+                run_id=str(history_entry.id) if history_entry else None,
+                actor_user_id=credentials_owner_id,
+            )
         if execution_result.allow_downstream_pending:
             if background_tasks is None:
                 background_tasks = BackgroundTasks()
