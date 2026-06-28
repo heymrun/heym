@@ -54,6 +54,7 @@ import {
   Radio,
   RefreshCw,
   Repeat,
+  RotateCcw,
   Search,
   Send,
   Server,
@@ -316,6 +317,22 @@ const isWorkflowOwner = computed(
     !workflowStore.currentWorkflow ||
     workflowStore.currentWorkflow.owner_id === authStore.user?.id,
 );
+
+const autoRecoverRuns = computed(
+  () => workflowStore.currentWorkflow?.auto_recover_runs ?? true,
+);
+
+async function onToggleAutoRecover(value: boolean): Promise<void> {
+  const wf = workflowStore.currentWorkflow;
+  if (!wf || !isWorkflowOwner.value) return;
+  const previous = wf.auto_recover_runs;
+  wf.auto_recover_runs = value;
+  try {
+    await workflowApi.update(wf.id, { auto_recover_runs: value });
+  } catch {
+    wf.auto_recover_runs = previous;
+  }
+}
 
 const activeTab = computed({
   get: () => workflowStore.propertiesPanelTab,
@@ -7833,13 +7850,46 @@ onUnmounted(() => {
     >
       <div
         v-if="!selectedNode"
-        class="flex-1 flex items-center justify-center p-8 text-center"
+        class="flex-1 flex flex-col overflow-y-auto"
       >
-        <div class="text-muted-foreground">
+        <div class="p-8 text-center text-muted-foreground">
           <Settings class="w-10 h-10 mx-auto mb-3 opacity-50" />
           <p class="text-sm">
             Select a node to view its properties
           </p>
+        </div>
+
+        <div
+          v-if="workflowStore.currentWorkflow"
+          class="px-4 pb-6 mt-auto"
+        >
+          <div class="border-t border-border/40 pt-4">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2 min-w-0">
+                <RotateCcw class="w-4 h-4 text-muted-foreground shrink-0" />
+                <span class="text-sm font-medium">Auto-recover runs</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="autoRecoverRuns"
+                :disabled="!isWorkflowOwner"
+                class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                :class="autoRecoverRuns ? 'bg-primary' : 'bg-muted-foreground/30'"
+                @click="onToggleAutoRecover(!autoRecoverRuns)"
+              >
+                <span
+                  class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+                  :class="autoRecoverRuns ? 'translate-x-4' : 'translate-x-0.5'"
+                />
+              </button>
+            </div>
+            <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
+              If the server restarts mid-run, re-runs it from scratch with the
+              same inputs. Off = mark interrupted runs as
+              <span class="font-medium">skipped</span>.
+            </p>
+          </div>
         </div>
       </div>
 

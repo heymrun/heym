@@ -483,18 +483,6 @@ function stopExecution(): void {
   workflowStore.stopExecution();
 }
 
-async function onToggleAutoRecover(value: boolean): Promise<void> {
-  const wf = workflowStore.currentWorkflow;
-  if (!wf) return;
-  const previous = wf.auto_recover_runs;
-  wf.auto_recover_runs = value;
-  try {
-    await workflowApi.update(wf.id, { auto_recover_runs: value });
-  } catch {
-    wf.auto_recover_runs = previous;
-  }
-}
-
 const statusColors = {
   success: "text-green-500",
   error: "text-red-500",
@@ -2433,20 +2421,6 @@ function renderContent(content: string): string {
         />
       </div>
       <div class="flex items-center gap-2">
-        <label
-          v-if="workflowStore.currentWorkflow"
-          class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none mr-2"
-          title="Re-run interrupted runs from scratch after a server restart. When off, interrupted runs are marked skipped."
-          @click.stop
-        >
-          <input
-            type="checkbox"
-            class="h-3.5 w-3.5 cursor-pointer accent-primary"
-            :checked="workflowStore.currentWorkflow.auto_recover_runs ?? true"
-            @change="onToggleAutoRecover(($event.target as HTMLInputElement).checked)"
-          >
-          <span>Auto-recover</span>
-        </label>
         <div
           v-if="executionResult"
           class="flex items-center gap-2 text-xs mr-2"
