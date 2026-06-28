@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DOMPurify from "dompurify";
-import { AlertTriangle, Eye, Loader2, Pencil, Save, Sparkles, X } from "lucide-vue-next";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Eye,
+  Loader2,
+  Pencil,
+  Save,
+  Sparkles,
+  X,
+} from "lucide-vue-next";
 import { marked } from "marked";
 import { isAxiosError } from "axios";
 
@@ -135,6 +144,8 @@ async function loadModels(): Promise<void> {
   }
 }
 
+const EXECUTION_CANCELLED = "Execution cancelled";
+
 async function startAnalyze(): Promise<void> {
   if (!canAnalyze.value) return;
   errorMsg.value = null;
@@ -156,12 +167,23 @@ async function startAnalyze(): Promise<void> {
     running.value = true;
     try {
       executionLog = await props.runWorkflow();
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === EXECUTION_CANCELLED) {
+        analyzing.value = false;
+        if (reanalyze) {
+          reanalyzePreview.value = null;
+        } else {
+          draft.value = savedContent.value;
+        }
+        return;
+      }
       // Run failures are non-fatal; analyze the static workflow instead.
     } finally {
       running.value = false;
     }
   }
+
+  if (!analyzing.value) return;
 
   aiApi.analyzeWorkflowStream(
     {
@@ -184,6 +206,9 @@ async function startAnalyze(): Promise<void> {
     },
     (err) => {
       analyzing.value = false;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
       errorMsg.value = err.message || "Analysis failed.";
       if (reanalyze && !reanalyzePreview.value) reanalyzePreview.value = null;
     },
@@ -299,43 +324,53 @@ onBeforeUnmount(() => {
     <template v-else>
       <div class="px-4 py-2 border-b border-border/40 space-y-2 shrink-0">
         <div class="flex items-center gap-2">
-          <select
-            v-model="credentialId"
-            class="flex-1 min-w-0 text-xs rounded-md border border-border bg-background px-2 py-1"
-            :disabled="analyzing"
-            @change="loadModels"
-          >
-            <option
-              v-if="credentials.length === 0"
-              value=""
+          <div class="relative flex-1 min-w-0">
+            <select
+              v-model="credentialId"
+              class="h-9 w-full min-w-0 truncate rounded-md border border-border bg-background pl-2.5 pr-9 text-sm appearance-none cursor-pointer"
+              :disabled="analyzing"
+              @change="loadModels"
             >
-              No LLM credential
-            </option>
-            <option
-              v-for="c in credentials"
-              :key="c.id"
-              :value="c.id"
+              <option
+                v-if="credentials.length === 0"
+                value=""
+              >
+                No LLM credential
+              </option>
+              <option
+                v-for="c in credentials"
+                :key="c.id"
+                :value="c.id"
+              >
+                {{ c.name }}
+              </option>
+            </select>
+            <ChevronDown
+              class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 shrink-0 text-muted-foreground"
+            />
+          </div>
+          <div class="relative flex-1 min-w-0">
+            <select
+              v-model="model"
+              class="h-9 w-full min-w-0 truncate rounded-md border border-border bg-background pl-2.5 pr-9 text-sm appearance-none cursor-pointer disabled:opacity-50"
+              :disabled="analyzing || models.length === 0"
             >
-              {{ c.name }}
-            </option>
-          </select>
-          <select
-            v-model="model"
-            class="flex-1 min-w-0 text-xs rounded-md border border-border bg-background px-2 py-1"
-            :disabled="analyzing || models.length === 0"
-          >
-            <option
-              v-for="m in models"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.name }}
-            </option>
-          </select>
+              <option
+                v-for="m in models"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.name }}
+              </option>
+            </select>
+            <ChevronDown
+              class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 shrink-0 text-muted-foreground"
+            />
+          </div>
         </div>
         <div class="flex items-center gap-2">
           <button
-            class="inline-flex items-center gap-1.5 text-xs font-medium rounded-md px-2.5 py-1.5 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            class="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             :disabled="!canAnalyze"
             :title="
               credentials.length === 0 ? 'Add an LLM credential to analyze' : 'Run AI analysis'
@@ -344,46 +379,46 @@ onBeforeUnmount(() => {
           >
             <Loader2
               v-if="analyzing"
-              class="w-3.5 h-3.5 animate-spin"
+              class="h-4 w-4 animate-spin"
             />
             <Sparkles
               v-else
-              class="w-3.5 h-3.5"
+              class="h-4 w-4"
             />
             {{ hasContent ? "Reanalyze" : "Analyze my workflow" }}
           </button>
           <div class="ml-auto flex items-center gap-1">
             <button
-              class="inline-flex items-center gap-1 text-xs rounded-md px-2 py-1.5 hover:bg-muted disabled:opacity-50"
+              class="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50"
               :class="mode === 'edit' ? 'bg-muted text-foreground' : 'text-muted-foreground'"
               :disabled="pendingPreview"
               title="Edit"
               @click="mode = 'edit'"
             >
-              <Pencil class="w-3.5 h-3.5" />
+              <Pencil class="h-4 w-4" />
             </button>
             <button
-              class="inline-flex items-center gap-1 text-xs rounded-md px-2 py-1.5 hover:bg-muted disabled:opacity-50"
+              class="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50"
               :class="mode === 'preview' ? 'bg-muted text-foreground' : 'text-muted-foreground'"
               :disabled="pendingPreview"
               title="Preview"
               @click="mode = 'preview'"
             >
-              <Eye class="w-3.5 h-3.5" />
+              <Eye class="h-4 w-4" />
             </button>
             <button
-              class="inline-flex items-center gap-1.5 text-xs font-medium rounded-md px-2.5 py-1.5 border border-border hover:bg-muted disabled:opacity-50"
+              class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50"
               :disabled="!dirty || saving || pendingPreview"
               title="Save"
               @click="save()"
             >
               <Loader2
                 v-if="saving"
-                class="w-3.5 h-3.5 animate-spin"
+                class="h-4 w-4 animate-spin"
               />
               <Save
                 v-else
-                class="w-3.5 h-3.5"
+                class="h-4 w-4"
               />
               Save
             </button>

@@ -302,8 +302,11 @@ async function runWorkflowForAnalysis(): Promise<
   if (!targets.isValid) return undefined;
   try {
     await workflowStore.executeWorkflow(workflowStore.buildExecutionRequestBody());
-  } catch {
-    // Errors surface via execution state; analysis still proceeds.
+  } catch (err) {
+    if (err instanceof Error && err.message === "Execution cancelled") {
+      throw err;
+    }
+    // Other errors surface via execution state; analysis still proceeds.
   }
   const log = buildExecutionLogForAssistant(
     workflowStore.nodeResults,

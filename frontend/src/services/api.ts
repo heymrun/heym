@@ -868,6 +868,7 @@ export const workflowApi = {
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") {
+          onError(new Error("Execution cancelled"));
           return;
         }
         onError(error instanceof Error ? error : new Error("Workflow execution failed"));
