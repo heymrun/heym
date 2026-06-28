@@ -1140,6 +1140,31 @@ async def update_workflow(
         workflow.sse_node_config = sanitized_sse_node_config
     if workflow_data.auto_recover_runs is not None:
         workflow.auto_recover_runs = workflow_data.auto_recover_runs
+    if workflow_data.error_workflow_id is not None:
+        # Empty UUID (all-zeros) clears the setting; a workflow cannot target itself.
+        if workflow_data.error_workflow_id == uuid.UUID(int=0):
+            workflow.error_workflow_id = None
+        elif workflow_data.error_workflow_id == workflow_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A workflow cannot be its own error workflow",
+            )
+        else:
+            target = await get_workflow_for_user(
+                db, workflow_data.error_workflow_id, current_user.id
+            )
+            if target is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Error workflow not found or not accessible",
+                )
+            workflow.error_workflow_id = workflow_data.error_workflow_id
+    if workflow_data.minutes_saved_per_run is not None:
+        workflow.minutes_saved_per_run = (
+            workflow_data.minutes_saved_per_run
+            if workflow_data.minutes_saved_per_run > 0
+            else None
+        )
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow
     # is edited on the canvas (canvas -> dashboard direction).

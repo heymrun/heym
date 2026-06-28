@@ -187,6 +187,8 @@ class WorkflowUpdate(BaseModel):
     sse_enabled: bool | None = None
     sse_node_config: dict | None = None
     auto_recover_runs: bool | None = None
+    error_workflow_id: uuid.UUID | None = None
+    minutes_saved_per_run: float | None = None
 
 
 class WorkflowShareRequest(BaseModel):
@@ -223,6 +225,8 @@ class WorkflowResponse(BaseModel):
     sse_enabled: bool = False
     sse_node_config: dict | None = None
     auto_recover_runs: bool = True
+    error_workflow_id: uuid.UUID | None = None
+    minutes_saved_per_run: float | None = None
     created_at: datetime
     updated_at: datetime
 
