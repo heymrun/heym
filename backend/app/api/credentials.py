@@ -770,7 +770,11 @@ async def run_credential_connection_test(
         if test_data.type == CredentialType.linear:
             from app.services.linear_service import LinearService
 
-            viewer = LinearService(config).test_connection()
+            service = LinearService(config)
+            try:
+                viewer = service.test_connection()
+            finally:
+                service.close()
             viewer_name = str(
                 viewer.get("displayName") or viewer.get("name") or viewer.get("email") or ""
             )

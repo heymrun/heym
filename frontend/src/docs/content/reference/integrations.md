@@ -13,7 +13,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenAI** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md) | `api_key` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
-| **Linear** | [Linear node](../nodes/linear-node.md) | `api_key` |
+| **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -79,24 +79,45 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 
 ## Linear
 
-The Linear credential stores a personal API key for the
+The Linear credential supports either a personal API key or OAuth2 for the
 [Linear node](../nodes/linear-node.md). Heym sends native GraphQL queries to Linear for workspace
 metadata, projects, issues, and comments.
 
+### Setup
+
+Choose one authentication mode:
+
+**Personal API key**
+
+1. In Linear, open **Settings → Security & Access → Personal API keys**.
+2. Create a key with access to the workspace you want to automate.
+3. Paste the key into a Linear credential in Heym and use **Test Connection** to verify it.
+
+**OAuth2**
+
+1. Create a Linear OAuth application.
+2. Register `{FRONTEND_URL}/api/credentials/linear/oauth/callback` as the redirect URI.
+3. In Heym Dashboard → **Credentials** → **New** → type **Linear**.
+4. Choose **OAuth2**, enter the Client ID and Client Secret, then click **Connect**.
+
 ### Required Fields
 
-| Field | Description |
-|-------|-------------|
-| `api_key` | Linear personal API key, commonly prefixed with `lin_api_` |
+| Mode | Field | Description |
+|------|-------|-------------|
+| Personal API key | `api_key` | Linear personal API key, commonly prefixed with `lin_api_` |
+| OAuth2 | `client_id` | Client ID from the Linear OAuth application |
+| OAuth2 | `client_secret` | Client Secret from the Linear OAuth application |
+
+OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and refreshed automatically.
 
 ### Notes
 
-- Create the key in Linear under **Settings → Security & Access → Personal API keys**.
-- The key acts as the user who created it and can access that user's visible workspaces and teams.
-- Use **Test Connection** in the credential dialog to verify the key against the Linear API.
+- Personal API keys and OAuth tokens act as the Linear user who created or authorized them.
+- Linear OAuth uses the scopes `read,write,issues:create,comments:create`.
+- Use **Test Connection** in the credential dialog to verify the API key or OAuth token against the Linear API.
 - Use List Teams and List Projects in the Linear node to discover UUIDs before creating or filtering issues.
 - Use List Workflow States and List Team Members to discover state and assignee UUIDs for updates.
-- Rotate a key by editing the credential and entering the replacement value.
+- Rotate an API key by editing the credential and entering the replacement value. If you rotate OAuth app secrets, reconnect the credential via **Connect**.
 
 ### Used By
 

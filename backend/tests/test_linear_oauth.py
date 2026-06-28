@@ -17,7 +17,7 @@ class LinearOAuthTests(unittest.TestCase):
         url = build_auth_url("client-id", "http://test/callback", "state-token")
 
         self.assertIn("linear.app/oauth/authorize", url)
-        self.assertIn("scope=read+write+issues%3Acreate+comments%3Acreate", url)
+        self.assertIn("scope=read%2Cwrite%2Cissues%3Acreate%2Ccomments%3Acreate", url)
         self.assertIn("actor=user", url)
 
     def test_state_roundtrip(self) -> None:
@@ -132,4 +132,7 @@ class LinearOAuthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["access_token"], "oauth-access-token")
         self.assertEqual(stored["refresh_token"], "oauth-refresh-token")
         self.assertEqual(stored["auth_mode"], "oauth")
+        post_kwargs = http_client.__aenter__.return_value.post.call_args.kwargs
+        self.assertNotIn("data", post_kwargs)
+        self.assertEqual(post_kwargs["json"]["grant_type"], "authorization_code")
         db.commit.assert_awaited_once()

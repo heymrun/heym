@@ -128,6 +128,33 @@ class LinearCredentialConnectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertIn("Ada Lovelace", result.message)
 
+    async def test_test_connection_closes_linear_service(self) -> None:
+        current_user = MagicMock(id=uuid.uuid4())
+        instances = []
+
+        class FakeLinearService:
+            def __init__(self, config: dict) -> None:
+                self.config = config
+                self.close = MagicMock()
+                instances.append(self)
+
+            def test_connection(self) -> dict:
+                return {"displayName": "Ada Lovelace"}
+
+        with patch("app.services.linear_service.LinearService", FakeLinearService):
+            result = await run_credential_connection_test(
+                CredentialTestRequest(
+                    type=CredentialType.linear,
+                    config={"api_key": "lin_api_test"},
+                ),
+                current_user=current_user,
+                db=AsyncMock(),
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(len(instances), 1)
+        instances[0].close.assert_called_once()
+
     async def test_test_connection_returns_failure_message(self) -> None:
         current_user = MagicMock(id=uuid.uuid4())
         with patch(

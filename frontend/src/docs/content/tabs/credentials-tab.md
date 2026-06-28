@@ -12,7 +12,7 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **OpenAI** | OpenAI API key for LLM, Agent, and RAG nodes |
 | **Google** | Google AI (Gemini) API key |
 | **GitHub** | GitHub personal access token (PAT) for GitHub API, GitHub node workflows, MCP servers, and agent workflows; optional GitHub Enterprise `base_url` |
-| **Linear** | Linear personal API key for teams, projects, issues, and comments |
+| **Linear** | Linear personal API key or OAuth2 for teams, projects, issues, and comments |
 | **Notion** | Internal integration token or public-integration OAuth workspace authorization |
 | **Custom** | Custom LLM endpoints |
 | **Bearer** | Bearer token for HTTP auth |
@@ -37,9 +37,12 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 
 For GitHub, the current credential flow is PAT-based. Fine-grained PATs are recommended. GitHub App installation flows are not first-class in the UI today. If you use GitHub Enterprise Server, you can also set an optional GitHub API base URL such as `https://github.example.com/api/v3`.
 
-For Linear, create a personal API key under **Settings → Security & Access → Personal API keys**.
-The credential acts with the permissions of the Linear user who created it. Use **Test Connection**
-in the credential dialog to verify the key before saving.
+For Linear, choose **Personal API key** or **OAuth2** in the dialog. Personal API keys are created
+under **Settings → Security & Access → Personal API keys** in Linear. OAuth2 uses a Linear OAuth
+application Client ID and Client Secret, with `{FRONTEND_URL}/api/credentials/linear/oauth/callback`
+registered as the redirect URI. The credential acts with the permissions of the Linear user who
+created or authorized it. Use **Test Connection** in the credential dialog to verify the API key or
+OAuth token before saving.
 
 For **Notion**, choose **Internal token** or **OAuth** in the dialog. OAuth uses the Client ID and
 Client Secret from your Notion public integration; Heym stores them encrypted in the credential.

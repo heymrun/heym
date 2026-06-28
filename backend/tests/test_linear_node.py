@@ -2,12 +2,18 @@
 
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import httpx
 
 from app.db.models import CredentialType
-from app.services.linear_service import _UNSET, LINEAR_GRAPHQL_URL, LinearService
+from app.services.linear_service import (
+    _UNSET,
+    LINEAR_GRAPHQL_URL,
+    LINEAR_OAUTH_TOKEN_URL,
+    LinearService,
+)
 
 
 def _response(payload: object, status_code: int = 200) -> httpx.Response:
@@ -36,6 +42,48 @@ class LinearServiceTests(unittest.TestCase):
         viewer = service.test_connection()
 
         self.assertEqual(viewer["displayName"], "Ada Lovelace")
+
+    def test_refresh_oauth_token_posts_json_payload(self) -> None:
+        client = MagicMock()
+        client.post.side_effect = [
+            httpx.Response(
+                200,
+                json={
+                    "access_token": "new-access-token",
+                    "refresh_token": "new-refresh-token",
+                    "expires_in": 3600,
+                },
+                request=httpx.Request("POST", LINEAR_OAUTH_TOKEN_URL),
+            ),
+            _response({"data": {"viewer": {"id": "user-1", "name": "Ada"}}}),
+        ]
+        expired = datetime.now(timezone.utc) - timedelta(minutes=5)
+        service = LinearService(
+            {
+                "auth_mode": "oauth",
+                "access_token": "old-access-token",
+                "refresh_token": "old-refresh-token",
+                "client_id": "linear-client",
+                "client_secret": "linear-secret",
+                "token_expiry": expired.isoformat(),
+            },
+            client=client,
+        )
+
+        service.get_viewer()
+
+        refresh_call = client.post.call_args_list[0]
+        self.assertEqual(refresh_call.args[0], LINEAR_OAUTH_TOKEN_URL)
+        self.assertNotIn("data", refresh_call.kwargs)
+        self.assertEqual(
+            refresh_call.kwargs["json"],
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": "old-refresh-token",
+                "client_id": "linear-client",
+                "client_secret": "linear-secret",
+            },
+        )
 
     def test_strips_bearer_prefix_from_api_key(self) -> None:
         client = MagicMock()

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 _LINEAR_AUTH_URL = "https://linear.app/oauth/authorize"
 _LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token"
-_LINEAR_SCOPE = "read write issues:create comments:create"
+_LINEAR_SCOPE = "read,write,issues:create,comments:create"
 _STATE_TYPE = "linear_oauth_state"
 _STATE_TTL_MINUTES = 10
 
@@ -179,7 +179,7 @@ async def callback(
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 _LINEAR_TOKEN_URL,
-                data={
+                json={
                     "grant_type": "authorization_code",
                     "code": code,
                     "redirect_uri": payload["redirect_uri"],
