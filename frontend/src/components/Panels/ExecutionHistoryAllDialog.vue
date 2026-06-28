@@ -937,11 +937,10 @@ function bringToCanvas(): void {
                 </span>
                 <span
                   v-if="entry.recovered"
-                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-500/20 text-amber-400 uppercase shrink-0 hidden sm:inline-flex items-center gap-0.5"
+                  class="px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0 hidden sm:inline-flex items-center"
                   title="This run was automatically re-run after a server restart"
                 >
                   <RotateCcw class="w-3 h-3" />
-                  Recovered
                 </span>
               </div>
               <component
@@ -982,6 +981,13 @@ function bringToCanvas(): void {
             v-else-if="selectedEntry"
             class="space-y-3"
           >
+            <div
+              v-if="selectedEntry?.recovered"
+              class="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 text-amber-400 text-xs"
+            >
+              <RotateCcw class="w-3.5 h-3.5 shrink-0" />
+              <span>Recovered run, automatically re-run after a server restart.</span>
+            </div>
             <div class="text-sm font-semibold">
               Workflow
             </div>

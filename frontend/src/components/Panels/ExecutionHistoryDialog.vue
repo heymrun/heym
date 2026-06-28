@@ -776,11 +776,10 @@ function bringToCanvas(): void {
               </span>
               <span
                 v-if="entry.recovered"
-                class="px-1 py-0 text-[9px] font-semibold rounded bg-amber-500/20 text-amber-400 uppercase inline-flex items-center gap-0.5"
+                class="px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 inline-flex items-center"
                 title="This run was automatically re-run after a server restart"
               >
                 <RotateCcw class="w-2.5 h-2.5" />
-                Recovered
               </span>
             </div>
           </button>
@@ -813,6 +812,13 @@ function bringToCanvas(): void {
           class="space-y-3 pr-1"
           :class="{ 'opacity-50 pointer-events-none': isHistoryDetailLoading }"
         >
+          <div
+            v-if="selectedEntry?.recovered"
+            class="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 text-amber-400 text-xs"
+          >
+            <RotateCcw class="w-3.5 h-3.5 shrink-0" />
+            <span>Recovered run, automatically re-run after a server restart.</span>
+          </div>
           <!-- Inputs -->
           <div class="flex items-center justify-between">
             <div class="text-sm font-semibold">
