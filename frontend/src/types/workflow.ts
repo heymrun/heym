@@ -800,7 +800,7 @@ export interface ExecutionHistoryEntry {
   id: string;
   started_at: string;
   inputs: Record<string, unknown>;
-  status: "running" | "success" | "error" | "pending";
+  status: "running" | "success" | "error" | "pending" | "skipped" | "failed";
   result: ExecutionResult | null;
   trigger_source?: string | null;
   recovered?: boolean;
@@ -814,7 +814,7 @@ export interface AllExecutionHistoryEntry {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   node_results: NodeResult[];
-  status: "running" | "success" | "error" | "pending";
+  status: "running" | "success" | "error" | "pending" | "skipped" | "failed";
   execution_time_ms: number;
   started_at: string;
   trigger_source?: string | null;

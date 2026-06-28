@@ -330,7 +330,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       id: h.id,
       started_at: h.started_at,
       inputs: h.inputs,
-      status: h.status as "running" | "success" | "error" | "pending",
+      status: h.status as "running" | "success" | "error" | "pending" | "skipped" | "failed",
       recovered: h.recovered,
       result: {
         workflow_id: h.workflow_id,

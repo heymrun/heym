@@ -986,7 +986,15 @@ function bringToCanvas(): void {
               class="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 text-amber-400 text-xs"
             >
               <RotateCcw class="w-3.5 h-3.5 shrink-0" />
-              <span>Recovered run, automatically re-run after a server restart.</span>
+              <span v-if="selectedEntry?.status === 'skipped'">
+                Skipped after a server restart because auto-recover is off for this workflow.
+              </span>
+              <span v-else-if="selectedEntry?.status === 'failed'">
+                Recovery failed after a server restart.
+              </span>
+              <span v-else>
+                Recovered run, automatically re-run after a server restart.
+              </span>
             </div>
             <div class="text-sm font-semibold">
               Workflow
