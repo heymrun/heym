@@ -278,6 +278,7 @@ class Workflow(Base):
     sse_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sse_node_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mcp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auto_recover_runs: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     scheduled_for_deletion: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -538,6 +539,11 @@ class ActiveWorkflowExecution(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recoverable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
