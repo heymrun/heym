@@ -13,7 +13,12 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import async_session_maker
+
 ACTIVE_EXECUTION_STALE_AFTER_SECONDS = 300
+# Heartbeats stop the moment the owning worker dies; wait this long before
+# treating a run as orphaned so a brief pause is not misread as a crash.
+RECOVERY_STALE_AFTER_SECONDS = 60
 _REGISTRY_POLL_SECONDS = 0.5
 _REGISTRY_CLEANUP_SECONDS = 30.0
 
@@ -47,6 +52,18 @@ class ActiveExecutionRecord:
     workflow_id: uuid.UUID
     workflow_name: str
     started_at: datetime
+
+
+@dataclass(frozen=True)
+class ClaimedOrphan:
+    """An orphaned execution this worker has atomically claimed for recovery."""
+
+    execution_id: uuid.UUID
+    workflow_id: uuid.UUID
+    inputs: dict
+    trigger_source: str | None
+    actor_user_id: uuid.UUID | None
+    attempt: int
 
 
 @dataclass(frozen=True)
@@ -183,9 +200,9 @@ class ActiveExecutionRegistry:
             try:
                 await self._drain_commands()
                 await self._sync_local_handles()
-                if time.monotonic() >= self._next_cleanup_at:
-                    await cleanup_stale_persisted_executions()
-                    self._next_cleanup_at = time.monotonic() + _REGISTRY_CLEANUP_SECONDS
+                # Stale recoverable rows are now owned by the recovery service
+                # (execution_recovery), which re-runs / skips / fails them instead
+                # of silently deleting, so this loop no longer blind-deletes.
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -333,6 +350,75 @@ async def cleanup_stale_persisted_executions() -> int:
         )
         await session.commit()
     return result.rowcount or 0
+
+
+async def mark_own_executions_orphaned() -> int:
+    """Backdate this worker's recoverable rows so the next leader recovers them now."""
+    from sqlalchemy import update
+
+    from app.db.models import ActiveWorkflowExecution
+
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    async with async_session_maker() as session:
+        result = await session.execute(
+            update(ActiveWorkflowExecution)
+            .where(
+                ActiveWorkflowExecution.worker_id == _WORKER_ID,
+                ActiveWorkflowExecution.recoverable.is_(True),
+            )
+            .values(heartbeat_at=epoch)
+        )
+        await session.commit()
+    return result.rowcount or 0
+
+
+async def claim_orphaned_executions(*, now: datetime | None = None) -> list["ClaimedOrphan"]:
+    """Atomically claim recoverable rows whose heartbeat is stale; return the winners."""
+    from sqlalchemy import select, update
+
+    from app.db.models import ActiveWorkflowExecution
+
+    now = now or _utcnow()
+    cutoff = now - timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
+    claimed: list[ClaimedOrphan] = []
+    async with async_session_maker() as session:
+        candidates = (
+            await session.execute(
+                select(
+                    ActiveWorkflowExecution.execution_id,
+                    ActiveWorkflowExecution.workflow_id,
+                    ActiveWorkflowExecution.inputs,
+                    ActiveWorkflowExecution.trigger_source,
+                    ActiveWorkflowExecution.actor_user_id,
+                    ActiveWorkflowExecution.attempt,
+                ).where(
+                    ActiveWorkflowExecution.recoverable.is_(True),
+                    ActiveWorkflowExecution.heartbeat_at < cutoff,
+                )
+            )
+        ).all()
+        for row in candidates:
+            result = await session.execute(
+                update(ActiveWorkflowExecution)
+                .where(
+                    ActiveWorkflowExecution.execution_id == row.execution_id,
+                    ActiveWorkflowExecution.heartbeat_at < cutoff,
+                )
+                .values(worker_id=_WORKER_ID, heartbeat_at=now, attempt=row.attempt + 1)
+            )
+            if (result.rowcount or 0) == 1:
+                claimed.append(
+                    ClaimedOrphan(
+                        execution_id=row.execution_id,
+                        workflow_id=row.workflow_id,
+                        inputs=row.inputs or {},
+                        trigger_source=row.trigger_source,
+                        actor_user_id=row.actor_user_id,
+                        attempt=row.attempt + 1,
+                    )
+                )
+        await session.commit()
+    return claimed
 
 
 async def list_persisted_active_executions_for_user(
