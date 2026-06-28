@@ -392,8 +392,9 @@ async function onChangeMinutesSaved(raw: string): Promise<void> {
 
 const showRunAnalyzer = computed(
   () =>
-    (workflowStore.currentWorkflow?.nodes?.length ?? 0) > 0 &&
-    workflowStore.analysisNoteEmpty,
+    workflowStore.nodes.length > 0 &&
+    workflowStore.analysisNoteEmpty &&
+    !workflowStore.analysisPanelOpen,
 );
 
 function openAnalyzer(): void {
@@ -7934,23 +7935,28 @@ onUnmounted(() => {
               <AlertTriangle class="w-4 h-4 text-muted-foreground shrink-0" />
               <span class="text-sm font-medium">On error, run workflow</span>
             </div>
-            <select
-              class="w-full text-sm rounded-md border border-border bg-background pl-2 pr-3 py-1.5 disabled:opacity-50"
-              :value="errorWorkflowId"
-              :disabled="!isWorkflowOwner"
-              @change="onChangeErrorWorkflow(($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">
-                None
-              </option>
-              <option
-                v-for="w in otherWorkflows"
-                :key="w.id"
-                :value="w.id"
+            <div class="relative">
+              <select
+                class="w-full appearance-none text-sm rounded-md border border-border bg-background pl-2 pr-9 py-1.5 disabled:opacity-50"
+                :value="errorWorkflowId"
+                :disabled="!isWorkflowOwner"
+                @change="onChangeErrorWorkflow(($event.target as HTMLSelectElement).value)"
               >
-                {{ w.name }}
-              </option>
-            </select>
+                <option value="">
+                  None
+                </option>
+                <option
+                  v-for="w in otherWorkflows"
+                  :key="w.id"
+                  :value="w.id"
+                >
+                  {{ w.name }}
+                </option>
+              </select>
+              <ChevronDown
+                class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+              />
+            </div>
             <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
               Runs the selected workflow if this one fails — unless the canvas
               already has an Error Handler node.

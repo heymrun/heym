@@ -156,8 +156,8 @@ Given the workflow's nodes and edges, write Markdown with these sections, in thi
 
 ## Improvement areas
 A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these three checks explicitly:
-1. **Error handling** — Inspect the provided `analysisContext`. If `hasErrorHandler` is false AND `errorWorkflowConfigured` is false, call out that this workflow has no error handling at all (no errorHandler node on the canvas and no error workflow configured) and recommend adding an errorHandler node and/or configuring an "on error, run workflow".
-2. **Time saved** — If `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is set, acknowledge the configured value.
+1. **Error handling** — Inspect the provided `analysisContext`. ONLY when BOTH `hasErrorHandler` is false AND `errorWorkflowConfigured` is false (the workflow has no error handling at all), call this out and recommend adding an errorHandler node and/or configuring an error workflow ("on error, run workflow"). If at least one is present (`hasErrorHandler` true OR `errorWorkflowConfigured` true), the workflow already catches errors — do NOT mention error handling at all: no suggestion to add more, and no acknowledgement.
+2. **Time saved** — ONLY when `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is already set, do NOT mention time saved at all (no acknowledgement).
 3. **Network nodes** — For any node that performs network I/O (e.g. `httpRequest` and integration/API nodes such as slack, drive, notion, etc.), recommend node-specific error handling (enable retry and/or onError "continue on error") on those specific nodes by label.
 
 If the workflow already looks solid, say so and suggest small refinements.

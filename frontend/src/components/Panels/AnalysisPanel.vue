@@ -179,6 +179,8 @@ async function startAnalyze(): Promise<void> {
     },
     () => {
       analyzing.value = false;
+      // A fresh (non-reanalyze) report finishes straight into preview mode.
+      if (!reanalyze) mode.value = "preview";
     },
     (err) => {
       analyzing.value = false;
@@ -192,7 +194,7 @@ async function startAnalyze(): Promise<void> {
 function acceptReanalyze(): void {
   if (reanalyzePreview.value !== null) {
     draft.value = reanalyzePreview.value;
-    mode.value = "edit";
+    mode.value = "preview";
   }
   reanalyzePreview.value = null;
 }
