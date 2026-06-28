@@ -3610,6 +3610,7 @@ class WorkflowExecutor:
             workflow_id=uuid.UUID(workflow_id_str),
             execution_id=_sub_execution_id,
             event=sub_cancel_event,
+            recoverable=False,
         )
         # Propagate parent cancellation into the sub's cancel event.
         if self.cancel_event is not None:
@@ -7460,6 +7461,7 @@ class WorkflowExecutor:
                             workflow_id=uuid.UUID(execute_workflow_id),
                             execution_id=_sub_exec_id,
                             event=_exec_node_cancel_event,
+                            recoverable=False,
                         )
                         try:
                             sub_result = sub_executor.execute(
