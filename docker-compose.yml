@@ -56,6 +56,11 @@ services:
       OAUTH_ISSUER: ${OAUTH_ISSUER}
       DOCKER_LOGS_ENABLED: ${DOCKER_LOGS_ENABLED:-false}
       DOCKER_LOGS_ALLOWED_EMAILS: ${DOCKER_LOGS_ALLOWED_EMAILS:-}
+      # Plugins (custom nodes installed as zip). Disabled by default. Install /
+      # uninstall is restricted to the operator emails in HEYM_PLUGIN_ADMIN_EMAILS.
+      HEYM_PLUGINS_ENABLED: ${HEYM_PLUGINS_ENABLED:-false}
+      HEYM_PLUGIN_ADMIN_EMAILS: ${HEYM_PLUGIN_ADMIN_EMAILS:-}
+      HEYM_PLUGINS_DIR: ${HEYM_PLUGINS_DIR:-/app/data/plugins}
       # Python tool sandbox: untrusted user tools run in a hardened, throwaway
       # sibling container (no network, no docker socket, read-only, non-root).
       # Empty image = auto-detect this backend image.
@@ -75,6 +80,8 @@ services:
       # gated by DOCKER_LOGS_ENABLED and DOCKER_LOGS_ALLOWED_EMAILS.
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/files:/app/data/files
+      # Persist installed plugins across restarts.
+      - ./data/plugins:/app/data/plugins
     depends_on:
       postgres:
         condition: service_healthy
