@@ -4,9 +4,6 @@ import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, 
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
 import { createAgentSkillZipBlob, getSkillZipFileName, parseSkillZip } from "@/lib/skillZipParser";
-import ExpressionInput from "@/components/ui/ExpressionInput.vue";
-import GoogleSheetsValuesInputPanel from "@/components/ui/GoogleSheetsValuesInputPanel.vue";
-import JsonInputPanel from "@/components/ui/JsonInputPanel.vue";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
@@ -27,6 +24,11 @@ import type { NodeType } from "@/types/workflow";
 import type { WebSocketTriggerEventName } from "@/types/workflow";
 import { NODE_DEFINITIONS } from "@/types/node";
 import { inject, provide, type InjectionKey } from "vue";
+
+interface ExpandableFieldRef {
+  openExpandDialog(localIndex?: number): void;
+  closeExpandDialog(): void;
+}
 
 export function usePropertiesPanelController() {
   const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
@@ -420,45 +422,45 @@ export function usePropertiesPanelController() {
   });
   const isEditingPinnedData = ref(false);
   const editedPinnedData = ref("");
-  const outputMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const outputSchemaValueInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
+  const outputMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const outputSchemaValueInputRefs = ref<Map<number, ExpandableFieldRef>>(new Map());
   const currentOutputExpressionFieldIndex = ref(0);
-  const httpCurlInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const websocketSendUrlInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const websocketSendHeadersInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const websocketSendMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const userMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const telegramChatIdInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const telegramMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const slackMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const discordMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const discordUsernameInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const discordAvatarUrlInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailToInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailCcInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailBccInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailSubjectInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailBodyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const sendEmailAttachmentsInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const httpCurlInputRef = ref<ExpandableFieldRef | null>(null);
+  const websocketSendUrlInputRef = ref<ExpandableFieldRef | null>(null);
+  const websocketSendHeadersInputRef = ref<ExpandableFieldRef | null>(null);
+  const websocketSendMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const userMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const telegramChatIdInputRef = ref<ExpandableFieldRef | null>(null);
+  const telegramMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const slackMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const discordMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const discordUsernameInputRef = ref<ExpandableFieldRef | null>(null);
+  const discordAvatarUrlInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailToInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailCcInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailBccInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailSubjectInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailBodyInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailAttachmentsInputRef = ref<ExpandableFieldRef | null>(null);
   const currentSendEmailExpressionFieldIndex = ref(0);
-  const conditionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const redisKeyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const setMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
+  const conditionInputRef = ref<ExpandableFieldRef | null>(null);
+  const redisKeyInputRef = ref<ExpandableFieldRef | null>(null);
+  const setMappingInputRefs = ref<Map<number, ExpandableFieldRef>>(new Map());
   const currentSetMappingIndex = ref(0);
-  const executeMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
+  const executeMappingInputRefs = ref<Map<number, ExpandableFieldRef>>(new Map());
   const currentExecuteMappingIndex = ref(0);
 
   /** When set to the newly selected node id, skip closing evaluate dialogs (graph Prev/Next reopens immediately). */
   const suppressCloseExpandDialogsForNavigationId = ref<string | null>(null);
-  const llmSystemInstructionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const llmImageExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const llmSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
+  const llmImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentLlmExpressionFieldIndex = ref(0);
-  const agentSystemInstructionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const agentImageExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const agentMcpEnvInputRefs = ref<Map<string, InstanceType<typeof ExpressionInput>>>(new Map());
+  const agentSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
+  const agentImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const agentMcpEnvInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentAgentExpressionFieldIndex = ref(0);
-  const variableValueInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const throwErrorMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const variableValueInputRef = ref<ExpandableFieldRef | null>(null);
+  const throwErrorMessageInputRef = ref<ExpandableFieldRef | null>(null);
 
   const llmCredentials = ref<CredentialListItem[]>([]);
   const llmModels = ref<LLMModel[]>([]);
@@ -526,16 +528,16 @@ export function usePropertiesPanelController() {
   const dataTableColumns = ref<import("@/types/dataTable").DataTableColumn[]>([]);
   const dataTableSelectiveValues = ref<Record<string, string>>({});
   const dataTableSelectiveExpressionInputRefs = ref<
-    Map<string, InstanceType<typeof ExpressionInput>>
+    Map<string, ExpandableFieldRef>
   >(new Map());
   const gristColumns = ref<{ id: string; name: string; type: string }[]>([]);
   const vectorStores = ref<{ id: string; name: string; backend: string }[]>([]);
-  const ragQueryInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const ragDocumentInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const rabbitmqExchangeInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const rabbitmqRoutingKeyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const rabbitmqQueueNameInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const rabbitmqMessageBodyInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const ragQueryInputRef = ref<ExpandableFieldRef | null>(null);
+  const ragDocumentInputRef = ref<ExpandableFieldRef | null>(null);
+  const rabbitmqExchangeInputRef = ref<ExpandableFieldRef | null>(null);
+  const rabbitmqRoutingKeyInputRef = ref<ExpandableFieldRef | null>(null);
+  const rabbitmqQueueNameInputRef = ref<ExpandableFieldRef | null>(null);
+  const rabbitmqMessageBodyInputRef = ref<ExpandableFieldRef | null>(null);
   const currentRabbitmqSendExpressionFieldIndex = ref(0);
   const websocketTriggerEventOptions: Array<{
     value: WebSocketTriggerEventName;
@@ -558,141 +560,135 @@ export function usePropertiesPanelController() {
       description: "Fire when an established connection closes and include close metadata.",
     },
   ];
-  const crawlerUrlInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const consoleLogMessageInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const switchExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const loopArrayExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const executeTemplateExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristDocIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristTableIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristRecordIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristRecordIdsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristRecordsDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const gristRecordDataJsonInputRef = ref<InstanceType<typeof JsonInputPanel> | null>(null);
-  const gristFilterJsonInputRef = ref<InstanceType<typeof JsonInputPanel> | null>(null);
+  const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
+  const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const switchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const loopArrayExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const executeTemplateExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristDocIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristTableIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristRecordIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristRecordIdsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristRecordsDataExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristSortExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristRecordDataJsonInputRef = ref<ExpandableFieldRef | null>(null);
+  const gristFilterJsonInputRef = ref<ExpandableFieldRef | null>(null);
   const currentGristExpressionFieldIndex = ref(0);
-  const githubOwnerExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubRepoExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubOrganizationExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubInviteEmailExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubIssueNumberExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubAssigneeExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubCreatorExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubMentionedExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubLabelsFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubSinceExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubTitleExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubCommentBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubLabelsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubAssigneesExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubHeadExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubBaseExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubPullRequestNumberExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubReviewIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubReviewBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubCommitIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubFilePathExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubFileContentExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubCommitMessageExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubBranchExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubTagNameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubReleaseIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubWorkflowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const githubWorkflowInputsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const githubOwnerExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubRepoExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubOrganizationExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubInviteEmailExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubIssueNumberExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubAssigneeExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubCreatorExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubMentionedExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubLabelsFilterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubSinceExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubTitleExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubCommentBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubLabelsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubAssigneesExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubHeadExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubBaseExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubPullRequestNumberExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubReviewIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubReviewBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubCommitIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubFilePathExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubFileContentExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubCommitMessageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubBranchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubTagNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubReleaseIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubWorkflowIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const githubWorkflowInputsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentGitHubExpressionFieldIndex = ref(0);
-  const linearLimitExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearAfterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearTeamIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearProjectIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearIssueIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearTitleExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearDescriptionExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearStateIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearIssueLinkUrlExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearAssigneeIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearPriorityExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearCommentIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearCommentBodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const linearParentCommentIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const linearLimitExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearAfterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearTeamIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearProjectIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearIssueIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearTitleExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearDescriptionExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearStateIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearIssueLinkUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearAssigneeIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearPriorityExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearCommentIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearCommentBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const linearParentCommentIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentLinearExpressionFieldIndex = ref(0);
-  const googleSheetsSpreadsheetIdExpressionInputRef = ref<InstanceType<
-    typeof ExpressionInput
-  > | null>(null);
-  const googleSheetsSheetNameExpressionInputRef = ref<InstanceType<
-    typeof ExpressionInput
-  > | null>(null);
-  const googleSheetsValuesInputRef = ref<InstanceType<
-    typeof GoogleSheetsValuesInputPanel
-  > | null>(null);
+  const googleSheetsSpreadsheetIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleSheetsSheetNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleSheetsValuesInputRef = ref<ExpandableFieldRef | null>(null);
   const currentGoogleSheetsExpressionFieldIndex = ref(0);
-  const bqProjectIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const bqQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const bqDatasetIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const bqTableIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const bqRowsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const bqMappingInputRefs = ref<Map<number, InstanceType<typeof ExpressionInput>>>(new Map());
+  const bqProjectIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const bqQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const bqDatasetIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const bqTableIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const bqRowsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const bqMappingInputRefs = ref<Map<number, ExpandableFieldRef>>(new Map());
   const currentBigQueryExpressionFieldIndex = ref(0);
-  const clickhouseQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseTableExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseRowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const clickhouseMappingInputRefs = ref<Map<string, InstanceType<typeof ExpressionInput>>>(new Map());
+  const clickhouseQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseTableExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseFilterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseSortExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseRowIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseDataExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const clickhouseMappingInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentClickhouseExpressionFieldIndex = ref(0);
-  const supabaseSchemaExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseTableExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseSelectColumnsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseOrderByExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseRowsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseOnConflictExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const supabaseDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const supabaseSchemaExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseTableExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseSelectColumnsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseFilterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseOrderByExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseRowsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseOnConflictExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const supabaseDataExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentSupabaseExpressionFieldIndex = ref(0);
-  const notionQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionPageIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionDatabaseIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionDatabaseExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionDataSourceIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionDataSourceExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionBlockIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionPropertiesExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionParentPageIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionBlockExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionIconExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionCoverExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionChildrenExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionSortsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionStartCursorExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const notionAfterBlockIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const notionQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionPageIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionDatabaseIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionDatabaseExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionDataSourceIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionDataSourceExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionBlockIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionPropertiesExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionParentPageIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionBlockExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionIconExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionCoverExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionChildrenExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionFilterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionSortExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionSortsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionStartCursorExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const notionAfterBlockIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentNotionExpressionFieldIndex = ref(0);
-  const dataTableRowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const dataTableDataExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const dataTableFilterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const dataTableSortExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const dataTableRowIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const dataTableDataExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const dataTableFilterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const dataTableSortExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentDataTableExpressionFieldIndex = ref(0);
-  const driveFileIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const drivePasswordExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const driveFilenameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const driveBase64ContentExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const driveFileIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const drivePasswordExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const driveFilenameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const driveBase64ContentExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentDriveExpressionFieldIndex = ref(0);
-  const s3BucketExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3KeyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3SourceBucketExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3SourceKeyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3PrefixExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3ContinuationTokenExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
-  const s3BodyExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const s3BucketExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3KeyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3SourceBucketExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3SourceKeyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3PrefixExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3ContinuationTokenExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const s3BodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentS3ExpressionFieldIndex = ref(0);
   const currentPlaywrightExpressionFieldIndex = ref(0);
   /** ExpressionInput instances keyed by stable slot id (survives action changes / unmount). */
-  const playwrightExprRefsBySlotKey = ref<Record<string, InstanceType<typeof ExpressionInput> | null>>({});
-  const mcpCallArgumentInputRefs = ref<Map<string, InstanceType<typeof ExpressionInput>>>(new Map());
-  const mcpCallConnectionEnvInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+  const playwrightExprRefsBySlotKey = ref<Record<string, ExpandableFieldRef | null>>({});
+  const mcpCallArgumentInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
+  const mcpCallConnectionEnvInputRef = ref<ExpandableFieldRef | null>(null);
   const currentMCPCallExpressionFieldIndex = ref(0);
   type ChartOutputExpressionFieldKey =
     | "text"
@@ -713,7 +709,7 @@ export function usePropertiesPanelController() {
   }
 
   const chartOutputExpressionInputRefs = ref<
-    Map<ChartOutputExpressionFieldKey, InstanceType<typeof ExpressionInput>>
+    Map<ChartOutputExpressionFieldKey, ExpandableFieldRef>
   >(new Map());
   const currentChartOutputExpressionFieldIndex = ref(0);
   const validationErrors = ref<ValidationError[]>([]);
@@ -2105,7 +2101,7 @@ export function usePropertiesPanelController() {
   /** Opens the primary expression evaluate dialog for whichever node is currently selected. */
   function notionExpressionInputRefForField(
     field: string | null,
-  ): InstanceType<typeof ExpressionInput> | null {
+  ): ExpandableFieldRef | null {
     switch (field) {
       case "notionQuery":
         return notionQueryExpressionInputRef.value;
@@ -2950,7 +2946,7 @@ export function usePropertiesPanelController() {
   }
 
   const sendEmailExpressionFieldRefs = computed(
-    (): (InstanceType<typeof ExpressionInput> | null)[] => [
+    (): (ExpandableFieldRef | null)[] => [
       sendEmailToInputRef.value,
       sendEmailCcInputRef.value,
       sendEmailBccInputRef.value,
@@ -3048,7 +3044,7 @@ export function usePropertiesPanelController() {
     el: unknown,
   ): void {
     if (el) {
-      agentMcpEnvInputRefs.value.set(connId, el as InstanceType<typeof ExpressionInput>);
+      agentMcpEnvInputRefs.value.set(connId, el as ExpandableFieldRef);
     } else {
       agentMcpEnvInputRefs.value.delete(connId);
     }
@@ -3091,7 +3087,7 @@ export function usePropertiesPanelController() {
     el: unknown,
   ): void {
     if (el) {
-      mcpCallArgumentInputRefs.value.set(key, el as InstanceType<typeof ExpressionInput>);
+      mcpCallArgumentInputRefs.value.set(key, el as ExpandableFieldRef);
     } else {
       mcpCallArgumentInputRefs.value.delete(key);
     }
@@ -3477,7 +3473,7 @@ export function usePropertiesPanelController() {
 
   function getClickhouseExpressionInputAtIndex(
     index: number,
-  ): InstanceType<typeof ExpressionInput> | null {
+  ): ExpandableFieldRef | null {
     const n = selectedNode.value;
     if (!n || n.type !== "clickhouse") return null;
     const op = (n.data.clickhouseOperation as string | undefined) || "";
@@ -3561,7 +3557,7 @@ export function usePropertiesPanelController() {
 
   function clickhouseMappingInputRef(
     key: string,
-    el: InstanceType<typeof ExpressionInput> | null,
+    el: ExpandableFieldRef | null,
   ): void {
     if (!key) return;
     if (el) clickhouseMappingInputRefs.value.set(key, el);
@@ -3889,7 +3885,7 @@ export function usePropertiesPanelController() {
 
   function linearExpressionInputRefForKey(
     key: LinearExpressionFieldKey,
-  ): InstanceType<typeof ExpressionInput> | null {
+  ): ExpandableFieldRef | null {
     switch (key) {
       case "linearLimit":
         return linearLimitExpressionInputRef.value;
@@ -4018,7 +4014,7 @@ export function usePropertiesPanelController() {
 
   function githubExpressionInputRefForKey(
     key: GitHubExpressionFieldKey,
-  ): InstanceType<typeof ExpressionInput> | null {
+  ): ExpandableFieldRef | null {
     switch (key) {
       case "githubOwner":
         return githubOwnerExpressionInputRef.value;
@@ -4164,7 +4160,7 @@ export function usePropertiesPanelController() {
     currentGitHubExpressionFieldIndex.value = index;
   }
 
-  function bqMappingInputRef(index: number, el: InstanceType<typeof ExpressionInput> | null): void {
+  function bqMappingInputRef(index: number, el: ExpandableFieldRef | null): void {
     if (el) {
       bqMappingInputRefs.value.set(index, el);
     } else {
@@ -4324,7 +4320,7 @@ export function usePropertiesPanelController() {
     colName: string,
     el: Element | ComponentPublicInstance | null,
   ): void {
-    const inst = el as InstanceType<typeof ExpressionInput> | null;
+    const inst = el as ExpandableFieldRef | null;
     if (inst && typeof inst.openExpandDialog === "function") {
       dataTableSelectiveExpressionInputRefs.value.set(colName, inst);
     } else {
@@ -4710,7 +4706,7 @@ export function usePropertiesPanelController() {
     el: unknown,
   ): void {
     if (el) {
-      chartOutputExpressionInputRefs.value.set(key, el as InstanceType<typeof ExpressionInput>);
+      chartOutputExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
     } else {
       chartOutputExpressionInputRefs.value.delete(key);
     }
@@ -5967,7 +5963,7 @@ export function usePropertiesPanelController() {
       playwrightExprRefsBySlotKey.value[slotKey] = null;
       return;
     }
-    playwrightExprRefsBySlotKey.value[slotKey] = el as InstanceType<typeof ExpressionInput>;
+    playwrightExprRefsBySlotKey.value[slotKey] = el as ExpandableFieldRef;
   }
 
   function closeAllPlaywrightExpressionDialogs(): void {
@@ -7313,7 +7309,7 @@ export function usePropertiesPanelController() {
 
   function setOutputSchemaValueInputRef(index: number, el: unknown): void {
     if (el) {
-      outputSchemaValueInputRefs.value.set(index, el as InstanceType<typeof ExpressionInput>);
+      outputSchemaValueInputRefs.value.set(index, el as ExpandableFieldRef);
     } else {
       outputSchemaValueInputRefs.value.delete(index);
     }
@@ -7409,7 +7405,7 @@ export function usePropertiesPanelController() {
     });
   }
 
-  function setMappingInputRef(index: number, el: InstanceType<typeof ExpressionInput> | null): void {
+  function setMappingInputRef(index: number, el: ExpandableFieldRef | null): void {
     if (el) {
       setMappingInputRefs.value.set(index, el);
     } else {
@@ -7480,7 +7476,7 @@ export function usePropertiesPanelController() {
     });
   }
 
-  function setExecuteMappingInputRef(index: number, el: InstanceType<typeof ExpressionInput> | null): void {
+  function setExecuteMappingInputRef(index: number, el: ExpandableFieldRef | null): void {
     if (el) {
       executeMappingInputRefs.value.set(index, el);
     } else {
