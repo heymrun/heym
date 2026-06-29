@@ -128,7 +128,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:6544/heym_e2e
           E2E_ARTIFACT_DIR: .e2e-artifacts/ci
-        run: bun run test:e2e --workers=8 --fully-parallel
+        run: bun run test:e2e
 
       - name: Upload Playwright report
         if: always()
