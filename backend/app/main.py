@@ -39,6 +39,7 @@ from app.api import (
     notion_oauth,
     oauth,
     playwright,
+    plugins,
     portal,
     schedules,
     skill_builder,
@@ -279,6 +280,7 @@ app.include_router(portal.router, prefix="/api/workflows", tags=["Portal Setting
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["Dashboards"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+app.include_router(plugins.router, prefix="/api/plugins", tags=["Plugins"])
 app.include_router(evals.router, prefix="/api/evals", tags=["Evals"])
 app.include_router(chats.router, prefix="/api/chats", tags=["Chats"])
 app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
