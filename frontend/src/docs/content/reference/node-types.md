@@ -85,6 +85,17 @@ See [Triggers](./triggers.md) for all entry points.
 | [Disable Node](../nodes/disable-node.md) | Disable another node in the workflow | 1 | 1 |
 | [Throw Error](../nodes/throw-error-node.md) | Stop workflow with error response | 1 | 0 |
 
+## Plugin Nodes
+
+Plugin nodes are provided by plugins installed on the instance. Each installed
+plugin appears in the palette under **Plugins** with its own name; under the hood
+it maps to one of these two node types.
+
+| Node | Description | Inputs | Outputs |
+|------|-------------|--------|---------|
+| [Plugin](../nodes/plugin-node.md) | Custom action provided by an installed plugin | 1 | 1 |
+| [Plugin Trigger](../nodes/plugin-trigger-node.md) | Custom trigger provided by an installed plugin | 0 | 1 |
+
 ## Related
 
 - [Canvas Features](./canvas-features.md) – Data pin, execution logs, enable/disable, extract to sub-workflow

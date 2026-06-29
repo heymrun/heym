@@ -28,6 +28,8 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
     items: [
       { slug: "agent-node", title: "Agent Node" },
       { slug: "mcp-call-node", title: "MCP Call Node" },
+      { slug: "plugin-node", title: "Plugin" },
+      { slug: "plugin-trigger-node", title: "Plugin Trigger" },
       { slug: "input-node", title: "Input" },
       { slug: "cron-node", title: "Cron" },
       { slug: "telegram-trigger-node", title: "Telegram Trigger" },
