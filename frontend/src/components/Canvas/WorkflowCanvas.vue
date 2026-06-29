@@ -1073,6 +1073,16 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       unit: "",
       title: "",
     },
+    plugin: {
+      label: "plugin",
+      pluginId: "",
+      config: {},
+    },
+    pluginTrigger: {
+      label: "pluginTrigger",
+      pluginId: "",
+      config: {},
+    },
   };
   return defaults[type];
 }

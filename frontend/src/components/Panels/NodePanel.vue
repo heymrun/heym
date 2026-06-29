@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch, nextTick, ref } from "vue";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
 import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
@@ -193,6 +193,8 @@ const icons = {
   s3: Server,
   mcpCall: Plug,
   chartOutput: BarChart3,
+  plugin: Puzzle,
+  pluginTrigger: Puzzle,
 };
 
 const allNodeTypes = Object.values(NODE_DEFINITIONS);

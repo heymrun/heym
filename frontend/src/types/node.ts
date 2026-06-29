@@ -952,4 +952,32 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       title: "",
     },
   },
+  plugin: {
+    type: "plugin",
+    label: "Plugin",
+    description: "Custom node provided by an installed plugin",
+    color: "node-action",
+    icon: "Puzzle",
+    inputs: 1,
+    outputs: 1,
+    defaultData: {
+      label: "plugin",
+      pluginId: "",
+      config: {} as Record<string, unknown>,
+    },
+  },
+  pluginTrigger: {
+    type: "pluginTrigger",
+    label: "Plugin Trigger",
+    description: "Trigger node provided by an installed plugin",
+    color: "node-trigger",
+    icon: "Puzzle",
+    inputs: 0,
+    outputs: 1,
+    defaultData: {
+      label: "pluginTrigger",
+      pluginId: "",
+      config: {} as Record<string, unknown>,
+    },
+  },
 };

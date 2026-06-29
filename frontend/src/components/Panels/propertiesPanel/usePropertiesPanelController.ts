@@ -1,6 +1,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
 import { createAgentSkillZipBlob, getSkillZipFileName, parseSkillZip } from "@/lib/skillZipParser";
@@ -81,6 +81,8 @@ export function usePropertiesPanelController() {
     drive: HardDrive,
     s3: Server,
     mcpCall: Plug,
+    plugin: Puzzle,
+    pluginTrigger: Puzzle,
   };
 
   const nodeColorMap: Record<NodeType, string> = {
@@ -133,6 +135,8 @@ export function usePropertiesPanelController() {
     drive: "node-drive",
     s3: "node-drive",
     mcpCall: "node-agent",
+    plugin: "node-action",
+    pluginTrigger: "node-trigger",
   };
 
   const nodeDocSlugMap: Record<NodeType, string> = {
@@ -185,6 +189,8 @@ export function usePropertiesPanelController() {
     drive: "drive-node",
     s3: "amazon-s3-node",
     mcpCall: "mcp-call-node",
+    plugin: "plugin-node",
+    pluginTrigger: "plugin-trigger-node",
   };
 
   const workflowStore = useWorkflowStore();

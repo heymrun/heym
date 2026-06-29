@@ -176,7 +176,34 @@ export type NodeType =
   | "slackTrigger"
   | "discordTrigger"
   | "mcpCall"
-  | "chartOutput";
+  | "chartOutput"
+  | "plugin"
+  | "pluginTrigger";
+
+export interface PluginFieldDef {
+  key: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "select";
+  required?: boolean;
+  secret?: boolean;
+  default?: string | number | boolean | null;
+  options?: { label: string; value: string }[];
+  dynamic?: boolean;
+  expression?: boolean;
+}
+
+export interface PluginSummary {
+  id: string;
+  name: string;
+  version: string;
+  kind: "action" | "trigger";
+  description: string;
+  enabled: boolean;
+  fields: PluginFieldDef[];
+  dsl_hint?: string;
+  doc_slug?: string;
+  has_icon?: boolean;
+}
 
 export type VariableType =
   | "string"
@@ -329,6 +356,10 @@ export interface NodeData {
   label: string;
   value?: string;
   inputFields?: InputField[];
+  /** Plugin node: id of the installed plugin this node maps to. */
+  pluginId?: string;
+  /** Plugin node: per-field configuration values keyed by manifest field key. */
+  config?: Record<string, unknown>;
   model?: string;
   temperature?: number;
   maxTokens?: number;
