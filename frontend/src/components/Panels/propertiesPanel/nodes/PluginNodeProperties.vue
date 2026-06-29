@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import type { PluginFieldDef, PluginSummary } from "@/types/workflow";
+import type { PluginFieldDef, PluginNodeSummary, PluginSummary } from "@/types/workflow";
 
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
@@ -26,11 +26,17 @@ onMounted(async () => {
   }
 });
 
-const manifest = computed<PluginSummary | undefined>(() =>
+const pkg = computed<PluginSummary | undefined>(() =>
   plugins.value.find((plugin) => plugin.id === selectedNode.value?.data.pluginId),
 );
 
-const fields = computed<PluginFieldDef[]>(() => manifest.value?.fields ?? []);
+const nodeDef = computed<PluginNodeSummary | undefined>(() => {
+  const nodes = pkg.value?.nodes ?? [];
+  const key = selectedNode.value?.data.pluginNodeKey;
+  return (key ? nodes.find((node) => node.key === key) : undefined) ?? nodes[0];
+});
+
+const fields = computed<PluginFieldDef[]>(() => nodeDef.value?.fields ?? []);
 
 function configValue(key: string): unknown {
   const config = selectedNode.value?.data.config;
@@ -51,7 +57,7 @@ function setConfigValue(key: string, value: unknown): void {
 <template>
   <template v-if="selectedNode">
     <p
-      v-if="!manifest"
+      v-if="!nodeDef"
       class="text-xs text-muted-foreground"
     >
       Plugin not found or disabled on this instance.

@@ -192,16 +192,24 @@ export interface PluginFieldDef {
   expression?: boolean;
 }
 
+export interface PluginNodeSummary {
+  key: string;
+  name: string;
+  kind: "action" | "trigger";
+  description: string;
+  fields: PluginFieldDef[];
+  dsl_hint?: string;
+  doc_slug?: string;
+}
+
 export interface PluginSummary {
   id: string;
   name: string;
   version: string;
-  kind: "action" | "trigger";
+  kind: string;
   description: string;
   enabled: boolean;
-  fields: PluginFieldDef[];
-  dsl_hint?: string;
-  doc_slug?: string;
+  nodes: PluginNodeSummary[];
   has_icon?: boolean;
 }
 
@@ -356,8 +364,10 @@ export interface NodeData {
   label: string;
   value?: string;
   inputFields?: InputField[];
-  /** Plugin node: id of the installed plugin this node maps to. */
+  /** Plugin node: id of the installed plugin package this node maps to. */
   pluginId?: string;
+  /** Plugin node: key of the node within the plugin package. */
+  pluginNodeKey?: string;
   /** Plugin node: per-field configuration values keyed by manifest field key. */
   config?: Record<string, unknown>;
   model?: string;

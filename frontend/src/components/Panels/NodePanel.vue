@@ -49,6 +49,14 @@ async function loadNodeTemplates(): Promise<void> {
   }
 }
 
+interface PalettedPluginNode {
+  pluginId: string;
+  nodeKey: string;
+  name: string;
+  description: string;
+  kind: "action" | "trigger";
+}
+
 const installedPlugins = ref<PluginSummary[]>([]);
 
 async function loadPlugins(): Promise<void> {
@@ -60,25 +68,38 @@ async function loadPlugins(): Promise<void> {
   }
 }
 
-const visiblePlugins = computed<PluginSummary[]>(() => {
+const pluginNodes = computed<PalettedPluginNode[]>(() =>
+  installedPlugins.value.flatMap((plugin) =>
+    plugin.nodes.map((node) => ({
+      pluginId: plugin.id,
+      nodeKey: node.key,
+      name: node.name,
+      description: node.description,
+      kind: node.kind,
+    })),
+  ),
+);
+
+const visiblePlugins = computed<PalettedPluginNode[]>(() => {
   const query = searchQuery.value.toLowerCase().trim();
   const list = isDashboardWidget.value
-    ? installedPlugins.value.filter((plugin) => plugin.kind !== "trigger")
-    : installedPlugins.value;
+    ? pluginNodes.value.filter((node) => node.kind !== "trigger")
+    : pluginNodes.value;
   if (!query) return list;
   return list.filter(
-    (plugin) =>
-      plugin.name.toLowerCase().includes(query) ||
-      plugin.description.toLowerCase().includes(query),
+    (node) =>
+      node.name.toLowerCase().includes(query) ||
+      node.description.toLowerCase().includes(query),
   );
 });
 
-function handlePluginDragStart(event: DragEvent, plugin: PluginSummary): void {
+function handlePluginDragStart(event: DragEvent, node: PalettedPluginNode): void {
   if (!event.dataTransfer) return;
-  const type: NodeType = plugin.kind === "trigger" ? "pluginTrigger" : "plugin";
+  const type: NodeType = node.kind === "trigger" ? "pluginTrigger" : "plugin";
   event.dataTransfer.setData("application/heym-node", type);
-  event.dataTransfer.setData("application/heym-plugin-id", plugin.id);
-  event.dataTransfer.setData("application/heym-plugin-label", plugin.name);
+  event.dataTransfer.setData("application/heym-plugin-id", node.pluginId);
+  event.dataTransfer.setData("application/heym-plugin-node-key", node.nodeKey);
+  event.dataTransfer.setData("application/heym-plugin-label", node.name);
   event.dataTransfer.effectAllowed = "move";
 }
 
@@ -657,32 +678,32 @@ function handleDoubleClick(type: NodeType): void {
             </h3>
           </div>
           <div
-            v-for="plugin in visiblePlugins"
-            :key="plugin.id"
-            :data-testid="`node-palette-plugin-${plugin.id}`"
+            v-for="node in visiblePlugins"
+            :key="`${node.pluginId}:${node.nodeKey}`"
+            :data-testid="`node-palette-plugin-${node.pluginId}-${node.nodeKey}`"
             :draggable="true"
             :class="cn(
               'node-item flex items-center gap-3 p-3 rounded-xl border border-border/40 cursor-grab transition-all duration-200 min-h-[44px]',
               'hover:border-primary/40 hover:bg-accent/50 hover:shadow-sm active:cursor-grabbing'
             )"
             @mousedown="handleMouseDown"
-            @dragstart="handlePluginDragStart($event, plugin)"
+            @dragstart="handlePluginDragStart($event, node)"
           >
             <div
               class="node-icon flex items-center justify-center w-10 h-10 rounded-xl shrink-0 transition-all duration-200"
               :style="{
-                backgroundColor: `hsl(var(--${plugin.kind === 'trigger' ? 'node-trigger' : 'node-action'}) / 0.12)`,
-                color: `hsl(var(--${plugin.kind === 'trigger' ? 'node-trigger' : 'node-action'}))`,
+                backgroundColor: `hsl(var(--${node.kind === 'trigger' ? 'node-trigger' : 'node-action'}) / 0.12)`,
+                color: `hsl(var(--${node.kind === 'trigger' ? 'node-trigger' : 'node-action'}))`,
               }"
             >
               <Puzzle class="w-5 h-5" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="font-medium text-sm leading-tight">
-                {{ plugin.name }}
+                {{ node.name }}
               </div>
               <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5 hidden md:block">
-                {{ plugin.description }}
+                {{ node.description }}
               </div>
             </div>
           </div>

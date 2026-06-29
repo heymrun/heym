@@ -717,14 +717,20 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <span class="text-sm font-medium truncate">{{ plugin.name }}</span>
-                  <span class="text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
-                    {{ plugin.kind }}
-                  </span>
                   <span class="text-xs text-muted-foreground">v{{ plugin.version }}</span>
                 </div>
                 <p class="text-xs text-muted-foreground line-clamp-1">
                   {{ plugin.description }}
                 </p>
+                <div class="mt-1 flex flex-wrap gap-1">
+                  <span
+                    v-for="node in plugin.nodes"
+                    :key="node.key"
+                    class="text-[10px] rounded px-1.5 py-0.5 bg-muted text-muted-foreground"
+                  >
+                    {{ node.name }} · {{ node.kind }}
+                  </span>
+                </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <Button

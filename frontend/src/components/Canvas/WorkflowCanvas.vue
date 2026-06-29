@@ -889,9 +889,16 @@ function handleDrop(event: DragEvent): void {
 
   if (nodeType === "plugin" || nodeType === "pluginTrigger") {
     const pluginId = event.dataTransfer?.getData("application/heym-plugin-id");
+    const pluginNodeKey = event.dataTransfer?.getData("application/heym-plugin-node-key");
     const pluginLabel = event.dataTransfer?.getData("application/heym-plugin-label");
     if (pluginId) {
-      defaultData = { ...defaultData, pluginId, label: pluginLabel || pluginId, config: {} };
+      defaultData = {
+        ...defaultData,
+        pluginId,
+        pluginNodeKey: pluginNodeKey || undefined,
+        label: pluginLabel || pluginNodeKey || pluginId,
+        config: {},
+      };
     }
   }
 
