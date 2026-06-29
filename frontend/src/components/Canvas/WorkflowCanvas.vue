@@ -887,6 +887,14 @@ function handleDrop(event: DragEvent): void {
 
   let defaultData = getDefaultNodeData(nodeType);
 
+  if (nodeType === "plugin" || nodeType === "pluginTrigger") {
+    const pluginId = event.dataTransfer?.getData("application/heym-plugin-id");
+    const pluginLabel = event.dataTransfer?.getData("application/heym-plugin-label");
+    if (pluginId) {
+      defaultData = { ...defaultData, pluginId, label: pluginLabel || pluginId, config: {} };
+    }
+  }
+
   const pendingSource = workflowStore.pendingConnectionSource;
   if (pendingSource) {
     const sourceNode = workflowStore.nodes.find((n) => n.id === pendingSource.nodeId);

@@ -3,7 +3,9 @@ import { computed, onMounted, watch, nextTick, ref } from "vue";
 import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
-import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
+import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/types/workflow";
+
+import { listPlugins } from "@/services/plugins";
 
 import TemplatesBrowseDialog from "@/features/templates/components/TemplatesBrowseDialog.vue";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
@@ -47,8 +49,42 @@ async function loadNodeTemplates(): Promise<void> {
   }
 }
 
+const installedPlugins = ref<PluginSummary[]>([]);
+
+async function loadPlugins(): Promise<void> {
+  try {
+    installedPlugins.value = (await listPlugins()).filter((plugin) => plugin.enabled);
+  } catch {
+    // Plugins disabled (404) or unavailable; show nothing.
+    installedPlugins.value = [];
+  }
+}
+
+const visiblePlugins = computed<PluginSummary[]>(() => {
+  const query = searchQuery.value.toLowerCase().trim();
+  const list = isDashboardWidget.value
+    ? installedPlugins.value.filter((plugin) => plugin.kind !== "trigger")
+    : installedPlugins.value;
+  if (!query) return list;
+  return list.filter(
+    (plugin) =>
+      plugin.name.toLowerCase().includes(query) ||
+      plugin.description.toLowerCase().includes(query),
+  );
+});
+
+function handlePluginDragStart(event: DragEvent, plugin: PluginSummary): void {
+  if (!event.dataTransfer) return;
+  const type: NodeType = plugin.kind === "trigger" ? "pluginTrigger" : "plugin";
+  event.dataTransfer.setData("application/heym-node", type);
+  event.dataTransfer.setData("application/heym-plugin-id", plugin.id);
+  event.dataTransfer.setData("application/heym-plugin-label", plugin.name);
+  event.dataTransfer.effectAllowed = "move";
+}
+
 onMounted(() => {
   void loadNodeTemplates();
+  void loadPlugins();
 });
 
 const searchQuery = computed({
@@ -217,8 +253,16 @@ const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "rabbitmq",
   "output",
   "jsonOutputMapper",
+  "plugin",
+  "pluginTrigger",
 ]);
-const WORKFLOW_HIDDEN_NODE_TYPES = new Set<NodeType>(["chartOutput"]);
+// Generic plugin node types are never shown directly; installed plugins are
+// listed as their own palette cards below (each carries a concrete pluginId).
+const WORKFLOW_HIDDEN_NODE_TYPES = new Set<NodeType>([
+  "chartOutput",
+  "plugin",
+  "pluginTrigger",
+]);
 
 const isDashboardWidget = computed(
   () => workflowStore.currentWorkflow?.kind === "dashboard_widget",
@@ -605,6 +649,44 @@ function handleDoubleClick(type: NodeType): void {
             </div>
           </div>
         </div>
+        <template v-if="visiblePlugins.length > 0">
+          <div class="pt-4 pb-1">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+              <Puzzle class="w-3.5 h-3.5" />
+              Plugins
+            </h3>
+          </div>
+          <div
+            v-for="plugin in visiblePlugins"
+            :key="plugin.id"
+            :data-testid="`node-palette-plugin-${plugin.id}`"
+            :draggable="true"
+            :class="cn(
+              'node-item flex items-center gap-3 p-3 rounded-xl border border-border/40 cursor-grab transition-all duration-200 min-h-[44px]',
+              'hover:border-primary/40 hover:bg-accent/50 hover:shadow-sm active:cursor-grabbing'
+            )"
+            @mousedown="handleMouseDown"
+            @dragstart="handlePluginDragStart($event, plugin)"
+          >
+            <div
+              class="node-icon flex items-center justify-center w-10 h-10 rounded-xl shrink-0 transition-all duration-200"
+              :style="{
+                backgroundColor: `hsl(var(--${plugin.kind === 'trigger' ? 'node-trigger' : 'node-action'}) / 0.12)`,
+                color: `hsl(var(--${plugin.kind === 'trigger' ? 'node-trigger' : 'node-action'}))`,
+              }"
+            >
+              <Puzzle class="w-5 h-5" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-sm leading-tight">
+                {{ plugin.name }}
+              </div>
+              <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5 hidden md:block">
+                {{ plugin.description }}
+              </div>
+            </div>
+          </div>
+        </template>
         <template v-if="showNodeTemplates && (filteredNodeTemplates.length > 0 || templatesLoadError)">
           <div class="pt-4 pb-1">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
