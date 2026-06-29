@@ -2588,20 +2588,10 @@ function renderContent(content: string): string {
       </div>
 
       <div
-        v-if="displayResults.length === 0 && !isExecuting && !fileUploadMint"
+        v-if="displayResults.length === 0 && !isExecuting && !fileUploadMint && !workflowLevelError"
         class="flex items-center justify-center h-full p-4"
       >
-        <div
-          v-if="workflowLevelError"
-          class="flex items-start gap-2 text-sm text-red-500 max-w-full"
-        >
-          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
-          <span class="font-mono break-words">{{ workflowLevelError }}</span>
-        </div>
-        <p
-          v-else
-          class="text-muted-foreground text-sm"
-        >
+        <p class="text-muted-foreground text-sm">
           Run the workflow to see execution results
         </p>
       </div>
@@ -2610,6 +2600,13 @@ function renderContent(content: string): string {
         v-else
         class="space-y-2 text-sm font-mono"
       >
+        <div
+          v-if="workflowLevelError"
+          class="flex items-start gap-2 p-2 rounded-md bg-red-500/10 text-red-500"
+        >
+          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="break-words">{{ workflowLevelError }}</span>
+        </div>
         <div
           v-for="result in displayResults"
           :key="result.displayKey"

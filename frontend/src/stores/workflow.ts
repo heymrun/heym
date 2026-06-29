@@ -1252,7 +1252,13 @@ export const useWorkflowStore = defineStore("workflow", () => {
               return;
             }
 
-            const finalRows = (result.node_results || []) as NodeResult[];
+            // A run that fails without per-node results (e.g. a workflow timeout)
+            // sends an empty node_results; keep the rows we already streamed so the
+            // prior node history stays visible instead of being wiped.
+            const finalRows =
+              result.node_results && result.node_results.length > 0
+                ? (result.node_results as NodeResult[])
+                : nodeResults.value;
             timelinePickedNodeResultIndex.value = null;
             nodeResults.value = finalRows;
 
