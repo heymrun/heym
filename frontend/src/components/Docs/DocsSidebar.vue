@@ -10,10 +10,12 @@ import { useDebounceFn, useEventListener } from "@vueuse/core";
 
 interface Props {
   open?: boolean;
+  extraCategories?: Record<string, DocCategory>;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   open: true,
+  extraCategories: () => ({}),
 });
 
 const emit = defineEmits<{
@@ -24,6 +26,11 @@ const route = useRoute();
 
 const searchInput = ref("");
 const searchQuery = ref("");
+const allCategories = computed<Record<string, DocCategory>>(() => ({
+  ...DOCS_MANIFEST,
+  ...props.extraCategories,
+}));
+
 const expandedCategories = ref<Set<string>>(new Set(Object.keys(DOCS_MANIFEST)));
 
 const updateSearch = useDebounceFn(() => {
@@ -106,7 +113,7 @@ function filterCategory(category: DocCategory): { slug: string; title: string }[
 const filteredManifest = computed(() => {
   const q = searchQuery.value.toLowerCase().trim();
   const result: Record<string, DocCategory> = {};
-  for (const [id, cat] of Object.entries(DOCS_MANIFEST)) {
+  for (const [id, cat] of Object.entries(allCategories.value)) {
     const items = filterCategory(cat);
     if (items.length > 0 || !q) {
       result[id] = { ...cat, items };

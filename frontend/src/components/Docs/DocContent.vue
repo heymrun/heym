@@ -9,6 +9,7 @@ import { ChevronLeft, ChevronRight } from "lucide-vue-next";
 import NodePreviewCard from "@/components/Docs/NodePreviewCard.vue";
 import Button from "@/components/ui/Button.vue";
 import { getPrevNextDoc } from "@/docs/manifest";
+import { getPluginDoc } from "@/services/plugins";
 import type { NodeType } from "@/types/workflow";
 
 interface Props {
@@ -70,6 +71,22 @@ async function loadContent(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
+    // Plugin docs are served dynamically by the backend, not bundled markdown.
+    const normalized = requestedPath.replace(/^\//, "").replace(/\/$/, "");
+    if (normalized.startsWith("plugins/")) {
+      const pluginId = normalized.slice("plugins/".length);
+      try {
+        const doc = await getPluginDoc(pluginId);
+        if (requestId !== latestLoadRequestId) return;
+        content.value = doc.markdown || `# ${doc.name}\n\nThis plugin has no documentation.`;
+      } catch {
+        if (requestId !== latestLoadRequestId) return;
+        content.value = "";
+        error.value = "Page not found";
+      }
+      return;
+    }
+
     const key = findModuleKey(requestedPath);
     const loader = key ? docModules[key] : undefined;
     if (requestId !== latestLoadRequestId) return;
