@@ -25,7 +25,8 @@ Gereksinimler:
 
 | Karar | Sonuç |
 |-------|-------|
-| Çalıştırma modeli | Plugin Python handler'ı **mevcut Docker sandbox** içinde çalışır (`python_tool_executor`, `HEYM_PYTHON_TOOL_SANDBOX`). Yeni güvenlik sınırı yok. |
+| Çalıştırma modeli | Pluginler **Heym tarafından iletilen, admin'in kurduğu güvenilir kod**. Handler **backend process'i içinde dinamik import** ile, yerleşik bir node gibi tam yetkiyle çalışır (ağ açık, tüm kütüphaneler serbest). Kısıtlı tool-sandbox kullanılmaz. |
+| Bağımlılıklar | Plugin manifest'i `dependencies` (pip paketleri) bildirebilir; kurulum sırasında o Heym instance'ına `uv pip install` ile kurulur. |
 | Node entegrasyonu | **A Yaklaşımı**: tek `plugin` + `pluginTrigger` statik node tipi, `pluginId` ile parametrize. Per-plugin dinamik NodeType yok. |
 | Admin gate | Yeni, plugin'e özel env allowlist: `HEYM_PLUGIN_ADMIN_EMAILS` (kuruluma yetkili maillerin listesi). |
 | Enable flag | `HEYM_PLUGINS_ENABLED` env, varsayılan kapalı; tüm alt sistemi (API + UI + DSL enjeksiyonu) gate'ler. |
@@ -53,6 +54,7 @@ my-plugin.zip
   "kind": "action",
   "description": "Acme CRM'e kayıt gönderir/çeker",
   "entry": "handler.py",
+  "dependencies": ["requests==2.32.3"],
   "fields": [
     { "key": "apiKey", "label": "API Key", "type": "string", "secret": true, "required": true },
     { "key": "recordId", "label": "Record ID", "type": "string", "dynamic": true, "expression": true }
@@ -67,6 +69,7 @@ Manifest alanları (Pydantic `PluginManifest` ile doğrulanır):
 - `name`, `version`, `description`.
 - `kind` — `"action"` | `"trigger"`.
 - `entry` — Python handler dosyası (varsayılan `handler.py`).
+- `dependencies` — opsiyonel pip paketleri listesi; kurulumda `uv pip install` ile instance'a kurulur.
 - `fields[]` — config alanları. Her alan: `key`, `label`, `type`
   (`string`|`number`|`boolean`|`select`), opsiyonel `required`, `secret`,
   `default`, `options` (select için), `dynamic` (runtime/expression
@@ -85,9 +88,10 @@ Manifest alanları (Pydantic `PluginManifest` ile doğrulanır):
 - **action**: `def run(inputs: dict, config: dict, ctx: dict) -> dict`
 - **trigger**: `def trigger(config: dict, ctx: dict) -> dict`
 
-`ctx` yalnızca güvenli, serileştirilebilir bilgileri taşır (executor objesi
-değil). Handler kodu **Docker sandbox** içinde, kod stdin'den stream edilerek
-çalışır (mevcut `python_tool_executor` deseni).
+`ctx` serileştirilebilir bağlam bilgilerini taşır (executor objesi değil).
+Handler **backend process'i içinde**, diskten dinamik import edilen modül olarak
+çalışır (yerleşik node gibi tam yetki: ağ + tüm kütüphaneler). Pluginler
+güvenilir (Heym-iletili, admin-kurulu) olduğu için kısıtlı sandbox uygulanmaz.
 
 ## 4. Backend
 
@@ -138,16 +142,18 @@ Endpointler (hepsi `plugins_enabled` arkasında):
 - Path-traversal / zip-slip koruması (üye yolları hedef dizin altında kalmalı).
 - `plugin.json` Pydantic şema validasyonu; `id` format kontrolü.
 - Aynı `plugin_id` tekrar yüklenirse sürüm güncellenir (upsert).
+- `dependencies` varsa `uv pip install <paketler>` çalıştırılır; başarısızsa
+  install fail eder ve kısmi kurulum geri alınır (disk klasörü silinir).
 
 ### 4.5 Çalıştırma Seam'i (A Yaklaşımı)
 
 - `node_execution/registry.py`'ye iki kayıt:
   `"plugin": "plugin_node"`, `"pluginTrigger": "plugin_trigger_node"`.
 - `node_execution/nodes/plugin_node.py` (tek dispatcher):
-  1. `node_data.pluginId`'den manifesti bul (yoksa/disabled ise hata).
+  1. `node_data.pluginId`'den manifesti diskten bul (yoksa/disabled ise hata).
   2. `config` alanlarını expression resolve et (`ctx.executor.resolve_expression`).
-  3. Handler'ı Docker sandbox'ta `run(inputs, config, ctx_safe)` ile çalıştır.
-  4. Dönen dict'i çıktı olarak ver.
+  3. `HEYM_PLUGINS_DIR/<pluginId>/handler.py`'yi dinamik import et (modül cache'li).
+  4. `run(inputs, config, ctx_safe)` çağır, dönen dict'i çıktı olarak ver.
 - `node_execution/nodes/plugin_trigger_node.py` → `trigger(config, ctx_safe)`
   çağırır; çıktıyı entry/trigger node çıktısı olarak verir.
 - Retry, tracing, cancellation, final `NodeResult` paketleme `WorkflowExecutor`'da
@@ -199,15 +205,18 @@ Endpointler (hepsi `plugins_enabled` arkasında):
   guard testi (sync diff = 0) yeşil kalır.
 - Böylece AI assistant ve chat canvas plugin node'larını üretebilir.
 
-## 8. Güvenlik
+## 8. Güvenlik / Güven Modeli
 
-- Kod yürütme yalnızca Docker sandbox içinde (`HEYM_PYTHON_TOOL_SANDBOX`).
-  Sandbox yoksa fail-closed.
-- Install/uninstall hem `HEYM_PLUGINS_ENABLED` hem `HEYM_PLUGIN_ADMIN_EMAILS`
-  ile gate'li.
+- **Güven modeli:** Pluginler Heym tarafından iletilir ve yalnızca admin kurar.
+  Bu yüzden plugin kodu **güvenilir** kabul edilir ve yerleşik node'lar gibi
+  backend process içinde tam yetkiyle çalışır (ağ + tüm kütüphaneler). Bu
+  bilinçli bir karar (enterprise on-demand plugin yüzeyi).
+- Asıl güvenlik sınırı **kurulum kapısı**: install/uninstall/dependency-install
+  hem `HEYM_PLUGINS_ENABLED` hem `HEYM_PLUGIN_ADMIN_EMAILS` ile gate'li.
 - Zip-slip / boyut / şema doğrulaması.
+- `dependencies` pip kurulumu yalnızca admin install akışında tetiklenir.
 - `secret` işaretli alanlar UI'da maskelenir ve loglara yazılmaz.
-- Handler'a executor objesi değil, sadece güvenli serileştirilmiş `ctx` verilir.
+- Handler'a executor objesi değil, serileştirilmiş `ctx` verilir.
 
 ## 9. Test Planı
 
@@ -218,8 +227,10 @@ Endpointler (hepsi `plugins_enabled` arkasında):
 - Flag-off: `HEYM_PLUGINS_ENABLED=false` → 404.
 - Install → list → uninstall akışı (disk + DB).
 - `enabled` toggle (`PATCH`).
-- `plugin_node` / `plugin_trigger_node` dispatcher (sandbox mock'lu) `run` /
-  `trigger` davranışı; expression resolve.
+- Dependency install adımı (mock'lu `uv pip install`); başarısızlıkta rollback.
+- `plugin_node` / `plugin_trigger_node` dispatcher: diskten örnek bir
+  `handler.py` dinamik import edilir, `run` / `trigger` davranışı + expression
+  resolve doğrulanır.
 - DSL prompt enjeksiyonu: `build_assistant_prompt` çıktısında plugin bölümü;
   statik `WORKFLOW_DSL_SYSTEM_PROMPT` değişmediğini doğrulayan sync guard.
 
