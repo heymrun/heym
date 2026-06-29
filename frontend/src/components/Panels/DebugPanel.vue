@@ -55,6 +55,15 @@ const scrollContainer = ref<HTMLDivElement | null>(null);
 const executionResult = computed(() => workflowStore.executionResult);
 const nodeResults = computed(() => workflowStore.nodeResults);
 const isExecuting = computed(() => workflowStore.isExecuting);
+
+/** A run-level failure (e.g. a workflow timeout) that isn't tied to a single
+ *  node, so it would otherwise leave the log empty. */
+const workflowLevelError = computed<string | null>(() => {
+  const r = executionResult.value;
+  if (!r || r.status !== "error") return null;
+  const outputs = r.outputs as Record<string, unknown> | undefined;
+  return outputs && typeof outputs.error === "string" ? outputs.error : null;
+});
 const runningNodeId = computed(() => workflowStore.runningNodeId);
 const agentProgressLogs = computed(() => workflowStore.agentProgressLogs);
 const selectedNode = computed(() => workflowStore.selectedNode);
@@ -2580,9 +2589,19 @@ function renderContent(content: string): string {
 
       <div
         v-if="displayResults.length === 0 && !isExecuting && !fileUploadMint"
-        class="flex items-center justify-center h-full"
+        class="flex items-center justify-center h-full p-4"
       >
-        <p class="text-muted-foreground text-sm">
+        <div
+          v-if="workflowLevelError"
+          class="flex items-start gap-2 text-sm text-red-500 max-w-full"
+        >
+          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="font-mono break-words">{{ workflowLevelError }}</span>
+        </div>
+        <p
+          v-else
+          class="text-muted-foreground text-sm"
+        >
           Run the workflow to see execution results
         </p>
       </div>
