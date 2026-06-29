@@ -1000,15 +1000,18 @@ async def _load_installed_plugins(db: AsyncSession) -> list[dict]:
     result: list[dict] = []
     for plugin in rows:
         manifest = PluginManifest.model_validate(plugin.manifest)
-        result.append(
-            {
-                "id": plugin.plugin_id,
-                "kind": plugin.kind,
-                "description": plugin.description,
-                "dsl_hint": manifest.dsl_hint,
-                "fields": [field.model_dump() for field in manifest.fields],
-            }
-        )
+        for node in manifest.resolved_nodes():
+            result.append(
+                {
+                    "id": plugin.plugin_id,
+                    "node_key": node.key,
+                    "name": node.name,
+                    "kind": node.kind,
+                    "description": node.description,
+                    "dsl_hint": node.dsl_hint,
+                    "fields": [field.model_dump() for field in node.fields],
+                }
+            )
     return result
 
 

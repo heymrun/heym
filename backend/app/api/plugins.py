@@ -11,7 +11,12 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db.models import Plugin, User
 from app.db.session import get_db
-from app.models.plugin_schemas import PluginDoc, PluginManifest, PluginSummary
+from app.models.plugin_schemas import (
+    PluginDoc,
+    PluginManifest,
+    PluginNodeSummary,
+    PluginSummary,
+)
 from app.services import plugin_loader, plugin_store
 from app.services.plugin_store import PluginInstallError
 
@@ -42,16 +47,26 @@ def require_plugin_admin(current_user: User) -> None:
 
 def _to_summary(plugin: Plugin) -> PluginSummary:
     manifest = PluginManifest.model_validate(plugin.manifest)
+    nodes = [
+        PluginNodeSummary(
+            key=node.key,
+            name=node.name,
+            kind=node.kind,
+            description=node.description,
+            fields=node.fields,
+            dsl_hint=node.dsl_hint,
+            doc_slug=node.doc_slug,
+        )
+        for node in manifest.resolved_nodes()
+    ]
     return PluginSummary(
         id=plugin.plugin_id,
         name=plugin.name,
         version=plugin.version,
-        kind=plugin.kind,  # type: ignore[arg-type]
+        kind=plugin.kind,
         description=plugin.description,
         enabled=plugin.enabled,
-        fields=manifest.fields,
-        dsl_hint=manifest.dsl_hint,
-        doc_slug=manifest.resolved_doc_slug(),
+        nodes=nodes,
         has_icon=(plugin_store.plugins_root() / plugin.plugin_id / "icon.svg").exists(),
     )
 
@@ -123,7 +138,7 @@ async def install_plugin(
         db.add(existing)
     existing.name = manifest.name
     existing.version = manifest.version
-    existing.kind = manifest.kind
+    existing.kind = manifest.package_kind()
     existing.description = manifest.description
     existing.manifest = manifest.model_dump(by_alias=True)
     existing.enabled = True

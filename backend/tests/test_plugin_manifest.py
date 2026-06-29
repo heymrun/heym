@@ -6,7 +6,7 @@ from app.models.plugin_schemas import PluginManifest
 
 
 class PluginManifestTests(unittest.TestCase):
-    def _valid(self) -> dict:
+    def _valid_legacy(self) -> dict:
         return {
             "id": "acme-crm",
             "name": "Acme CRM",
@@ -21,39 +21,70 @@ class PluginManifestTests(unittest.TestCase):
                     "secret": True,
                     "required": True,
                 },
+            ],
+        }
+
+    def _valid_multinode(self) -> dict:
+        return {
+            "id": "ikv",
+            "name": "IKV",
+            "version": "1.0.0",
+            "description": "Test package",
+            "dependencies": ["coolname"],
+            "nodes": [
+                {"key": "ikvTrigger", "name": "ikvTrigger", "kind": "trigger"},
                 {
-                    "key": "recordId",
-                    "label": "Record ID",
-                    "type": "string",
-                    "dynamic": True,
-                    "expression": True,
+                    "key": "ikvPublisher",
+                    "name": "ikvPublisher",
+                    "kind": "action",
+                    "fields": [{"key": "text", "label": "Text", "type": "string"}],
                 },
             ],
         }
 
-    def test_parses_valid_manifest(self) -> None:
-        manifest = PluginManifest.model_validate(self._valid())
-        self.assertEqual(manifest.id, "acme-crm")
-        self.assertEqual(manifest.kind, "action")
-        self.assertEqual(manifest.entry, "handler.py")
-        self.assertEqual(manifest.fields[0].key, "apiKey")
-        self.assertTrue(manifest.fields[0].secret)
+    def test_legacy_single_kind_synthesizes_one_node(self) -> None:
+        manifest = PluginManifest.model_validate(self._valid_legacy())
+        nodes = manifest.resolved_nodes()
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].key, "acme-crm")
+        self.assertEqual(nodes[0].kind, "action")
+        self.assertEqual(nodes[0].function, "run")
+        self.assertEqual(nodes[0].fields[0].key, "apiKey")
+
+    def test_multinode_manifest(self) -> None:
+        manifest = PluginManifest.model_validate(self._valid_multinode())
+        nodes = manifest.resolved_nodes()
+        self.assertEqual([n.key for n in nodes], ["ikvTrigger", "ikvPublisher"])
+        self.assertEqual(nodes[0].function, "trigger")
+        self.assertEqual(nodes[1].function, "run")
+        self.assertEqual(manifest.package_kind(), "mixed")
+        self.assertEqual(manifest.dependencies, ["coolname"])
+
+    def test_explicit_function_name(self) -> None:
+        data = self._valid_multinode()
+        data["nodes"][0]["function"] = "tick"
+        manifest = PluginManifest.model_validate(data)
+        self.assertEqual(manifest.resolved_nodes()[0].function, "tick")
 
     def test_rejects_bad_id(self) -> None:
-        bad = self._valid()
+        bad = self._valid_legacy()
         bad["id"] = "Acme CRM!"
         with self.assertRaises(ValidationError):
             PluginManifest.model_validate(bad)
 
-    def test_rejects_unknown_kind(self) -> None:
-        bad = self._valid()
-        bad["kind"] = "webhook"
+    def test_rejects_no_nodes_and_no_kind(self) -> None:
         with self.assertRaises(ValidationError):
-            PluginManifest.model_validate(bad)
+            PluginManifest.model_validate(
+                {"id": "x", "name": "X", "version": "1.0.0", "description": "no nodes"}
+            )
 
-    def test_defaults_optional_fields(self) -> None:
-        minimal = {"id": "p1", "name": "P1", "version": "0.1.0", "kind": "trigger"}
-        manifest = PluginManifest.model_validate(minimal)
-        self.assertEqual(manifest.fields, [])
-        self.assertEqual(manifest.dependencies, [])
-        self.assertEqual(manifest.doc_slug, "p1")
+    def test_rejects_duplicate_node_keys(self) -> None:
+        data = self._valid_multinode()
+        data["nodes"][1]["key"] = "ikvTrigger"
+        with self.assertRaises(ValidationError):
+            PluginManifest.model_validate(data)
+
+    def test_get_node_by_key(self) -> None:
+        manifest = PluginManifest.model_validate(self._valid_multinode())
+        self.assertEqual(manifest.get_node("ikvPublisher").kind, "action")
+        self.assertIsNone(manifest.get_node("missing"))

@@ -4587,13 +4587,18 @@ def build_assistant_prompt(
     if installed_plugins:
         prompt += "\n\n## Installed Plugins\n\n"
         prompt += (
-            "These plugins are installed on this instance and behave like custom nodes. "
-            "Use node type `plugin` for actions and `pluginTrigger` for triggers, and set "
-            "`pluginId` to the plugin's id. Put field values under `config`.\n\n"
+            "These plugin nodes are installed on this instance and behave like custom nodes. "
+            "Use node type `plugin` for actions and `pluginTrigger` for triggers, set "
+            "`pluginId` to the plugin's id and `pluginNodeKey` to the node key, and put field "
+            "values under `config`.\n\n"
         )
         for plugin in installed_plugins:
-            prompt += f"- **{plugin.get('id', '')}** ({plugin.get('kind', 'action')}): "
+            node_key = plugin.get("node_key")
+            label = f"{plugin.get('id', '')}" + (f" / {node_key}" if node_key else "")
+            prompt += f"- **{label}** ({plugin.get('kind', 'action')}): "
             prompt += f"{plugin.get('description', '')}\n"
+            if node_key:
+                prompt += f"  pluginId: `{plugin.get('id', '')}`, pluginNodeKey: `{node_key}`\n"
             hint = plugin.get("dsl_hint")
             if hint:
                 prompt += f"  Usage: {hint}\n"
