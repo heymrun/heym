@@ -198,6 +198,15 @@ class WorkflowCancelledError(Exception):
     """Raised when a running workflow execution is cancelled."""
 
 
+class WorkflowTimeoutError(WorkflowCancelledError):
+    """Raised when a workflow exceeds its configured timeout.
+
+    Subclasses ``WorkflowCancelledError`` so existing cancellation handling
+    (cooperative unwind at node boundaries, retry suppression) applies, while
+    callers that care can distinguish a timeout from a user cancel.
+    """
+
+
 def run_async(coro):
     try:
         loop = asyncio.get_event_loop()
@@ -1708,6 +1717,7 @@ class WorkflowExecutor:
         invoked_by_agent: bool = False,
         public_base_url: str = "",
         return_on_chart_output: bool = False,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self.agent_progress_queue = agent_progress_queue
@@ -1739,6 +1749,10 @@ class WorkflowExecutor:
         self._base_url = public_base_url
         self.return_on_chart_output = return_on_chart_output
         self.cancel_event = cancel_event
+        # Cooperative timeout: a monotonic deadline checked at every node boundary
+        # via ``check_cancelled``. ``None`` (or non-positive timeout) disables it.
+        self.timeout_seconds = timeout_seconds
+        self._deadline: float | None = None
         self.hitl_resume_context: dict[str, dict] = {}
         self.error_handler_nodes = {
             node_id for node_id, node in self.nodes.items() if node.get("type") == "errorHandler"
@@ -2126,7 +2140,16 @@ class WorkflowExecutor:
             self.retry_node_results.append(retry_result)
         return retry_result
 
+    def _arm_deadline(self) -> None:
+        """Start the timeout clock. Call once at the beginning of a run."""
+        if self.timeout_seconds and self.timeout_seconds > 0:
+            self._deadline = time.monotonic() + self.timeout_seconds
+
     def check_cancelled(self) -> None:
+        if self._deadline is not None and time.monotonic() > self._deadline:
+            raise WorkflowTimeoutError(
+                f"Workflow timed out after {int(self.timeout_seconds or 0)} seconds"
+            )
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise WorkflowCancelledError("Workflow execution cancelled")
 
@@ -7977,7 +8000,15 @@ class WorkflowExecutor:
 
             elif node_type == "wait":
                 duration_ms = node_data.get("duration", 1000)
-                time.sleep(duration_ms / 1000.0)
+                # Sleep in small slices so a workflow timeout (or cancel) interrupts
+                # a long wait promptly instead of blocking the whole duration.
+                remaining = duration_ms / 1000.0
+                while remaining > 0:
+                    self.check_cancelled()
+                    slice_s = min(0.1, remaining)
+                    time.sleep(slice_s)
+                    remaining -= slice_s
+                self.check_cancelled()
                 first_input = self._first_visible_input(inputs)
                 output = first_input if isinstance(first_input, dict) else {"value": first_input}
 
@@ -12301,6 +12332,7 @@ class WorkflowExecutor:
 
     def _execute_inner(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         start_time = time.time()
+        self._arm_deadline()
         self.check_cancelled()
         node_results: list[NodeResult] = []
         error_flow_nodes = self.get_error_flow_nodes()
@@ -12744,6 +12776,7 @@ def execute_workflow(
     cancel_event: Event | None = None,
     public_base_url: str = "",
     return_on_chart_output: bool = False,
+    timeout_seconds: float | None = None,
 ) -> ExecutionResult:
     executor = WorkflowExecutor(
         nodes,
@@ -12759,8 +12792,20 @@ def execute_workflow(
         cancel_event=cancel_event,
         public_base_url=public_base_url,
         return_on_chart_output=return_on_chart_output,
+        timeout_seconds=timeout_seconds,
     )
-    result = executor.execute(workflow_id, inputs)
+    try:
+        result = executor.execute(workflow_id, inputs)
+    except WorkflowTimeoutError as exc:
+        # A timeout unwinds the run; surface it as a failed result so every
+        # caller (API, triggers) records it like any other error.
+        return ExecutionResult(
+            workflow_id=workflow_id,
+            status="error",
+            outputs={"error": str(exc)},
+            execution_time_ms=0.0,
+            node_results=[],
+        )
 
     if credentials_context:
         result.outputs = mask_sensitive_output(result.outputs, credentials_context)
@@ -13855,6 +13900,7 @@ def _execute_workflow_streaming_impl(
     sse_node_config: dict | None = None,
     public_base_url: str = "",
     otel_root_context: object | None = None,
+    timeout_seconds: float | None = None,
 ):
     import queue
 
@@ -13873,7 +13919,9 @@ def _execute_workflow_streaming_impl(
         agent_progress_queue=event_queue,
         cancel_event=cancel_event,
         public_base_url=public_base_url,
+        timeout_seconds=timeout_seconds,
     )
+    wf_executor._arm_deadline()
     if executor_holder is not None:
         executor_holder["executor"] = wf_executor
     # Re-attach the streaming root span context so node spans (run in worker

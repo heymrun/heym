@@ -35,6 +35,7 @@ export interface Workflow {
   auto_recover_runs: boolean;
   error_workflow_id: string | null;
   minutes_saved_per_run: number | null;
+  workflow_timeout_seconds: number | null;
   created_at: string;
   updated_at: string;
 }

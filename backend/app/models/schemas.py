@@ -189,6 +189,7 @@ class WorkflowUpdate(BaseModel):
     auto_recover_runs: bool | None = None
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
+    workflow_timeout_seconds: int | None = None
 
 
 class WorkflowShareRequest(BaseModel):
@@ -227,6 +228,7 @@ class WorkflowResponse(BaseModel):
     auto_recover_runs: bool = True
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
+    workflow_timeout_seconds: int | None = None
     created_at: datetime
     updated_at: datetime
 

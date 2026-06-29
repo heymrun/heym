@@ -514,6 +514,7 @@ export const workflowApi = {
         | "auto_recover_runs"
         | "error_workflow_id"
         | "minutes_saved_per_run"
+        | "workflow_timeout_seconds"
       >
     >,
   ): Promise<Workflow> => {

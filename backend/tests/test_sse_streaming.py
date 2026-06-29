@@ -86,8 +86,9 @@ class _FakeWorkflowExecutor:
         agent_progress_queue: object | None = None,
         cancel_event: object | None = None,
         public_base_url: str = "",  # noqa: ARG002
+        timeout_seconds: float | None = None,  # noqa: ARG002
     ) -> None:
-        del actor_user_id
+        del actor_user_id, timeout_seconds
         self.nodes = {node["id"]: node for node in nodes}
         self.edges = list(edges)
         self._active_edges = list(edges)
@@ -100,6 +101,9 @@ class _FakeWorkflowExecutor:
         self.node_outputs: dict[str, dict] = {}
         self._cancel_event = cancel_event
         self._sequence = 0
+
+    def _arm_deadline(self) -> None:
+        return None
 
     def get_error_flow_nodes(self) -> set[str]:
         return set()

@@ -525,7 +525,11 @@ See also [Execution History](./execution-history.md), [Workflow Structure](./wor
 
 ### Error Workflow
 
-A workflow can designate another workflow to run when it fails. Configure it in the workflow-level **Properties** panel (shown when no node is selected) under **On error, run workflow**. When a top-level run ends with an unhandled failure, the selected error workflow runs and receives the failure context (failed workflow id and name, run id, error message, failed node label and type, and a timestamp). If the canvas already contains an [Error Handler](../nodes/error-handler-node.md) node, the local handler takes precedence and the error workflow is **not** called. The error workflow itself runs directly, so it never triggers its own error workflow.
+A workflow can designate another workflow to run when it fails. Configure it in the workflow-level **Properties** panel (shown when no node is selected) under **On error, run workflow**. When a top-level run ends with an unhandled failure, the selected error workflow runs and receives the failure context (failed workflow id and name, run id, error message, failed node label and type, and a timestamp). If the canvas already contains an [Error Handler](../nodes/error-handler-node.md) node, the local handler takes precedence and the error workflow is **not** called. The error workflow itself runs directly, so it never triggers its own error workflow. It is **not** triggered by manual canvas test runs — only by API and triggered runs.
+
+### Workflow Timeout
+
+Each workflow can set a **workflow timeout** in seconds in the workflow-level **Properties** panel. `0` (the default) disables it. When set, a run that exceeds the limit is stopped at the next node boundary and recorded as a failed run with a "timed out" error. The timeout applies to manual, API, and triggered runs. Long [Wait](../nodes/wait-node.md) nodes are interrupted promptly rather than blocking for their full duration.
 
 ### Time Saved
 

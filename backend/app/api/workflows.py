@@ -86,6 +86,7 @@ from app.services.hitl_service import (
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
+    WorkflowTimeoutError,
     _serialize_sub_workflow_executions,
     _to_json_compatible,
     execute_workflow,
@@ -1162,6 +1163,12 @@ async def update_workflow(
     if workflow_data.minutes_saved_per_run is not None:
         workflow.minutes_saved_per_run = (
             workflow_data.minutes_saved_per_run if workflow_data.minutes_saved_per_run > 0 else None
+        )
+    if workflow_data.workflow_timeout_seconds is not None:
+        workflow.workflow_timeout_seconds = (
+            workflow_data.workflow_timeout_seconds
+            if workflow_data.workflow_timeout_seconds > 0
+            else None
         )
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow
@@ -2396,6 +2403,7 @@ async def execute_workflow_endpoint(
             trace_user_id=trace_user_id,
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
+            timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
         )
     except WorkflowCancelledError:
         if not test_run:
@@ -3031,6 +3039,7 @@ async def execute_workflow_stream(
                 executor_holder=executor_holder,
                 sse_node_config=workflow.sse_node_config or {},
                 public_base_url=public_base_url,
+                timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             ):
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
@@ -3047,6 +3056,21 @@ async def execute_workflow_stream(
                     final_result["sub_workflow_executions"] = existing + [
                         s for s in extra if s.get("workflow_id") not in seen
                     ]
+        except WorkflowTimeoutError as exc:
+            # Surface as a failed run: emit a final event (so the canvas shows the
+            # timeout) and set final_result so it is persisted with status "error".
+            timeout_event = {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "error",
+                "outputs": {"error": str(exc)},
+                "execution_time_ms": 0,
+                "node_results": [],
+                "sub_workflow_executions": [],
+            }
+            final_result = timeout_event
+            event_queue.put(timeout_event)
+            return
         except WorkflowCancelledError:
             was_cancelled = True
             return

@@ -286,6 +286,7 @@ class Workflow(Base):
         index=True,
     )
     minutes_saved_per_run: Mapped[float | None] = mapped_column(Float, nullable=True)
+    workflow_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scheduled_for_deletion: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )

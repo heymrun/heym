@@ -390,6 +390,25 @@ async function onChangeMinutesSaved(raw: string): Promise<void> {
   }
 }
 
+const workflowTimeoutSeconds = computed(
+  () => workflowStore.currentWorkflow?.workflow_timeout_seconds ?? null,
+);
+
+async function onChangeWorkflowTimeout(raw: string): Promise<void> {
+  const wf = workflowStore.currentWorkflow;
+  if (!wf || !isWorkflowOwner.value) return;
+  const parsed = raw === "" ? null : Number(raw);
+  const next =
+    parsed !== null && Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+  const previous = wf.workflow_timeout_seconds;
+  wf.workflow_timeout_seconds = next;
+  try {
+    await workflowApi.update(wf.id, { workflow_timeout_seconds: next ?? 0 });
+  } catch {
+    wf.workflow_timeout_seconds = previous;
+  }
+}
+
 const showRunAnalyzer = computed(
   () =>
     workflowStore.nodes.length > 0 &&
@@ -7959,7 +7978,8 @@ onUnmounted(() => {
             </div>
             <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
               Runs the selected workflow if this one fails — unless the canvas
-              already has an Error Handler node.
+              already has an Error Handler node. Not triggered on manual test
+              runs.
             </p>
           </div>
 
@@ -7981,6 +8001,27 @@ onUnmounted(() => {
             <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
               Estimated minutes this automation saves per successful run.
               Surfaced as total Time Saved in Analytics.
+            </p>
+          </div>
+
+          <div class="border-t border-border/40 pt-4 pb-4">
+            <div class="flex items-center gap-2 mb-2">
+              <Clock class="w-4 h-4 text-muted-foreground shrink-0" />
+              <span class="text-sm font-medium">Workflow timeout (seconds)</span>
+            </div>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              class="w-full text-sm rounded-md border border-border bg-background px-2 py-1.5 disabled:opacity-50"
+              :value="workflowTimeoutSeconds ?? ''"
+              :disabled="!isWorkflowOwner"
+              placeholder="0 = no timeout"
+              @change="onChangeWorkflowTimeout(($event.target as HTMLInputElement).value)"
+            >
+            <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
+              Fail the run if it exceeds this many seconds. 0 disables the
+              timeout. Applies to manual, API, and triggered runs.
             </p>
           </div>
 
