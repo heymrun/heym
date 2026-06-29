@@ -39,6 +39,8 @@ _HANDLER_MODULES: dict[str, str] = {
     "notion": "notion_node",
     "output": "output_node",
     "playwright": "playwright_node",
+    "plugin": "plugin_node",
+    "pluginTrigger": "plugin_trigger_node",
     "rabbitmq": "rabbitmq_node",
     "rag": "rag_node",
     "redis": "redis_node",
