@@ -4467,6 +4467,7 @@ def build_assistant_prompt(
     available_workflows: list[dict] | None = None,
     user_rules: str | None = None,
     available_node_templates: list[dict] | None = None,
+    installed_plugins: list[dict] | None = None,
 ) -> str:
     import json
 
@@ -4582,6 +4583,25 @@ def build_assistant_prompt(
         prompt += "- Add new nodes with unique IDs\n"
         prompt += "- For new nodes that need credentials, use placeholder 'YOUR_CREDENTIAL_ID' or ask the user"
         prompt += "\n- **Credential fields** (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Slack/SMTP/Redis/etc.): use ONLY owned credentials in generated output; never shared credentials."
+
+    if installed_plugins:
+        prompt += "\n\n## Installed Plugins\n\n"
+        prompt += (
+            "These plugins are installed on this instance and behave like custom nodes. "
+            "Use node type `plugin` for actions and `pluginTrigger` for triggers, and set "
+            "`pluginId` to the plugin's id. Put field values under `config`.\n\n"
+        )
+        for plugin in installed_plugins:
+            prompt += f"- **{plugin.get('id', '')}** ({plugin.get('kind', 'action')}): "
+            prompt += f"{plugin.get('description', '')}\n"
+            hint = plugin.get("dsl_hint")
+            if hint:
+                prompt += f"  Usage: {hint}\n"
+            fields = plugin.get("fields", [])
+            if fields:
+                prompt += "  config fields:\n"
+                for field in fields:
+                    prompt += f"    - `{field.get('key')}` ({field.get('type', 'string')})\n"
 
     prompt += CLARIFY_PROTOCOL_PROMPT
 
