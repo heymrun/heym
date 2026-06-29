@@ -12,9 +12,10 @@ expressible as Python — without modifying the core application.
 | Outputs | 1 |
 | Output | `$nodeLabel.<keys returned by the plugin>` |
 
-Each installed plugin appears in the node palette under **Plugins** with its own
-name and description. Dragging it onto the canvas creates a Plugin node bound to
-that plugin (`pluginId`).
+A plugin **package** (one zip) can ship **multiple nodes** — any mix of actions
+and triggers. Each node appears in the palette under **Plugins** with its own
+name and description. Dragging one onto the canvas creates a Plugin node bound to
+that package (`pluginId`) and node (`pluginNodeKey`).
 
 ## When to Use
 
