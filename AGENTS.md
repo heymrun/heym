@@ -87,6 +87,9 @@ When adding a new node type, operation, or operation-specific field, keep the ca
 - When adding a **new node type**, update the docs that enumerate nodes: add the node page under `frontend/src/docs/content/nodes/`, register it in `frontend/src/docs/manifest.ts`, and add the node to the reference docs — including `frontend/src/docs/content/reference/features.md` (both the per-node section and the node-types summary list), plus `node-types.md` and, for credential-backed nodes, `integrations.md` / `credentials.md` / `credentials-sharing.md`. 
 - Add or extend frontend tests for meaningful UI behavior changes when practical, especially for autofill eligibility and expression dialog field discovery.
 
+### PropertiesPanel modularity
+`frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
+
 ### Expression evaluation (avoid executor vs dialog drift)
 The canvas **expression evaluate** dialog (`/expressions/evaluate`, `ExpressionEvaluatorService`) and **workflow execution** (`WorkflowExecutor`) must agree on the same semantics for `$…` templates.
 
