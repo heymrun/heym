@@ -1,8 +1,8 @@
 <script lang="ts">
 // Shared across all instances: dedupe + cache icon fetches by plugin/node.
-// A resolved value of `null` means "no custom icon" (use the fallback). Failures
-// are NOT cached permanently (entry is dropped) so a later install/reinstall is
-// picked up on the next mount.
+// A resolved value of `null` means "no custom icon" (use the fallback). The cache
+// is busted via clearPluginIconCache() on plugin install/uninstall/toggle so a
+// reinstall is picked up without a full page reload.
 const pluginIconCache = new Map<string, Promise<string | null>>();
 
 export function clearPluginIconCache(): void {
@@ -17,10 +17,12 @@ import { Puzzle } from "lucide-vue-next";
 
 import { fetchPluginIconSvg } from "@/services/plugins";
 
+// NOTE: do not declare a `hasIcon: boolean` prop here — Vue casts an absent
+// Boolean prop to `false`, which previously made callers that omit it (the
+// canvas node) silently skip the fetch. We always attempt the fetch instead.
 const props = defineProps<{
   pluginId?: string;
   nodeKey?: string;
-  hasIcon?: boolean;
   sizeClass?: string;
 }>();
 
@@ -29,7 +31,7 @@ const sizeClass = computed(() => props.sizeClass ?? "w-5 h-5");
 
 async function load(): Promise<void> {
   svg.value = null;
-  if (props.hasIcon === false || !props.pluginId) return;
+  if (!props.pluginId) return;
   const key = `${props.pluginId}:${props.nodeKey ?? ""}`;
   let pending = pluginIconCache.get(key);
   if (!pending) {
@@ -39,16 +41,12 @@ async function load(): Promise<void> {
     pluginIconCache.set(key, pending);
   }
   const raw = await pending;
-  if (raw === null) {
-    // Don't keep a failure cached forever — allow a later retry on re-mount.
-    pluginIconCache.delete(key);
-    svg.value = null;
-    return;
-  }
-  svg.value = DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } });
+  svg.value = raw
+    ? DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } })
+    : null;
 }
 
-watch(() => [props.pluginId, props.nodeKey, props.hasIcon], load, { immediate: true });
+watch(() => [props.pluginId, props.nodeKey], load, { immediate: true });
 </script>
 
 <template>

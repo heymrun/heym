@@ -56,7 +56,6 @@ interface PalettedPluginNode {
   name: string;
   description: string;
   kind: "action" | "trigger";
-  hasIcon: boolean;
 }
 
 const installedPlugins = ref<PluginSummary[]>([]);
@@ -78,7 +77,6 @@ const pluginNodes = computed<PalettedPluginNode[]>(() =>
       name: node.name,
       description: node.description,
       kind: node.kind,
-      hasIcon: Boolean(node.has_icon),
     })),
   ),
 );
@@ -713,7 +711,6 @@ function handleDoubleClick(type: NodeType, extraData?: Record<string, unknown>):
               <PluginIcon
                 :plugin-id="node.pluginId"
                 :node-key="node.nodeKey"
-                :has-icon="node.hasIcon"
                 size-class="w-5 h-5"
               />
             </div>
