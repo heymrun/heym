@@ -72,12 +72,8 @@ class PluginNodeTests(unittest.TestCase):
         self.assertEqual(output, {"text": "HI"})
 
     def test_trigger_node_runs_named_function(self) -> None:
-        ctx = _ctx(
-            {"pluginId": "ikv", "pluginNodeKey": "ikvTrigger", "config": {"seed": 1}}, {}
-        )
-        with patch.object(
-            plugin_trigger_node.plugin_store, "plugins_root", return_value=self.root
-        ):
+        ctx = _ctx({"pluginId": "ikv", "pluginNodeKey": "ikvTrigger", "config": {"seed": 1}}, {})
+        with patch.object(plugin_trigger_node.plugin_store, "plugins_root", return_value=self.root):
             output = plugin_trigger_node.execute(ctx)
         self.assertEqual(output, {"value": 1})
 

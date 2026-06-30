@@ -75,6 +75,11 @@ prepare_env() {
         cp "$PROJECT_ROOT/.env.example" "$ENV_FILE"
     fi
 
+    # Host dirs for the docker-compose bind mounts (files + installed plugins).
+    # Plugins persist here across container recreates; their pip dependencies are
+    # reinstalled into the backend container on startup (see app startup).
+    mkdir -p "$PROJECT_ROOT/data/files" "$PROJECT_ROOT/data/plugins"
+
     # Backfill both keys in all cases: empty SECRET_KEY and empty ENCRYPTION_KEY are
     # safe to generate regardless of whether .env is new or pre-existing. The legacy
     # placeholder ENCRYPTION_KEY triggers an explicit error instead of silent rotation.

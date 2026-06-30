@@ -100,6 +100,34 @@ def _install_dependencies(dependencies: list[str]) -> None:
         raise PluginInstallError(f"Dependency install failed: {result.stderr.strip()}")
 
 
+def ensure_dependencies_installed(dependencies: list[str]) -> None:
+    """Best-effort dependency install used on startup; never raises.
+
+    In container deployments the backend image filesystem is ephemeral, so pip
+    packages installed when a plugin was first added are lost on recreate. Calling
+    this on startup restores them. Idempotent for native runs.
+    """
+    if not dependencies:
+        return
+    # The release image runs uvicorn with multiple workers, so this can be called
+    # from several processes at once against the same venv. Serialize with a file
+    # lock so only one worker installs at a time (the rest then no-op quickly).
+    import fcntl
+
+    lock_path = plugins_root() / ".deps.lock"
+    try:
+        with open(lock_path, "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                _install_dependencies(dependencies)
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+    except PluginInstallError as exc:
+        logger.warning("Plugin dependency reinstall failed: %s", exc)
+    except OSError as exc:
+        logger.warning("Plugin dependency reinstall could not acquire lock: %s", exc)
+
+
 def remove_plugin_dir(plugin_id: str, plugins_dir: Path) -> None:
     shutil.rmtree(plugins_dir / plugin_id, ignore_errors=True)
 

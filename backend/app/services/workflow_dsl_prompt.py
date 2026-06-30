@@ -4588,25 +4588,39 @@ def build_assistant_prompt(
         prompt += "\n\n## Installed Plugins\n\n"
         prompt += (
             "These plugin nodes are installed on this instance and behave like custom nodes. "
-            "Use node type `plugin` for actions and `pluginTrigger` for triggers, set "
-            "`pluginId` to the plugin's id and `pluginNodeKey` to the node key, and put field "
-            "values under `config`.\n\n"
+            "Use node type `plugin` for actions and `pluginTrigger` for triggers. A single "
+            "plugin **package** (one `pluginId`) can expose **multiple nodes**, so you MUST set "
+            "BOTH `pluginId` (the package id) AND `pluginNodeKey` (the specific node key) to "
+            "select the exact node. Put field values under `config`. Example action node:\n\n"
+            "```json\n"
+            '{ "id": "...", "type": "plugin", "data": { "label": "Uppercase",\n'
+            '  "pluginId": "acme", "pluginNodeKey": "acmeUppercase",\n'
+            '  "config": { "text": "$prevNode.text" } } }\n'
+            "```\n\n"
+            "Available plugin nodes (grouped by package):\n"
         )
+        # Group flattened plugin nodes by their package id so the model sees that a
+        # package can contain several nodes.
+        by_package: dict[str, list[dict]] = {}
         for plugin in installed_plugins:
-            node_key = plugin.get("node_key")
-            label = f"{plugin.get('id', '')}" + (f" / {node_key}" if node_key else "")
-            prompt += f"- **{label}** ({plugin.get('kind', 'action')}): "
-            prompt += f"{plugin.get('description', '')}\n"
-            if node_key:
-                prompt += f"  pluginId: `{plugin.get('id', '')}`, pluginNodeKey: `{node_key}`\n"
-            hint = plugin.get("dsl_hint")
-            if hint:
-                prompt += f"  Usage: {hint}\n"
-            fields = plugin.get("fields", [])
-            if fields:
-                prompt += "  config fields:\n"
-                for field in fields:
-                    prompt += f"    - `{field.get('key')}` ({field.get('type', 'string')})\n"
+            by_package.setdefault(plugin.get("id", ""), []).append(plugin)
+        for package_id, nodes in by_package.items():
+            prompt += f"\n- Package `{package_id}` ({len(nodes)} node(s)):\n"
+            for node in nodes:
+                node_key = node.get("node_key", "")
+                prompt += (
+                    f"  - pluginNodeKey `{node_key}` ({node.get('kind', 'action')}): "
+                    f"{node.get('description', '')}\n"
+                )
+                hint = node.get("dsl_hint")
+                if hint:
+                    prompt += f"    Usage: {hint}\n"
+                fields = node.get("fields", [])
+                if fields:
+                    field_list = ", ".join(
+                        f"`{f.get('key')}` ({f.get('type', 'string')})" for f in fields
+                    )
+                    prompt += f"    config fields: {field_list}\n"
 
     prompt += CLARIFY_PROTOCOL_PROMPT
 

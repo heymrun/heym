@@ -113,6 +113,43 @@ def _ensure_playwright_browsers() -> None:
         logger.warning("Playwright install skipped: %s", e)
 
 
+async def _reinstall_plugin_dependencies() -> None:
+    """Reinstall declared pip dependencies for installed plugins on startup.
+
+    Container filesystems are ephemeral, so deps installed when a plugin was added
+    are lost on recreate; this restores them. No-op when plugins are disabled.
+    Failures never block startup.
+    """
+    if not settings.plugins_enabled:
+        return
+    try:
+        import asyncio
+
+        from sqlalchemy import select
+
+        from app.db.models import Plugin
+        from app.models.plugin_schemas import PluginManifest
+        from app.services import plugin_store
+
+        async with async_session_maker() as _plugin_db:
+            rows = (
+                (await _plugin_db.execute(select(Plugin).where(Plugin.enabled.is_(True))))
+                .scalars()
+                .all()
+            )
+        deps: set[str] = set()
+        for plugin in rows:
+            try:
+                deps.update(PluginManifest.model_validate(plugin.manifest).dependencies)
+            except Exception:
+                continue
+        if deps:
+            logger.info("Reinstalling %d plugin dependency spec(s) on startup", len(deps))
+            await asyncio.to_thread(plugin_store.ensure_dependencies_installed, sorted(deps))
+    except Exception as exc:
+        logger.warning("Plugin dependency reinstall skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
@@ -123,6 +160,8 @@ async def lifespan(app: FastAPI):
             sa.text("UPDATE dashboard_conversations SET is_running = false WHERE is_running = true")
         )
         await _startup_db.commit()
+
+    await _reinstall_plugin_dependencies()
 
     _ensure_playwright_browsers()
 
