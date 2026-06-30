@@ -1,7 +1,13 @@
 <script lang="ts">
 // Shared across all instances: dedupe + cache icon fetches by plugin/node.
-// A resolved value of `null` means "no custom icon" (use the fallback).
+// A resolved value of `null` means "no custom icon" (use the fallback). Failures
+// are NOT cached permanently (entry is dropped) so a later install/reinstall is
+// picked up on the next mount.
 const pluginIconCache = new Map<string, Promise<string | null>>();
+
+export function clearPluginIconCache(): void {
+  pluginIconCache.clear();
+}
 </script>
 
 <script setup lang="ts">
@@ -33,9 +39,13 @@ async function load(): Promise<void> {
     pluginIconCache.set(key, pending);
   }
   const raw = await pending;
-  svg.value = raw
-    ? DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } })
-    : null;
+  if (raw === null) {
+    // Don't keep a failure cached forever — allow a later retry on re-mount.
+    pluginIconCache.delete(key);
+    svg.value = null;
+    return;
+  }
+  svg.value = DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } });
 }
 
 watch(() => [props.pluginId, props.nodeKey, props.hasIcon], load, { immediate: true });

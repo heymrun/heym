@@ -25,6 +25,8 @@ import {
 } from "@/services/plugins";
 import { useAuthStore } from "@/stores/auth";
 
+import { clearPluginIconCache } from "@/components/Panels/PluginIcon.vue";
+
 import type { PluginSummary } from "@/types/workflow";
 
 type SettingsTab = "profile" | "security" | "voice" | "observability" | "plugins";
@@ -66,6 +68,7 @@ const pluginBusy = ref(false);
 async function loadPlugins(): Promise<void> {
   loadingPlugins.value = true;
   pluginError.value = null;
+  clearPluginIconCache();
   try {
     installedPlugins.value = await listPlugins();
     pluginsEnabled.value = true;
