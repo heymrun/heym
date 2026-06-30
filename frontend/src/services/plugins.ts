@@ -41,3 +41,14 @@ export async function setPluginEnabled(
 export async function uninstallPlugin(pluginId: string): Promise<void> {
   await api.delete(`/plugins/${pluginId}`);
 }
+
+export async function fetchPluginIconSvg(
+  pluginId: string,
+  nodeKey?: string,
+): Promise<string> {
+  const { data } = await api.get<string>(`/plugins/${pluginId}/icon`, {
+    params: nodeKey ? { node: nodeKey } : undefined,
+    responseType: "text",
+  });
+  return typeof data === "string" ? data : "";
+}

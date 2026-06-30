@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +47,28 @@ def require_plugin_admin(current_user: User) -> None:
         )
 
 
+def _safe_icon_path(plugin_id: str, filename: str) -> Path | None:
+    """Resolve an icon file inside the plugin package dir, guarding traversal."""
+    if not filename:
+        return None
+    package_root = (plugin_store.plugins_root() / plugin_id).resolve()
+    candidate = (package_root / filename).resolve()
+    if candidate != package_root and not str(candidate).startswith(str(package_root) + "/"):
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _resolve_icon(plugin_id: str, manifest: PluginManifest, node_key: str | None) -> Path | None:
+    """Find the icon for a node (its own icon) or fall back to the package icon."""
+    if node_key:
+        node = manifest.get_node(node_key)
+        if node is not None and node.icon:
+            node_icon = _safe_icon_path(plugin_id, node.icon)
+            if node_icon is not None:
+                return node_icon
+    return _safe_icon_path(plugin_id, "icon.svg")
+
+
 def _to_summary(plugin: Plugin) -> PluginSummary:
     manifest = PluginManifest.model_validate(plugin.manifest)
     nodes = [
@@ -56,6 +80,7 @@ def _to_summary(plugin: Plugin) -> PluginSummary:
             fields=node.fields,
             dsl_hint=node.dsl_hint,
             doc_slug=node.doc_slug,
+            has_icon=_resolve_icon(plugin.plugin_id, manifest, node.key) is not None,
         )
         for node in manifest.resolved_nodes()
     ]
@@ -67,7 +92,7 @@ def _to_summary(plugin: Plugin) -> PluginSummary:
         description=plugin.description,
         enabled=plugin.enabled,
         nodes=nodes,
-        has_icon=(plugin_store.plugins_root() / plugin.plugin_id / "icon.svg").exists(),
+        has_icon=_safe_icon_path(plugin.plugin_id, "icon.svg") is not None,
     )
 
 
@@ -107,11 +132,19 @@ async def get_plugin_doc(
 @router.get("/{plugin_id}/icon")
 async def get_plugin_icon(
     plugin_id: str,
+    node: str | None = Query(None, description="Resolve the icon for a specific node key"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     require_plugins_enabled()
-    icon = plugin_store.plugins_root() / plugin_id / "icon.svg"
-    if not icon.exists():
+    plugin = (
+        await db.execute(select(Plugin).where(Plugin.plugin_id == plugin_id))
+    ).scalar_one_or_none()
+    if plugin is None:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    manifest = PluginManifest.model_validate(plugin.manifest)
+    icon = _resolve_icon(plugin_id, manifest, node)
+    if icon is None:
         raise HTTPException(status_code=404, detail="Icon not found")
     return FileResponse(icon, media_type="image/svg+xml")
 

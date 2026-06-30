@@ -7,6 +7,7 @@ import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/type
 
 import { listPlugins } from "@/services/plugins";
 
+import PluginIcon from "@/components/Panels/PluginIcon.vue";
 import TemplatesBrowseDialog from "@/features/templates/components/TemplatesBrowseDialog.vue";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import {
@@ -55,6 +56,7 @@ interface PalettedPluginNode {
   name: string;
   description: string;
   kind: "action" | "trigger";
+  hasIcon: boolean;
 }
 
 const installedPlugins = ref<PluginSummary[]>([]);
@@ -76,6 +78,7 @@ const pluginNodes = computed<PalettedPluginNode[]>(() =>
       name: node.name,
       description: node.description,
       kind: node.kind,
+      hasIcon: Boolean(node.has_icon),
     })),
   ),
 );
@@ -101,6 +104,16 @@ function handlePluginDragStart(event: DragEvent, node: PalettedPluginNode): void
   event.dataTransfer.setData("application/heym-plugin-node-key", node.nodeKey);
   event.dataTransfer.setData("application/heym-plugin-label", node.name);
   event.dataTransfer.effectAllowed = "move";
+}
+
+function handlePluginDoubleClick(node: PalettedPluginNode): void {
+  const type: NodeType = node.kind === "trigger" ? "pluginTrigger" : "plugin";
+  handleDoubleClick(type, {
+    pluginId: node.pluginId,
+    pluginNodeKey: node.nodeKey,
+    label: node.name,
+    config: {},
+  });
 }
 
 onMounted(() => {
@@ -488,14 +501,14 @@ function addNodeFromTemplate(template: NodeTemplate): void {
   recordTemplateUse(template.id);
 }
 
-function handleDoubleClick(type: NodeType): void {
+function handleDoubleClick(type: NodeType, extraData?: Record<string, unknown>): void {
   const pendingInsert = workflowStore.pendingInsertEdge;
   if (pendingInsert && !isNoRegularInputNodeType(type)) {
     const newNode: WorkflowNode = {
       id: generateId(),
       type,
       position: { x: 0, y: 0 },
-      data: { ...NODE_DEFINITIONS[type].defaultData },
+      data: { ...NODE_DEFINITIONS[type].defaultData, ...(extraData ?? {}) },
     };
 
     const sourceNode = workflowStore.nodes.find((n) => n.id === pendingInsert.sourceId);
@@ -523,7 +536,7 @@ function handleDoubleClick(type: NodeType): void {
   const existingNodes = workflowStore.nodes;
   const offset = existingNodes.length * 20;
 
-  let defaultData = { ...NODE_DEFINITIONS[type].defaultData };
+  let defaultData = { ...NODE_DEFINITIONS[type].defaultData, ...(extraData ?? {}) };
 
   const pendingSource = workflowStore.pendingConnectionSource;
   if (pendingSource) {
@@ -688,6 +701,7 @@ function handleDoubleClick(type: NodeType): void {
             )"
             @mousedown="handleMouseDown"
             @dragstart="handlePluginDragStart($event, node)"
+            @dblclick="handlePluginDoubleClick(node)"
           >
             <div
               class="node-icon flex items-center justify-center w-10 h-10 rounded-xl shrink-0 transition-all duration-200"
@@ -696,7 +710,12 @@ function handleDoubleClick(type: NodeType): void {
                 color: `hsl(var(--${node.kind === 'trigger' ? 'node-trigger' : 'node-action'}))`,
               }"
             >
-              <Puzzle class="w-5 h-5" />
+              <PluginIcon
+                :plugin-id="node.pluginId"
+                :node-key="node.nodeKey"
+                :has-icon="node.hasIcon"
+                size-class="w-5 h-5"
+              />
             </div>
             <div class="min-w-0 flex-1">
               <div class="font-medium text-sm leading-tight">

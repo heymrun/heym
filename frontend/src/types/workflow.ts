@@ -200,6 +200,7 @@ export interface PluginNodeSummary {
   fields: PluginFieldDef[];
   dsl_hint?: string;
   doc_slug?: string;
+  has_icon?: boolean;
 }
 
 export interface PluginSummary {

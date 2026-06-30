@@ -48,6 +48,7 @@ class PluginNodeDef(BaseModel):
     kind: PluginKind
     function: str = ""
     description: str = ""
+    icon: str = ""
     fields: list[PluginField] = Field(default_factory=list)
     dsl_hint: str = Field(default="", alias="dslHint")
     doc_slug: str = Field(default="", alias="docSlug")
@@ -138,6 +139,7 @@ class PluginNodeSummary(BaseModel):
     fields: list[PluginField]
     dsl_hint: str = ""
     doc_slug: str = ""
+    has_icon: bool = False
 
 
 class PluginSummary(BaseModel):
