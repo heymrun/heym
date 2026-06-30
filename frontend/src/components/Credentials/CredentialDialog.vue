@@ -117,6 +117,9 @@ const notionConnectedCredential = ref<Credential | null>(null);
 const notionTesting = ref(false);
 const notionTestSuccess = ref<boolean | null>(null);
 const notionTestMessage = ref("");
+const sentryTesting = ref(false);
+const sentryTestSuccess = ref<boolean | null>(null);
+const sentryTestMessage = ref("");
 const s3AccessKeyId = ref("");
 const s3SecretAccessKey = ref("");
 const s3Region = ref("us-east-1");
@@ -199,6 +202,7 @@ const typeOptions = [
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
   { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
   { value: "notion", label: CREDENTIAL_TYPE_LABELS.notion },
+  { value: "sentry", label: CREDENTIAL_TYPE_LABELS.sentry },
   { value: "s3", label: CREDENTIAL_TYPE_LABELS.s3 },
 ];
 
@@ -304,6 +308,8 @@ watch(
             false);
         notionOAuthConnecting.value = false;
         notionConnectedCredential.value = null;
+        sentryTestSuccess.value = null;
+        sentryTestMessage.value = "";
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value =
@@ -382,6 +388,8 @@ watch(
         notionOAuthConnected.value = false;
         notionOAuthConnecting.value = false;
         notionConnectedCredential.value = null;
+        sentryTestSuccess.value = null;
+        sentryTestMessage.value = "";
         s3AccessKeyId.value = "";
         s3SecretAccessKey.value = "";
         s3Region.value = "us-east-1";
@@ -398,6 +406,9 @@ watch(
       notionTesting.value = false;
       notionTestSuccess.value = null;
       notionTestMessage.value = "";
+      sentryTesting.value = false;
+      sentryTestSuccess.value = null;
+      sentryTestMessage.value = "";
     }
   }
 );
@@ -423,6 +434,7 @@ const isValid = computed(() => {
     type.value === "openai" ||
     type.value === "google" ||
     type.value === "github" ||
+    type.value === "sentry" ||
     type.value === "elevenlabs"
   ) {
     return !!apiKey.value.trim() || isEditing.value;
@@ -562,6 +574,12 @@ function buildConfig(): CredentialConfig {
     const trimmedBaseUrl = baseUrl.value.trim();
     return {
       api_key: apiKey.value,
+      ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
+    };
+  } else if (type.value === "sentry") {
+    const trimmedBaseUrl = baseUrl.value.trim();
+    return {
+      api_token: apiKey.value.trim(),
       ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
     };
   } else if (type.value === "linear") {
@@ -962,6 +980,40 @@ async function testNotionConnection(): Promise<void> {
   }
 }
 
+async function testSentryConnection(): Promise<void> {
+  if (!apiKey.value.trim() && !isEditing.value) {
+    error.value = "Enter a Sentry auth token to test the connection.";
+    return;
+  }
+  sentryTesting.value = true;
+  sentryTestSuccess.value = null;
+  sentryTestMessage.value = "";
+  error.value = "";
+  try {
+    const trimmedBaseUrl = baseUrl.value.trim();
+    const result = await credentialsApi.testConnection({
+      type: "sentry",
+      config: {
+        api_token: apiKey.value.trim(),
+        ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
+      },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    sentryTestSuccess.value = result.success;
+    sentryTestMessage.value = result.message;
+    if (!result.success) {
+      error.value = result.message;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection test failed";
+    sentryTestSuccess.value = false;
+    sentryTestMessage.value = message;
+    error.value = message;
+  } finally {
+    sentryTesting.value = false;
+  }
+}
+
 const notionWorkspaceName = computed((): string => {
   const fromCredential =
     props.credential?.public_fields?.workspace_name ||
@@ -1289,7 +1341,7 @@ async function handleSave(): Promise<void> {
       </div>
 
       <div
-        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'elevenlabs'"
+        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'sentry' || type === 'elevenlabs'"
         class="space-y-2"
       >
         <Label for="cred-api-key">API Key</Label>
@@ -1298,7 +1350,7 @@ async function handleSave(): Promise<void> {
             id="cred-api-key"
             v-model="apiKey"
             :type="showApiKey ? 'text' : 'password'"
-            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : 'sk-...')"
+            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : type === 'sentry' ? 'sntrys_... or sentry auth token' : 'sk-...')"
             :disabled="saving"
             class="pr-10"
           />
@@ -1330,6 +1382,12 @@ async function handleSave(): Promise<void> {
           class="text-xs text-muted-foreground"
         >
           Use a GitHub personal access token. Fine-grained PATs are recommended. This credential currently targets PAT-based auth, not GitHub App installation flows.
+        </p>
+        <p
+          v-else-if="type === 'sentry'"
+          class="text-xs text-muted-foreground"
+        >
+          Use a Sentry auth token with access to the organizations and projects you want to automate.
         </p>
       </div>
 
@@ -1468,6 +1526,42 @@ async function handleSave(): Promise<void> {
           <code>https://github.example.com/api/v3</code>), not the web UI URL.
         </p>
       </div>
+
+      <template v-if="type === 'sentry'">
+        <div class="space-y-2">
+          <Label for="cred-sentry-base-url">Sentry Base URL (Optional)</Label>
+          <Input
+            id="cred-sentry-base-url"
+            v-model="baseUrl"
+            placeholder="https://sentry.io"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            Leave empty for Sentry SaaS. For self-hosted Sentry, enter the root URL, not
+            the <code>/api/0</code> path.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            :loading="sentryTesting"
+            :disabled="saving || sentryTesting || (!apiKey.trim() && !isEditing)"
+            @click="testSentryConnection"
+          >
+            Test Connection
+          </Button>
+          <p
+            v-if="sentryTestMessage"
+            class="text-xs"
+            :class="sentryTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ sentryTestMessage }}
+          </p>
+        </div>
+      </template>
 
       <template v-if="type === 'custom'">
         <div class="space-y-2">

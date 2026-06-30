@@ -62,6 +62,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Supabase](../nodes/supabase-node.md) | Query and mutate Supabase tables through PostgREST | 1 | 1 |
 | [ClickHouse](../nodes/clickhouse-node.md) | Run SQL, CRUD, and count operations against ClickHouse | 1 | 1 |
 | [Notion](../nodes/notion-node.md) | Manage Notion databases, data sources, pages, and blocks | 1 | 1 |
+| [Sentry](../nodes/sentry-node.md) | Manage Sentry organizations, projects, teams, issues, events, and releases | 1 | 1 |
 | [Amazon S3](../nodes/amazon-s3-node.md) | Manage buckets and folders; list, upload, download, copy, and delete objects | 1 | 1 |
 | [DataTable](../nodes/datatable-node.md) | Read/write Heym DataTables (first-party storage) | 1 | 1 |
 | [Drive](../nodes/drive-node.md) | Manage Drive files: delete, set password, TTL, max downloads | 1 | 1 |

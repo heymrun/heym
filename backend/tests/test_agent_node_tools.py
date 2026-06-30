@@ -116,6 +116,7 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
             ],
             "supabase-1": ["supabaseTable", "supabaseRows", "supabaseLimit"],
             "notion-1": ["notionDataSourceId", "notionProperties", "notionPageSize"],
+            "sentry-1": ["sentryOrganizationSlug", "sentryIssueId", "sentryStatus"],
             "s3-1": ["s3Bucket", "s3Key", "s3MaxKeys"],
         }
         nodes = {agent_id: {"type": "agent", "data": {"label": "Agent"}}}

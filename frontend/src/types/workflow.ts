@@ -164,6 +164,7 @@ export type NodeType =
   | "supabase"
   | "clickhouse"
   | "notion"
+  | "sentry"
   | "throwError"
   | "rabbitmq"
   | "imapTrigger"
@@ -712,6 +713,36 @@ export interface NodeData {
   notionStartCursor?: string;
   notionAppendPosition?: "start" | "end" | "after_block";
   notionAfterBlockId?: string;
+  sentryOperation?:
+    | "listOrganizations"
+    | "listProjects"
+    | "createProject"
+    | "listTeams"
+    | "createTeam"
+    | "listIssues"
+    | "getIssue"
+    | "updateIssue"
+    | "listEvents"
+    | "getEvent"
+    | "listReleases"
+    | "getRelease"
+    | "createRelease";
+  sentryOrganizationSlug?: string;
+  sentryProjectSlug?: string;
+  sentryTeamSlug?: string;
+  sentryIssueId?: string;
+  sentryEventId?: string;
+  sentryReleaseVersion?: string;
+  sentryName?: string;
+  sentrySlug?: string;
+  sentryPlatform?: string;
+  sentryStatus?: string;
+  sentryAssignedTo?: string;
+  sentryQuery?: string;
+  sentryStatsPeriod?: string;
+  sentryLimit?: string;
+  sentryReleaseProjects?: string;
+  sentryReleaseRefs?: string;
   gsOperation?: string;
   gsSpreadsheetId?: string;
   gsSheetName?: string;

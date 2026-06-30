@@ -2410,6 +2410,110 @@ export const useWorkflowStore = defineStore("workflow", () => {
           });
         }
       }
+
+      if (node.type === "sentry") {
+        const operation = node.data.sentryOperation;
+        const organizationOperations = new Set([
+          "listProjects",
+          "createProject",
+          "listTeams",
+          "createTeam",
+          "listIssues",
+          "listEvents",
+          "getEvent",
+          "listReleases",
+          "getRelease",
+          "createRelease",
+        ]);
+
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Credential is not selected",
+          });
+        }
+        if (!operation) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Operation is not selected",
+          });
+        }
+        if (
+          organizationOperations.has(operation ?? "") &&
+          !node.data.sentryOrganizationSlug?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Organization slug is required",
+          });
+        }
+        if (
+          (operation === "listEvents" || operation === "getEvent") &&
+          !node.data.sentryProjectSlug?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Project slug is required",
+          });
+        }
+        if (
+          (operation === "getIssue" || operation === "updateIssue") &&
+          !node.data.sentryIssueId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Issue ID is required",
+          });
+        }
+        if (operation === "getEvent" && !node.data.sentryEventId?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Event ID is required",
+          });
+        }
+        if (
+          (operation === "getRelease" || operation === "createRelease") &&
+          !node.data.sentryReleaseVersion?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Release version is required",
+          });
+        }
+        if (
+          operation === "createProject" &&
+          (!node.data.sentryTeamSlug?.trim() || !node.data.sentryName?.trim())
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Team slug and name are required to create a project",
+          });
+        }
+        if (operation === "createTeam" && !node.data.sentryName?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Sentry",
+            message: "Name is required to create a team",
+          });
+        }
+      }
     }
 
     return {

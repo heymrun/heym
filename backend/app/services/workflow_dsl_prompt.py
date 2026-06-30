@@ -3930,7 +3930,44 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 34. github (GitHub REST Operations)
+### 34. sentry (Sentry REST Operations)
+- **Type**: `sentry`
+- **Purpose**: Manage Sentry organizations, projects, teams, issues, events, and releases
+- **Inputs**: 1 | **Outputs**: 1
+- **Required setup**: `credentialId` must point to an owned Sentry credential
+- **Operations**: `listOrganizations`, `listProjects`, `createProject`, `listTeams`,
+  `createTeam`, `listIssues`, `getIssue`, `updateIssue`, `listEvents`, `getEvent`,
+  `listReleases`, `getRelease`, `createRelease`
+- **Fields**: `sentryOperation`, `sentryOrganizationSlug`, `sentryProjectSlug`,
+  `sentryTeamSlug`, `sentryIssueId`, `sentryEventId`, `sentryReleaseVersion`,
+  `sentryName`, `sentrySlug`, `sentryPlatform`, `sentryStatus`, `sentryAssignedTo`,
+  `sentryQuery`, `sentryStatsPeriod`, `sentryLimit`, `sentryReleaseProjects`,
+  `sentryReleaseRefs`
+- Text and JSON-array fields support expressions.
+- Issue status accepts common Sentry values such as `resolved`, `unresolved`, and `ignored`.
+- List outputs contain `{success, operation, count, organizations|projects|teams|issues|events|releases}`.
+- Single-resource outputs contain `{success, operation, issue|event|release|project|team}`.
+
+**Example — list unresolved issues:**
+```json
+{
+  "id": "sentry-1",
+  "type": "sentry",
+  "position": {"x": 500, "y": 100},
+  "data": {
+    "label": "sentryIssues",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "sentryOperation": "listIssues",
+    "sentryOrganizationSlug": "acme",
+    "sentryProjectSlug": "web-app",
+    "sentryQuery": "is:unresolved level:error",
+    "sentryStatsPeriod": "14d",
+    "sentryLimit": "25"
+  }
+}
+```
+
+### 35. github (GitHub REST Operations)
 - **Type**: `github`
 - **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
   workflows, traffic insights, and repository files

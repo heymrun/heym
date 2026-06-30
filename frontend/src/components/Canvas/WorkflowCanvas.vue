@@ -669,6 +669,7 @@ function handleNodeDoubleClick(event: {
       githubOperation?: string;
       linearOperation?: string;
       notionOperation?: string;
+      sentryOperation?: string;
     };
   };
 }): void {
@@ -766,6 +767,19 @@ function handleNodeDoubleClick(event: {
       notionOperation === "appendBlocks"
     ) {
       fieldToFocus = "notionBlockId";
+    }
+  } else if (nodeType === "sentry") {
+    const sentryOperation = event.node.data?.sentryOperation;
+    if (sentryOperation === "getIssue" || sentryOperation === "updateIssue") {
+      fieldToFocus = "sentryIssueId";
+    } else if (sentryOperation === "getEvent") {
+      fieldToFocus = "sentryEventId";
+    } else if (sentryOperation === "getRelease" || sentryOperation === "createRelease") {
+      fieldToFocus = "sentryReleaseVersion";
+    } else if (sentryOperation === "createProject" || sentryOperation === "createTeam") {
+      fieldToFocus = "sentryName";
+    } else {
+      fieldToFocus = "sentryOrganizationSlug";
     }
   } else if (nodeType === "throwError") {
     fieldToFocus = "errorMessage";
@@ -1031,6 +1045,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     supabase: { label: "supabase", credentialId: "", supabaseOperation: undefined, supabaseSchema: "public", supabaseTable: "", supabaseSelectColumns: "*", supabaseFilter: "{}", supabaseLimit: "100", supabaseOrderBy: "", supabaseAscending: true, supabaseRows: "[]", supabaseOnConflict: "", supabaseData: "{}" },
     clickhouse: { label: "clickhouse", credentialId: "", clickhouseOperation: undefined, clickhouseTable: "", clickhouseQuery: "", clickhouseFilter: "{}", clickhouseLimit: "100", clickhouseSort: "", clickhouseRowId: "", clickhouseInputMode: "raw", clickhouseData: "[]", clickhouseMappings: [] },
     notion: { label: "notion", credentialId: "", notionOperation: undefined, notionQuery: "", notionPageId: "", notionDatabaseId: "", notionDatabase: "{}", notionDataSourceId: "", notionDataSource: "{}", notionDataSourceInputMode: "select", notionParentPageId: "", notionParentPageInputMode: "select", notionBlockId: "", notionBlock: "{}", notionProperties: "{}", notionChildren: "[]", notionFilter: "{}", notionSort: "{}", notionSorts: "[]", notionIcon: "{}", notionCover: "{}", notionPageSize: "100", notionStartCursor: "", notionAppendPosition: "end", notionAfterBlockId: "" },
+    sentry: { label: "sentry", credentialId: "", sentryOperation: "listIssues", sentryOrganizationSlug: "", sentryProjectSlug: "", sentryTeamSlug: "", sentryIssueId: "", sentryEventId: "", sentryReleaseVersion: "", sentryName: "", sentrySlug: "", sentryPlatform: "", sentryStatus: "", sentryAssignedTo: "", sentryQuery: "", sentryStatsPeriod: "14d", sentryLimit: "25", sentryReleaseProjects: "[]", sentryReleaseRefs: "[]" },
     s3: { label: "amazonS3", credentialId: "", s3Operation: "putObject", s3Bucket: "", s3Key: "$input.filename || 'output.txt'", s3SourceBucket: "", s3SourceKey: "", s3Prefix: "", s3ContinuationToken: "", s3Body: "$input.text", s3ContentType: "text/plain", s3MaxKeys: "100", s3IncludeBinary: false },
     throwError: { label: "throwError", errorMessage: "$input.text", httpStatusCode: 400 },
     rabbitmq: { label: "rabbitmq", credentialId: "", rabbitmqOperation: undefined, rabbitmqExchange: "", rabbitmqRoutingKey: "", rabbitmqQueueName: "", rabbitmqMessageBody: "$input", rabbitmqDelayMs: undefined },

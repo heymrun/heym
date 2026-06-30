@@ -51,6 +51,7 @@ class CredentialType(str, PyEnum):
     bigquery = "bigquery"
     supabase = "supabase"
     notion = "notion"
+    sentry = "sentry"
     s3 = "s3"
     elevenlabs = "elevenlabs"
     clickhouse = "clickhouse"

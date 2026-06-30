@@ -14,6 +14,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
+| **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -123,6 +124,29 @@ OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and re
 ### Used By
 
 - [Linear node](../nodes/linear-node.md)
+
+---
+
+## Sentry
+
+The Sentry credential stores an auth token for the [Sentry node](../nodes/sentry-node.md). Heym uses Sentry's REST API for organization, project, team, issue, event, and release operations.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `api_token` | Sentry auth token with access to the organizations and projects you automate |
+| `base_url` | Optional root URL for self-hosted Sentry, for example `https://sentry.example.com` |
+
+### Notes
+
+- Leave `base_url` empty for Sentry SaaS.
+- Use **Test Connection** to confirm the token can list visible organizations.
+- For custom REST calls, use `$credentials.YourSentryCredential` as the bearer token.
+
+### Used By
+
+- [Sentry node](../nodes/sentry-node.md)
 
 ---
 

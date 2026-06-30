@@ -134,6 +134,10 @@ import {
   getNotionExpressionFields,
   type NotionExpressionFieldKey,
 } from "@/lib/notionExpressionFields";
+import {
+  getSentryExpressionFields,
+  type SentryExpressionFieldKey,
+} from "@/lib/sentryExpressionFields";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { cn } from "@/lib/utils";
 import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
@@ -192,6 +196,7 @@ const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   supabase: Database,
   clickhouse: Database,
   notion: FileText,
+  sentry: ShieldAlert,
   throwError: XCircle,
   rabbitmq: Rabbit,
   crawler: Bug,
@@ -244,6 +249,7 @@ const nodeColorMap: Record<NodeType, string> = {
   supabase: "node-datatable",
   clickhouse: "node-datatable",
   notion: "node-notion",
+  sentry: "node-sentry",
   throwError: "node-throw-error",
   rabbitmq: "node-rabbitmq",
   crawler: "node-crawler",
@@ -296,6 +302,7 @@ const nodeDocSlugMap: Record<NodeType, string> = {
   supabase: "supabase-node",
   clickhouse: "clickhouse-node",
   notion: "notion-node",
+  sentry: "sentry-node",
   throwError: "throw-error-node",
   rabbitmq: "rabbitmq-node",
   crawler: "crawler-node",
@@ -606,6 +613,7 @@ const bigqueryCredentials = ref<CredentialListItem[]>([]);
 const supabaseCredentials = ref<CredentialListItem[]>([]);
 const clickhouseCredentials = ref<CredentialListItem[]>([]);
 const notionCredentials = ref<CredentialListItem[]>([]);
+const sentryCredentials = ref<CredentialListItem[]>([]);
 const notionDiscoveredDataSources = ref<NotionDataSourceItem[]>([]);
 const loadingNotionDataSources = ref(false);
 const notionDataSourcesError = ref<string | null>(null);
@@ -724,6 +732,23 @@ const githubReleaseIdExpressionInputRef = ref<InstanceType<typeof ExpressionInpu
 const githubWorkflowIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const githubWorkflowInputsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const currentGitHubExpressionFieldIndex = ref(0);
+const sentryOrganizationSlugExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryProjectSlugExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryTeamSlugExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryIssueIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryEventIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryReleaseVersionExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryNameExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentrySlugExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryPlatformExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryStatusExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryAssignedToExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryQueryExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryStatsPeriodExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryLimitExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryReleaseProjectsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const sentryReleaseRefsExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
+const currentSentryExpressionFieldIndex = ref(0);
 const linearLimitExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const linearAfterExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
 const linearTeamIdExpressionInputRef = ref<InstanceType<typeof ExpressionInput> | null>(null);
@@ -1111,6 +1136,14 @@ watch(
         notionCredentials.value = await credentialsApi.listByType("notion");
       } catch {
         notionCredentials.value = [];
+      }
+    }
+
+    if (type === "sentry") {
+      try {
+        sentryCredentials.value = await credentialsApi.listByType("sentry");
+      } catch {
+        sentryCredentials.value = [];
       }
     }
 
@@ -2177,6 +2210,7 @@ function closeAllExpressionExpandDialogs(): void {
   closeMCPCallExpressionDialogs();
   closeChartOutputExpressionDialogs();
   closeGitHubExpressionDialogs();
+  closeSentryExpressionDialogs();
   closeLinearExpressionDialogs();
 }
 
@@ -2586,6 +2620,28 @@ function openPrimaryExpandDialogForSelectedNode(): void {
       const field = githubExpressionFields.value[startIndex];
       if (field && githubExpressionInputRefForKey(field.key)) {
         nextTick(() => openGitHubExpressionFieldAtIndex(startIndex));
+      } else {
+        setTimeout(() => tryOpenDialog(attempts + 1), 100);
+      }
+    };
+    nextTick(() => tryOpenDialog());
+  } else if (nodeType === "sentry") {
+    const startIndex = resolveSentryExpressionStartIndex();
+    currentSentryExpressionFieldIndex.value = startIndex;
+    const tryOpenDialog = (attempts = 0): void => {
+      if (attempts > 20) {
+        return;
+      }
+      const n = workflowStore.selectedNode;
+      if (!n || n.type !== "sentry") {
+        return;
+      }
+      if (sentryExpressionFieldCount.value === 0) {
+        return;
+      }
+      const field = sentryExpressionFields.value[startIndex];
+      if (field && sentryExpressionInputRefForKey(field.key)) {
+        nextTick(() => openSentryExpressionFieldAtIndex(startIndex));
       } else {
         setTimeout(() => tryOpenDialog(attempts + 1), 100);
       }
@@ -3251,6 +3307,7 @@ watch(
     currentPlaywrightExpressionFieldIndex.value = 0;
     currentMCPCallExpressionFieldIndex.value = 0;
     currentGitHubExpressionFieldIndex.value = 0;
+    currentSentryExpressionFieldIndex.value = 0;
     currentLinearExpressionFieldIndex.value = 0;
     currentNotionExpressionFieldIndex.value = 0;
     playwrightExprRefsBySlotKey.value = {};
@@ -3930,6 +3987,17 @@ const githubExpressionFields = computed(() => {
 
 const githubExpressionFieldCount = computed((): number => githubExpressionFields.value.length);
 
+const sentryExpressionFields = computed(() => {
+  const n = workflowStore.selectedNode;
+  if (!n || n.type !== "sentry") {
+    return [];
+  }
+  const operation = (n.data.sentryOperation as string | undefined) || "listIssues";
+  return getSentryExpressionFields(operation);
+});
+
+const sentryExpressionFieldCount = computed((): number => sentryExpressionFields.value.length);
+
 const linearExpressionFields = computed(() => {
   const n = workflowStore.selectedNode;
   if (!n || n.type !== "linear") {
@@ -4284,6 +4352,141 @@ function handleGitHubExpressionFieldNavigate(direction: "prev" | "next"): void {
 
 function onGitHubRegisterExpressionFieldIndex(index: number): void {
   currentGitHubExpressionFieldIndex.value = index;
+}
+
+function sentryExpressionFieldIndex(key: SentryExpressionFieldKey): number {
+  const index = sentryExpressionFields.value.findIndex((field) => field.key === key);
+  return index >= 0 ? index : -1;
+}
+
+function sentryExpressionFieldLabel(key: SentryExpressionFieldKey): string {
+  return sentryExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+}
+
+function sentryExpressionNavBindings(key: SentryExpressionFieldKey): {
+  navigationEnabled: boolean;
+  navigationIndex: number;
+  navigationTotal: number;
+  dialogNodeLabel: string;
+  dialogKeyLabel: string;
+} {
+  const index = sentryExpressionFieldIndex(key);
+  return {
+    navigationEnabled: sentryExpressionFieldCount.value > 1 && index >= 0,
+    navigationIndex: index >= 0 ? index : 0,
+    navigationTotal: sentryExpressionFieldCount.value,
+    dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+    dialogKeyLabel: sentryExpressionFieldLabel(key),
+  };
+}
+
+function sentryExpressionInputRefForKey(
+  key: SentryExpressionFieldKey,
+): InstanceType<typeof ExpressionInput> | null {
+  switch (key) {
+    case "sentryOrganizationSlug":
+      return sentryOrganizationSlugExpressionInputRef.value;
+    case "sentryProjectSlug":
+      return sentryProjectSlugExpressionInputRef.value;
+    case "sentryTeamSlug":
+      return sentryTeamSlugExpressionInputRef.value;
+    case "sentryIssueId":
+      return sentryIssueIdExpressionInputRef.value;
+    case "sentryEventId":
+      return sentryEventIdExpressionInputRef.value;
+    case "sentryReleaseVersion":
+      return sentryReleaseVersionExpressionInputRef.value;
+    case "sentryName":
+      return sentryNameExpressionInputRef.value;
+    case "sentrySlug":
+      return sentrySlugExpressionInputRef.value;
+    case "sentryPlatform":
+      return sentryPlatformExpressionInputRef.value;
+    case "sentryStatus":
+      return sentryStatusExpressionInputRef.value;
+    case "sentryAssignedTo":
+      return sentryAssignedToExpressionInputRef.value;
+    case "sentryQuery":
+      return sentryQueryExpressionInputRef.value;
+    case "sentryStatsPeriod":
+      return sentryStatsPeriodExpressionInputRef.value;
+    case "sentryLimit":
+      return sentryLimitExpressionInputRef.value;
+    case "sentryReleaseProjects":
+      return sentryReleaseProjectsExpressionInputRef.value;
+    case "sentryReleaseRefs":
+      return sentryReleaseRefsExpressionInputRef.value;
+    default:
+      return null;
+  }
+}
+
+function resolveSentryExpressionStartIndex(): number {
+  const focusField = workflowStore.focusField;
+  if (focusField) {
+    const index = sentryExpressionFieldIndex(focusField as SentryExpressionFieldKey);
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function openSentryExpressionFieldAtIndex(index: number): boolean {
+  const n = selectedNode.value;
+  if (!n || n.type !== "sentry") {
+    return false;
+  }
+  const field = sentryExpressionFields.value[index];
+  if (!field) {
+    return false;
+  }
+  currentSentryExpressionFieldIndex.value = index;
+  const input = sentryExpressionInputRefForKey(field.key);
+  if (!input) {
+    return false;
+  }
+  input.openExpandDialog();
+  return true;
+}
+
+function closeSentryExpressionDialogs(): void {
+  sentryOrganizationSlugExpressionInputRef.value?.closeExpandDialog();
+  sentryProjectSlugExpressionInputRef.value?.closeExpandDialog();
+  sentryTeamSlugExpressionInputRef.value?.closeExpandDialog();
+  sentryIssueIdExpressionInputRef.value?.closeExpandDialog();
+  sentryEventIdExpressionInputRef.value?.closeExpandDialog();
+  sentryReleaseVersionExpressionInputRef.value?.closeExpandDialog();
+  sentryNameExpressionInputRef.value?.closeExpandDialog();
+  sentrySlugExpressionInputRef.value?.closeExpandDialog();
+  sentryPlatformExpressionInputRef.value?.closeExpandDialog();
+  sentryStatusExpressionInputRef.value?.closeExpandDialog();
+  sentryAssignedToExpressionInputRef.value?.closeExpandDialog();
+  sentryQueryExpressionInputRef.value?.closeExpandDialog();
+  sentryStatsPeriodExpressionInputRef.value?.closeExpandDialog();
+  sentryLimitExpressionInputRef.value?.closeExpandDialog();
+  sentryReleaseProjectsExpressionInputRef.value?.closeExpandDialog();
+  sentryReleaseRefsExpressionInputRef.value?.closeExpandDialog();
+}
+
+function handleSentryExpressionFieldNavigate(direction: "prev" | "next"): void {
+  const total = sentryExpressionFieldCount.value;
+  const newIndex =
+    direction === "prev"
+      ? currentSentryExpressionFieldIndex.value - 1
+      : currentSentryExpressionFieldIndex.value + 1;
+  if (newIndex < 0 || newIndex >= total) {
+    return;
+  }
+  closeSentryExpressionDialogs();
+  currentSentryExpressionFieldIndex.value = newIndex;
+  nextTick(() => {
+    openSentryExpressionFieldAtIndex(newIndex);
+  });
+}
+
+function onSentryRegisterExpressionFieldIndex(index: number): void {
+  currentSentryExpressionFieldIndex.value = index;
 }
 
 function bqMappingInputRef(index: number, el: InstanceType<typeof ExpressionInput> | null): void {
@@ -5507,6 +5710,54 @@ const notionOperationOptions = [
   { value: "deleteBlock", label: "Delete Block" },
   { value: "appendBlocks", label: "Append Blocks" },
 ];
+
+const sentryCredentialOptions = computed(() => {
+  const node = selectedNode.value;
+  const selectedCredentialId =
+    node && node.type === "sentry"
+      ? (node.data.credentialId as string | undefined)
+      : undefined;
+
+  return buildCredentialOptions(
+    sentryCredentials.value,
+    selectedCredentialId,
+    "Select Sentry credential...",
+    "Shared Sentry credential (from owner)",
+  );
+});
+
+const sentryOperationOptions = [
+  { value: "listOrganizations", label: "List Organizations" },
+  { value: "listProjects", label: "List Projects" },
+  { value: "createProject", label: "Create Project" },
+  { value: "listTeams", label: "List Teams" },
+  { value: "createTeam", label: "Create Team" },
+  { value: "listIssues", label: "List Issues" },
+  { value: "getIssue", label: "Get Issue" },
+  { value: "updateIssue", label: "Update Issue" },
+  { value: "listEvents", label: "List Events" },
+  { value: "getEvent", label: "Get Event" },
+  { value: "listReleases", label: "List Releases" },
+  { value: "getRelease", label: "Get Release" },
+  { value: "createRelease", label: "Create Release" },
+];
+
+const sentryOrganizationOperations = new Set([
+  "listProjects",
+  "createProject",
+  "listTeams",
+  "createTeam",
+  "listIssues",
+  "listEvents",
+  "getEvent",
+  "listReleases",
+  "getRelease",
+  "createRelease",
+]);
+
+function isSentryOrganizationRequired(operation: string | undefined): boolean {
+  return sentryOrganizationOperations.has(operation || "");
+}
 
 const notionDataSourceOptions = computed(() => {
   const selectedId =
@@ -16131,6 +16382,395 @@ onUnmounted(() => {
                 <template v-else>
                   <div>Select an operation to see output fields</div>
                 </template>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="selectedNode.type === 'sentry'">
+            <div class="space-y-2">
+              <Label>Credential</Label>
+              <Select
+                :model-value="selectedNode.data.credentialId || ''"
+                :options="sentryCredentialOptions"
+                @update:model-value="updateNodeData('credentialId', $event)"
+              />
+              <p
+                v-if="!selectedNode.data.credentialId"
+                class="text-xs text-amber-500 flex items-center gap-1"
+              >
+                <AlertTriangle class="h-3 w-3" />
+                Sentry credential is required.
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label>Operation</Label>
+              <Select
+                :model-value="selectedNode.data.sentryOperation || 'listIssues'"
+                :options="sentryOperationOptions"
+                @update:model-value="updateNodeData('sentryOperation', $event)"
+              />
+            </div>
+
+            <div
+              v-if="isSentryOrganizationRequired(selectedNode.data.sentryOperation)"
+              class="space-y-2"
+            >
+              <Label>Organization Slug</Label>
+              <ExpressionInput
+                ref="sentryOrganizationSlugExpressionInputRef"
+                :model-value="selectedNode.data.sentryOrganizationSlug || ''"
+                placeholder="acme"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryOrganizationSlug"
+                v-bind="sentryExpressionNavBindings('sentryOrganizationSlug')"
+                @update:model-value="updateNodeData('sentryOrganizationSlug', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['listIssues', 'listEvents', 'getEvent'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Project Slug</Label>
+              <ExpressionInput
+                ref="sentryProjectSlugExpressionInputRef"
+                :model-value="selectedNode.data.sentryProjectSlug || ''"
+                placeholder="web-app"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryProjectSlug"
+                v-bind="sentryExpressionNavBindings('sentryProjectSlug')"
+                @update:model-value="updateNodeData('sentryProjectSlug', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'createProject'"
+              class="space-y-2"
+            >
+              <Label>Team Slug</Label>
+              <ExpressionInput
+                ref="sentryTeamSlugExpressionInputRef"
+                :model-value="selectedNode.data.sentryTeamSlug || ''"
+                placeholder="backend"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryTeamSlug"
+                v-bind="sentryExpressionNavBindings('sentryTeamSlug')"
+                @update:model-value="updateNodeData('sentryTeamSlug', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['createProject', 'createTeam'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Name</Label>
+              <ExpressionInput
+                ref="sentryNameExpressionInputRef"
+                :model-value="selectedNode.data.sentryName || ''"
+                placeholder="Project or team name"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryName"
+                v-bind="sentryExpressionNavBindings('sentryName')"
+                @update:model-value="updateNodeData('sentryName', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['createProject', 'createTeam'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Slug</Label>
+              <ExpressionInput
+                ref="sentrySlugExpressionInputRef"
+                :model-value="selectedNode.data.sentrySlug || ''"
+                placeholder="optional-slug"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentrySlug"
+                v-bind="sentryExpressionNavBindings('sentrySlug')"
+                @update:model-value="updateNodeData('sentrySlug', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'createProject'"
+              class="space-y-2"
+            >
+              <Label>Platform</Label>
+              <ExpressionInput
+                ref="sentryPlatformExpressionInputRef"
+                :model-value="selectedNode.data.sentryPlatform || ''"
+                placeholder="javascript-vue"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryPlatform"
+                v-bind="sentryExpressionNavBindings('sentryPlatform')"
+                @update:model-value="updateNodeData('sentryPlatform', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['listIssues', 'listEvents'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Query</Label>
+              <ExpressionInput
+                ref="sentryQueryExpressionInputRef"
+                :model-value="selectedNode.data.sentryQuery || ''"
+                placeholder="is:unresolved level:error"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryQuery"
+                v-bind="sentryExpressionNavBindings('sentryQuery')"
+                @update:model-value="updateNodeData('sentryQuery', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'listIssues'"
+              class="space-y-2"
+            >
+              <Label>Stats Period</Label>
+              <ExpressionInput
+                ref="sentryStatsPeriodExpressionInputRef"
+                :model-value="selectedNode.data.sentryStatsPeriod || '14d'"
+                placeholder="14d"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryStatsPeriod"
+                v-bind="sentryExpressionNavBindings('sentryStatsPeriod')"
+                @update:model-value="updateNodeData('sentryStatsPeriod', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['listOrganizations', 'listProjects', 'listTeams', 'listIssues', 'listEvents', 'listReleases'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Limit</Label>
+              <ExpressionInput
+                ref="sentryLimitExpressionInputRef"
+                :model-value="selectedNode.data.sentryLimit || '25'"
+                placeholder="25"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryLimit"
+                v-bind="sentryExpressionNavBindings('sentryLimit')"
+                @update:model-value="updateNodeData('sentryLimit', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['getIssue', 'updateIssue'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Issue ID</Label>
+              <ExpressionInput
+                ref="sentryIssueIdExpressionInputRef"
+                :model-value="selectedNode.data.sentryIssueId || ''"
+                placeholder="1234567890"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryIssueId"
+                v-bind="sentryExpressionNavBindings('sentryIssueId')"
+                @update:model-value="updateNodeData('sentryIssueId', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>Status</Label>
+              <ExpressionInput
+                ref="sentryStatusExpressionInputRef"
+                :model-value="selectedNode.data.sentryStatus || ''"
+                placeholder="resolved | unresolved | ignored"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryStatus"
+                v-bind="sentryExpressionNavBindings('sentryStatus')"
+                @update:model-value="updateNodeData('sentryStatus', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'updateIssue'"
+              class="space-y-2"
+            >
+              <Label>Assigned To</Label>
+              <ExpressionInput
+                ref="sentryAssignedToExpressionInputRef"
+                :model-value="selectedNode.data.sentryAssignedTo || ''"
+                placeholder="user:email@example.com or team:backend"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryAssignedTo"
+                v-bind="sentryExpressionNavBindings('sentryAssignedTo')"
+                @update:model-value="updateNodeData('sentryAssignedTo', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'getEvent'"
+              class="space-y-2"
+            >
+              <Label>Event ID</Label>
+              <ExpressionInput
+                ref="sentryEventIdExpressionInputRef"
+                :model-value="selectedNode.data.sentryEventId || ''"
+                placeholder="event id"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryEventId"
+                v-bind="sentryExpressionNavBindings('sentryEventId')"
+                @update:model-value="updateNodeData('sentryEventId', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="['getRelease', 'createRelease'].includes(selectedNode.data.sentryOperation || '')"
+              class="space-y-2"
+            >
+              <Label>Release Version</Label>
+              <ExpressionInput
+                ref="sentryReleaseVersionExpressionInputRef"
+                :model-value="selectedNode.data.sentryReleaseVersion || ''"
+                placeholder="my-app@1.2.3"
+                single-line
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryReleaseVersion"
+                v-bind="sentryExpressionNavBindings('sentryReleaseVersion')"
+                @update:model-value="updateNodeData('sentryReleaseVersion', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'createRelease'"
+              class="space-y-2"
+            >
+              <Label>Projects (JSON array)</Label>
+              <ExpressionInput
+                ref="sentryReleaseProjectsExpressionInputRef"
+                :model-value="selectedNode.data.sentryReleaseProjects || '[]'"
+                placeholder="[&quot;web-app&quot;]"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryReleaseProjects"
+                v-bind="sentryExpressionNavBindings('sentryReleaseProjects')"
+                @update:model-value="updateNodeData('sentryReleaseProjects', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div
+              v-if="selectedNode.data.sentryOperation === 'createRelease'"
+              class="space-y-2"
+            >
+              <Label>Refs (JSON array)</Label>
+              <ExpressionInput
+                ref="sentryReleaseRefsExpressionInputRef"
+                :model-value="selectedNode.data.sentryReleaseRefs || '[]'"
+                placeholder="[{&quot;repository&quot;:&quot;owner/repo&quot;,&quot;commit&quot;:&quot;abc123&quot;}]"
+                :nodes="workflowStore.nodes"
+                :node-results="workflowStore.nodeResults"
+                :edges="workflowStore.edges"
+                :current-node-id="selectedNode.id"
+                field-key="sentryReleaseRefs"
+                v-bind="sentryExpressionNavBindings('sentryReleaseRefs')"
+                @update:model-value="updateNodeData('sentryReleaseRefs', $event)"
+                @navigate="handleSentryExpressionFieldNavigate"
+                @register-field-index="onSentryRegisterExpressionFieldIndex"
+              />
+            </div>
+
+            <div class="rounded-md bg-muted/40 border p-3 space-y-1">
+              <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Output
+              </p>
+              <div class="text-xs font-mono space-y-0.5">
+                <div>${{ selectedNode.data.label }}.issues - Listed issues</div>
+                <div>${{ selectedNode.data.label }}.event - Single event</div>
+                <div>${{ selectedNode.data.label }}.release - Single release</div>
+                <div>${{ selectedNode.data.label }}.count - List result count</div>
               </div>
             </div>
           </template>

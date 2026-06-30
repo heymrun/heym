@@ -1939,6 +1939,8 @@ async def get_credentials_context(
                 from app.services.notion_service import NotionService
 
                 context[cred.name] = NotionService.resolve_bearer_token(config)
+            elif cred.type == CredentialType.sentry:
+                context[cred.name] = config.get("api_token", "")
             else:
                 context[cred.name] = config.get("api_key", "")
         except Exception:

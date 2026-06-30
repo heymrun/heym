@@ -24,6 +24,7 @@ export type CredentialType =
   | "bigquery"
   | "supabase"
   | "notion"
+  | "sentry"
   | "s3"
   | "elevenlabs"
   | "clickhouse";
@@ -228,6 +229,11 @@ export interface CredentialConfigNotion {
   auth_mode?: "token" | "oauth";
 }
 
+export interface CredentialConfigSentry {
+  api_token: string;
+  base_url?: string;
+}
+
 export type CredentialConfig =
   | CredentialConfigOpenAI
   | CredentialConfigGoogle
@@ -254,6 +260,7 @@ export type CredentialConfig =
   | CredentialConfigSupabase
   | CredentialConfigClickHouse
   | CredentialConfigNotion
+  | CredentialConfigSentry
   | CredentialConfigS3
   | CredentialConfigElevenLabs;
 
@@ -352,6 +359,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   supabase: "Supabase",
   clickhouse: "ClickHouse",
   notion: "Notion (Token or OAuth)",
+  sentry: "Sentry",
   s3: "Amazon S3",
   elevenlabs: "ElevenLabs (Voice)",
 };
@@ -385,6 +393,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   clickhouse:
     "Connect to ClickHouse — run SQL and CRUD over OLAP tables via the HTTP interface",
   notion: "Connect to Notion with an internal token or user-authorized OAuth workspace",
+  sentry: "Connect to Sentry for organizations, projects, issues, events, and releases",
   s3: "Connect to Amazon S3 — manage buckets, folders, and objects",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
 };

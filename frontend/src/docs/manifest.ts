@@ -61,6 +61,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "supabase-node", title: "Supabase" },
       { slug: "clickhouse-node", title: "ClickHouse" },
       { slug: "notion-node", title: "Notion" },
+      { slug: "sentry-node", title: "Sentry" },
       { slug: "amazon-s3-node", title: "Amazon S3" },
       { slug: "drive-node", title: "Drive" },
       { slug: "datatable-node", title: "DataTable" },

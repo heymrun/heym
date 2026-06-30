@@ -51,6 +51,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 |-----------|-------|-------------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), Image Gen | `credentialId` | LLM API credential |
 | [Notion](../nodes/notion-node.md) | `credentialId` | Notion internal token or OAuth workspace credential |
+| [Sentry](../nodes/sentry-node.md) | `credentialId` | Sentry auth token and optional base URL |
 | [Supabase](../nodes/supabase-node.md) | `credentialId` | Supabase project URL and API key |
 | [ClickHouse](../nodes/clickhouse-node.md) | `credentialId` | ClickHouse connection details (host, port, auth, database) |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md), [Telegram](../nodes/telegram-node.md) | `credentialId` | Telegram bot credential |

@@ -478,6 +478,7 @@ class CredentialType(str, Enum):
     bigquery = "bigquery"
     supabase = "supabase"
     notion = "notion"
+    sentry = "sentry"
     s3 = "s3"
     elevenlabs = "elevenlabs"
     clickhouse = "clickhouse"
@@ -569,6 +570,11 @@ class CredentialConfigNotion(BaseModel):
     client_secret: str | None = None
     access_token: str | None = None
     auth_mode: str | None = None
+
+
+class CredentialConfigSentry(BaseModel):
+    api_token: str
+    base_url: str | None = None
 
 
 class CredentialCreate(BaseModel):
