@@ -48,6 +48,13 @@ in `HEYM_PLUGIN_ADMIN_EMAILS`, and the whole subsystem is gated by
 [Running & Deployment](../getting-started/running-and-deployment.md) for the
 environment variables.
 
+## Custom Icons
+
+A plugin can ship custom SVG logos. Put an `icon.svg` at the package root to set a
+default for every node, and/or give a node its own `"icon": "<file>.svg"` in the
+manifest. The icon shows on both the palette card and the canvas node; nodes
+without an icon fall back to the default puzzle‑piece glyph.
+
 ## AI Builder
 
 Installed plugins are surfaced to the AI assistant and chat canvas, so you can ask
