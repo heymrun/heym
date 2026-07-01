@@ -30,6 +30,7 @@ import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import Tooltip from "@/components/ui/Tooltip.vue";
 import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
 import {
   extractClarifyBlock,
@@ -217,6 +218,13 @@ const contextUsageForBadge = computed(() => {
   return chatStore.contextUsageByConv[props.conversationId] ?? null;
 });
 const interactiveVoiceOpen = ref(false);
+const interactiveVoiceTooltip =
+  "Hands-free voice mode — speak, hear replies, and keep talking without typing";
+const speechInputTooltip = computed((): string => {
+  if (isFixingTranscription.value) return "Cleaning up dictated text…";
+  if (isListening.value) return "Stop dictation";
+  return "Dictate into the message box with your microphone";
+});
 const canFocusInput = computed(
   () =>
     canSendMessage.value &&
@@ -1320,90 +1328,98 @@ onUnmounted(() => {
       >
         <div
           v-if="queuedMessages.length > 0"
-          class="flex max-h-28 w-full min-w-0 flex-col gap-1 overflow-y-auto"
+          class="w-full min-w-0 rounded-lg border border-border/50 bg-muted/35 px-2.5 py-2"
         >
-          <div
-            v-for="queued in queuedMessages"
-            :key="queued.id"
-            class="group/queue relative min-w-0 rounded-lg border border-border/50 bg-muted/35 px-2.5 py-1.5 pr-[4.5rem] text-sm text-foreground"
-          >
-            <template v-if="queueEditingId === queued.id">
-              <div class="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                <span>Queued</span>
-                <span v-if="queueBusyIds.has(queued.id)">Saving...</span>
-              </div>
-              <textarea
-                v-model="queueEditingValue"
-                data-queued-edit
-                rows="2"
-                class="min-h-16 w-full resize-y rounded-lg border border-border/60 bg-background/80 px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/40"
-                :disabled="queueBusyIds.has(queued.id)"
-                @keydown.enter.exact.prevent="saveQueuedEdit(queued)"
-                @keydown.esc.prevent="cancelQueuedEdit"
-              />
-              <div class="mt-2 flex justify-end gap-1.5">
+          <p class="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Queue
+          </p>
+          <ul class="flex max-h-24 flex-col divide-y divide-border/40 overflow-y-auto">
+            <li
+              v-for="queued in queuedMessages"
+              :key="queued.id"
+              class="group/queue relative min-w-0 py-1.5 pr-[4.5rem] first:pt-0 last:pb-0"
+            >
+              <template v-if="queueEditingId === queued.id">
+                <div class="mb-1 flex items-center gap-2 text-[10px] font-medium text-muted-foreground">
+                  <span
+                    v-if="queueBusyIds.has(queued.id)"
+                    class="uppercase tracking-wide"
+                  >
+                    Saving...
+                  </span>
+                </div>
+                <textarea
+                  v-model="queueEditingValue"
+                  data-queued-edit
+                  rows="2"
+                  class="min-h-16 w-full resize-y rounded-lg border border-border/60 bg-background/80 px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/40"
+                  :disabled="queueBusyIds.has(queued.id)"
+                  @keydown.enter.exact.prevent="saveQueuedEdit(queued)"
+                  @keydown.esc.prevent="cancelQueuedEdit"
+                />
+                <div class="mt-2 flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    title="Cancel edit"
+                    :disabled="queueBusyIds.has(queued.id)"
+                    @click="cancelQueuedEdit"
+                  >
+                    <X class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    title="Save queued message"
+                    :disabled="!queueEditingValue.trim() || queueBusyIds.has(queued.id)"
+                    @click="saveQueuedEdit(queued)"
+                  >
+                    <Check class="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="flex min-w-0 items-start gap-2 text-sm text-foreground">
+                  <span
+                    class="mt-[3px] shrink-0 text-xs leading-none text-muted-foreground"
+                    aria-hidden="true"
+                  >
+                    •
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <p class="min-w-0 truncate leading-5">
+                      {{ queued.content }}
+                    </p>
+                    <div
+                      v-if="queued.attachment_name"
+                      class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
+                    >
+                      <Paperclip class="h-3 w-3 shrink-0" />
+                      <span class="truncate">{{ queued.attachment_name }}</span>
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                  title="Cancel edit"
+                  class="absolute right-8 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  title="Edit queued message"
                   :disabled="queueBusyIds.has(queued.id)"
-                  @click="cancelQueuedEdit"
+                  @click="startQueuedEdit(queued)"
+                >
+                  <Pencil class="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  title="Delete queued message"
+                  :disabled="queueBusyIds.has(queued.id)"
+                  @click="deleteQueuedMessage(queued)"
                 >
                   <X class="h-3.5 w-3.5" />
                 </button>
-                <button
-                  type="button"
-                  class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                  title="Save queued message"
-                  :disabled="!queueEditingValue.trim() || queueBusyIds.has(queued.id)"
-                  @click="saveQueuedEdit(queued)"
-                >
-                  <Check class="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </template>
-            <template v-else>
-              <div class="flex min-w-0 items-center gap-2">
-                <span class="shrink-0 text-[10px] font-medium uppercase leading-5 tracking-wide text-muted-foreground">
-                  Queued
-                </span>
-                <span
-                  v-if="queueBusyIds.has(queued.id)"
-                  class="shrink-0 text-[10px] font-medium uppercase leading-5 tracking-wide text-muted-foreground"
-                >
-                  Saving...
-                </span>
-                <p class="min-w-0 truncate text-sm leading-5">
-                  {{ queued.content }}
-                </p>
-              </div>
-              <div
-                v-if="queued.attachment_name"
-                class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
-              >
-                <Paperclip class="h-3 w-3 shrink-0" />
-                <span class="truncate">{{ queued.attachment_name }}</span>
-              </div>
-              <button
-                type="button"
-                class="absolute right-8 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                title="Edit queued message"
-                :disabled="queueBusyIds.has(queued.id)"
-                @click="startQueuedEdit(queued)"
-              >
-                <Pencil class="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                title="Delete queued message"
-                :disabled="queueBusyIds.has(queued.id)"
-                @click="deleteQueuedMessage(queued)"
-              >
-                <X class="h-3.5 w-3.5" />
-              </button>
-            </template>
-          </div>
+              </template>
+            </li>
+          </ul>
         </div>
 
         <div
@@ -1465,34 +1481,47 @@ onUnmounted(() => {
           @keydown="onKeydown"
           @input="resizeChatInput"
         />
-        <button
-          type="button"
-          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
-          :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
-          title="Interactive voice mode"
-          aria-label="Open interactive voice mode"
-          @click="openInteractiveVoice"
+        <Tooltip
+          :label="interactiveVoiceTooltip"
+          side="top"
         >
-          <AudioLines class="w-4 h-4" />
-        </button>
-        <button
+          <span class="inline-flex shrink-0">
+            <button
+              type="button"
+              class="h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+              :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+              aria-label="Hands-free voice mode"
+              @click="openInteractiveVoice"
+            >
+              <AudioLines class="w-4 h-4" />
+            </button>
+          </span>
+        </Tooltip>
+        <Tooltip
           v-if="isSpeechSupported"
-          type="button"
-          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
-          :disabled="!canSendMessage || isFixingTranscription || !selectedCredentialId || !selectedModel || modelsLoadFailed"
-          :title="isListening ? 'Stop voice input' : isFixingTranscription ? 'Fixing...' : 'Voice input'"
-          @click="toggleSpeechInput"
+          :label="speechInputTooltip"
+          side="top"
         >
-          <Loader2
-            v-if="isFixingTranscription"
-            class="w-4 h-4 animate-spin"
-          />
-          <component
-            :is="isListening ? MicOff : Mic"
-            v-else
-            class="w-4 h-4"
-          />
-        </button>
+          <span class="inline-flex shrink-0">
+            <button
+              type="button"
+              class="h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+              :disabled="!canSendMessage || isFixingTranscription || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+              :aria-label="speechInputTooltip"
+              @click="toggleSpeechInput"
+            >
+              <Loader2
+                v-if="isFixingTranscription"
+                class="w-4 h-4 animate-spin"
+              />
+              <component
+                :is="isListening ? MicOff : Mic"
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </span>
+        </Tooltip>
         <ChatContextBadge
           :context-usage="contextUsageForBadge"
           :draft-tokens="draftTokens"
@@ -1503,7 +1532,7 @@ onUnmounted(() => {
           size="icon"
           aria-label="Send message"
           :disabled="!input.trim() || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed || !!attachmentError || attachmentLoading"
-          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl touch-manipulation"
+          class="shrink-0 !h-9 !w-9 !min-h-[36px] !min-w-[36px] rounded-xl touch-manipulation"
         >
           <Send class="w-4 h-4" />
         </Button>
@@ -1513,7 +1542,7 @@ onUnmounted(() => {
           variant="destructive"
           size="icon"
           aria-label="Stop response"
-          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl touch-manipulation"
+          class="shrink-0 !h-9 !w-9 !min-h-[36px] !min-w-[36px] rounded-xl touch-manipulation"
           @click="stopStreaming"
         >
           <Square class="w-4 h-4" />

@@ -211,7 +211,7 @@ test("queues, edits, and deletes a message while streaming", async ({ page }) =>
   await page.getByRole("button", { name: "Send message" }).click();
 
   const inputArea = page.locator(".chat-input-area");
-  await expect(inputArea.getByText("Queued", { exact: true })).toBeVisible();
+  await expect(inputArea.getByText("Queue", { exact: true })).toBeVisible();
   await expect(inputArea.getByText("Second queued message", { exact: true })).toBeVisible();
   await expect(
     page.locator("#chat-messages-scroll").getByText("Second queued message", { exact: true }),

@@ -41,7 +41,7 @@ function formatK(n: number): string {
 <template>
   <div
     v-if="contextUsage"
-    class="relative inline-flex shrink-0 px-1.5"
+    class="relative inline-flex shrink-0 pl-0 pr-2.5"
     @mouseenter="isOpen = true"
     @mouseleave="isOpen = false"
   >
