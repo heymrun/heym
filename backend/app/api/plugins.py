@@ -53,7 +53,9 @@ def _safe_icon_path(plugin_id: str, filename: str) -> Path | None:
         return None
     package_root = (plugin_store.plugins_root() / plugin_id).resolve()
     candidate = (package_root / filename).resolve()
-    if candidate != package_root and not str(candidate).startswith(str(package_root) + "/"):
+    try:
+        candidate.relative_to(package_root)
+    except ValueError:
         return None
     return candidate if candidate.is_file() else None
 

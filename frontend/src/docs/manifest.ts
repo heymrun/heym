@@ -9,6 +9,13 @@ export interface DocCategory {
   items: DocItem[];
 }
 
+export interface DocSearchItem {
+  categoryId: string;
+  categoryLabel: string;
+  slug: string;
+  title: string;
+}
+
 export const DOCS_MANIFEST: Record<string, DocCategory> = {
   "getting-started": {
     id: "getting-started",
@@ -166,9 +173,12 @@ export function getPrevNextDoc(
   };
 }
 
-export function getAllDocItems(): { categoryId: string; categoryLabel: string; slug: string; title: string }[] {
-  const items: { categoryId: string; categoryLabel: string; slug: string; title: string }[] = [];
-  for (const [categoryId, category] of Object.entries(DOCS_MANIFEST)) {
+export function getAllDocItems(
+  extraCategories: Record<string, DocCategory> = {},
+): DocSearchItem[] {
+  const items: DocSearchItem[] = [];
+  const categories = { ...DOCS_MANIFEST, ...extraCategories };
+  for (const [categoryId, category] of Object.entries(categories)) {
     for (const item of category.items) {
       items.push({
         categoryId,

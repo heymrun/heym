@@ -41,6 +41,20 @@ class PluginStoreTests(unittest.TestCase):
         # No dependencies in this manifest -> installer not called.
         deps.assert_not_called()
 
+    def test_extract_allows_nested_plugin_members(self) -> None:
+        data = _make_zip(
+            {
+                "plugin.json": _VALID_MANIFEST,
+                "handler.py": _HANDLER,
+                "assets/icon.svg": "<svg/>",
+            }
+        )
+
+        with patch.object(plugin_store, "_install_dependencies"):
+            plugin_store.extract_and_validate(data, self.dir)
+
+        self.assertEqual((self.dir / "acme-crm" / "assets" / "icon.svg").read_text(), "<svg/>")
+
     def test_rejects_zip_slip(self) -> None:
         data = _make_zip({"plugin.json": _VALID_MANIFEST, "../evil.py": "x"})
         with self.assertRaises(PluginInstallError):

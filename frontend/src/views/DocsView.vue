@@ -16,8 +16,8 @@ import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDi
 import WorkspaceShell from "@/components/Layout/WorkspaceShell.vue";
 import Button from "@/components/ui/Button.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
-import { getDocPath, type DocCategory } from "@/docs/manifest";
-import { listPlugins } from "@/services/plugins";
+import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
+import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
@@ -38,26 +38,7 @@ const showcaseContext = computed(() => {
   return resolveShowcaseContext({ routePath: route.path });
 });
 
-const pluginCategories = ref<Record<string, DocCategory>>({});
-
-async function loadPluginDocs(): Promise<void> {
-  try {
-    const plugins = (await listPlugins()).filter((plugin) => plugin.enabled);
-    if (plugins.length === 0) {
-      pluginCategories.value = {};
-      return;
-    }
-    pluginCategories.value = {
-      plugins: {
-        id: "plugins",
-        label: "Plugins",
-        items: plugins.map((plugin) => ({ slug: plugin.id, title: plugin.name })),
-      },
-    };
-  } catch {
-    pluginCategories.value = {};
-  }
-}
+const { pluginDocCategories, loadPluginDocCategories } = usePluginDocCategories();
 
 function handleKeyDown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === "k") {
@@ -82,7 +63,7 @@ onMounted(async () => {
   } catch {
     workflows.value = [];
   }
-  void loadPluginDocs();
+  void loadPluginDocCategories();
 });
 
 onUnmounted(() => {
@@ -197,12 +178,12 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent | Keyb
       <main class="flex-1 flex min-h-0 overflow-hidden relative">
         <DocsMobileDrawer
           :open="mobileDrawerOpen"
-          :extra-categories="pluginCategories"
+          :extra-categories="pluginDocCategories"
           @update:open="mobileDrawerOpen = $event"
         />
         <DocsSidebar
           class="hidden md:flex"
-          :extra-categories="pluginCategories"
+          :extra-categories="pluginDocCategories"
         />
 
         <div

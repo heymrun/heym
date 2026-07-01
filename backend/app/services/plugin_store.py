@@ -25,13 +25,15 @@ class PluginInstallError(Exception):
 def _safe_members(zf: zipfile.ZipFile, dest_root: Path) -> list[zipfile.ZipInfo]:
     members: list[zipfile.ZipInfo] = []
     total = 0
-    root_str = str(dest_root.resolve())
+    resolved_root = dest_root.resolve()
     for info in zf.infolist():
         name = info.filename
         if name.endswith("/"):
             continue
         target = (dest_root / name).resolve()
-        if target != dest_root.resolve() and not str(target).startswith(root_str + "/"):
+        try:
+            target.relative_to(resolved_root)
+        except ValueError:
             raise PluginInstallError(f"Unsafe path in zip: {name}")
         total += info.file_size
         if total > MAX_UNCOMPRESSED_BYTES:
