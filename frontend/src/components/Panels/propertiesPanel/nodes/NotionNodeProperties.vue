@@ -73,6 +73,7 @@ const {
     <div class="space-y-2">
       <Label>Operation</Label>
       <SearchableSelect
+        data-testid="notion-operation-field"
         :model-value="selectedNode.data.notionOperation || ''"
         :groups="notionOperationGroups"
         search-placeholder="Search Notion operations..."
