@@ -628,7 +628,11 @@ See also [Global Variables](./global-variables.md), [Variable](../nodes/variable
 
 ### [Chat](../tabs/chat-tab.md)
 
-The Chat tab provides a direct [LLM](../nodes/llm-node.md) chat interface. Select a [credential](./credentials.md) and model, then send messages to test models, prototype prompts, or ask questions without building a workflow. It supports streaming, markdown, inline images, copy, clear, and voice input. User Rules from [Settings](./user-settings.md) apply automatically; [global variables](./global-variables.md) are available to the LLM as context.
+The Chat tab is Heym's long-running agent surface for operating the workspace from conversation. Select a [credential](./credentials.md) and model, then ask Chat to answer questions, inspect workflow definitions, run existing workflows, summarize executions and schedules, resolve pending human reviews, or create and revise workflows with the same AI Builder engine used in the editor.
+
+Chat keeps running on the backend after the browser closes. While an answer is streaming, you can send more messages; Heym stores them in a database-backed queue, lets you edit or delete queued messages before they start, and runs them in order when the current response finishes. If the assistant needs planning details and returns clarification questions, the queue pauses until you answer those questions, then resumes after the planning response.
+
+Responses stream with markdown, inline images, workflow preview cards, collapsible tool-call cards, context usage, and automatic context compression. Chat supports attachments, voice input, read-aloud playback, copy actions, quick prompts, User Rules from [Settings](./user-settings.md), and [global variables](./global-variables.md) as context.
 
 See also [AI Assistant](./ai-assistant.md), [Credentials](./credentials.md), and [Settings](./user-settings.md).
 

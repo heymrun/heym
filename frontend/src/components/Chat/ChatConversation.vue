@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-vue-next";
 
-import type { Message, WorkflowPreview } from "@/types/chat";
+import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
@@ -81,6 +81,9 @@ const isLoadingModels = ref(false);
 const credentialError = ref("");
 const modelsLoadFailed = ref(false);
 const copiedMessageId = ref<string | null>(null);
+const queueEditingId = ref<string | null>(null);
+const queueEditingValue = ref("");
+const queueBusyIds = reactive<Set<string>>(new Set());
 const speechRecognition = ref<SpeechRecognition | null>(null);
 const isSpeechSupported = ref(false);
 const isListening = ref(false);
@@ -176,6 +179,7 @@ const isConversationTransitioning = computed(
   () => chatStore.activeConversation !== null && !isShowingConversation.value,
 );
 const messages = computed(() => chatStore.activeConversation?.messages ?? []);
+const queuedMessages = computed(() => chatStore.activeConversation?.queued_messages ?? []);
 
 const answeredClarify = reactive<Set<string>>(new Set());
 
@@ -216,7 +220,6 @@ const interactiveVoiceOpen = ref(false);
 const canFocusInput = computed(
   () =>
     canSendMessage.value &&
-    !isThisConvStreaming.value &&
     !isLoadingModels.value &&
     !modelsLoadFailed.value &&
     // Never steal focus into the chat textarea while the full-screen voice
@@ -521,6 +524,45 @@ async function copyMessage(msg: Message): Promise<void> {
   }
 }
 
+function startQueuedEdit(message: QueuedMessage): void {
+  queueEditingId.value = message.id;
+  queueEditingValue.value = message.content;
+  nextTick(() => {
+    (chatRootRef.value?.querySelector("[data-queued-edit]") as HTMLTextAreaElement | null)
+      ?.focus();
+  });
+}
+
+function cancelQueuedEdit(): void {
+  queueEditingId.value = null;
+  queueEditingValue.value = "";
+}
+
+async function saveQueuedEdit(message: QueuedMessage): Promise<void> {
+  const nextContent = queueEditingValue.value.trim();
+  if (!nextContent || queueBusyIds.has(message.id)) return;
+  queueBusyIds.add(message.id);
+  try {
+    await chatStore.updateQueuedMessage(props.conversationId, message.id, nextContent);
+    cancelQueuedEdit();
+  } finally {
+    queueBusyIds.delete(message.id);
+  }
+}
+
+async function deleteQueuedMessage(message: QueuedMessage): Promise<void> {
+  if (queueBusyIds.has(message.id)) return;
+  queueBusyIds.add(message.id);
+  try {
+    await chatStore.deleteQueuedMessage(props.conversationId, message.id);
+    if (queueEditingId.value === message.id) {
+      cancelQueuedEdit();
+    }
+  } finally {
+    queueBusyIds.delete(message.id);
+  }
+}
+
 const tts = useTextToSpeech();
 const voiceStore = useVoiceStore();
 
@@ -560,7 +602,6 @@ async function sendVoiceText(text: string): Promise<void> {
 
 async function runWorkflowFromCard(workflow: WorkflowPreview): Promise<void> {
   if (!selectedCredentialId.value || !selectedModel.value) return;
-  if (isThisConvStreaming.value) return;
   await chatStore.sendMessage(
     props.conversationId,
     `Run the "${workflow.name}" workflow now (id: ${workflow.id}).`,
@@ -721,7 +762,6 @@ async function onCredentialChange(): Promise<void> {
 }
 
 function sendQuickPrompt(text: string): void {
-  if (isThisConvStreaming.value) return;
   input.value = text;
   void send();
 }
@@ -730,7 +770,6 @@ async function send(): Promise<void> {
   const text = input.value.trim();
   if (
     !text ||
-    isThisConvStreaming.value ||
     !canSendMessage.value ||
     !selectedCredentialId.value ||
     !selectedModel.value ||
@@ -1059,7 +1098,6 @@ onUnmounted(() => {
                 <div class="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
-                    :disabled="isThisConvStreaming"
                     class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                     @click="runWorkflowFromCard(msg.workflowPreview)"
                   >
@@ -1276,12 +1314,102 @@ onUnmounted(() => {
         class="hidden"
         @change="handleFileInputChange"
       >
-      <div class="flex items-center justify-between gap-2 mb-1.5 px-1">
-        <ChatContextBadge
-          :context-usage="contextUsageForBadge"
-          :draft-tokens="draftTokens"
-        />
-        <div class="flex items-center gap-2 min-w-0">
+      <div
+        v-if="queuedMessages.length > 0 || attachedFile || attachmentError"
+        class="mb-1.5 flex flex-col gap-1.5 px-1"
+      >
+        <div
+          v-if="queuedMessages.length > 0"
+          class="flex max-h-28 w-full min-w-0 flex-col gap-1 overflow-y-auto"
+        >
+          <div
+            v-for="queued in queuedMessages"
+            :key="queued.id"
+            class="group/queue relative min-w-0 rounded-lg border border-border/50 bg-muted/35 px-2.5 py-1.5 pr-[4.5rem] text-sm text-foreground"
+          >
+            <template v-if="queueEditingId === queued.id">
+              <div class="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span>Queued</span>
+                <span v-if="queueBusyIds.has(queued.id)">Saving...</span>
+              </div>
+              <textarea
+                v-model="queueEditingValue"
+                data-queued-edit
+                rows="2"
+                class="min-h-16 w-full resize-y rounded-lg border border-border/60 bg-background/80 px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/40"
+                :disabled="queueBusyIds.has(queued.id)"
+                @keydown.enter.exact.prevent="saveQueuedEdit(queued)"
+                @keydown.esc.prevent="cancelQueuedEdit"
+              />
+              <div class="mt-2 flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  title="Cancel edit"
+                  :disabled="queueBusyIds.has(queued.id)"
+                  @click="cancelQueuedEdit"
+                >
+                  <X class="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  title="Save queued message"
+                  :disabled="!queueEditingValue.trim() || queueBusyIds.has(queued.id)"
+                  @click="saveQueuedEdit(queued)"
+                >
+                  <Check class="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="shrink-0 text-[10px] font-medium uppercase leading-5 tracking-wide text-muted-foreground">
+                  Queued
+                </span>
+                <span
+                  v-if="queueBusyIds.has(queued.id)"
+                  class="shrink-0 text-[10px] font-medium uppercase leading-5 tracking-wide text-muted-foreground"
+                >
+                  Saving...
+                </span>
+                <p class="min-w-0 truncate text-sm leading-5">
+                  {{ queued.content }}
+                </p>
+              </div>
+              <div
+                v-if="queued.attachment_name"
+                class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
+              >
+                <Paperclip class="h-3 w-3 shrink-0" />
+                <span class="truncate">{{ queued.attachment_name }}</span>
+              </div>
+              <button
+                type="button"
+                class="absolute right-8 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Edit queued message"
+                :disabled="queueBusyIds.has(queued.id)"
+                @click="startQueuedEdit(queued)"
+              >
+                <Pencil class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Delete queued message"
+                :disabled="queueBusyIds.has(queued.id)"
+                @click="deleteQueuedMessage(queued)"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div
+          v-if="attachedFile || attachmentError"
+          class="flex min-w-0 items-center justify-end gap-2"
+        >
           <div
             v-if="attachedFile"
             class="flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border/40 px-2.5 py-1 text-xs text-foreground max-w-xs"
@@ -1313,7 +1441,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
-          :disabled="isThisConvStreaming || attachmentLoading"
+          :disabled="attachmentLoading"
           title="Attach file"
           aria-label="Attach file"
           @click="openFilePicker"
@@ -1333,7 +1461,7 @@ onUnmounted(() => {
           rows="1"
           placeholder="Type a message..."
           class="chat-input flex-1 min-h-[44px] max-h-40 resize-none bg-transparent border-0 px-1 py-3 text-sm text-left focus:outline-none focus:ring-0 disabled:opacity-50 touch-manipulation placeholder:text-muted-foreground leading-5"
-          :disabled="isThisConvStreaming || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+          :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
           @keydown="onKeydown"
           @input="resizeChatInput"
         />
@@ -1351,7 +1479,7 @@ onUnmounted(() => {
           v-if="isSpeechSupported"
           type="button"
           class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
-          :disabled="isThisConvStreaming || !canSendMessage || isFixingTranscription || !selectedCredentialId || !selectedModel || modelsLoadFailed"
+          :disabled="!canSendMessage || isFixingTranscription || !selectedCredentialId || !selectedModel || modelsLoadFailed"
           :title="isListening ? 'Stop voice input' : isFixingTranscription ? 'Fixing...' : 'Voice input'"
           @click="toggleSpeechInput"
         >
@@ -1365,21 +1493,26 @@ onUnmounted(() => {
             class="w-4 h-4"
           />
         </button>
+        <ChatContextBadge
+          :context-usage="contextUsageForBadge"
+          :draft-tokens="draftTokens"
+        />
         <Button
-          v-if="!isThisConvStreaming"
           type="submit"
           variant="gradient"
           size="icon"
+          aria-label="Send message"
           :disabled="!input.trim() || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed || !!attachmentError || attachmentLoading"
           class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl touch-manipulation"
         >
           <Send class="w-4 h-4" />
         </Button>
         <Button
-          v-else
+          v-if="isThisConvStreaming"
           type="button"
           variant="destructive"
           size="icon"
+          aria-label="Stop response"
           class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl touch-manipulation"
           @click="stopStreaming"
         >

@@ -52,6 +52,18 @@ class MessageResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class QueuedMessageResponse(BaseModel):
+    id: uuid.UUID
+    content: str
+    credential_id: uuid.UUID
+    model: str
+    attachment_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ConversationDetailResponse(BaseModel):
     id: uuid.UUID
     title: str
@@ -63,6 +75,7 @@ class ConversationDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[MessageResponse]
+    queued_messages: list[QueuedMessageResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -85,8 +98,15 @@ class ConversationTitleGenerate(BaseModel):
     model: str
 
 
+class QueuedMessageUpdate(BaseModel):
+    content: str = Field(min_length=1)
+
+
 class SendMessageResponse(BaseModel):
     conversation_id: uuid.UUID
+    status: Literal["started", "queued"]
+    user_message: MessageResponse | None = None
+    queued_message: QueuedMessageResponse | None = None
 
 
 class QuickPromptsResponse(BaseModel):
