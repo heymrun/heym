@@ -226,7 +226,11 @@ export async function selectSearchableOption(
   const combobox = field.getByRole("combobox");
   await combobox.click();
   await combobox.fill(optionLabel);
-  await page.getByRole("option", { name: optionLabel, exact: true }).click();
+  const listboxId = await combobox.getAttribute("aria-controls");
+  const listbox = listboxId
+    ? page.locator(`#${listboxId}`)
+    : page.getByRole("listbox").filter({ has: page.getByRole("option", { name: optionLabel }) });
+  await listbox.getByRole("option", { name: optionLabel, exact: true }).click();
 }
 
 export async function acceptNextDialog(
