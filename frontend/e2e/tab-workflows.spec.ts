@@ -7,6 +7,7 @@ import {
   deleteCredential,
   expectOk,
   prepareAuthenticatedPage,
+  selectSearchableOption,
 } from "./support";
 
 test.beforeEach(async ({ page }) => {
@@ -295,10 +296,7 @@ test("adds and configures a Linear node", async ({ page }) => {
       .getByTestId("linear-credential-field")
       .locator("select")
       .selectOption(credential.id);
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("getIssue");
+    await selectSearchableOption(page, page.getByTestId("linear-operation-field"), "Get Issue");
     await page
       .getByTestId("linear-issue-id-field")
       .locator("input")
@@ -313,22 +311,20 @@ test("adds and configures a Linear node", async ({ page }) => {
     await page.getByRole("button", { name: "Properties" }).click();
     await page.locator(".vue-flow__node").click();
     await expect(
-      page.getByTestId("linear-operation-field").locator("select"),
-    ).toHaveValue("getIssue");
+      page.getByTestId("linear-operation-field").getByRole("combobox"),
+    ).toHaveValue("Get Issue");
     await expect(
       page.getByTestId("linear-issue-id-field").locator("input"),
     ).toHaveValue("ENG-123");
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("listWorkflowStates");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "List Workflow States",
+    );
     await expect(page.getByTestId("linear-team-id-field")).toBeVisible();
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("listTeams");
+    await selectSearchableOption(page, page.getByTestId("linear-operation-field"), "List Teams");
     await expect(page.getByTestId("linear-after-field")).toBeVisible();
     await page
       .getByTestId("linear-after-field")
@@ -362,10 +358,11 @@ test("configures Linear listTeamMembers fields and persists after save", async (
       .getByTestId("linear-credential-field")
       .locator("select")
       .selectOption(credential.id);
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("listTeamMembers");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "List Team Members",
+    );
     await expect(page.getByTestId("linear-team-id-field")).toBeVisible();
     await expect(page.getByTestId("linear-limit-field")).toBeVisible();
     await expect(page.getByTestId("linear-after-field")).toBeVisible();
@@ -385,8 +382,8 @@ test("configures Linear listTeamMembers fields and persists after save", async (
     await page.locator(".vue-flow__node").click();
 
     await expect(
-      page.getByTestId("linear-operation-field").locator("select"),
-    ).toHaveValue("listTeamMembers");
+      page.getByTestId("linear-operation-field").getByRole("combobox"),
+    ).toHaveValue("List Team Members");
     await expect(page.getByTestId("linear-team-id-field").locator("input")).toHaveValue(
       "team-uuid-1",
     );
@@ -423,10 +420,11 @@ test("configures Linear comment operations and persists update comment fields", 
       .locator("select")
       .selectOption(credential.id);
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("listComments");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "List Comments",
+    );
     await expect(page.getByTestId("linear-issue-id-field")).toBeVisible();
     await expect(page.getByTestId("linear-limit-field")).toBeVisible();
     await expect(page.getByTestId("linear-after-field")).toBeVisible();
@@ -440,29 +438,33 @@ test("configures Linear comment operations and persists update comment fields", 
       .locator("input")
       .fill("$listComments.pageInfo.endCursor");
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("deleteComment");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "Delete Comment",
+    );
     await expect(page.getByTestId("linear-comment-id-field")).toBeVisible();
     await expect(page.getByTestId("linear-issue-id-field")).toBeHidden();
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("resolveComment");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "Resolve Comment",
+    );
     await expect(page.getByTestId("linear-comment-id-field")).toBeVisible();
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("unresolveComment");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "Unresolve Comment",
+    );
     await expect(page.getByTestId("linear-comment-id-field")).toBeVisible();
 
-    await page
-      .getByTestId("linear-operation-field")
-      .locator("select")
-      .selectOption("updateComment");
+    await selectSearchableOption(
+      page,
+      page.getByTestId("linear-operation-field"),
+      "Update Comment",
+    );
     await expect(page.getByTestId("linear-comment-id-field")).toBeVisible();
     await expect(page.getByTestId("linear-comment-body-field")).toBeVisible();
     await page
@@ -480,8 +482,8 @@ test("configures Linear comment operations and persists update comment fields", 
     await page.locator(".vue-flow__node").click();
 
     await expect(
-      page.getByTestId("linear-operation-field").locator("select"),
-    ).toHaveValue("updateComment");
+      page.getByTestId("linear-operation-field").getByRole("combobox"),
+    ).toHaveValue("Update Comment");
     await expect(page.getByTestId("linear-comment-id-field").locator("input")).toHaveValue(
       "comment-uuid-1",
     );

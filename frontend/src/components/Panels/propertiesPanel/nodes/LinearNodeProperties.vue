@@ -2,6 +2,7 @@
 import { AlertTriangle } from "lucide-vue-next";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -29,7 +30,7 @@ const {
   handleLinearExpressionFieldNavigate,
   onLinearRegisterExpressionFieldIndex,
   linearCredentialOptions,
-  linearOperationOptions,
+  linearOperationGroups,
   updateNodeData,
 } = usePropertiesPanelContext();
 </script>
@@ -60,9 +61,10 @@ const {
       data-testid="linear-operation-field"
     >
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.linearOperation || 'listIssues'"
-        :options="linearOperationOptions"
+        :groups="linearOperationGroups"
+        search-placeholder="Search Linear operations..."
         @update:model-value="updateNodeData('linearOperation', $event)"
       />
     </div>

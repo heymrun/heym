@@ -2,6 +2,7 @@
 import { AlertTriangle, Loader2 } from "lucide-vue-next";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -27,7 +28,7 @@ const {
   updateClickhouseMappingValue,
   switchClickhouseToRaw,
   clickhouseCredentialOptions,
-  clickhouseOperationOptions,
+  clickhouseOperationGroups,
   updateNodeData,
 } = usePropertiesPanelContext();
 </script>
@@ -59,9 +60,10 @@ const {
 
     <div class="space-y-2">
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.clickhouseOperation || ''"
-        :options="clickhouseOperationOptions"
+        :groups="clickhouseOperationGroups"
+        search-placeholder="Search ClickHouse operations..."
         @update:model-value="updateNodeData('clickhouseOperation', $event)"
       />
     </div>

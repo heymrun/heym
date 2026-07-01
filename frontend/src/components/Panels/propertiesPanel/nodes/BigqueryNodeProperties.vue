@@ -4,6 +4,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -60,9 +61,10 @@ const {
 
     <div class="space-y-2">
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.bqOperation || ''"
         :options="bigQueryOperationOptions"
+        search-placeholder="Search BigQuery operations..."
         @update:model-value="updateNodeData('bqOperation', $event)"
       />
     </div>
