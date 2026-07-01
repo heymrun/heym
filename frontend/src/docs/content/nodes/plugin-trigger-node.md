@@ -25,12 +25,19 @@ your workflow. For plugins that perform an action mid‑workflow, use the
 ## Configuration
 
 Like the Plugin node, the configuration form is generated from the plugin's
-manifest fields. Expression‑capable fields accept `$` expressions, and secret
+manifest fields. Non-secret string fields use the expression input, and secret
 fields are masked.
 
 ## How Plugins Run
 
-Plugin code is trusted (Heym‑delivered, operator‑installed) and runs in‑process.
+Plugin code is trusted (Heym-delivered, operator-installed) and runs in-process.
 Installation is restricted to `HEYM_PLUGIN_ADMIN_EMAILS` and the subsystem is
 gated by `HEYM_PLUGINS_ENABLED`. See
 [Running & Deployment](../getting-started/running-and-deployment.md).
+
+## Author Plugins
+
+To build a trigger plugin package, see
+[Plugin Authoring](../reference/plugin-authoring.md) for the zip layout,
+manifest fields, handler signatures, icons, dependencies, and runtime trust
+model.

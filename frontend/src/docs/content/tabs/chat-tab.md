@@ -15,9 +15,12 @@ The **Chat** tab provides a direct LLM chat interface. Use it to test models, as
 
 - **Global variables context** – Your [Global Variables](../reference/global-variables.md) are available to the LLM, so you can ask about or reference stored values
 - **Workspace template context** – Shared workflow and node templates in your workspace are included as context, so Chat can answer questions about available templates
-- **Workflow creation** – Ask Chat to create or set up a workflow, and it uses the same Workflow AI Builder engine as the editor assistant to generate the workflow, save it, and run it once
+- **Long-running agent** – Chat keeps working on the backend even if the browser closes, so you can come back from another device and continue the same conversation
+- **Workflow creation** – Ask Chat to create or set up a workflow, and it uses the same Workflow AI Builder engine as the editor assistant to generate and save the workflow
+- **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
+- **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
 - **Streaming responses** – See the model's output as it streams
-- **Stop response** – Interrupt the current streaming answer at any time
+- **Stop response** – Interrupt the current streaming answer at any time; stopping also clears queued messages for that conversation
 - **Markdown rendering** – Responses support markdown formatting, including inline images
 - **Image display** – Images embedded in responses (e.g. from LLM image generation) appear inline; click any image to view it fullscreen. Press **Esc** or the back button (mobile) to close the fullscreen view
 - **Copy messages** – Copy any message to the clipboard
@@ -31,9 +34,9 @@ The chat keeps up to 25 recent messages in context. Older messages are trimmed t
 
 ## Creating Workflows
 
-When you ask Chat to create, build, generate, or set up a workflow, it creates a new saved workflow with a generated name and description. Chat then runs the workflow with the details from your message and summarizes the result. The response includes an **Open workflow** link that opens the workflow editor in a new browser tab, plus a read-only canvas preview of the generated nodes and edges.
+When you ask Chat to create, build, generate, or set up a workflow, it creates a new saved workflow with a generated name and description. The response includes a read-only canvas preview of the generated nodes and edges, plus an **Open workflow** link that opens the workflow editor in a new browser tab. Use the preview card's **Run** button when you want to execute the workflow.
 
-Follow-up feedback in the same chat edits that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step", "change the output format", or "şöyle yap" and Chat updates the saved workflow, reruns it, and refreshes the preview.
+Follow-up feedback in the same chat edits that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step", "change the output format", or "şöyle yap" and Chat updates the saved workflow and refreshes the preview.
 
 This is best for requests where you want the work done as a reusable automation, not just a one-off answer.
 

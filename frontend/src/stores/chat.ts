@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import type { Conversation, ConversationDetail, ContextUsage, Message, ToolCall, WorkflowPreview } from "@/types/chat";
+import type { Conversation, ConversationDetail, ContextUsage, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -34,6 +34,7 @@ export const useChatStore = defineStore("chat", () => {
   const isLoadingConversations = ref(false);
   const isLoadingMessages = ref(false);
   interface StreamState {
+    messageId: string | null;
     content: string;
     images: string[];
     toolCalls: ToolCall[];
@@ -43,6 +44,7 @@ export const useChatStore = defineStore("chat", () => {
     isStreaming: boolean;
   }
   const EMPTY_STREAM_STATE: StreamState = Object.freeze({
+    messageId: null,
     content: "",
     images: [],
     toolCalls: [],
@@ -67,6 +69,7 @@ export const useChatStore = defineStore("chat", () => {
 
   function _setStreamState(conversationId: string, patch: Partial<StreamState>): void {
     const current = streamStatesByConv.value[conversationId] ?? {
+      messageId: null,
       content: "",
       images: [],
       toolCalls: [],
@@ -157,6 +160,12 @@ export const useChatStore = defineStore("chat", () => {
         undefined, // onWorkflowCreated
         undefined, // onCompressed
         undefined, // onContext
+        undefined, // onAssistantDone
+        undefined, // onQueuedMessageCreated
+        undefined, // onQueuedMessageUpdated
+        undefined, // onQueuedMessageDeleted
+        undefined, // onQueueCleared
+        undefined, // onQueuedMessageStarted
         controller.signal,
       );
     } catch {
@@ -237,6 +246,7 @@ export const useChatStore = defineStore("chat", () => {
       last_credential_id: null,
       last_model: null,
       messages: [],
+      queued_messages: [],
     };
     activeConversation.value = detail;
     void _writeCachedConversation(detail);
@@ -293,44 +303,118 @@ export const useChatStore = defineStore("chat", () => {
   ): Promise<void> {
     if (!activeConversation.value || activeConversation.value.id !== conversationId) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content,
-      ...(attachment ? { attachmentName: attachment.name } : {}),
-      created_at: new Date().toISOString(),
-    };
     const isFirstMessage = activeConversation.value.messages.length === 0;
-    activeConversation.value = {
-      ...activeConversation.value,
-      messages: [...activeConversation.value.messages, userMessage],
-    };
-    void _writeCachedConversation(activeConversation.value);
+    const wasStreaming = getStreamState(conversationId).isStreaming;
+    userCancelledConvIds.delete(conversationId);
 
-    if (isFirstMessage && activeConversation.value.title === DEFAULT_CONVERSATION_TITLE) {
-      const immediateTitle = _titleFromContent(content);
-      _patchConversationTitle(conversationId, immediateTitle);
+    try {
+      const response = await chatApi.sendMessage(conversationId, content, credentialId, model, attachment);
+      if (response.status === "queued" && response.queued_message) {
+        _upsertQueuedMessage(conversationId, response.queued_message);
+        _patchConversationFlag(conversationId, "is_running", true);
+        return;
+      }
+      if (!response.user_message) return;
+      const displayMessage: Message = {
+        ...response.user_message,
+        content,
+        ...(attachment ? { attachmentName: attachment.name } : {}),
+      };
+      _appendMessageIfMissing(conversationId, displayMessage);
+
+      if (isFirstMessage && activeConversation.value.title === DEFAULT_CONVERSATION_TITLE) {
+        const immediateTitle = _titleFromContent(content);
+        _patchConversationTitle(conversationId, immediateTitle);
+      }
+
+      _setStreamState(conversationId, {
+        messageId: null,
+        content: "",
+        images: [],
+        toolCalls: [],
+        contextUsage: null,
+        workflowPreview: null,
+        error: null,
+        isStreaming: true,
+      });
+      _patchConversationFlag(conversationId, "is_running", true);
+      void _subscribeToStream(conversationId);
+    } catch {
+      if (!wasStreaming) {
+        _clearStreamState(conversationId);
+      }
     }
+  }
 
-    _setStreamState(conversationId, {
+  function _emptyStreamingPatch(isStreaming: boolean): Partial<StreamState> {
+    return {
+      messageId: null,
       content: "",
       images: [],
       toolCalls: [],
       contextUsage: null,
       workflowPreview: null,
       error: null,
-      isStreaming: true,
-    });
+      isStreaming,
+    };
+  }
 
-    userCancelledConvIds.delete(conversationId);
+  function _appendMessageIfMissing(conversationId: string, message: Message): void {
+    if (activeConversation.value?.id !== conversationId) return;
+    if (activeConversation.value.messages.some((existing) => existing.id === message.id)) return;
+    activeConversation.value = {
+      ...activeConversation.value,
+      messages: [...activeConversation.value.messages, message],
+    };
+    void _writeCachedConversation(activeConversation.value);
+  }
 
-    try {
-      await chatApi.sendMessage(conversationId, content, credentialId, model, attachment);
-      _patchConversationFlag(conversationId, "is_running", true);
-      void _subscribeToStream(conversationId);
-    } catch {
-      _clearStreamState(conversationId);
+  function _finalizeStreamingAssistant(conversationId: string): boolean {
+    const final = getStreamState(conversationId);
+    const hasContent =
+      final.content.length > 0 ||
+      final.images.length > 0 ||
+      final.workflowPreview !== null ||
+      final.toolCalls.length > 0;
+    if (hasContent) {
+      _appendMessageIfMissing(conversationId, {
+        id: final.messageId ?? crypto.randomUUID(),
+        role: "assistant",
+        content: final.content,
+        ...(final.images.length > 0 ? { images: [...final.images] } : {}),
+        ...(final.workflowPreview ? { workflowPreview: final.workflowPreview } : {}),
+        ...(final.toolCalls.length > 0 ? { tool_calls: [...final.toolCalls] } : {}),
+        created_at: new Date().toISOString(),
+      });
     }
+    return hasContent;
+  }
+
+  function _upsertQueuedMessage(conversationId: string, queuedMessage: QueuedMessage): void {
+    if (activeConversation.value?.id !== conversationId) return;
+    const existing = activeConversation.value.queued_messages ?? [];
+    const next = existing.some((message) => message.id === queuedMessage.id)
+      ? existing.map((message) => (message.id === queuedMessage.id ? queuedMessage : message))
+      : [...existing, queuedMessage];
+    activeConversation.value = { ...activeConversation.value, queued_messages: next };
+    void _writeCachedConversation(activeConversation.value);
+  }
+
+  function _removeQueuedMessage(conversationId: string, queuedMessageId: string): void {
+    if (activeConversation.value?.id !== conversationId) return;
+    activeConversation.value = {
+      ...activeConversation.value,
+      queued_messages: (activeConversation.value.queued_messages ?? []).filter(
+        (message) => message.id !== queuedMessageId,
+      ),
+    };
+    void _writeCachedConversation(activeConversation.value);
+  }
+
+  function _clearQueuedMessages(conversationId: string): void {
+    if (activeConversation.value?.id !== conversationId) return;
+    activeConversation.value = { ...activeConversation.value, queued_messages: [] };
+    void _writeCachedConversation(activeConversation.value);
   }
 
   async function _subscribeToStream(conversationId: string): Promise<void> {
@@ -345,46 +429,20 @@ export const useChatStore = defineStore("chat", () => {
     const controller = new AbortController();
     activeControllersByConv.set(conversationId, controller);
 
-    _setStreamState(conversationId, {
-      content: "",
-      images: [],
-      toolCalls: [],
-      contextUsage: null,
-      workflowPreview: null,
-      error: null,
-      isStreaming: true,
-    });
+    _setStreamState(conversationId, _emptyStreamingPatch(true));
 
     try {
       await chatApi.subscribeStream(
         conversationId,
-        (text) => {
+        (payload) => {
           const current = getStreamState(conversationId);
-          _setStreamState(conversationId, { content: current.content + text });
+          _setStreamState(conversationId, {
+            messageId: payload.messageId ?? current.messageId,
+            content: current.content + payload.text,
+          });
         },
         () => {
-          const final = getStreamState(conversationId);
-          const hasContent =
-            final.content.length > 0 ||
-            final.images.length > 0 ||
-            final.workflowPreview !== null ||
-            final.toolCalls.length > 0;
-          if (hasContent && activeConversation.value?.id === conversationId) {
-            const assistantMessage: Message = {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: final.content,
-              ...(final.images.length > 0 ? { images: [...final.images] } : {}),
-              ...(final.workflowPreview ? { workflowPreview: final.workflowPreview } : {}),
-              ...(final.toolCalls.length > 0 ? { tool_calls: [...final.toolCalls] } : {}),
-              created_at: new Date().toISOString(),
-            };
-            activeConversation.value = {
-              ...activeConversation.value,
-              messages: [...activeConversation.value.messages, assistantMessage],
-            };
-            void _writeCachedConversation(activeConversation.value);
-          }
+          const hasContent = _finalizeStreamingAssistant(conversationId);
           _clearStreamState(conversationId);
           _patchConversationFlag(conversationId, "is_running", false);
           if (activeConversation.value?.id !== conversationId) {
@@ -401,6 +459,7 @@ export const useChatStore = defineStore("chat", () => {
         (payload) => {
           const current = getStreamState(conversationId);
           _setStreamState(conversationId, {
+            messageId: payload.messageId ?? current.messageId,
             toolCalls: [
               ...current.toolCalls,
               {
@@ -416,6 +475,7 @@ export const useChatStore = defineStore("chat", () => {
         (payload) => {
           const current = getStreamState(conversationId);
           _setStreamState(conversationId, {
+            messageId: payload.messageId ?? current.messageId,
             toolCalls: current.toolCalls.map((tc) =>
               tc.id === payload.id
                 ? {
@@ -435,8 +495,12 @@ export const useChatStore = defineStore("chat", () => {
         (title) => {
           _patchConversationTitle(conversationId, title);
         },
-        (workflow) => {
-          _setStreamState(conversationId, { workflowPreview: workflow });
+        (workflow, messageId) => {
+          const current = getStreamState(conversationId);
+          _setStreamState(conversationId, {
+            messageId: messageId ?? current.messageId,
+            workflowPreview: workflow,
+          });
         },
         (payload) => {
           const current = getStreamState(conversationId);
@@ -449,11 +513,44 @@ export const useChatStore = defineStore("chat", () => {
             elapsed_ms: payload.elapsed_ms,
             status: "compressed",
           };
-          _setStreamState(conversationId, { toolCalls: [...current.toolCalls, synthetic] });
+          _setStreamState(conversationId, {
+            messageId: payload.messageId ?? current.messageId,
+            toolCalls: [...current.toolCalls, synthetic],
+          });
         },
         (payload) => {
           _setStreamState(conversationId, { contextUsage: payload });
           contextUsageByConv.value = { ...contextUsageByConv.value, [conversationId]: payload };
+        },
+        () => {
+          const hasContent = _finalizeStreamingAssistant(conversationId);
+          _setStreamState(conversationId, _emptyStreamingPatch(true));
+          _refreshConversationTimestamp(conversationId);
+          if (hasContent) _playDing();
+        },
+        (queuedMessage) => {
+          _upsertQueuedMessage(conversationId, queuedMessage);
+        },
+        (queuedMessage) => {
+          _upsertQueuedMessage(conversationId, queuedMessage);
+        },
+        (queuedMessageId) => {
+          _removeQueuedMessage(conversationId, queuedMessageId);
+        },
+        () => {
+          _clearQueuedMessages(conversationId);
+        },
+        (payload) => {
+          const queued = activeConversation.value?.queued_messages.find(
+            (message) => message.id === payload.queuedMessageId,
+          );
+          _removeQueuedMessage(conversationId, payload.queuedMessageId);
+          _appendMessageIfMissing(conversationId, {
+            ...payload.userMessage,
+            content: queued?.content ?? payload.userMessage.content,
+            ...(queued?.attachment_name ? { attachmentName: queued.attachment_name } : {}),
+          });
+          _setStreamState(conversationId, _emptyStreamingPatch(true));
         },
         controller.signal,
       );
@@ -519,9 +616,24 @@ export const useChatStore = defineStore("chat", () => {
           : tc,
       ),
     });
+    _clearQueuedMessages(conversationId);
     _patchConversationFlag(conversationId, "is_running", false);
     // Tell the backend to stop the running agent task, not just the local reader.
     void chatApi.cancelStream(conversationId).catch(() => {});
+  }
+
+  async function updateQueuedMessage(
+    conversationId: string,
+    itemId: string,
+    content: string,
+  ): Promise<void> {
+    const updated = await chatApi.updateQueuedMessage(conversationId, itemId, content);
+    _upsertQueuedMessage(conversationId, updated);
+  }
+
+  async function deleteQueuedMessage(conversationId: string, itemId: string): Promise<void> {
+    await chatApi.deleteQueuedMessage(conversationId, itemId);
+    _removeQueuedMessage(conversationId, itemId);
   }
 
   function _patchConversation(updated: Conversation): void {
@@ -599,17 +711,19 @@ export const useChatStore = defineStore("chat", () => {
     fetched: ConversationDetail,
   ): ConversationDetail {
     if (current.messages.length === 0) {
-      return fetched;
+      return { ...fetched, queued_messages: fetched.queued_messages ?? [] };
     }
     if (fetched.messages.length <= current.messages.length) {
       return {
         ...fetched,
         messages: current.messages,
+        queued_messages: fetched.queued_messages ?? [],
       };
     }
     return {
       ...fetched,
       messages: [...current.messages, ...fetched.messages.slice(current.messages.length)],
+      queued_messages: fetched.queued_messages ?? [],
     };
   }
 
@@ -631,7 +745,8 @@ export const useChatStore = defineStore("chat", () => {
         key,
         _bytesToArrayBuffer(data),
       );
-      return JSON.parse(new TextDecoder().decode(decrypted)) as ConversationDetail;
+      const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as ConversationDetail;
+      return { ...parsed, queued_messages: parsed.queued_messages ?? [] };
     } catch {
       _removeCachedConversation(id);
       return null;
@@ -774,6 +889,8 @@ export const useChatStore = defineStore("chat", () => {
     clearConversations,
     sendMessage,
     cancelStreaming,
+    updateQueuedMessage,
+    deleteQueuedMessage,
     markConversationRead,
     loadQuickPrompts,
     saveQuickPrompts,

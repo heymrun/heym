@@ -30,8 +30,9 @@ For trigger‑style plugins that start a workflow, see the
 
 The node's configuration form is generated from the plugin's manifest. Each field
 declared by the plugin (`string`, `number`, `boolean`, or `select`) is rendered
-automatically. Fields marked as expression‑capable accept `$` expressions and can
-be filled from the expression dialog, just like built‑in nodes.
+automatically. Non-secret string fields use the expression input, and saved
+string config values that start with `$` are resolved before the plugin handler
+runs.
 
 Secret fields (such as API keys) are masked in the UI and never written to logs.
 
@@ -60,3 +61,10 @@ without an icon fall back to the default puzzle‑piece glyph.
 Installed plugins are surfaced to the AI assistant and chat canvas, so you can ask
 Heym to "use the Acme CRM plugin to create a record" and it will generate the
 Plugin node with the right `pluginId` and `config`.
+
+## Author Plugins
+
+To build a plugin package, see
+[Plugin Authoring](../reference/plugin-authoring.md) for the zip layout,
+manifest fields, handler signatures, icons, dependencies, and runtime trust
+model.

@@ -125,6 +125,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "file-generation", title: "File Generation" },
       { slug: "drive", title: "Drive" },
       { slug: "security", title: "Security" },
+      { slug: "plugin-authoring", title: "Plugin Authoring" },
       { slug: "integrations", title: "Third-Party Integrations" },
       { slug: "guardrails", title: "Guardrails" },
       { slug: "enterprise", title: "Enterprise" },
