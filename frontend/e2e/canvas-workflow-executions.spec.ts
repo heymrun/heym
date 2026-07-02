@@ -439,7 +439,7 @@ test("shows an error workflow when an HTTP API call fails", async ({ page }) => 
     [
       workflowNode("http_error", "http", 120, 160, {
         label: "fetchBrokenApi",
-        curl: "curl -X GET http://",
+        curl: "curl -X GET http://127.0.0.1:9/e2e-http-error",
       }),
       workflowNode("output_unreachable", "output", 380, 160, {
         label: "unreachableOutput",
