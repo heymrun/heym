@@ -920,6 +920,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       sentryLimit: "25",
       sentryReleaseProjects: "[]",
       sentryReleaseRefs: "[]",
+      sentryPayload: "{}",
     },
   },
   mcpCall: {

@@ -757,10 +757,16 @@ export interface NodeData {
   notionAfterBlockId?: string;
   sentryOperation?:
     | "listOrganizations"
+    | "updateOrganization"
     | "listProjects"
     | "createProject"
+    | "getProject"
+    | "updateProject"
+    | "deleteProject"
     | "listTeams"
     | "createTeam"
+    | "updateTeam"
+    | "deleteTeam"
     | "listIssues"
     | "getIssue"
     | "updateIssue"
@@ -768,7 +774,9 @@ export interface NodeData {
     | "getEvent"
     | "listReleases"
     | "getRelease"
-    | "createRelease";
+    | "createRelease"
+    | "updateRelease"
+    | "deleteRelease";
   sentryOrganizationSlug?: string;
   sentryProjectSlug?: string;
   sentryTeamSlug?: string;
@@ -785,6 +793,7 @@ export interface NodeData {
   sentryLimit?: string;
   sentryReleaseProjects?: string;
   sentryReleaseRefs?: string;
+  sentryPayload?: string;
   gsOperation?: string;
   gsSpreadsheetId?: string;
   gsSheetName?: string;

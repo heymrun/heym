@@ -1547,6 +1547,7 @@ async function handleSave(): Promise<void> {
             type="button"
             variant="outline"
             size="sm"
+            data-testid="sentry-test-connection-button"
             :loading="sentryTesting"
             :disabled="saving || sentryTesting || (!apiKey.trim() && !isEditing)"
             @click="testSentryConnection"

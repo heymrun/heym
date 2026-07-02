@@ -136,6 +136,11 @@ The Sentry credential stores an auth token for the [Sentry node](../nodes/sentry
 | Field | Description |
 |-------|-------------|
 | `api_token` | Sentry auth token with access to the organizations and projects you automate |
+
+### Optional Fields
+
+| Field | Description |
+|-------|-------------|
 | `base_url` | Optional root URL for self-hosted Sentry, for example `https://sentry.example.com` |
 
 ### Notes

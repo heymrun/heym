@@ -247,7 +247,7 @@ function clearValue(): void {
         >
           <ComboboxLabel
             v-if="group.label"
-            class="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground"
+            class="mb-1 mt-2 rounded-md bg-muted/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground first:mt-0"
           >
             {{ group.label }}
           </ComboboxLabel>

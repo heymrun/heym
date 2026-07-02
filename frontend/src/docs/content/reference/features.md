@@ -282,7 +282,7 @@ For custom REST calls, `$credentials.YourNotionCredential` resolves to the same 
 
 #### [Sentry](../nodes/sentry-node.md)
 
-The Sentry node automates Sentry organizations, projects, teams, issues, events, and releases through the Sentry REST API. Use it for alert triage, issue status updates, release creation, event lookup, and project/team setup. It supports Sentry SaaS and self-hosted Sentry via an optional credential base URL.
+The Sentry node automates Sentry organizations, projects, teams, issues, events, and releases through the Sentry REST API. Use it for alert triage, issue status updates, release automation, event lookup, and project/team setup or cleanup. It supports Sentry SaaS and self-hosted Sentry via an optional credential base URL.
 
 Pairs with [Error Handler](../nodes/error-handler-node.md), [Slack](../nodes/slack-node.md), [Linear](../nodes/linear-node.md), and [Third-Party Integrations](./integrations.md) for incident and release workflows.
 

@@ -129,6 +129,66 @@ test("creates and deletes a Linear credential", async ({ page }) => {
   await expect(credentialCard).toBeHidden();
 });
 
+test("creates and deletes a Sentry credential with base URL and test connection", async ({
+  page,
+}) => {
+  const credentialName = `e2e-sentry-${Date.now()}`;
+
+  await openCredentialDialog(page);
+  await page.getByLabel("Name").fill(credentialName);
+  await page.locator("#cred-type select").selectOption("sentry");
+  await page.getByLabel("API Key").fill("sntrys_e2e_test");
+  await page.getByLabel("Sentry Base URL (Optional)").fill("https://sentry.example.com");
+  await expect(page.getByTestId("sentry-test-connection-button")).toBeVisible();
+
+  await page.route("**/api/credentials/test", async (route) => {
+    const payload = route.request().postDataJSON() as {
+      type?: string;
+      config?: { api_token?: string; base_url?: string };
+    };
+    expect(payload.type).toBe("sentry");
+    expect(payload.config?.api_token).toBe("sntrys_e2e_test");
+    expect(payload.config?.base_url).toBe("https://sentry.example.com");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        message: "Connected. 2 organization(s) visible.",
+      }),
+    });
+  });
+
+  const testResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/credentials/test",
+  );
+  await page.getByTestId("sentry-test-connection-button").click();
+  await testResponsePromise;
+  await expect(page.getByText("Connected. 2 organization(s) visible.")).toBeVisible();
+
+  const credentialResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/credentials",
+  );
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const credential = (await (await credentialResponsePromise).json()) as { id: string };
+
+  const credentialCard = page.getByTestId(`credential-card-${credential.id}`);
+  await expect(credentialCard).toBeVisible();
+  await expect(credentialCard).toContainText(credentialName);
+  await expect(credentialCard).toContainText("Sentry");
+
+  await acceptNextDialog(
+    page,
+    () => page.getByTestId(`credential-delete-${credential.id}`).click(),
+    "Are you sure you want to delete this credential?",
+  );
+  await expect(credentialCard).toBeHidden();
+});
+
 test("creates and deletes a Notion internal token credential", async ({ page }) => {
   const credentialName = `e2e-notion-${Date.now()}`;
 

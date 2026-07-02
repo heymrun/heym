@@ -336,6 +336,79 @@ test("adds and configures a Linear node", async ({ page }) => {
   }
 });
 
+test("configures a Sentry node operation with searchable select", async ({ page }) => {
+  const credentialResponse = await page.request.post("/api/credentials", {
+    data: {
+      name: `E2E Sentry ${Date.now()}`,
+      type: "sentry",
+      config: { api_token: "sntrys_e2e_test" },
+    },
+  });
+  await expectOk(credentialResponse);
+  const credential = (await credentialResponse.json()) as { id: string };
+  const workflow = await createWorkflow(page, `Sentry Workflow ${Date.now()}`, [
+    {
+      id: "sentry-node",
+      type: "sentry",
+      position: { x: 200, y: 150 },
+      data: {
+        label: "sentry",
+        credentialId: credential.id,
+        sentryOperation: "listIssues",
+      },
+    },
+  ]);
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    const sentryNode = page.locator('.vue-flow__node[data-id="sentry-node"]');
+    await expect(sentryNode).toBeVisible();
+    await page.getByRole("button", { name: "Properties" }).click();
+    await sentryNode.click();
+
+    const operationField = page.getByTestId("sentry-operation-field");
+    await expect(operationField.getByRole("combobox")).toHaveValue("List Issues");
+    await expect(page.getByText("Organization Slug", { exact: true })).toBeVisible();
+    await expect(page.getByText("Stats Period", { exact: true })).toBeVisible();
+    await expect(page.getByText("Limit", { exact: true })).toBeVisible();
+
+    await operationField.getByRole("combobox").click();
+    await expect(page.getByText("Issue", { exact: true })).toBeVisible();
+    await expect(page.getByText("Event", { exact: true })).toBeVisible();
+    await expect(page.getByText("Release", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await selectSearchableOption(page, operationField, "Get Issue");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Get Issue");
+    await expect(page.getByText("Issue ID", { exact: true })).toBeVisible();
+    await expect(page.getByText("Organization Slug", { exact: true })).toBeVisible();
+
+    await selectSearchableOption(page, operationField, "Update Issue");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Update Issue");
+    await expect(page.getByText("Issue ID", { exact: true })).toBeVisible();
+    await expect(page.getByText("Status", { exact: true })).toBeVisible();
+    await expect(page.getByText("Assigned To", { exact: true })).toBeVisible();
+
+    await selectSearchableOption(page, operationField, "Update Project");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Update Project");
+    await expect(page.getByText("Project Slug", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payload JSON", { exact: true })).toBeVisible();
+
+    await selectSearchableOption(page, operationField, "Delete Release");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Delete Release");
+    await expect(page.getByText("Release Version", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payload JSON", { exact: true })).toBeHidden();
+
+    await selectSearchableOption(page, operationField, "Update Team");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Update Team");
+    await expect(page.getByText("Team Slug", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payload JSON", { exact: true })).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+    await deleteCredential(page, credential.id);
+  }
+});
+
 test("configures Linear listTeamMembers fields and persists after save", async ({ page }) => {
   const credentialResponse = await page.request.post("/api/credentials", {
     data: {

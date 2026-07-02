@@ -8,12 +8,14 @@ Create a **Sentry** credential with an auth token. Leave Base URL empty for Sent
 
 ## Operations
 
-- `listOrganizations`
-- `listProjects`, `createProject`
-- `listTeams`, `createTeam`
+- `listOrganizations`, `updateOrganization`
+- `listProjects`, `createProject`, `getProject`, `updateProject`, `deleteProject`
+- `listTeams`, `createTeam`, `updateTeam`, `deleteTeam`
 - `listIssues`, `getIssue`, `updateIssue`
 - `listEvents`, `getEvent`
-- `listReleases`, `getRelease`, `createRelease`
+- `listReleases`, `getRelease`, `createRelease`, `updateRelease`, `deleteRelease`
+
+`deleteIssue` and `createOrganization` are not exposed because Sentry does not document public REST endpoints for them.
 
 ## Common Fields
 
@@ -21,9 +23,21 @@ Create a **Sentry** credential with an auth token. Leave Base URL empty for Sent
 | --- | --- |
 | Credential | Sentry credential to use |
 | Operation | Sentry action to run |
-| Organization Slug | Sentry organization slug for project, team, issue, event, and release operations |
-| Project Slug | Project slug for event operations and project-scoped filters |
-| Limit | Page size for list operations, capped at 100 |
+| Organization Slug | Sentry organization slug for organization update and project, team, issue, event, and release operations |
+| Project Slug | Project slug for project get/update/delete and event operations; project slug or ID for issue filters |
+| Team Slug | Team slug for project creation and team update/delete operations |
+| Issue ID | Issue ID for issue get/update operations |
+| Event ID | Event ID for event lookup operations |
+| Release Version | Release version for release get/update/delete operations |
+| Name | Project or team name for create operations |
+| Slug | Optional project or team slug for create operations |
+| Platform | Optional Sentry platform for project creation |
+| Status / Assigned To | Issue update fields. At least one is required for `updateIssue` |
+| Query | Sentry search query. Omit it for unresolved issues, or set it to an empty string to fetch all issues |
+| Limit | Result limit for list operations, capped at 1,000 total results |
+| Release Projects JSON | JSON array of project slugs for release creation |
+| Release Refs JSON | JSON array of repository/commit objects for release creation |
+| Payload JSON | JSON object for update organization, project, release, and team operations |
 
 ## Examples
 
@@ -45,6 +59,7 @@ Resolve an issue:
 ```json
 {
   "sentryOperation": "updateIssue",
+  "sentryOrganizationSlug": "acme",
   "sentryIssueId": "$input.issue_id",
   "sentryStatus": "resolved"
 }
@@ -61,6 +76,17 @@ Create a release:
 }
 ```
 
+Update a project:
+
+```json
+{
+  "sentryOperation": "updateProject",
+  "sentryOrganizationSlug": "acme",
+  "sentryProjectSlug": "web-app",
+  "sentryPayload": "{\"name\":\"Web App\"}"
+}
+```
+
 ## Outputs
 
-List operations return `success`, `operation`, `count`, and the relevant collection such as `issues`, `events`, or `releases`. Single-resource operations return `issue`, `event`, `release`, `project`, or `team`.
+List operations return `success`, `operation`, `count`, and the relevant collection such as `organizations`, `projects`, `teams`, `issues`, `events`, or `releases`. Single-resource operations return `organization`, `issue`, `event`, `release`, `project`, or `team`. Delete operations return the relevant resource key with `deleted: true` and identifying fields.

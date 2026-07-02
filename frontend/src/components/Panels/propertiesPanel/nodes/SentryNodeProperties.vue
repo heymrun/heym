@@ -3,14 +3,14 @@ import { computed, onMounted, ref, watch } from "vue";
 import { AlertTriangle } from "lucide-vue-next";
 
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
-import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import {
-  getSentryOperationOptions,
+  getSentryOperationGroups,
   isSentryFieldVisible,
   type SentryFieldKey,
-} from "@/lib/sentryOperationMetadata";
+} from "@/lib/sentryExpressionFields";
 import { credentialsApi } from "@/services/api";
 import type { CredentialListItem } from "@/types/credential";
 
@@ -28,7 +28,7 @@ const sentryCredentialOptions = computed(() => [
   })),
 ]);
 
-const sentryOperationOptions = getSentryOperationOptions();
+const sentryOperationGroups = getSentryOperationGroups();
 
 async function loadSentryCredentials(): Promise<void> {
   try {
@@ -92,11 +92,15 @@ watch(
       </div>
     </div>
 
-    <div class="space-y-2">
+    <div
+      class="space-y-2"
+      data-testid="sentry-operation-field"
+    >
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.sentryOperation || 'listIssues'"
-        :options="sentryOperationOptions"
+        :groups="sentryOperationGroups"
+        search-placeholder="Search Sentry operations..."
         @update:model-value="updateNodeData('sentryOperation', $event)"
       />
     </div>
@@ -232,9 +236,15 @@ watch(
       class="space-y-2"
     >
       <Label>Stats Period</Label>
-      <Input
+      <ExpressionInput
         :model-value="selectedNode.data.sentryStatsPeriod || '14d'"
         placeholder="14d"
+        single-line
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        field-key="sentryStatsPeriod"
         @update:model-value="updateNodeData('sentryStatsPeriod', $event)"
       />
     </div>
@@ -244,9 +254,15 @@ watch(
       class="space-y-2"
     >
       <Label>Limit</Label>
-      <Input
+      <ExpressionInput
         :model-value="selectedNode.data.sentryLimit || '25'"
         placeholder="25"
+        single-line
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        field-key="sentryLimit"
         @update:model-value="updateNodeData('sentryLimit', $event)"
       />
     </div>
@@ -274,9 +290,15 @@ watch(
       class="space-y-2"
     >
       <Label>Status</Label>
-      <Input
+      <ExpressionInput
         :model-value="selectedNode.data.sentryStatus || ''"
         placeholder="resolved"
+        single-line
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        field-key="sentryStatus"
         @update:model-value="updateNodeData('sentryStatus', $event)"
       />
     </div>
@@ -366,6 +388,23 @@ watch(
         :current-node-id="selectedNode.id"
         field-key="sentryReleaseRefs"
         @update:model-value="updateNodeData('sentryReleaseRefs', $event)"
+      />
+    </div>
+
+    <div
+      v-if="fieldVisible('sentryPayload', selectedNode.data.sentryOperation)"
+      class="space-y-2"
+    >
+      <Label>Payload JSON</Label>
+      <ExpressionInput
+        :model-value="selectedNode.data.sentryPayload || '{}'"
+        placeholder="{&quot;name&quot;:&quot;New name&quot;}"
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        field-key="sentryPayload"
+        @update:model-value="updateNodeData('sentryPayload', $event)"
       />
     </div>
   </template>

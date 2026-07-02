@@ -162,7 +162,7 @@ class SentryService:
             except ValueError as exc:
                 raise ValueError(f"Sentry {operation} returned invalid JSON") from exc
             if not isinstance(result, list):
-                return items
+                raise ValueError(f"Sentry {operation} returned an unexpected response")
 
             items.extend(item for item in result if isinstance(item, dict))
             cursor = self._next_cursor(response)
@@ -185,6 +185,20 @@ class SentryService:
             operation="listOrganizations",
             limit=limit,
         )
+
+    def update_organization(
+        self, organization_slug: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update an organization."""
+        result = self._request(
+            "PUT",
+            f"/organizations/{self._path_segment(organization_slug)}/",
+            operation="updateOrganization",
+            json=payload,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Sentry updateOrganization returned an unexpected response")
+        return result
 
     def list_projects(
         self, organization_slug: str, limit: int | str | None = 25
@@ -223,6 +237,54 @@ class SentryService:
             raise ValueError("Sentry createProject returned an unexpected response")
         return result
 
+    def get_project(self, organization_slug: str, project_slug: str) -> dict[str, Any]:
+        """Fetch a project."""
+        result = self._request(
+            "GET",
+            (
+                f"/projects/{self._path_segment(organization_slug)}/"
+                f"{self._path_segment(project_slug)}/"
+            ),
+            operation="getProject",
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Sentry getProject returned an unexpected response")
+        return result
+
+    def update_project(
+        self, organization_slug: str, project_slug: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update a project."""
+        result = self._request(
+            "PUT",
+            (
+                f"/projects/{self._path_segment(organization_slug)}/"
+                f"{self._path_segment(project_slug)}/"
+            ),
+            operation="updateProject",
+            json=payload,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Sentry updateProject returned an unexpected response")
+        return result
+
+    def delete_project(self, organization_slug: str, project_slug: str) -> dict[str, Any]:
+        """Delete a project."""
+        self._request(
+            "DELETE",
+            (
+                f"/projects/{self._path_segment(organization_slug)}/"
+                f"{self._path_segment(project_slug)}/"
+            ),
+            operation="deleteProject",
+            success_codes=(200, 202, 204),
+        )
+        return {
+            "deleted": True,
+            "organization_slug": organization_slug,
+            "project_slug": project_slug,
+        }
+
     def list_teams(
         self, organization_slug: str, limit: int | str | None = 25
     ) -> list[dict[str, Any]]:
@@ -256,20 +318,29 @@ class SentryService:
             raise ValueError("Sentry createTeam returned an unexpected response")
         return result
 
-    def _resolve_project_id(self, organization_slug: str, project_slug_or_id: str) -> str:
-        if project_slug_or_id.isdigit():
-            return project_slug_or_id
-        projects = self.list_projects(organization_slug, self._MAX_TOTAL_LIMIT)
-        for project in projects:
-            if project_slug_or_id in {
-                str(project.get("id", "")),
-                str(project.get("slug", "")),
-                str(project.get("name", "")),
-            }:
-                project_id = project.get("id")
-                if project_id:
-                    return str(project_id)
-        raise ValueError(f"Sentry project not found: {project_slug_or_id}")
+    def update_team(
+        self, organization_slug: str, team_slug: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update a team."""
+        result = self._request(
+            "PUT",
+            (f"/teams/{self._path_segment(organization_slug)}/{self._path_segment(team_slug)}/"),
+            operation="updateTeam",
+            json=payload,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Sentry updateTeam returned an unexpected response")
+        return result
+
+    def delete_team(self, organization_slug: str, team_slug: str) -> dict[str, Any]:
+        """Delete a team."""
+        self._request(
+            "DELETE",
+            (f"/teams/{self._path_segment(organization_slug)}/{self._path_segment(team_slug)}/"),
+            operation="deleteTeam",
+            success_codes=(200, 202, 204),
+        )
+        return {"deleted": True, "organization_slug": organization_slug, "team_slug": team_slug}
 
     def list_issues(
         self,
@@ -283,8 +354,8 @@ class SentryService:
         """List issues for an organization, optionally filtered to a project."""
         params: dict[str, Any] = {}
         if project_slug:
-            params["project"] = self._resolve_project_id(organization_slug, project_slug)
-        if query:
+            params["project"] = project_slug
+        if query is not None:
             params["query"] = query
         if stats_period:
             params["statsPeriod"] = stats_period
@@ -296,17 +367,27 @@ class SentryService:
         )
         return result
 
-    def get_issue(self, issue_id: str) -> dict[str, Any]:
+    def get_issue(self, organization_slug: str, issue_id: str) -> dict[str, Any]:
         """Fetch a Sentry issue by ID."""
         result = self._request(
-            "GET", f"/issues/{self._path_segment(issue_id)}/", operation="getIssue"
+            "GET",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"issues/{self._path_segment(issue_id)}/"
+            ),
+            operation="getIssue",
         )
         if not isinstance(result, dict):
             raise ValueError("Sentry getIssue returned an unexpected response")
         return result
 
     def update_issue(
-        self, issue_id: str, *, status: str | None = None, assigned_to: str | None = None
+        self,
+        organization_slug: str,
+        issue_id: str,
+        *,
+        status: str | None = None,
+        assigned_to: str | None = None,
     ) -> dict[str, Any]:
         """Update a Sentry issue status or assignment."""
         payload: dict[str, Any] = {}
@@ -318,7 +399,10 @@ class SentryService:
             raise ValueError("Sentry updateIssue requires status or assignedTo")
         result = self._request(
             "PUT",
-            f"/issues/{self._path_segment(issue_id)}/",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"issues/{self._path_segment(issue_id)}/"
+            ),
             operation="updateIssue",
             json=payload,
         )
@@ -409,3 +493,33 @@ class SentryService:
         if not isinstance(result, dict):
             raise ValueError("Sentry createRelease returned an unexpected response")
         return result
+
+    def update_release(
+        self, organization_slug: str, version: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update a release."""
+        result = self._request(
+            "PUT",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"releases/{self._path_segment(version)}/"
+            ),
+            operation="updateRelease",
+            json=payload,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("Sentry updateRelease returned an unexpected response")
+        return result
+
+    def delete_release(self, organization_slug: str, version: str) -> dict[str, Any]:
+        """Delete a release."""
+        self._request(
+            "DELETE",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"releases/{self._path_segment(version)}/"
+            ),
+            operation="deleteRelease",
+            success_codes=(200, 202, 204),
+        )
+        return {"deleted": True, "organization_slug": organization_slug, "version": version}

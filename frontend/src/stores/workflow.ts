@@ -3,7 +3,7 @@ import { defineStore } from "pinia";
 
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
-import { getSentryOperationMetadata } from "@/lib/sentryOperationMetadata";
+import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { workflowApi } from "@/services/api";
@@ -2446,6 +2446,29 @@ export const useWorkflowStore = defineStore("workflow", () => {
               });
             }
           });
+          if (
+            metadata.requiredFields.includes("sentryPayload") &&
+            (!node.data.sentryPayload?.trim() || node.data.sentryPayload.trim() === "{}")
+          ) {
+            errors.push({
+              nodeId: node.id,
+              nodeLabel: node.data.label,
+              nodeType: "Sentry",
+              message: "Payload JSON must include at least one field",
+            });
+          }
+          if (
+            operation === "updateIssue" &&
+            !node.data.sentryStatus?.trim() &&
+            !node.data.sentryAssignedTo?.trim()
+          ) {
+            errors.push({
+              nodeId: node.id,
+              nodeLabel: node.data.label,
+              nodeType: "Sentry",
+              message: "Status or Assigned To is required",
+            });
+          }
         }
       }
     }

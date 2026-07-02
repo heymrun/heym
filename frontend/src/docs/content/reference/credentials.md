@@ -75,7 +75,7 @@ Use the Notion **node** for native database, page, and block operations. Use `$c
 - [GitHub Node](../nodes/github-node.md) – Native GitHub REST operations
 - [Linear Node](../nodes/linear-node.md) – Linear GraphQL workspace and issue automation
 - [Notion Node](../nodes/notion-node.md) – Search and manage Notion content
-- [Sentry Node](../nodes/sentry-node.md) – Sentry issue, event, release, project, and team automation
+- [Sentry Node](../nodes/sentry-node.md) – Sentry organization, project, team, issue, event, and release automation
 - [Credentials Sharing](./credentials-sharing.md) – Share with users and teams
 - [Third-Party Integrations](./integrations.md) – Setup guide per credential type
 - [Expression DSL](./expression-dsl.md) – `$credentials` in expressions
