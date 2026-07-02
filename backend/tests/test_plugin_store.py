@@ -1,9 +1,12 @@
+import builtins
 import io
+import sys
 import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app.services import plugin_store
 from app.services.plugin_store import PluginInstallError
@@ -89,3 +92,64 @@ class PluginStoreTests(unittest.TestCase):
         (target / "handler.py").write_text("x")
         plugin_store.remove_plugin_dir("acme-crm", self.dir)
         self.assertFalse(target.exists())
+
+    def test_dependency_reinstall_noops_without_dependencies(self) -> None:
+        with (
+            patch.object(plugin_store, "plugins_root") as root,
+            patch.object(plugin_store, "_install_dependencies") as install,
+        ):
+            plugin_store.ensure_dependencies_installed([])
+
+        root.assert_not_called()
+        install.assert_not_called()
+
+    def test_dependency_reinstall_uses_windows_lock_without_fcntl(self) -> None:
+        real_import = builtins.__import__
+
+        def import_without_fcntl(name: str, *args, **kwargs):
+            if name == "fcntl":
+                raise AssertionError("fcntl must not be imported on Windows")
+            return real_import(name, *args, **kwargs)
+
+        fake_msvcrt = SimpleNamespace(LK_LOCK=1, LK_UNLCK=2, locking=Mock())
+
+        with (
+            patch.object(plugin_store.os, "name", "nt"),
+            patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+            patch("builtins.__import__", side_effect=import_without_fcntl),
+            patch.object(plugin_store, "plugins_root", return_value=self.dir),
+            patch.object(plugin_store, "_install_dependencies") as install,
+        ):
+            plugin_store.ensure_dependencies_installed(["requests"])
+
+        install.assert_called_once_with(["requests"])
+        self.assertEqual(fake_msvcrt.locking.call_count, 2)
+        self.assertEqual(fake_msvcrt.locking.call_args_list[0].args[1], fake_msvcrt.LK_LOCK)
+        self.assertEqual(fake_msvcrt.locking.call_args_list[1].args[1], fake_msvcrt.LK_UNLCK)
+
+    def test_dependency_reinstall_logs_lock_failure_without_raising(self) -> None:
+        with (
+            patch.object(plugin_store, "plugins_root", return_value=self.dir),
+            patch.object(plugin_store, "_lock_dependency_file", side_effect=OSError("locked")),
+            patch.object(plugin_store, "_install_dependencies") as install,
+            self.assertLogs(plugin_store.logger, level="WARNING") as logs,
+        ):
+            plugin_store.ensure_dependencies_installed(["requests"])
+
+        install.assert_not_called()
+        self.assertIn("could not acquire lock", "\n".join(logs.output))
+
+    def test_dependency_reinstall_logs_install_failure_without_raising(self) -> None:
+        with (
+            patch.object(plugin_store, "plugins_root", return_value=self.dir),
+            patch.object(
+                plugin_store,
+                "_install_dependencies",
+                side_effect=PluginInstallError("pip failed"),
+            ) as install,
+            self.assertLogs(plugin_store.logger, level="WARNING") as logs,
+        ):
+            plugin_store.ensure_dependencies_installed(["requests"])
+
+        install.assert_called_once_with(["requests"])
+        self.assertIn("Plugin dependency reinstall failed", "\n".join(logs.output))

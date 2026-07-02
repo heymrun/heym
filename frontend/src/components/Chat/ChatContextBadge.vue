@@ -29,11 +29,6 @@ const ringStyle = computed(() => ({
   background: `conic-gradient(${ringColor.value} ${pct.value * 3.6}deg, hsl(var(--muted)) 0)`,
 }));
 
-const usedDisplay = computed(() => {
-  const k = usedTotal.value / 1000;
-  return k >= 10 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`;
-});
-
 const isOpen = ref(false);
 
 function formatK(n: number): string {
@@ -46,25 +41,24 @@ function formatK(n: number): string {
 <template>
   <div
     v-if="contextUsage"
-    class="relative inline-flex"
+    class="relative inline-flex shrink-0 pl-0 pr-2.5"
     @mouseenter="isOpen = true"
     @mouseleave="isOpen = false"
   >
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 rounded-full bg-muted/50 hover:bg-muted/70 border border-border/40 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors"
+      class="inline-flex h-9 w-9 min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
       :aria-label="`Context usage ${pct}%`"
       @click="isOpen = !isOpen"
     >
       <span
-        class="w-3.5 h-3.5 rounded-full"
+        class="h-4 w-4 rounded-full"
         :style="ringStyle"
       />
-      <span class="tabular-nums">{{ pct }}% · ~{{ usedDisplay }}</span>
     </button>
     <div
       v-if="isOpen"
-      class="absolute bottom-full left-0 mb-2 w-60 rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-md p-3 text-xs space-y-1 z-10"
+      class="absolute bottom-full right-0 mb-2 w-60 rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-md p-3 text-xs space-y-1 z-10"
       role="tooltip"
     >
       <p class="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">

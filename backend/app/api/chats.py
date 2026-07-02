@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from threading import Event
 
 import sqlalchemy as sa
@@ -30,6 +31,7 @@ from app.api.ai_assistant import (
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.db.models import (
     CredentialType,
+    DashboardChatQueueItem,
     DashboardChatQuickPrompts,
     DashboardConversation,
     DashboardMessage,
@@ -46,6 +48,8 @@ from app.models.chat_schemas import (
     ConversationUpdate,
     MessageCreate,
     MessageResponse,
+    QueuedMessageResponse,
+    QueuedMessageUpdate,
     QuickPromptsResponse,
     QuickPromptsUpdate,
     SendMessageResponse,
@@ -72,6 +76,23 @@ DEFAULT_QUICK_PROMPTS: list[str] = [
 MAX_QUICK_PROMPTS = 7
 MAX_PROMPT_LENGTH = 200
 CHAT_STREAM_HEARTBEAT_SECONDS = 10.0
+CLARIFY_FENCE = "```heym-clarify"
+
+
+@dataclass(frozen=True)
+class ChatTurn:
+    content: str
+    credential_id: uuid.UUID
+    model: str
+    attachment_data: dict | None
+    should_generate_title: bool
+
+
+@dataclass(frozen=True)
+class ChatTurnResult:
+    paused_for_clarification: bool
+    assistant_message_id: uuid.UUID
+    stop_worker: bool = False
 
 
 def _build_hidden_workflow_context_marker(workflow_id: str, workflow_name: str) -> str:
@@ -116,6 +137,58 @@ def _ingest_tool_event(tool_calls_for_message: list[dict], payload: dict) -> Non
                 "status": "compressed",
             }
         )
+
+
+def _queued_message_response(item: DashboardChatQueueItem) -> QueuedMessageResponse:
+    attachment = item.attachment if isinstance(item.attachment, dict) else None
+    attachment_name = attachment.get("name") if attachment else None
+    return QueuedMessageResponse(
+        id=item.id,
+        content=item.content,
+        credential_id=item.credential_id,
+        model=item.model,
+        attachment_name=str(attachment_name) if attachment_name else None,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+def _message_response(message: DashboardMessage) -> MessageResponse:
+    return MessageResponse.model_validate(message)
+
+
+def _has_clarify_block(content: str) -> bool:
+    return CLARIFY_FENCE in content
+
+
+async def _publish_payload_with_message_id(
+    conv_id: str,
+    chunk: str,
+    assistant_message_id: uuid.UUID,
+) -> None:
+    if not chunk.startswith("data: "):
+        await registry.publish(conv_id, chunk)
+        return
+    try:
+        payload = json.loads(chunk[6:].strip())
+    except json.JSONDecodeError:
+        await registry.publish(conv_id, chunk)
+        return
+    if payload.get("type") == "done":
+        return
+    payload["message_id"] = str(assistant_message_id)
+    await registry.publish(conv_id, payload)
+
+
+async def _clear_queue_items(
+    db: AsyncSession,
+    conversation_id: uuid.UUID,
+) -> None:
+    await db.execute(
+        delete(DashboardChatQueueItem).where(
+            DashboardChatQueueItem.conversation_id == conversation_id
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -213,64 +286,54 @@ def request_chat_cancel(conv_id: str) -> bool:
     return found
 
 
-async def _process_chat(
+async def _run_chat_turn(
     conv_id: str,
     user_id: uuid.UUID,
-    content: str,
-    credential_id: uuid.UUID,
-    model: str,
-    attachment_data: dict | None,
+    turn: ChatTurn,
     public_base_url: str,
-    should_generate_title: bool,
-) -> None:
-    """Background coroutine: streams assistant reply, writes to queue, persists to DB."""
-    if not await registry.has_task(conv_id):
-        return
-
-    # Declared up front so the cancellation handler can persist whatever streamed so far.
+) -> ChatTurnResult:
+    """Stream and persist one assistant turn for a conversation worker."""
+    conv_uuid = uuid.UUID(conv_id)
+    assistant_message_id = uuid.uuid4()
     assistant_chunks: list[str] = []
     workflow_context_markers: list[str] = []
     tool_calls_for_message: list[dict] = []
 
-    async with async_session_maker() as db:
-        try:
+    try:
+        async with async_session_maker() as db:
             user_result = await db.execute(select(User).where(User.id == user_id))
             user = user_result.scalar_one_or_none()
             if user is None:
                 await registry.publish(conv_id, {"type": "error", "text": "User not found"})
-                await registry.finish(conv_id)
-                return
+                return ChatTurnResult(False, assistant_message_id, stop_worker=True)
 
-            credential = await get_accessible_credential(db, credential_id, user_id)
+            credential = await get_accessible_credential(db, turn.credential_id, user_id)
             if credential is None:
                 await registry.publish(conv_id, {"type": "error", "text": "Credential not found"})
-                await registry.finish(conv_id)
-                return
+                return ChatTurnResult(False, assistant_message_id, stop_worker=True)
 
             config = decrypt_config(credential.encrypted_config)
             client, provider = get_openai_client(credential.type, config)
 
             attachment = (
                 FileAttachment(
-                    name=attachment_data["name"],
-                    kind=attachment_data["kind"],
-                    content=attachment_data["content"],
+                    name=turn.attachment_data["name"],
+                    kind=turn.attachment_data["kind"],
+                    content=turn.attachment_data["content"],
                 )
-                if attachment_data
+                if turn.attachment_data
                 else None
             )
 
             msg_result = await db.execute(
                 select(DashboardMessage)
-                .where(DashboardMessage.conversation_id == uuid.UUID(conv_id))
+                .where(DashboardMessage.conversation_id == conv_uuid)
                 .order_by(DashboardMessage.created_at)
             )
             all_messages = msg_result.scalars().all()
             history = [{"role": m.role, "content": m.content} for m in all_messages]
             if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
                 history = history[-MAX_DASHBOARD_CHAT_HISTORY:]
-
-            messages = list(history)
 
             trace_context = LLMTraceContext(
                 user_id=user_id,
@@ -280,19 +343,20 @@ async def _process_chat(
                 source="dashboard_chat",
             )
             parts = await _assemble_system_prompt_parts(
-                user, db, include_attachment_instructions=attachment_data is not None
+                user, db, include_attachment_instructions=turn.attachment_data is not None
             )
-            system_prompt = parts.full_system_prompt
 
-            cancel_event = Event()
-            _cancel_events[conv_id] = cancel_event
+            cancel_event = _cancel_events.get(conv_id)
+            if cancel_event is None:
+                cancel_event = Event()
+                _cancel_events[conv_id] = cancel_event
             workflow_note_ids: set[str] = set()
 
             async for chunk in stream_dashboard_chat(
                 client,
-                model,
-                system_prompt,
-                messages,
+                turn.model,
+                parts.full_system_prompt,
+                list(history),
                 db,
                 user,
                 provider,
@@ -321,24 +385,19 @@ async def _process_chat(
                             )
                     elif ptype in ("tool_start", "tool_end", "compressed"):
                         _ingest_tool_event(tool_calls_for_message, payload)
-                await registry.publish(conv_id, chunk)
+                await _publish_payload_with_message_id(conv_id, chunk, assistant_message_id)
 
             assistant_content = "".join(assistant_chunks)
             for marker in workflow_context_markers:
                 if marker and marker not in assistant_content:
                     assistant_content += marker
-            # A cancelled run can return before a tool's `tool_end` is emitted,
-            # leaving its tool_call stuck in "running". Normalize so reloads don't
-            # show a perpetual spinner.
-            for entry in tool_calls_for_message:
-                if entry.get("status") == "running":
-                    entry["status"] = "cancelled"
-                    if not entry.get("response_summary"):
-                        entry["response_summary"] = "Cancelled"
+
+            paused_for_clarification = _has_clarify_block(assistant_content)
             if assistant_content or tool_calls_for_message:
                 db.add(
                     DashboardMessage(
-                        conversation_id=uuid.UUID(conv_id),
+                        id=assistant_message_id,
+                        conversation_id=conv_uuid,
                         role="assistant",
                         content=assistant_content,
                         tool_calls=tool_calls_for_message or None,
@@ -346,74 +405,257 @@ async def _process_chat(
                 )
 
             conv_result = await db.execute(
-                select(DashboardConversation).where(DashboardConversation.id == uuid.UUID(conv_id))
+                select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
+            )
+            conversation = conv_result.scalar_one_or_none()
+            if conversation is not None:
+                conversation.has_unread = True
+                if paused_for_clarification:
+                    conversation.is_running = False
+                    conversation.queue_paused_by_message_id = assistant_message_id
+                if turn.should_generate_title and conversation.title == DEFAULT_CONVERSATION_TITLE:
+                    conversation.title = _fallback_title_from_content(turn.content)
+                    await registry.publish(
+                        conv_id,
+                        {"type": "title", "title": conversation.title},
+                    )
+            await db.commit()
+            await registry.publish(
+                conv_id,
+                {
+                    "type": "assistant_done",
+                    "message_id": str(assistant_message_id),
+                    "paused_for_clarification": paused_for_clarification,
+                },
+            )
+            return ChatTurnResult(paused_for_clarification, assistant_message_id)
+
+    except asyncio.CancelledError:
+        assistant_content = "".join(assistant_chunks)
+        for marker in workflow_context_markers:
+            if marker and marker not in assistant_content:
+                assistant_content += marker
+        for entry in tool_calls_for_message:
+            if entry.get("status") == "running":
+                entry["status"] = "cancelled"
+                if not entry.get("response_summary"):
+                    entry["response_summary"] = "Cancelled"
+        async with async_session_maker() as cancel_db:
+            if assistant_content or tool_calls_for_message:
+                cancel_db.add(
+                    DashboardMessage(
+                        id=assistant_message_id,
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content=assistant_content,
+                        tool_calls=tool_calls_for_message or None,
+                    )
+                )
+            conv_result = await cancel_db.execute(
+                select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
             )
             conversation = conv_result.scalar_one_or_none()
             if conversation is not None:
                 conversation.is_running = False
-                # Subscriber count isn't tracked across workers under the
-                # Postgres-backed registry. Mark as unread so the conversation
-                # list reflects the new message; the frontend's
-                # markConversationRead path clears this immediately when the
-                # user is viewing the conversation.
-                conversation.has_unread = True
-                if should_generate_title and conversation.title == DEFAULT_CONVERSATION_TITLE:
-                    conversation.title = _fallback_title_from_content(content)
-                    await registry.publish(
-                        conv_id,
-                        f"data: {json.dumps({'type': 'title', 'title': conversation.title})}\n\n",
-                    )
+                conversation.queue_paused_by_message_id = None
+            await _clear_queue_items(cancel_db, conv_uuid)
+            await cancel_db.commit()
+        await registry.publish(conv_id, {"type": "queue_cleared"})
+        await registry.publish(
+            conv_id,
+            {
+                "type": "assistant_done",
+                "message_id": str(assistant_message_id),
+                "cancelled": True,
+            },
+        )
+        raise
+
+
+async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
+    conv_uuid = uuid.UUID(conv_id)
+    async with async_session_maker() as db:
+        conv_result = await db.execute(
+            select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
+        )
+        conversation = conv_result.scalar_one_or_none()
+        if conversation is None:
+            return None
+        if conversation.queue_paused_by_message_id is not None:
+            conversation.is_running = False
             await db.commit()
-            await registry.finish(conv_id)
+            return None
 
-        except asyncio.CancelledError:
-            # The user pressed Stop: an in-flight LLM/tool await was interrupted.
-            # Persist whatever streamed so far (with any unfinished tool marked
-            # cancelled), clear is_running, and end the stream cleanly. Use a fresh
-            # session since the active one may be in a broken state after cancellation.
-            assistant_content = "".join(assistant_chunks)
-            for marker in workflow_context_markers:
-                if marker and marker not in assistant_content:
-                    assistant_content += marker
-            for entry in tool_calls_for_message:
-                if entry.get("status") == "running":
-                    entry["status"] = "cancelled"
-                    if not entry.get("response_summary"):
-                        entry["response_summary"] = "Cancelled"
-            async with async_session_maker() as cancel_db:
-                if assistant_content or tool_calls_for_message:
-                    cancel_db.add(
-                        DashboardMessage(
-                            conversation_id=uuid.UUID(conv_id),
-                            role="assistant",
-                            content=assistant_content,
-                            tool_calls=tool_calls_for_message or None,
-                        )
-                    )
-                await cancel_db.execute(
-                    sa.text("UPDATE dashboard_conversations SET is_running = false WHERE id = :id"),
-                    {"id": conv_id},
-                )
-                await cancel_db.commit()
-            await registry.publish(conv_id, f"data: {json.dumps({'type': 'done'})}\n\n")
-            await registry.finish(conv_id)
-            return
+        item_result = await db.execute(
+            select(DashboardChatQueueItem)
+            .where(DashboardChatQueueItem.conversation_id == conv_uuid)
+            .order_by(DashboardChatQueueItem.created_at, DashboardChatQueueItem.id)
+            .limit(1)
+        )
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            conversation.is_running = False
+            await db.commit()
+            return None
 
-        except Exception:
-            logger.exception("Background chat task failed for conv_id=%s", conv_id)
-            async with async_session_maker() as err_db:
-                await err_db.execute(
-                    sa.text("UPDATE dashboard_conversations SET is_running = false WHERE id = :id"),
-                    {"id": conv_id},
-                )
-                await err_db.commit()
-            await registry.publish(
-                conv_id, f"data: {json.dumps({'type': 'error', 'text': 'Processing failed'})}\n\n"
+        attachment = (
+            FileAttachment(
+                name=item.attachment["name"],
+                kind=item.attachment["kind"],
+                content=item.attachment["content"],
             )
-            await registry.finish(conv_id)
-        finally:
-            _cancel_events.pop(conv_id, None)
-            _chat_tasks.pop(conv_id, None)
+            if isinstance(item.attachment, dict)
+            else None
+        )
+        user_message_data = _build_user_message(item.content, attachment)
+        message_created_at = datetime.now(timezone.utc)
+        user_message = DashboardMessage(
+            id=uuid.uuid4(),
+            conversation_id=conv_uuid,
+            role="user",
+            content=user_message_data["content"],
+            created_at=message_created_at,
+        )
+        db.add(user_message)
+        await db.flush()
+        turn = ChatTurn(
+            content=item.content,
+            credential_id=item.credential_id,
+            model=item.model,
+            attachment_data=dict(item.attachment) if isinstance(item.attachment, dict) else None,
+            should_generate_title=False,
+        )
+        queued_item_id = item.id
+        await db.delete(item)
+        conversation.has_unread = False
+        conversation.last_credential_id = turn.credential_id
+        conversation.last_model = turn.model
+        await db.commit()
+        await db.refresh(user_message)
+
+    await registry.publish(
+        conv_id,
+        {
+            "type": "queued_message_started",
+            "queued_message_id": str(queued_item_id),
+            "user_message": _message_response(user_message).model_dump(mode="json"),
+        },
+    )
+    return turn
+
+
+async def _finish_worker_state(conv_id: str) -> None:
+    async with async_session_maker() as db:
+        conv_uuid = uuid.UUID(conv_id)
+        result = await db.execute(
+            select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is not None and conversation.queue_paused_by_message_id is None:
+            conversation.is_running = False
+        await db.commit()
+
+
+async def _process_chat(
+    conv_id: str,
+    user_id: uuid.UUID,
+    content: str,
+    credential_id: uuid.UUID,
+    model: str,
+    attachment_data: dict | None,
+    public_base_url: str,
+    should_generate_title: bool,
+) -> None:
+    """Background coroutine: streams assistant replies and drains queued messages."""
+    if not await registry.has_task(conv_id):
+        return
+
+    _cancel_events[conv_id] = Event()
+    turn: ChatTurn | None = ChatTurn(
+        content=content,
+        credential_id=credential_id,
+        model=model,
+        attachment_data=attachment_data,
+        should_generate_title=should_generate_title,
+    )
+
+    try:
+        while turn is not None:
+            result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
+            if result.stop_worker or result.paused_for_clarification:
+                break
+            turn = await _dequeue_next_turn(conv_id)
+        await _finish_worker_state(conv_id)
+        await registry.finish(conv_id)
+    except asyncio.CancelledError:
+        await registry.finish(conv_id)
+        return
+    except Exception:
+        logger.exception("Background chat task failed for conv_id=%s", conv_id)
+        async with async_session_maker() as err_db:
+            conv_uuid = uuid.UUID(conv_id)
+            await err_db.execute(
+                sa.text(
+                    "UPDATE dashboard_conversations "
+                    "SET is_running = false WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": conv_id},
+            )
+            await _clear_queue_items(err_db, conv_uuid)
+            await err_db.commit()
+        await registry.publish(
+            conv_id, f"data: {json.dumps({'type': 'error', 'text': 'Processing failed'})}\n\n"
+        )
+        await registry.publish(conv_id, {"type": "queue_cleared"})
+        await registry.finish(conv_id)
+    finally:
+        _cancel_events.pop(conv_id, None)
+        _chat_tasks.pop(conv_id, None)
+
+
+async def _process_chat_queue(
+    conv_id: str,
+    user_id: uuid.UUID,
+    public_base_url: str,
+) -> None:
+    """Background coroutine: starts from the persisted queue and drains it."""
+    if not await registry.has_task(conv_id):
+        return
+
+    _cancel_events[conv_id] = Event()
+    try:
+        turn = await _dequeue_next_turn(conv_id)
+        while turn is not None:
+            result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
+            if result.stop_worker or result.paused_for_clarification:
+                break
+            turn = await _dequeue_next_turn(conv_id)
+        await _finish_worker_state(conv_id)
+        await registry.finish(conv_id)
+    except asyncio.CancelledError:
+        await registry.finish(conv_id)
+        return
+    except Exception:
+        logger.exception("Background queued chat task failed for conv_id=%s", conv_id)
+        async with async_session_maker() as err_db:
+            conv_uuid = uuid.UUID(conv_id)
+            await err_db.execute(
+                sa.text(
+                    "UPDATE dashboard_conversations "
+                    "SET is_running = false WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": conv_id},
+            )
+            await _clear_queue_items(err_db, conv_uuid)
+            await err_db.commit()
+        await registry.publish(
+            conv_id, f"data: {json.dumps({'type': 'error', 'text': 'Processing failed'})}\n\n"
+        )
+        await registry.publish(conv_id, {"type": "queue_cleared"})
+        await registry.finish(conv_id)
+    finally:
+        _cancel_events.pop(conv_id, None)
+        _chat_tasks.pop(conv_id, None)
 
 
 @router.get("", response_model=ConversationListResponse)
@@ -529,12 +771,16 @@ async def get_conversation(
             DashboardConversation.id == conversation_id,
             DashboardConversation.user_id == current_user.id,
         )
-        .options(selectinload(DashboardConversation.messages))
+        .options(
+            selectinload(DashboardConversation.messages),
+            selectinload(DashboardConversation.queue_items),
+        )
     )
     conversation = result.scalar_one_or_none()
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     sorted_messages = sorted(conversation.messages, key=lambda m: m.created_at)
+    sorted_queue = sorted(conversation.queue_items, key=lambda item: (item.created_at, item.id))
     return ConversationDetailResponse(
         id=conversation.id,
         title=conversation.title,
@@ -546,6 +792,7 @@ async def get_conversation(
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
         messages=[MessageResponse.model_validate(m) for m in sorted_messages],
+        queued_messages=[_queued_message_response(item) for item in sorted_queue],
     )
 
 
@@ -628,12 +875,14 @@ async def cancel_conversation_stream(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Signal the in-progress background chat task to stop at the next tool boundary."""
+    """Signal the in-progress background chat task to stop and clear queued messages."""
     conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
     request_chat_cancel(str(conversation_id))
+    await _clear_queue_items(db, conversation_id)
     if conversation.is_running:
         conversation.is_running = False
-        await db.commit()
+    await db.commit()
+    await registry.publish(str(conversation_id), {"type": "queue_cleared"})
 
 
 @router.post(
@@ -648,7 +897,7 @@ async def send_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SendMessageResponse:
-    """Accept a user message, launch background task, return 202."""
+    """Accept a user message, launch a worker or persist it in the queue."""
     conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
 
     msg_result = await db.execute(
@@ -667,6 +916,54 @@ async def send_message(
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
+    attachment_data = body.attachment.model_dump() if body.attachment else None
+    conv_id_str = str(conversation_id)
+    if conversation.is_running:
+        queued_at = datetime.now(timezone.utc)
+        queue_item = DashboardChatQueueItem(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            content=body.content,
+            credential_id=credential.id,
+            model=body.model,
+            attachment=attachment_data,
+            created_at=queued_at,
+            updated_at=queued_at,
+        )
+        db.add(queue_item)
+        conversation.has_unread = False
+        conversation.last_credential_id = credential.id
+        conversation.last_model = body.model
+        await db.commit()
+        await db.refresh(queue_item)
+        await db.refresh(conversation)
+        queued_response = _queued_message_response(queue_item)
+        if conversation.is_running:
+            await registry.publish(
+                conv_id_str,
+                {
+                    "type": "queued_message_created",
+                    "queued_message": queued_response.model_dump(mode="json"),
+                },
+            )
+        else:
+            conversation.is_running = True
+            await db.commit()
+            await registry.create_task(conv_id_str)
+            task = asyncio.create_task(
+                _process_chat_queue(
+                    conv_id=conv_id_str,
+                    user_id=current_user.id,
+                    public_base_url=build_public_base_url(http_request),
+                )
+            )
+            _chat_tasks[conv_id_str] = task
+        return SendMessageResponse(
+            conversation_id=conversation_id,
+            status="queued",
+            queued_message=queued_response,
+        )
+
     attachment = (
         FileAttachment(
             name=body.attachment.name,
@@ -677,24 +974,26 @@ async def send_message(
         else None
     )
     user_message = _build_user_message(body.content, attachment)
-
-    db.add(
-        DashboardMessage(
-            conversation_id=conversation_id,
-            role="user",
-            content=user_message["content"],
-        )
+    message_created_at = datetime.now(timezone.utc)
+    message = DashboardMessage(
+        id=uuid.uuid4(),
+        conversation_id=conversation_id,
+        role="user",
+        content=user_message["content"],
+        created_at=message_created_at,
     )
+    db.add(message)
     conversation.is_running = True
     conversation.has_unread = False
+    conversation.queue_paused_by_message_id = None
     conversation.last_credential_id = credential.id
     conversation.last_model = body.model
     await db.commit()
+    await db.refresh(message)
 
     should_generate_title = (
         len(existing_messages) == 0 and conversation.title == DEFAULT_CONVERSATION_TITLE
     )
-    conv_id_str = str(conversation_id)
     await registry.create_task(conv_id_str)
     public_base_url = build_public_base_url(http_request)
 
@@ -705,14 +1004,98 @@ async def send_message(
             content=body.content,
             credential_id=credential.id,
             model=body.model,
-            attachment_data=body.attachment.model_dump() if body.attachment else None,
+            attachment_data=attachment_data,
             public_base_url=public_base_url,
             should_generate_title=should_generate_title,
         )
     )
     _chat_tasks[conv_id_str] = task
 
-    return SendMessageResponse(conversation_id=conversation_id)
+    return SendMessageResponse(
+        conversation_id=conversation_id,
+        status="started",
+        user_message=_message_response(message),
+    )
+
+
+async def _get_queue_item_or_404(
+    conversation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+) -> DashboardChatQueueItem:
+    result = await db.execute(
+        select(DashboardChatQueueItem)
+        .join(
+            DashboardConversation,
+            DashboardChatQueueItem.conversation_id == DashboardConversation.id,
+        )
+        .where(
+            DashboardChatQueueItem.id == item_id,
+            DashboardChatQueueItem.conversation_id == conversation_id,
+            DashboardConversation.user_id == user_id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Queued message not found"
+        )
+    return item
+
+
+@router.patch(
+    "/{conversation_id}/queue/{item_id}",
+    response_model=QueuedMessageResponse,
+)
+async def update_queued_message(
+    conversation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: QueuedMessageUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QueuedMessageResponse:
+    """Update a queued message before it starts running."""
+    conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
+    item = await _get_queue_item_or_404(conversation_id, item_id, current_user.id, db)
+    cleaned = body.content.strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Queued message content cannot be empty",
+        )
+    item.content = cleaned
+    await db.commit()
+    await db.refresh(item)
+    response = _queued_message_response(item)
+    if conversation.is_running:
+        await registry.publish(
+            str(conversation_id),
+            {
+                "type": "queued_message_updated",
+                "queued_message": response.model_dump(mode="json"),
+            },
+        )
+    return response
+
+
+@router.delete("/{conversation_id}/queue/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_queued_message(
+    conversation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a queued message before it starts running."""
+    conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
+    item = await _get_queue_item_or_404(conversation_id, item_id, current_user.id, db)
+    await db.delete(item)
+    await db.commit()
+    if conversation.is_running:
+        await registry.publish(
+            str(conversation_id),
+            {"type": "queued_message_deleted", "queued_message_id": str(item_id)},
+        )
 
 
 @router.get("/{conversation_id}/stream")

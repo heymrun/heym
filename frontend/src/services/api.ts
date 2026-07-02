@@ -121,6 +121,9 @@ import type {
   ConversationDetail,
   ConversationUpdate,
   ContextUsage,
+  Message,
+  QueuedMessage,
+  SendMessageResponse,
   WorkflowPreview,
 } from "@/types/chat";
 
@@ -2945,13 +2948,30 @@ export const chatApi = {
     credentialId: string,
     model: string,
     attachment: FileAttachmentPayload | null,
-  ): Promise<void> => {
-    await api.post(`/chats/${id}/messages`, {
+  ): Promise<SendMessageResponse> => {
+    const response = await api.post<SendMessageResponse>(`/chats/${id}/messages`, {
       content,
       credential_id: credentialId,
       model,
       ...(attachment ? { attachment } : {}),
     });
+    return response.data;
+  },
+
+  updateQueuedMessage: async (
+    conversationId: string,
+    itemId: string,
+    content: string,
+  ): Promise<QueuedMessage> => {
+    const response = await api.patch<QueuedMessage>(
+      `/chats/${conversationId}/queue/${itemId}`,
+      { content },
+    );
+    return response.data;
+  },
+
+  deleteQueuedMessage: async (conversationId: string, itemId: string): Promise<void> => {
+    await api.delete(`/chats/${conversationId}/queue/${itemId}`);
   },
 
   cancelStream: async (id: string): Promise<void> => {
@@ -2960,16 +2980,22 @@ export const chatApi = {
 
   subscribeStream: async (
     id: string,
-    onChunk: (text: string) => void,
+    onChunk: (payload: { text: string; messageId?: string }) => void,
     onDone: () => void,
     onError: (msg: string) => void,
-    onToolStart?: (payload: { id: string; name: string; label: string; args: Record<string, unknown> }) => void,
-    onToolEnd?: (payload: { id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error' }) => void,
+    onToolStart?: (payload: { id: string; name: string; label: string; args: Record<string, unknown>; messageId?: string }) => void,
+    onToolEnd?: (payload: { id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error'; messageId?: string }) => void,
     onToolOutput?: (images: string[]) => void,
     onTitle?: (title: string) => void,
-    onWorkflowCreated?: (workflow: WorkflowPreview) => void,
-    onCompressed?: (payload: { messages_compressed: number; tokens_before: number; tokens_after: number; elapsed_ms: number }) => void,
+    onWorkflowCreated?: (workflow: WorkflowPreview, messageId?: string) => void,
+    onCompressed?: (payload: { messages_compressed: number; tokens_before: number; tokens_after: number; elapsed_ms: number; messageId?: string }) => void,
     onContext?: (payload: ContextUsage) => void,
+    onAssistantDone?: (payload: { messageId?: string; pausedForClarification: boolean; cancelled: boolean }) => void,
+    onQueuedMessageCreated?: (queuedMessage: QueuedMessage) => void,
+    onQueuedMessageUpdated?: (queuedMessage: QueuedMessage) => void,
+    onQueuedMessageDeleted?: (queuedMessageId: string) => void,
+    onQueueCleared?: () => void,
+    onQueuedMessageStarted?: (payload: { queuedMessageId: string; userMessage: Message }) => void,
     signal?: AbortSignal,
   ): Promise<void> => {
     const base = import.meta.env.VITE_API_URL || "";
@@ -3003,8 +3029,21 @@ export const chatApi = {
         if (!line.startsWith("data: ")) continue;
         try {
           const parsed = JSON.parse(line.slice(6));
-          if (parsed.type === "content") onChunk(parsed.text);
+          const messageId = typeof parsed.message_id === "string" ? parsed.message_id : undefined;
+          if (parsed.type === "content") {
+            onChunk({
+              text: typeof parsed.text === "string" ? parsed.text : "",
+              messageId,
+            });
+          }
           else if (parsed.type === "done") { onDone(); reading = false; break; }
+          else if (parsed.type === "assistant_done") {
+            onAssistantDone?.({
+              messageId,
+              pausedForClarification: parsed.paused_for_clarification === true,
+              cancelled: parsed.cancelled === true,
+            });
+          }
           else if (parsed.type === "error") {
             let message = "Dashboard chat failed";
             if (typeof parsed.text === "string") {
@@ -3022,6 +3061,7 @@ export const chatApi = {
               name: typeof parsed.name === "string" ? parsed.name : "",
               label: typeof parsed.label === "string" ? parsed.label : "",
               args: (parsed.args && typeof parsed.args === "object") ? parsed.args : {},
+              messageId,
             });
           } else if (parsed.type === "tool_end" && typeof parsed.id === "string") {
             onToolEnd?.({
@@ -3030,6 +3070,7 @@ export const chatApi = {
                 typeof parsed.response_summary === "string" ? parsed.response_summary : "",
               elapsed_ms: typeof parsed.elapsed_ms === "number" ? parsed.elapsed_ms : 0,
               status: parsed.status === "error" ? "error" : "success",
+              messageId,
             });
           } else if (parsed.type === "compressed") {
             onCompressed?.({
@@ -3040,6 +3081,7 @@ export const chatApi = {
               tokens_after:
                 typeof parsed.tokens_after === "number" ? parsed.tokens_after : 0,
               elapsed_ms: typeof parsed.elapsed_ms === "number" ? parsed.elapsed_ms : 0,
+              messageId,
             });
           } else if (parsed.type === "context") {
             onContext?.({
@@ -3075,6 +3117,26 @@ export const chatApi = {
               url: parsed.workflow_url,
               nodes: parsed.nodes,
               edges: parsed.edges,
+            }, messageId);
+          } else if (parsed.type === "queued_message_created" && parsed.queued_message) {
+            onQueuedMessageCreated?.(parsed.queued_message as QueuedMessage);
+          } else if (parsed.type === "queued_message_updated" && parsed.queued_message) {
+            onQueuedMessageUpdated?.(parsed.queued_message as QueuedMessage);
+          } else if (
+            parsed.type === "queued_message_deleted" &&
+            typeof parsed.queued_message_id === "string"
+          ) {
+            onQueuedMessageDeleted?.(parsed.queued_message_id);
+          } else if (parsed.type === "queue_cleared") {
+            onQueueCleared?.();
+          } else if (
+            parsed.type === "queued_message_started" &&
+            typeof parsed.queued_message_id === "string" &&
+            parsed.user_message
+          ) {
+            onQueuedMessageStarted?.({
+              queuedMessageId: parsed.queued_message_id,
+              userMessage: parsed.user_message as Message,
             });
           }
         } catch {
