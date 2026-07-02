@@ -15,6 +15,7 @@ class SentryService:
     _REQUEST_TIMEOUT_SECONDS = 30.0
     _MAX_PAGE_LIMIT = 100
     _MAX_TOTAL_LIMIT = 1000
+    _MAX_ERROR_MESSAGE_LENGTH = 1000
 
     def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
         token = str(config.get("api_token", "") or "").strip()
@@ -46,7 +47,8 @@ class SentryService:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Sentry base_url must be a valid http(s) URL")
-        return value.rstrip("/")
+        normalized = parsed._replace(query="", fragment="").geturl()
+        return normalized.rstrip("/")
 
     @staticmethod
     def _path_segment(value: str) -> str:
@@ -56,23 +58,30 @@ class SentryService:
     def _normalize_limit(value: int | str | None, default: int = 25, maximum: int = 100) -> int:
         try:
             limit = int(float(value if value is not None else default))
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             limit = default
         return max(1, min(limit, maximum))
 
-    @staticmethod
-    def _error_message(response: httpx.Response) -> str:
+    @classmethod
+    def _truncate_error_message(cls, value: str) -> str:
+        message = value.strip()
+        if len(message) <= cls._MAX_ERROR_MESSAGE_LENGTH:
+            return message
+        return f"{message[: cls._MAX_ERROR_MESSAGE_LENGTH].rstrip()}..."
+
+    @classmethod
+    def _error_message(cls, response: httpx.Response) -> str:
         try:
             payload = response.json()
         except ValueError:
-            return response.text
+            return cls._truncate_error_message(response.text)
         if isinstance(payload, dict):
             detail = payload.get("detail")
             if detail:
-                return str(detail)
+                return cls._truncate_error_message(str(detail))
             if payload.get("error"):
-                return str(payload["error"])
-        return response.text
+                return cls._truncate_error_message(str(payload["error"]))
+        return cls._truncate_error_message(response.text)
 
     def _request(
         self,
@@ -163,8 +172,10 @@ class SentryService:
                 raise ValueError(f"Sentry {operation} returned invalid JSON") from exc
             if not isinstance(result, list):
                 raise ValueError(f"Sentry {operation} returned an unexpected response")
+            if any(not isinstance(item, dict) for item in result):
+                raise ValueError(f"Sentry {operation} returned an unexpected response")
 
-            items.extend(item for item in result if isinstance(item, dict))
+            items.extend(result)
             cursor = self._next_cursor(response)
             if not cursor or not result:
                 break
@@ -173,10 +184,12 @@ class SentryService:
 
     def test_connection(self) -> dict[str, Any]:
         """Validate the token by listing visible organizations."""
-        result = self._request("GET", "/organizations/", operation="connection test")
-        if not isinstance(result, list):
-            raise ValueError("Sentry connection test returned an unexpected response")
-        return {"organizations": result, "count": len(result)}
+        organizations = self._request_list(
+            "/organizations/",
+            operation="connection test",
+            limit=1,
+        )
+        return {"organizations": organizations, "count": len(organizations)}
 
     def list_organizations(self, limit: int | str | None = 25) -> list[dict[str, Any]]:
         """List organizations visible to the token."""
@@ -409,6 +422,19 @@ class SentryService:
         if not isinstance(result, dict):
             raise ValueError("Sentry updateIssue returned an unexpected response")
         return result
+
+    def delete_issue(self, organization_slug: str, issue_id: str) -> dict[str, Any]:
+        """Delete a Sentry issue by ID."""
+        self._request(
+            "DELETE",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"issues/{self._path_segment(issue_id)}/"
+            ),
+            operation="deleteIssue",
+            success_codes=(200, 202, 204),
+        )
+        return {"deleted": True, "organization_slug": organization_slug, "issue_id": issue_id}
 
     def list_events(
         self,

@@ -8,14 +8,13 @@ Create a **Sentry** credential with an auth token. Leave Base URL empty for Sent
 
 ## Operations
 
-- `listOrganizations`, `updateOrganization`
-- `listProjects`, `createProject`, `getProject`, `updateProject`, `deleteProject`
-- `listTeams`, `createTeam`, `updateTeam`, `deleteTeam`
-- `listIssues`, `getIssue`, `updateIssue`
-- `listEvents`, `getEvent`
-- `listReleases`, `getRelease`, `createRelease`, `updateRelease`, `deleteRelease`
+- `createProject`, `createRelease`, `createTeam`
+- `deleteIssue`, `deleteProject`, `deleteRelease`, `deleteTeam`
+- `getEvent`, `getIssue`, `getProject`, `getRelease`
+- `listEvents`, `listIssues`, `listOrganizations`, `listProjects`, `listReleases`, `listTeams`
+- `updateIssue`, `updateOrganization`, `updateProject`, `updateRelease`, `updateTeam`
 
-`deleteIssue` and `createOrganization` are not exposed because Sentry does not document public REST endpoints for them.
+`createIssue` and `createOrganization` are not exposed because Sentry does not document public REST endpoints for them.
 
 ## Common Fields
 
@@ -26,7 +25,7 @@ Create a **Sentry** credential with an auth token. Leave Base URL empty for Sent
 | Organization Slug | Sentry organization slug for organization update and project, team, issue, event, and release operations |
 | Project Slug | Project slug for project get/update/delete and event operations; project slug or ID for issue filters |
 | Team Slug | Team slug for project creation and team update/delete operations |
-| Issue ID | Issue ID for issue get/update operations |
+| Issue ID | Issue ID for issue get/update/delete operations |
 | Event ID | Event ID for event lookup operations |
 | Release Version | Release version for release get/update/delete operations |
 | Name | Project or team name for create operations |
@@ -62,6 +61,16 @@ Resolve an issue:
   "sentryOrganizationSlug": "acme",
   "sentryIssueId": "$input.issue_id",
   "sentryStatus": "resolved"
+}
+```
+
+Delete an issue:
+
+```json
+{
+  "sentryOperation": "deleteIssue",
+  "sentryOrganizationSlug": "acme",
+  "sentryIssueId": "$input.issue_id"
 }
 ```
 

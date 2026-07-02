@@ -389,6 +389,12 @@ test("configures a Sentry node operation with searchable select", async ({ page 
     await expect(page.getByText("Status", { exact: true })).toBeVisible();
     await expect(page.getByText("Assigned To", { exact: true })).toBeVisible();
 
+    await selectSearchableOption(page, operationField, "Delete Issue");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Delete Issue");
+    await expect(page.getByText("Issue ID", { exact: true })).toBeVisible();
+    await expect(page.getByText("Organization Slug", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payload JSON", { exact: true })).toBeHidden();
+
     await selectSearchableOption(page, operationField, "Update Project");
     await expect(operationField.getByRole("combobox")).toHaveValue("Update Project");
     await expect(page.getByText("Project Slug", { exact: true })).toBeVisible();

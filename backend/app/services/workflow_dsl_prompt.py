@@ -3935,11 +3935,11 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 - **Purpose**: Manage Sentry organizations, projects, teams, issues, events, and releases
 - **Inputs**: 1 | **Outputs**: 1
 - **Required setup**: `credentialId` must point to an owned Sentry credential
-- **Operations**: `listOrganizations`, `updateOrganization`, `listProjects`,
-  `createProject`, `getProject`, `updateProject`, `deleteProject`, `listTeams`,
-  `createTeam`, `updateTeam`, `deleteTeam`, `listIssues`, `getIssue`, `updateIssue`,
-  `listEvents`, `getEvent`, `listReleases`, `getRelease`, `createRelease`,
-  `updateRelease`, `deleteRelease`
+- **Operations**: `createProject`, `createRelease`, `createTeam`, `deleteIssue`,
+  `deleteProject`, `deleteRelease`, `deleteTeam`, `getEvent`, `getIssue`, `getProject`,
+  `getRelease`, `listEvents`, `listIssues`, `listOrganizations`, `listProjects`,
+  `listReleases`, `listTeams`, `updateIssue`, `updateOrganization`, `updateProject`,
+  `updateRelease`, `updateTeam`
 - **Fields**: `sentryOperation`, `sentryOrganizationSlug`, `sentryProjectSlug`,
   `sentryTeamSlug`, `sentryIssueId`, `sentryEventId`, `sentryReleaseVersion`,
   `sentryName`, `sentrySlug`, `sentryPlatform`, `sentryStatus`, `sentryAssignedTo`,
@@ -3949,14 +3949,14 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 - JSON object payload fields support expressions and are used by update organization, project,
   release, and team operations.
 - Issue status accepts common Sentry values such as `resolved`, `unresolved`, and `ignored`.
-- Issue fetch and update operations require `sentryOrganizationSlug` and `sentryIssueId`.
+- Issue fetch, update, and delete operations require `sentryOrganizationSlug` and `sentryIssueId`.
 - For `listIssues`, omit `sentryQuery` for unresolved issues or set it to an empty string to fetch
   all issues.
-- `deleteIssue` and `createOrganization` are not exposed because Sentry does not document public
+- `createIssue` and `createOrganization` are not exposed because Sentry does not document public
   REST endpoints for them.
 - List outputs contain `{success, operation, count, organizations|projects|teams|issues|events|releases}`.
 - Single-resource outputs contain `{success, operation, organization|issue|event|release|project|team}`.
-- Delete outputs place `{deleted: true}` inside the relevant `release`, `project`, or `team` key.
+- Delete outputs place `{deleted: true}` inside the relevant `issue`, `release`, `project`, or `team` key.
 
 **Example — list unresolved issues:**
 ```json

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getSentryExpressionFields } from "@/lib/sentryExpressionFields";
 import {
+  getSentryOperationOptions,
   getSentryOperationGroups,
   sentryOperationMetadata,
 } from "@/lib/sentryExpressionFields";
@@ -42,6 +43,12 @@ describe("getSentryExpressionFields", () => {
     ]);
   });
 
+  it("includes issue delete fields", () => {
+    const keys = getSentryExpressionFields("deleteIssue").map((field) => field.key);
+
+    expect(keys).toEqual(["sentryOrganizationSlug", "sentryIssueId"]);
+  });
+
   it("includes release payload fields", () => {
     const keys = getSentryExpressionFields("createRelease").map((field) => field.key);
 
@@ -77,6 +84,24 @@ describe("getSentryExpressionFields", () => {
 
     expect(new Set(groupedOperations).size).toBe(groupedOperations.length);
     expect(groupedOperations.toSorted()).toEqual(metadataOperations.toSorted());
+  });
+
+  it("sorts operation groups and options alphabetically", () => {
+    const groups = getSentryOperationGroups();
+
+    expect(groups.map((group) => group.label)).toEqual(
+      groups.map((group) => group.label).toSorted(),
+    );
+    groups.forEach((group) => {
+      const operations = group.options.map((option) => option.value);
+      expect(operations).toEqual(operations.toSorted());
+    });
+  });
+
+  it("sorts flat operation options alphabetically", () => {
+    const operations = getSentryOperationOptions().map((option) => option.value);
+
+    expect(operations).toEqual(operations.toSorted());
   });
 
   it("keeps required fields visible for every operation", () => {

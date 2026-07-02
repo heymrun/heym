@@ -86,6 +86,20 @@ class SentryServiceTests(unittest.TestCase):
         self.assertIn("/api/0/organizations/acme/issues/", seen_urls[0])
         self.assertIn("query=", seen_urls[0])
 
+    def test_connection_only_fetches_one_organization(self) -> None:
+        seen_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen_urls.append(str(request.url))
+            return httpx.Response(200, json=[{"slug": "acme"}])
+
+        service = SentryService({"api_token": "secret"}, client=self._client(handler))
+        result = service.test_connection()
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["organizations"], [{"slug": "acme"}])
+        self.assertIn("per_page=1", seen_urls[0])
+
     def test_get_issue_uses_organization_scoped_endpoint(self) -> None:
         seen_urls: list[str] = []
 
@@ -116,6 +130,22 @@ class SentryServiceTests(unittest.TestCase):
         self.assertEqual(seen["method"], "PUT")
         self.assertIn("/api/0/organizations/acme/issues/123/", str(seen["url"]))
         self.assertIn(b'"status":"resolved"', seen["payload"])
+
+    def test_delete_issue_uses_organization_scoped_endpoint(self) -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            return httpx.Response(204)
+
+        service = SentryService({"api_token": "secret"}, client=self._client(handler))
+        issue = service.delete_issue("acme", "123")
+
+        self.assertEqual(issue["deleted"], True)
+        self.assertEqual(issue["issue_id"], "123")
+        self.assertEqual(seen["method"], "DELETE")
+        self.assertIn("/api/0/organizations/acme/issues/123/", str(seen["url"]))
 
     def test_request_list_follows_next_cursor(self) -> None:
         seen_urls: list[str] = []
@@ -150,6 +180,26 @@ class SentryServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "unexpected response"):
             service.list_projects("acme")
+
+    def test_request_list_rejects_non_object_items(self) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[{"id": "1"}, "not-an-object"])
+
+        service = SentryService({"api_token": "secret"}, client=self._client(handler))
+
+        with self.assertRaisesRegex(ValueError, "unexpected response"):
+            service.list_projects("acme")
+
+    def test_normalize_limit_handles_infinity(self) -> None:
+        self.assertEqual(SentryService._normalize_limit("inf"), 25)
+
+    def test_error_message_truncates_large_response_body(self) -> None:
+        response = httpx.Response(500, text="x" * 1200)
+
+        message = SentryService._error_message(response)
+
+        self.assertEqual(len(message), 1003)
+        self.assertTrue(message.endswith("..."))
 
     def test_create_release_sends_json_payload(self) -> None:
         seen: dict[str, object] = {}
@@ -347,6 +397,59 @@ class SentryNodeHandlerTests(unittest.TestCase):
         service.update_project.assert_not_called()
         service.close.assert_called_once()
 
+    def test_list_issues_preserves_empty_query(self) -> None:
+        node_data = {
+            "credentialId": "credential-id",
+            "sentryOperation": "listIssues",
+            "sentryOrganizationSlug": "acme",
+            "sentryQuery": "",
+            "sentryLimit": "25",
+        }
+        service = Mock()
+        service.list_issues.return_value = [{"id": "1"}]
+        service.close = Mock()
+
+        with (
+            patch.object(sentry_node, "SessionLocal") as session_local,
+            patch.object(sentry_node, "decrypt_config", return_value={"api_token": "secret"}),
+            patch.object(sentry_node, "SentryService", return_value=service),
+        ):
+            session_local.return_value.__enter__.return_value = Mock()
+            result = sentry_node.execute(self._ctx(node_data))
+
+        self.assertEqual(result["count"], 1)
+        service.list_issues.assert_called_once_with(
+            "acme",
+            project_slug=None,
+            query="",
+            stats_period=None,
+            limit="25",
+        )
+        service.close.assert_called_once()
+
+    def test_delete_issue_operation_calls_service(self) -> None:
+        node_data = {
+            "credentialId": "credential-id",
+            "sentryOperation": "deleteIssue",
+            "sentryOrganizationSlug": "acme",
+            "sentryIssueId": "123",
+        }
+        service = Mock()
+        service.delete_issue.return_value = {"deleted": True, "issue_id": "123"}
+        service.close = Mock()
+
+        with (
+            patch.object(sentry_node, "SessionLocal") as session_local,
+            patch.object(sentry_node, "decrypt_config", return_value={"api_token": "secret"}),
+            patch.object(sentry_node, "SentryService", return_value=service),
+        ):
+            session_local.return_value.__enter__.return_value = Mock()
+            result = sentry_node.execute(self._ctx(node_data))
+
+        self.assertEqual(result["issue"]["deleted"], True)
+        service.delete_issue.assert_called_once_with("acme", "123")
+        service.close.assert_called_once()
+
 
 class SentryDslPromptTests(unittest.TestCase):
     def test_prompt_mentions_sentry(self) -> None:
@@ -354,4 +457,5 @@ class SentryDslPromptTests(unittest.TestCase):
         self.assertIn("sentryOperation", WORKFLOW_DSL_SYSTEM_PROMPT)
         self.assertIn("sentryOrganizationSlug", WORKFLOW_DSL_SYSTEM_PROMPT)
         self.assertIn("updateProject", WORKFLOW_DSL_SYSTEM_PROMPT)
+        self.assertIn("deleteIssue", WORKFLOW_DSL_SYSTEM_PROMPT)
         self.assertIn("sentryPayload", WORKFLOW_DSL_SYSTEM_PROMPT)

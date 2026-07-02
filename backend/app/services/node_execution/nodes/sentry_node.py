@@ -192,7 +192,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             issues = service.list_issues(
                 _required_sentry_text("sentryOrganizationSlug", "an organization slug"),
                 project_slug=project or None,
-                query=_sentry_text("sentryQuery") or None,
+                query=_sentry_text("sentryQuery") if "sentryQuery" in node_data else None,
                 stats_period=_sentry_text("sentryStatsPeriod") or None,
                 limit=_sentry_text("sentryLimit", "25"),
             )
@@ -214,6 +214,12 @@ def execute(ctx: NodeExecutionContext) -> object:
                 _required_sentry_text("sentryIssueId", "an issue ID"),
                 status=_sentry_text("sentryStatus") or None,
                 assigned_to=_sentry_text("sentryAssignedTo") or None,
+            )
+            output = {"success": True, "operation": operation, "issue": issue}
+        elif operation == "deleteIssue":
+            issue = service.delete_issue(
+                _required_sentry_text("sentryOrganizationSlug", "an organization slug"),
+                _required_sentry_text("sentryIssueId", "an issue ID"),
             )
             output = {"success": True, "operation": operation, "issue": issue}
         elif operation == "listEvents":

@@ -73,4 +73,8 @@ test("browses documentation articles", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/docs\/getting-started\/quick-start$/);
   await expect(page.getByRole("heading", { name: "Quick Start", exact: true })).toBeVisible();
+
+  await page.goto("/docs/nodes/sentry-node");
+  await expect(page.getByRole("heading", { name: "Sentry Node", exact: true })).toBeVisible();
+  await expect(page.getByText("Delete an issue:", { exact: true })).toBeVisible();
 });

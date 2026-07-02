@@ -182,6 +182,15 @@ export const sentryOperationMetadata: SentryOperationMetadata[] = [
     requiredFields: ["sentryOrganizationSlug", "sentryIssueId"],
   },
   {
+    value: "deleteIssue",
+    label: "Delete Issue",
+    fields: [
+      { key: "sentryOrganizationSlug", label: "Organization Slug" },
+      { key: "sentryIssueId", label: "Issue ID" },
+    ],
+    requiredFields: ["sentryOrganizationSlug", "sentryIssueId"],
+  },
+  {
     value: "listEvents",
     label: "List Events",
     fields: [
@@ -260,24 +269,24 @@ const sentryOperationGroupDefinitions: Array<{
   label: string;
   operations: SentryOperation[];
 }> = [
-  { label: "Issue", operations: ["listIssues", "getIssue", "updateIssue"] },
-  { label: "Event", operations: ["listEvents", "getEvent"] },
+  { label: "Event", operations: ["getEvent", "listEvents"] },
+  { label: "Issue", operations: ["deleteIssue", "getIssue", "listIssues", "updateIssue"] },
+  { label: "Organization", operations: ["listOrganizations", "updateOrganization"] },
+  {
+    label: "Project",
+    operations: ["createProject", "deleteProject", "getProject", "listProjects", "updateProject"],
+  },
   {
     label: "Release",
     operations: [
-      "listReleases",
-      "getRelease",
       "createRelease",
-      "updateRelease",
       "deleteRelease",
+      "getRelease",
+      "listReleases",
+      "updateRelease",
     ],
   },
-  {
-    label: "Project",
-    operations: ["listProjects", "createProject", "getProject", "updateProject", "deleteProject"],
-  },
-  { label: "Team", operations: ["listTeams", "createTeam", "updateTeam", "deleteTeam"] },
-  { label: "Organization", operations: ["listOrganizations", "updateOrganization"] },
+  { label: "Team", operations: ["createTeam", "deleteTeam", "listTeams", "updateTeam"] },
 ];
 
 export function getSentryOperationMetadata(
@@ -287,7 +296,9 @@ export function getSentryOperationMetadata(
 }
 
 export function getSentryOperationOptions(): SentryOperationOption[] {
-  return sentryOperationMetadata.map(({ value, label }) => ({ value, label }));
+  return sentryOperationMetadata
+    .map(({ value, label }) => ({ value, label }))
+    .toSorted((left, right) => left.value.localeCompare(right.value));
 }
 
 export function getSentryOperationGroups(): SentryOperationOptionGroup[] {

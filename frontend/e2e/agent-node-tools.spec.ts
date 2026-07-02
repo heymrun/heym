@@ -21,6 +21,10 @@ const toolNodeCases: ToolNodeCase[] = [
     expectedToggles: 4,
   },
   {
+    id: "node_1782319499999_sentry1",
+    expectedToggles: 4,
+  },
+  {
     id: "node_1782319357334_hlkt3kgd3",
     expectedToggles: 6,
   },
@@ -212,6 +216,34 @@ function integrationToolDsl(): Record<string, unknown> {
         },
       },
       {
+        id: "node_1782319499999_sentry1",
+        type: "sentry",
+        position: { x: 945, y: 60 },
+        data: {
+          label: "sentry",
+          credentialId: "",
+          sentryOperation: "updateIssue",
+          sentryOrganizationSlug: "",
+          sentryProjectSlug: "",
+          sentryTeamSlug: "",
+          sentryIssueId: "",
+          sentryEventId: "",
+          sentryReleaseVersion: "",
+          sentryName: "",
+          sentrySlug: "",
+          sentryPlatform: "",
+          sentryStatus: "",
+          sentryAssignedTo: "",
+          sentryQuery: "",
+          sentryStatsPeriod: "14d",
+          sentryLimit: "25",
+          sentryReleaseProjects: "[]",
+          sentryReleaseRefs: "[]",
+          sentryPayload: "{}",
+          agentProvidedFields: [],
+        },
+      },
+      {
         id: "node_1782319471465_xcu6o8kqh",
         type: "discord",
         position: { x: 1095, y: 60 },
@@ -254,7 +286,7 @@ test("exposes integration inputs to an agent tool", async ({ page }) => {
   await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]+$/);
 
   try {
-    await expect(page.locator(".vue-flow__node")).toHaveCount(7);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(8);
     const propertiesPanel = page.locator(".properties-panel");
     await page.getByRole("button", { name: "Properties", exact: true }).click();
     await expect(propertiesPanel).toBeVisible();

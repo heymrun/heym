@@ -831,9 +831,14 @@ async def run_credential_connection_test(
             finally:
                 service.close()
             count = int(result.get("count", 0))
+            message = (
+                "Connected. At least one organization is visible."
+                if count > 0
+                else "Connected. No organizations are visible."
+            )
             return CredentialTestResponse(
                 success=True,
-                message=f"Connected. {count} organization(s) visible.",
+                message=message,
             )
 
         from app.services.notion_service import NotionService

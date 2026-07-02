@@ -756,27 +756,28 @@ export interface NodeData {
   notionAppendPosition?: "start" | "end" | "after_block";
   notionAfterBlockId?: string;
   sentryOperation?:
-    | "listOrganizations"
-    | "updateOrganization"
-    | "listProjects"
     | "createProject"
-    | "getProject"
-    | "updateProject"
-    | "deleteProject"
-    | "listTeams"
-    | "createTeam"
-    | "updateTeam"
-    | "deleteTeam"
-    | "listIssues"
-    | "getIssue"
-    | "updateIssue"
-    | "listEvents"
-    | "getEvent"
-    | "listReleases"
-    | "getRelease"
     | "createRelease"
+    | "createTeam"
+    | "deleteIssue"
+    | "deleteProject"
+    | "deleteRelease"
+    | "deleteTeam"
+    | "getEvent"
+    | "getIssue"
+    | "getProject"
+    | "getRelease"
+    | "listEvents"
+    | "listIssues"
+    | "listOrganizations"
+    | "listProjects"
+    | "listReleases"
+    | "listTeams"
+    | "updateIssue"
+    | "updateOrganization"
+    | "updateProject"
     | "updateRelease"
-    | "deleteRelease";
+    | "updateTeam";
   sentryOrganizationSlug?: string;
   sentryProjectSlug?: string;
   sentryTeamSlug?: string;
