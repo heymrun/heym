@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
+import PluginIcon from "@/components/Panels/PluginIcon.vue";
 import { nodeIconColorClass } from "@/lib/nodeIcons";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,8 @@ const icons = {
   drive: HardDrive,
   s3: Server,
   mcpCall: Plug,
+  plugin: Puzzle,
+  pluginTrigger: Puzzle,
 };
 
 const nodeColorMap = {
@@ -125,6 +128,8 @@ const nodeColorMap = {
   drive: "node-drive",
   s3: "node-drive",
   mcpCall: "node-agent",
+  plugin: "node-action",
+  pluginTrigger: "node-trigger",
 };
 
 const isSubAgentNode = computed(
@@ -491,6 +496,12 @@ const hasThrowErrorWarning = computed(() => {
         <Loader2
           v-if="isRunning"
           :class="cn('w-4.5 h-4.5 animate-spin', nodeIconColorClass[type])"
+        />
+        <PluginIcon
+          v-else-if="(type === 'plugin' || type === 'pluginTrigger') && data.pluginId"
+          :plugin-id="data.pluginId"
+          :node-key="data.pluginNodeKey"
+          size-class="w-4.5 h-4.5"
         />
         <component
           :is="Icon"

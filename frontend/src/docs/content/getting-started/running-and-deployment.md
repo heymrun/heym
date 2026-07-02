@@ -190,6 +190,7 @@ docker run --rm \
   -p 4017:4017 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
+  -v "$(pwd)/data/plugins:/app/data/plugins" \
   ghcr.io/heymrun/heym:latest
 ```
 
@@ -212,6 +213,9 @@ docker run --rm \
 | `ALLOW_REGISTER` | Recommended | Set `false` in production unless open signup is intended |
 | `DOCKER_LOGS_ENABLED` | Optional | Set `true` to allow the Logs tab to use Docker socket access |
 | `DOCKER_LOGS_ALLOWED_EMAILS` | Required when `DOCKER_LOGS_ENABLED=true` | Comma-separated list of trusted user emails allowed to access Docker logs |
+| `HEYM_PLUGINS_ENABLED` | Optional | Set `true` to enable the plugin subsystem (custom nodes installed as zip). Off by default |
+| `HEYM_PLUGIN_ADMIN_EMAILS` | Required when `HEYM_PLUGINS_ENABLED=true` | Comma-separated operator emails allowed to install/uninstall plugins |
+| `HEYM_PLUGINS_DIR` | Optional | Where plugin files are stored; defaults to `data/plugins` (mount it to persist) |
 | `HEYM_PYTHON_TOOL_SANDBOX` | Optional | Python tool isolation mode; defaults to `auto` (hardened Docker sandbox, fail closed). See [Security](../reference/security.md#python-tool-sandbox) |
 | `HEYM_PYTHON_TOOL_IMAGE` | Optional | Override the Python tool sandbox image; empty = auto-detect the backend image |
 
@@ -221,6 +225,7 @@ docker run --rm \
 - The backend stays internal and is proxied under `/api`
 - When `POSTGRES_HOST=localhost`, the release image automatically rewrites it to `host.docker.internal` when needed so the same `.env` works with a host-level PostgreSQL container on macOS Docker/Desktop tools
 - Keep the `data/files` mount if you want Drive uploads and skill-generated files to survive container restarts
+- **Plugins:** to enable them, set `HEYM_PLUGINS_ENABLED=true` and `HEYM_PLUGIN_ADMIN_EMAILS`, and mount `data/plugins` so installed plugin files persist across container recreates. Plugin metadata lives in your PostgreSQL, so it also survives. A plugin's declared pip `dependencies` are installed into the container at install time; because the image filesystem is ephemeral, they are **reinstalled automatically on startup** for every installed plugin (the release image's `uv` venv is writable, so this works in the single-container image too)
 
 ---
 

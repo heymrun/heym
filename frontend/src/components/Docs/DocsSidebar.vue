@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { useDebounceFn, useEventListener } from "@vueuse/core";
 import { useRoute } from "vue-router";
 import { ChevronDown, ChevronRight, Mail, Search, X } from "lucide-vue-next";
 
+import type { DocCategory } from "@/docs/manifest";
+
 import Input from "@/components/ui/Input.vue";
+import { DOCS_MANIFEST, getDocPath } from "@/docs/manifest";
 import { cn } from "@/lib/utils";
-import { DOCS_MANIFEST, getDocPath, type DocCategory } from "@/docs/manifest";
-import { useDebounceFn, useEventListener } from "@vueuse/core";
 
 interface Props {
   open?: boolean;
+  extraCategories?: Record<string, DocCategory>;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   open: true,
+  extraCategories: () => ({}),
 });
 
 const emit = defineEmits<{
@@ -24,7 +28,34 @@ const route = useRoute();
 
 const searchInput = ref("");
 const searchQuery = ref("");
+const allCategories = computed<Record<string, DocCategory>>(() => ({
+  ...DOCS_MANIFEST,
+  ...props.extraCategories,
+}));
+
 const expandedCategories = ref<Set<string>>(new Set(Object.keys(DOCS_MANIFEST)));
+const knownCategoryIds = new Set(Object.keys(DOCS_MANIFEST));
+
+watch(
+  allCategories,
+  (categories) => {
+    const next = new Set(expandedCategories.value);
+    let changed = false;
+
+    for (const categoryId of Object.keys(categories)) {
+      if (!knownCategoryIds.has(categoryId)) {
+        knownCategoryIds.add(categoryId);
+        next.add(categoryId);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      expandedCategories.value = next;
+    }
+  },
+  { immediate: true },
+);
 
 const updateSearch = useDebounceFn(() => {
   searchQuery.value = searchInput.value;
@@ -106,7 +137,7 @@ function filterCategory(category: DocCategory): { slug: string; title: string }[
 const filteredManifest = computed(() => {
   const q = searchQuery.value.toLowerCase().trim();
   const result: Record<string, DocCategory> = {};
-  for (const [id, cat] of Object.entries(DOCS_MANIFEST)) {
+  for (const [id, cat] of Object.entries(allCategories.value)) {
     const items = filterCategory(cat);
     if (items.length > 0 || !q) {
       result[id] = { ...cat, items };

@@ -1,7 +1,7 @@
 """Sentry REST API client used by workflow nodes and credentials."""
 
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -13,7 +13,8 @@ class SentryService:
 
     DEFAULT_BASE_URL = "https://sentry.io"
     _REQUEST_TIMEOUT_SECONDS = 30.0
-    _MAX_LIMIT = 100
+    _MAX_PAGE_LIMIT = 100
+    _MAX_TOTAL_LIMIT = 1000
 
     def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
         token = str(config.get("api_token", "") or "").strip()
@@ -48,12 +49,16 @@ class SentryService:
         return value.rstrip("/")
 
     @staticmethod
-    def _normalize_limit(value: int | str | None, default: int = 25) -> int:
+    def _path_segment(value: str) -> str:
+        return quote(value, safe="")
+
+    @staticmethod
+    def _normalize_limit(value: int | str | None, default: int = 25, maximum: int = 100) -> int:
         try:
             limit = int(float(value if value is not None else default))
         except (TypeError, ValueError):
             limit = default
-        return max(1, min(limit, SentryService._MAX_LIMIT))
+        return max(1, min(limit, maximum))
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:
@@ -105,6 +110,67 @@ class SentryService:
         except ValueError as exc:
             raise ValueError(f"Sentry {operation} returned invalid JSON") from exc
 
+    @staticmethod
+    def _next_cursor(response: httpx.Response) -> str | None:
+        next_link = response.links.get("next")
+        if not next_link or next_link.get("results") != "true":
+            return None
+        cursor = next_link.get("cursor")
+        return str(cursor) if cursor else None
+
+    def _request_list(
+        self,
+        path: str,
+        *,
+        operation: str,
+        limit: int | str | None = 25,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        total_limit = self._normalize_limit(limit, maximum=self._MAX_TOTAL_LIMIT)
+        items: list[dict[str, Any]] = []
+        cursor: str | None = None
+        base_params = dict(params or {})
+
+        while len(items) < total_limit:
+            page_params = {
+                **base_params,
+                "per_page": self._normalize_limit(
+                    total_limit - len(items),
+                    maximum=self._MAX_PAGE_LIMIT,
+                ),
+            }
+            if cursor:
+                page_params["cursor"] = cursor
+
+            try:
+                response = self._client.request(
+                    "GET",
+                    f"{self._base_url}/api/0{path}",
+                    headers=self._headers,
+                    params=page_params,
+                )
+            except httpx.HTTPError as exc:
+                raise ValueError(f"Sentry {operation} failed: {exc}") from exc
+
+            if not response.is_success:
+                raise ValueError(
+                    f"Sentry {operation} failed ({response.status_code}): "
+                    f"{self._error_message(response)}"
+                )
+            try:
+                result = response.json()
+            except ValueError as exc:
+                raise ValueError(f"Sentry {operation} returned invalid JSON") from exc
+            if not isinstance(result, list):
+                return items
+
+            items.extend(item for item in result if isinstance(item, dict))
+            cursor = self._next_cursor(response)
+            if not cursor or not result:
+                break
+
+        return items[:total_limit]
+
     def test_connection(self) -> dict[str, Any]:
         """Validate the token by listing visible organizations."""
         result = self._request("GET", "/organizations/", operation="connection test")
@@ -114,25 +180,22 @@ class SentryService:
 
     def list_organizations(self, limit: int | str | None = 25) -> list[dict[str, Any]]:
         """List organizations visible to the token."""
-        result = self._request(
-            "GET",
+        return self._request_list(
             "/organizations/",
             operation="listOrganizations",
-            params={"per_page": self._normalize_limit(limit)},
+            limit=limit,
         )
-        return result if isinstance(result, list) else []
 
     def list_projects(
         self, organization_slug: str, limit: int | str | None = 25
     ) -> list[dict[str, Any]]:
         """List projects for an organization."""
-        result = self._request(
-            "GET",
-            f"/organizations/{organization_slug}/projects/",
+        result = self._request_list(
+            f"/organizations/{self._path_segment(organization_slug)}/projects/",
             operation="listProjects",
-            params={"per_page": self._normalize_limit(limit)},
+            limit=limit,
         )
-        return result if isinstance(result, list) else []
+        return result
 
     def create_project(
         self,
@@ -151,7 +214,7 @@ class SentryService:
             payload["platform"] = platform
         result = self._request(
             "POST",
-            f"/teams/{organization_slug}/{team_slug}/projects/",
+            f"/teams/{self._path_segment(organization_slug)}/{self._path_segment(team_slug)}/projects/",
             operation="createProject",
             json=payload,
             success_codes=(200, 201),
@@ -164,13 +227,12 @@ class SentryService:
         self, organization_slug: str, limit: int | str | None = 25
     ) -> list[dict[str, Any]]:
         """List teams for an organization."""
-        result = self._request(
-            "GET",
-            f"/organizations/{organization_slug}/teams/",
+        result = self._request_list(
+            f"/organizations/{self._path_segment(organization_slug)}/teams/",
             operation="listTeams",
-            params={"per_page": self._normalize_limit(limit)},
+            limit=limit,
         )
-        return result if isinstance(result, list) else []
+        return result
 
     def create_team(
         self,
@@ -185,7 +247,7 @@ class SentryService:
             payload["slug"] = slug
         result = self._request(
             "POST",
-            f"/organizations/{organization_slug}/teams/",
+            f"/organizations/{self._path_segment(organization_slug)}/teams/",
             operation="createTeam",
             json=payload,
             success_codes=(200, 201),
@@ -193,6 +255,21 @@ class SentryService:
         if not isinstance(result, dict):
             raise ValueError("Sentry createTeam returned an unexpected response")
         return result
+
+    def _resolve_project_id(self, organization_slug: str, project_slug_or_id: str) -> str:
+        if project_slug_or_id.isdigit():
+            return project_slug_or_id
+        projects = self.list_projects(organization_slug, self._MAX_TOTAL_LIMIT)
+        for project in projects:
+            if project_slug_or_id in {
+                str(project.get("id", "")),
+                str(project.get("slug", "")),
+                str(project.get("name", "")),
+            }:
+                project_id = project.get("id")
+                if project_id:
+                    return str(project_id)
+        raise ValueError(f"Sentry project not found: {project_slug_or_id}")
 
     def list_issues(
         self,
@@ -204,24 +281,26 @@ class SentryService:
         limit: int | str | None = 25,
     ) -> list[dict[str, Any]]:
         """List issues for an organization, optionally filtered to a project."""
-        params: dict[str, Any] = {"per_page": self._normalize_limit(limit)}
+        params: dict[str, Any] = {}
         if project_slug:
-            params["project"] = project_slug
+            params["project"] = self._resolve_project_id(organization_slug, project_slug)
         if query:
             params["query"] = query
         if stats_period:
             params["statsPeriod"] = stats_period
-        result = self._request(
-            "GET",
-            f"/organizations/{organization_slug}/issues/",
+        result = self._request_list(
+            f"/organizations/{self._path_segment(organization_slug)}/issues/",
             operation="listIssues",
+            limit=limit,
             params=params,
         )
-        return result if isinstance(result, list) else []
+        return result
 
     def get_issue(self, issue_id: str) -> dict[str, Any]:
         """Fetch a Sentry issue by ID."""
-        result = self._request("GET", f"/issues/{issue_id}/", operation="getIssue")
+        result = self._request(
+            "GET", f"/issues/{self._path_segment(issue_id)}/", operation="getIssue"
+        )
         if not isinstance(result, dict):
             raise ValueError("Sentry getIssue returned an unexpected response")
         return result
@@ -239,7 +318,7 @@ class SentryService:
             raise ValueError("Sentry updateIssue requires status or assignedTo")
         result = self._request(
             "PUT",
-            f"/issues/{issue_id}/",
+            f"/issues/{self._path_segment(issue_id)}/",
             operation="updateIssue",
             json=payload,
         )
@@ -256,22 +335,25 @@ class SentryService:
         limit: int | str | None = 25,
     ) -> list[dict[str, Any]]:
         """List events for a project."""
-        params: dict[str, Any] = {"per_page": self._normalize_limit(limit)}
+        params: dict[str, Any] = {}
         if query:
             params["query"] = query
-        result = self._request(
-            "GET",
-            f"/projects/{organization_slug}/{project_slug}/events/",
+        result = self._request_list(
+            f"/projects/{self._path_segment(organization_slug)}/{self._path_segment(project_slug)}/events/",
             operation="listEvents",
+            limit=limit,
             params=params,
         )
-        return result if isinstance(result, list) else []
+        return result
 
     def get_event(self, organization_slug: str, project_slug: str, event_id: str) -> dict[str, Any]:
         """Fetch a project event."""
         result = self._request(
             "GET",
-            f"/projects/{organization_slug}/{project_slug}/events/{event_id}/",
+            (
+                f"/projects/{self._path_segment(organization_slug)}/"
+                f"{self._path_segment(project_slug)}/events/{self._path_segment(event_id)}/"
+            ),
             operation="getEvent",
         )
         if not isinstance(result, dict):
@@ -282,19 +364,21 @@ class SentryService:
         self, organization_slug: str, limit: int | str | None = 25
     ) -> list[dict[str, Any]]:
         """List releases for an organization."""
-        result = self._request(
-            "GET",
-            f"/organizations/{organization_slug}/releases/",
+        result = self._request_list(
+            f"/organizations/{self._path_segment(organization_slug)}/releases/",
             operation="listReleases",
-            params={"per_page": self._normalize_limit(limit)},
+            limit=limit,
         )
-        return result if isinstance(result, list) else []
+        return result
 
     def get_release(self, organization_slug: str, version: str) -> dict[str, Any]:
         """Fetch a release by version."""
         result = self._request(
             "GET",
-            f"/organizations/{organization_slug}/releases/{version}/",
+            (
+                f"/organizations/{self._path_segment(organization_slug)}/"
+                f"releases/{self._path_segment(version)}/"
+            ),
             operation="getRelease",
         )
         if not isinstance(result, dict):
@@ -317,7 +401,7 @@ class SentryService:
             payload["refs"] = refs
         result = self._request(
             "POST",
-            f"/organizations/{organization_slug}/releases/",
+            f"/organizations/{self._path_segment(organization_slug)}/releases/",
             operation="createRelease",
             json=payload,
             success_codes=(200, 201),

@@ -15,13 +15,19 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["090_add_sentry_credential_type"])
+        self.assertEqual(self.script.get_heads(), ["090_add_plugins_table"])
 
     def test_sentry_revision_follows_workflow_timeout(self) -> None:
         sentry_revision = self.script.get_revision("090_add_sentry_credential_type")
 
         self.assertIsNotNone(sentry_revision)
         self.assertEqual(sentry_revision.down_revision, "089_workflow_timeout")
+
+    def test_plugins_revision_follows_sentry_revision(self) -> None:
+        plugins_revision = self.script.get_revision("090_add_plugins_table")
+
+        self.assertIsNotNone(plugins_revision)
+        self.assertEqual(plugins_revision.down_revision, "090_add_sentry_credential_type")
 
     def test_github_and_supabase_revisions_are_merged(self) -> None:
         merge_revision = self.script.get_revision("080_merge_github_supabase_heads")

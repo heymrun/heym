@@ -16,6 +16,7 @@ import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDi
 import WorkspaceShell from "@/components/Layout/WorkspaceShell.vue";
 import Button from "@/components/ui/Button.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
+import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
 import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
@@ -36,6 +37,8 @@ const router = useRouter();
 const showcaseContext = computed(() => {
   return resolveShowcaseContext({ routePath: route.path });
 });
+
+const { pluginDocCategories, loadPluginDocCategories } = usePluginDocCategories();
 
 function handleKeyDown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === "k") {
@@ -60,6 +63,7 @@ onMounted(async () => {
   } catch {
     workflows.value = [];
   }
+  void loadPluginDocCategories();
 });
 
 onUnmounted(() => {
@@ -174,9 +178,13 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent | Keyb
       <main class="flex-1 flex min-h-0 overflow-hidden relative">
         <DocsMobileDrawer
           :open="mobileDrawerOpen"
+          :extra-categories="pluginDocCategories"
           @update:open="mobileDrawerOpen = $event"
         />
-        <DocsSidebar class="hidden md:flex" />
+        <DocsSidebar
+          class="hidden md:flex"
+          :extra-categories="pluginDocCategories"
+        />
 
         <div
           ref="contentScrollRef"

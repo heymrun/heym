@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   Braces,
+  Puzzle,
   Bug,
   CalendarClock,
   Clock,
@@ -95,6 +96,8 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   drive: HardDrive,
   s3: Server,
   mcpCall: Plug,
+  plugin: Puzzle,
+  pluginTrigger: Puzzle,
 };
 
 /** Tailwind text-* classes aligned with canvas node header tints (BaseNode). */
@@ -149,4 +152,6 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   drive: "text-node-drive",
   s3: "text-node-drive",
   mcpCall: "text-node-agent",
+  plugin: "text-node-action",
+  pluginTrigger: "text-node-trigger",
 };

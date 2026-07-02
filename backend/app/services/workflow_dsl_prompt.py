@@ -4504,6 +4504,7 @@ def build_assistant_prompt(
     available_workflows: list[dict] | None = None,
     user_rules: str | None = None,
     available_node_templates: list[dict] | None = None,
+    installed_plugins: list[dict] | None = None,
 ) -> str:
     import json
 
@@ -4619,6 +4620,44 @@ def build_assistant_prompt(
         prompt += "- Add new nodes with unique IDs\n"
         prompt += "- For new nodes that need credentials, use placeholder 'YOUR_CREDENTIAL_ID' or ask the user"
         prompt += "\n- **Credential fields** (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Slack/SMTP/Redis/etc.): use ONLY owned credentials in generated output; never shared credentials."
+
+    if installed_plugins:
+        prompt += "\n\n## Installed Plugins\n\n"
+        prompt += (
+            "These plugin nodes are installed on this instance and behave like custom nodes. "
+            "Use node type `plugin` for actions and `pluginTrigger` for triggers. A single "
+            "plugin **package** (one `pluginId`) can expose **multiple nodes**, so you MUST set "
+            "BOTH `pluginId` (the package id) AND `pluginNodeKey` (the specific node key) to "
+            "select the exact node. Put field values under `config`. Example action node:\n\n"
+            "```json\n"
+            '{ "id": "...", "type": "plugin", "data": { "label": "Uppercase",\n'
+            '  "pluginId": "acme", "pluginNodeKey": "acmeUppercase",\n'
+            '  "config": { "text": "$prevNode.text" } } }\n'
+            "```\n\n"
+            "Available plugin nodes (grouped by package):\n"
+        )
+        # Group flattened plugin nodes by their package id so the model sees that a
+        # package can contain several nodes.
+        by_package: dict[str, list[dict]] = {}
+        for plugin in installed_plugins:
+            by_package.setdefault(plugin.get("id", ""), []).append(plugin)
+        for package_id, nodes in by_package.items():
+            prompt += f"\n- Package `{package_id}` ({len(nodes)} node(s)):\n"
+            for node in nodes:
+                node_key = node.get("node_key", "")
+                prompt += (
+                    f"  - pluginNodeKey `{node_key}` ({node.get('kind', 'action')}): "
+                    f"{node.get('description', '')}\n"
+                )
+                hint = node.get("dsl_hint")
+                if hint:
+                    prompt += f"    Usage: {hint}\n"
+                fields = node.get("fields", [])
+                if fields:
+                    field_list = ", ".join(
+                        f"`{f.get('key')}` ({f.get('type', 'string')})" for f in fields
+                    )
+                    prompt += f"    config fields: {field_list}\n"
 
     prompt += CLARIFY_PROTOCOL_PROMPT
 

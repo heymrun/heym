@@ -24,14 +24,16 @@ import {
   Workflow,
 } from "lucide-vue-next";
 
+import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
+import type { WorkflowListItem } from "@/types/workflow";
+
+import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
 import { getAllDocItems } from "@/docs/manifest";
 import { cn, formatDate } from "@/lib/utils";
 import { nodeIcons } from "@/lib/nodeIcons";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { useFolderStore } from "@/stores/folder";
 import { templatesApi } from "@/services/api";
-import type { WorkflowListItem } from "@/types/workflow";
-import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
 
 const TABS = [
   { id: "workflows", label: "Workflows", icon: Workflow },
@@ -107,6 +109,7 @@ const emit = defineEmits<{
 }>();
 
 const { getRecent } = useRecentWorkflows();
+const { pluginDocCategories, loadPluginDocCategories } = usePluginDocCategories();
 const folderStore = useFolderStore();
 const workflowTemplates = ref<WorkflowTemplate[]>([]);
 const nodeTemplates = ref<NodeTemplate[]>([]);
@@ -200,7 +203,7 @@ const filteredNodeTemplates = computed(() => {
 
 const filteredDocs = computed(() => {
   const query = searchQuery.value.toLowerCase().trim();
-  const items = getAllDocItems();
+  const items = getAllDocItems(pluginDocCategories.value);
   if (!query) return items;
   return items.filter(
     (item) =>
@@ -384,6 +387,7 @@ watch(
       searchQuery.value = "";
       selectedIndex.value = 0;
       fetchTemplates();
+      void loadPluginDocCategories();
       nextTick(() => {
         inputRef.value?.focus();
       });

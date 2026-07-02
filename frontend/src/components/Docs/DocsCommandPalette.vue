@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { BookOpen, FileText, Search } from "lucide-vue-next";
 
+import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
 import { getAllDocItems, getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
+const { pluginDocCategories, loadPluginDocCategories } = usePluginDocCategories();
 const router = useRouter();
 
 const searchQuery = ref("");
@@ -26,7 +28,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLDivElement | null>(null);
 const itemRefs = ref<(HTMLDivElement | null)[]>([]);
 
-const allItems = computed(() => getAllDocItems());
+const allItems = computed(() => getAllDocItems(pluginDocCategories.value));
 
 const filteredItems = computed(() => {
   const q = searchQuery.value.toLowerCase().trim();
@@ -45,6 +47,7 @@ watch(
     if (open) {
       searchQuery.value = "";
       selectedIndex.value = 0;
+      void loadPluginDocCategories();
       nextTick(() => {
         inputRef.value?.focus();
       });

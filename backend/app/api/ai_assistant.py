@@ -988,6 +988,33 @@ async def _get_owned_credential_ids(db: AsyncSession, user_id: uuid.UUID) -> set
     return {str(credential_id) for credential_id in result.scalars().all()}
 
 
+async def _load_installed_plugins(db: AsyncSession) -> list[dict]:
+    """Return enabled plugins for assistant-prompt injection (empty when off)."""
+    from app.config import settings
+    from app.db.models import Plugin
+    from app.models.plugin_schemas import PluginManifest
+
+    if not settings.plugins_enabled:
+        return []
+    rows = (await db.execute(select(Plugin).where(Plugin.enabled.is_(True)))).scalars().all()
+    result: list[dict] = []
+    for plugin in rows:
+        manifest = PluginManifest.model_validate(plugin.manifest)
+        for node in manifest.resolved_nodes():
+            result.append(
+                {
+                    "id": plugin.plugin_id,
+                    "node_key": node.key,
+                    "name": node.name,
+                    "kind": node.kind,
+                    "description": node.description,
+                    "dsl_hint": node.dsl_hint,
+                    "fields": [field.model_dump() for field in node.fields],
+                }
+            )
+    return result
+
+
 def _build_workflow_builder_user_message(
     goal: str,
     inputs: dict[str, Any],
@@ -1124,6 +1151,7 @@ async def create_and_run_generated_workflow_tool(
             available_workflows,
             user.user_rules,
             available_node_templates=node_template_payload,
+            installed_plugins=await _load_installed_plugins(db),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
@@ -1246,6 +1274,7 @@ async def edit_and_run_generated_workflow_tool(
             available_workflows,
             user.user_rules,
             available_node_templates=node_template_payload,
+            installed_plugins=await _load_installed_plugins(db),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
@@ -3644,6 +3673,7 @@ async def workflow_assistant_stream(
             request.available_workflows,
             current_user.user_rules,
             available_node_templates=node_template_payload,
+            installed_plugins=await _load_installed_plugins(db),
         )
 
     if is_dashboard_widget_workflow(request.current_workflow):

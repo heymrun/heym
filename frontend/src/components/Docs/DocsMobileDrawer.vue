@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import Button from "@/components/ui/Button.vue";
 import DocsSidebar from "@/components/Docs/DocsSidebar.vue";
+import type { DocCategory } from "@/docs/manifest";
 
 interface Props {
   open: boolean;
+  extraCategories?: Record<string, DocCategory>;
 }
 
-defineProps<Props>();
+withDefaults(defineProps<Props>(), {
+  extraCategories: () => ({}),
+});
 
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
@@ -55,7 +59,10 @@ function onNavigate(): void {
             </Button>
           </div>
           <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-            <DocsSidebar @navigate="onNavigate" />
+            <DocsSidebar
+              :extra-categories="extraCategories"
+              @navigate="onNavigate"
+            />
           </div>
         </div>
       </div>

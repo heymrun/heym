@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, watch, nextTick, ref } from "vue";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
-import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
+import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 
+import { listPlugins } from "@/services/plugins";
+
+import PluginIcon from "@/components/Panels/PluginIcon.vue";
 import TemplatesBrowseDialog from "@/features/templates/components/TemplatesBrowseDialog.vue";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import {
@@ -47,8 +50,73 @@ async function loadNodeTemplates(): Promise<void> {
   }
 }
 
+interface PalettedPluginNode {
+  pluginId: string;
+  nodeKey: string;
+  name: string;
+  description: string;
+  kind: "action" | "trigger";
+}
+
+const installedPlugins = ref<PluginSummary[]>([]);
+
+async function loadPlugins(): Promise<void> {
+  try {
+    installedPlugins.value = (await listPlugins()).filter((plugin) => plugin.enabled);
+  } catch {
+    // Plugins disabled (404) or unavailable; show nothing.
+    installedPlugins.value = [];
+  }
+}
+
+const pluginNodes = computed<PalettedPluginNode[]>(() =>
+  installedPlugins.value.flatMap((plugin) =>
+    plugin.nodes.map((node) => ({
+      pluginId: plugin.id,
+      nodeKey: node.key,
+      name: node.name,
+      description: node.description,
+      kind: node.kind,
+    })),
+  ),
+);
+
+const visiblePlugins = computed<PalettedPluginNode[]>(() => {
+  const query = searchQuery.value.toLowerCase().trim();
+  const list = isDashboardWidget.value
+    ? pluginNodes.value.filter((node) => node.kind !== "trigger")
+    : pluginNodes.value;
+  if (!query) return list;
+  return list.filter(
+    (node) =>
+      node.name.toLowerCase().includes(query) ||
+      node.description.toLowerCase().includes(query),
+  );
+});
+
+function handlePluginDragStart(event: DragEvent, node: PalettedPluginNode): void {
+  if (!event.dataTransfer) return;
+  const type: NodeType = node.kind === "trigger" ? "pluginTrigger" : "plugin";
+  event.dataTransfer.setData("application/heym-node", type);
+  event.dataTransfer.setData("application/heym-plugin-id", node.pluginId);
+  event.dataTransfer.setData("application/heym-plugin-node-key", node.nodeKey);
+  event.dataTransfer.setData("application/heym-plugin-label", node.name);
+  event.dataTransfer.effectAllowed = "move";
+}
+
+function handlePluginDoubleClick(node: PalettedPluginNode): void {
+  const type: NodeType = node.kind === "trigger" ? "pluginTrigger" : "plugin";
+  handleDoubleClick(type, {
+    pluginId: node.pluginId,
+    pluginNodeKey: node.nodeKey,
+    label: node.name,
+    config: {},
+  });
+}
+
 onMounted(() => {
   void loadNodeTemplates();
+  void loadPlugins();
 });
 
 const searchQuery = computed({
@@ -194,6 +262,8 @@ const icons = {
   s3: Server,
   mcpCall: Plug,
   chartOutput: BarChart3,
+  plugin: Puzzle,
+  pluginTrigger: Puzzle,
 };
 
 const allNodeTypes = Object.values(NODE_DEFINITIONS);
@@ -216,8 +286,16 @@ const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "rabbitmq",
   "output",
   "jsonOutputMapper",
+  "plugin",
+  "pluginTrigger",
 ]);
-const WORKFLOW_HIDDEN_NODE_TYPES = new Set<NodeType>(["chartOutput"]);
+// Generic plugin node types are never shown directly; installed plugins are
+// listed as their own palette cards below (each carries a concrete pluginId).
+const WORKFLOW_HIDDEN_NODE_TYPES = new Set<NodeType>([
+  "chartOutput",
+  "plugin",
+  "pluginTrigger",
+]);
 
 const isDashboardWidget = computed(
   () => workflowStore.currentWorkflow?.kind === "dashboard_widget",
@@ -422,14 +500,14 @@ function addNodeFromTemplate(template: NodeTemplate): void {
   recordTemplateUse(template.id);
 }
 
-function handleDoubleClick(type: NodeType): void {
+function handleDoubleClick(type: NodeType, extraData?: Record<string, unknown>): void {
   const pendingInsert = workflowStore.pendingInsertEdge;
   if (pendingInsert && !isNoRegularInputNodeType(type)) {
     const newNode: WorkflowNode = {
       id: generateId(),
       type,
       position: { x: 0, y: 0 },
-      data: { ...NODE_DEFINITIONS[type].defaultData },
+      data: { ...NODE_DEFINITIONS[type].defaultData, ...(extraData ?? {}) },
     };
 
     const sourceNode = workflowStore.nodes.find((n) => n.id === pendingInsert.sourceId);
@@ -457,7 +535,7 @@ function handleDoubleClick(type: NodeType): void {
   const existingNodes = workflowStore.nodes;
   const offset = existingNodes.length * 20;
 
-  let defaultData = { ...NODE_DEFINITIONS[type].defaultData };
+  let defaultData = { ...NODE_DEFINITIONS[type].defaultData, ...(extraData ?? {}) };
 
   const pendingSource = workflowStore.pendingConnectionSource;
   if (pendingSource) {
@@ -604,6 +682,49 @@ function handleDoubleClick(type: NodeType): void {
             </div>
           </div>
         </div>
+        <template v-if="visiblePlugins.length > 0">
+          <div class="pt-4 pb-1">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+              <Puzzle class="w-3.5 h-3.5" />
+              Plugins
+            </h3>
+          </div>
+          <div
+            v-for="node in visiblePlugins"
+            :key="`${node.pluginId}:${node.nodeKey}`"
+            :data-testid="`node-palette-plugin-${node.pluginId}-${node.nodeKey}`"
+            :draggable="true"
+            :class="cn(
+              'node-item flex items-center gap-3 p-3 rounded-xl border border-border/40 cursor-grab transition-all duration-200 min-h-[44px]',
+              'hover:border-primary/40 hover:bg-accent/50 hover:shadow-sm active:cursor-grabbing'
+            )"
+            @mousedown="handleMouseDown"
+            @dragstart="handlePluginDragStart($event, node)"
+            @dblclick="handlePluginDoubleClick(node)"
+          >
+            <div
+              class="node-icon flex items-center justify-center w-10 h-10 rounded-xl shrink-0 transition-all duration-200"
+              :style="{
+                backgroundColor: `hsl(var(--${node.kind === 'trigger' ? 'node-trigger' : 'node-action'}) / 0.12)`,
+                color: `hsl(var(--${node.kind === 'trigger' ? 'node-trigger' : 'node-action'}))`,
+              }"
+            >
+              <PluginIcon
+                :plugin-id="node.pluginId"
+                :node-key="node.nodeKey"
+                size-class="w-5 h-5"
+              />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-sm leading-tight">
+                {{ node.name }}
+              </div>
+              <div class="text-xs text-muted-foreground line-clamp-1 mt-0.5 hidden md:block">
+                {{ node.description }}
+              </div>
+            </div>
+          </div>
+        </template>
         <template v-if="showNodeTemplates && (filteredNodeTemplates.length > 0 || templatesLoadError)">
           <div class="pt-4 pb-1">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">

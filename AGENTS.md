@@ -87,6 +87,9 @@ When adding a new node type, operation, or operation-specific field, keep the ca
 - When adding a **new node type**, update the docs that enumerate nodes: add the node page under `frontend/src/docs/content/nodes/`, register it in `frontend/src/docs/manifest.ts`, and add the node to the reference docs — including `frontend/src/docs/content/reference/features.md` (both the per-node section and the node-types summary list), plus `node-types.md` and, for credential-backed nodes, `integrations.md` / `credentials.md` / `credentials-sharing.md`. 
 - Add or extend frontend tests for meaningful UI behavior changes when practical, especially for autofill eligibility and expression dialog field discovery.
 
+### PropertiesPanel modularity
+`frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
+
 ### Expression evaluation (avoid executor vs dialog drift)
 The canvas **expression evaluate** dialog (`/expressions/evaluate`, `ExpressionEvaluatorService`) and **workflow execution** (`WorkflowExecutor`) must agree on the same semantics for `$…` templates.
 
@@ -103,6 +106,13 @@ OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstr
 - `WorkflowExecutor.execute` wraps a `heym.workflow.execute` root span and stores the active OTel context in `self._otel_root_context`.
 - `WorkflowExecutor.execute_node` wraps a `heym.node.execute` child span and re-attaches `self._otel_root_context` so node spans nest under the workflow span across `ThreadPoolExecutor` workers (see `tracing.run_with_context`).
 - **When changing the executor's parallel/thread submit logic or these two methods:** preserve the context capture/re-attach, and extend `backend/tests/test_observability_tracing.py`. Custom attributes use the `heym.*` prefix. Tracing must never break execution (failures are swallowed); the read-only status lives at `GET /api/config/observability`.
+
+### WorkflowExecutor modularity
+`backend/app/services/workflow_executor.py` must stay responsible for workflow orchestration, retries, tracing, cancellation, expression helpers, and shared result packaging. Node-specific execution logic belongs under `backend/app/services/node_execution/nodes/`, with one handler module per node type and registration in `backend/app/services/node_execution/registry.py`.
+
+- Do not add new `node_type` branches or node-specific business logic to `WorkflowExecutor._execute_node_logic`; route new or changed node behavior through a modular node handler.
+- Keep handler changes behavior-preserving unless the task explicitly asks for product behavior changes. Handlers may use `NodeExecutionContext.executor` for shared executor services, but should not duplicate retry, tracing, cancellation, or final `NodeResult` packaging.
+- When adding a new node type, add its handler, register it in the node execution registry, update the node DSL/schema/docs required by the node integration policy, and add focused backend tests for the handler behavior.
 
 ## Repository Layout
 ```
