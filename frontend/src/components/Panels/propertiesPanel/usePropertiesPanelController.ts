@@ -1,4 +1,15 @@
-import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  provide,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+  type InjectionKey,
+} from "vue";
 import { useRouter } from "vue-router";
 import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
@@ -23,7 +34,27 @@ import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 import type { NodeType } from "@/types/workflow";
 import type { WebSocketTriggerEventName } from "@/types/workflow";
 import { NODE_DEFINITIONS } from "@/types/node";
-import { inject, provide, type InjectionKey } from "vue";
+import {
+  bigQueryOperationOptions,
+  clickhouseOperationGroups,
+  clickhouseOperationOptions,
+  dataTableOperationOptions,
+  driveOperationOptions,
+  githubOperationGroups,
+  githubOperationOptions,
+  googleSheetsOperationOptions,
+  gristOperationOptions,
+  linearOperationGroups,
+  linearOperationOptions,
+  notionOperationGroups,
+  notionOperationOptions,
+  rabbitmqOperationOptions,
+  ragOperationOptions,
+  redisOperationOptions,
+  s3OperationGroups,
+  s3OperationOptions,
+  supabaseOperationOptions,
+} from "./operationOptions";
 
 interface ExpandableFieldRef {
   openExpandDialog(localIndex?: number): void;
@@ -1441,6 +1472,16 @@ export function usePropertiesPanelController() {
     if (node?.type !== "execute") return null;
     return node.data.executeWorkflowId || null;
   });
+
+  function updateExecuteWorkflowId(value: string | undefined): void {
+    const workflowId = value || "";
+    updateNodeData("executeWorkflowId", workflowId);
+    if (!workflowId) {
+      updateNodeData("targetWorkflowInputFields", []);
+      updateNodeData("targetWorkflowName", "");
+      updateNodeData("executeInputMappings", []);
+    }
+  }
 
   watch(
     executeWorkflowId,
@@ -4997,20 +5038,6 @@ export function usePropertiesPanelController() {
     { value: "pgvector", label: "Postgres (pgvector)" },
   ];
 
-  const ragOperationOptions = [
-    { value: "", label: "Select operation" },
-    { value: "insert", label: "Insert" },
-    { value: "search", label: "Search" },
-  ];
-
-  const redisOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "set", label: "Set Variable" },
-    { value: "get", label: "Get Variable" },
-    { value: "hasKey", label: "Has Key" },
-    { value: "deleteKey", label: "Delete Key" },
-  ];
-
   const gristCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
@@ -5055,69 +5082,6 @@ export function usePropertiesPanelController() {
       "Shared Linear credential (from owner)",
     );
   });
-
-  const linearOperationOptions = [
-    { value: "getViewer", label: "Get Viewer" },
-    { value: "listTeams", label: "List Teams" },
-    { value: "listProjects", label: "List Projects" },
-    { value: "listIssues", label: "List Issues" },
-    { value: "listWorkflowStates", label: "List Workflow States" },
-    { value: "listTeamMembers", label: "List Team Members" },
-    { value: "getIssue", label: "Get Issue" },
-    { value: "createIssue", label: "Create Issue" },
-    { value: "updateIssue", label: "Update Issue" },
-    { value: "deleteIssue", label: "Delete Issue" },
-    { value: "addIssueLink", label: "Add Issue Link" },
-    { value: "createComment", label: "Create Comment" },
-    { value: "listComments", label: "List Comments" },
-    { value: "updateComment", label: "Update Comment" },
-    { value: "deleteComment", label: "Delete Comment" },
-    { value: "resolveComment", label: "Resolve Comment" },
-    { value: "unresolveComment", label: "Unresolve Comment" },
-  ];
-
-  const githubOperationOptions = [
-    { value: "getRepository", label: "Get Repository" },
-    { value: "getRepositoryLicense", label: "Get Repository License" },
-    { value: "getRepositoryProfile", label: "Get Repository Profile" },
-    { value: "listPopularPaths", label: "List Popular Paths for Repository" },
-    { value: "listReferrers", label: "List Top Referrers for Repository" },
-    { value: "listOrganizationRepositories", label: "List Organization Repositories" },
-    { value: "listUserRepositories", label: "List User Repositories" },
-    { value: "getUserRepositories", label: "Get User Repositories" },
-    { value: "getUserIssues", label: "Get User Issues" },
-    { value: "inviteUser", label: "Invite User" },
-    { value: "createIssue", label: "Create Issue" },
-    { value: "getIssue", label: "Get Issue" },
-    { value: "listIssues", label: "List Issues" },
-    { value: "getRepositoryIssues", label: "Get Repository Issues" },
-    { value: "lockIssue", label: "Lock Issue" },
-    { value: "updateIssue", label: "Edit Issue" },
-    { value: "createComment", label: "Create Comment" },
-    { value: "createPullRequest", label: "Create Pull Request" },
-    { value: "listPullRequests", label: "List Pull Requests" },
-    { value: "getRepositoryPullRequests", label: "Get Repository Pull Requests" },
-    { value: "createReview", label: "Create Review" },
-    { value: "getReview", label: "Get Review" },
-    { value: "listReviews", label: "List Reviews" },
-    { value: "updateReview", label: "Update Review" },
-    { value: "createRelease", label: "Create Release" },
-    { value: "deleteRelease", label: "Delete Release" },
-    { value: "getRelease", label: "Get Release" },
-    { value: "listReleases", label: "List Releases" },
-    { value: "updateRelease", label: "Update Release" },
-    { value: "dispatchWorkflow", label: "Dispatch Workflow" },
-    { value: "dispatchWorkflowAndWait", label: "Dispatch Workflow and Wait" },
-    { value: "disableWorkflow", label: "Disable Workflow" },
-    { value: "enableWorkflow", label: "Enable Workflow" },
-    { value: "getWorkflow", label: "Get Workflow" },
-    { value: "getWorkflowUsage", label: "Get Workflow Usage" },
-    { value: "listWorkflows", label: "List Workflows" },
-    { value: "upsertFile", label: "Create or Update File" },
-    { value: "deleteFile", label: "Delete File" },
-    { value: "getFile", label: "Get File" },
-    { value: "listFiles", label: "List Files" },
-  ];
 
   const githubStateOptions = [
     { value: "open", label: "Open" },
@@ -5255,28 +5219,6 @@ export function usePropertiesPanelController() {
     return options;
   });
 
-  const gristOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "getRecord", label: "Get Record" },
-    { value: "getRecords", label: "Get Records" },
-    { value: "createRecord", label: "Create Record" },
-    { value: "createRecords", label: "Create Records (Batch)" },
-    { value: "updateRecord", label: "Update Record" },
-    { value: "updateRecords", label: "Update Records (Batch)" },
-    { value: "deleteRecord", label: "Delete Record(s)" },
-    { value: "listTables", label: "List Tables" },
-    { value: "listColumns", label: "List Columns" },
-  ];
-
-  const googleSheetsOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "readRange", label: "Read" },
-    { value: "appendRows", label: "Append Rows" },
-    { value: "updateRange", label: "Update Rows" },
-    { value: "clearRange", label: "Clear Rows" },
-    { value: "getSheetInfo", label: "Get Sheet Info" },
-  ];
-
   const googleSheetsAppendPlacementOptions = [
     { value: "append", label: "Bottom (after last row)" },
     { value: "prepend", label: "Top (below row 1)" },
@@ -5297,12 +5239,6 @@ export function usePropertiesPanelController() {
     );
   });
 
-  const bigQueryOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "query", label: "Run Query" },
-    { value: "insertRows", label: "Insert Rows" },
-  ];
-
   const clickhouseCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
@@ -5317,19 +5253,6 @@ export function usePropertiesPanelController() {
       "Shared ClickHouse credential (from owner)",
     );
   });
-
-  const clickhouseOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "query", label: "Run SQL Query" },
-    { value: "find", label: "Find Rows" },
-    { value: "getAll", label: "Get All Rows" },
-    { value: "count", label: "Count Rows" },
-    { value: "getById", label: "Get By ID" },
-    { value: "insert", label: "Insert Rows" },
-    { value: "update", label: "Update Rows" },
-    { value: "remove", label: "Remove Rows" },
-    { value: "upsert", label: "Upsert Rows" },
-  ];
 
   const supabaseCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -5346,15 +5269,6 @@ export function usePropertiesPanelController() {
     );
   });
 
-  const supabaseOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "select", label: "Select Rows" },
-    { value: "insert", label: "Insert Rows" },
-    { value: "update", label: "Update Rows" },
-    { value: "upsert", label: "Upsert Rows" },
-    { value: "delete", label: "Delete Rows" },
-  ];
-
   const notionCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
@@ -5369,27 +5283,6 @@ export function usePropertiesPanelController() {
       "Shared Notion credential (from owner)",
     );
   });
-
-  const notionOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "search", label: "Search" },
-    { value: "getPage", label: "Get Page" },
-    { value: "createPage", label: "Create Page" },
-    { value: "updatePage", label: "Update Page" },
-    { value: "trashPage", label: "Move Page to Trash" },
-    { value: "restorePage", label: "Restore Page" },
-    { value: "createDatabase", label: "Create Database" },
-    { value: "retrieveDatabase", label: "Retrieve Database" },
-    { value: "updateDatabase", label: "Update Database" },
-    { value: "createDataSource", label: "Create Data Source" },
-    { value: "retrieveDataSource", label: "Retrieve Data Source" },
-    { value: "updateDataSource", label: "Update Data Source" },
-    { value: "queryDataSource", label: "Query Data Source" },
-    { value: "getBlockChildren", label: "Get Block Children" },
-    { value: "updateBlock", label: "Update Block" },
-    { value: "deleteBlock", label: "Delete Block" },
-    { value: "appendBlocks", label: "Append Blocks" },
-  ];
 
   const notionDataSourceOptions = computed(() => {
     const selectedId =
@@ -5494,47 +5387,8 @@ export function usePropertiesPanelController() {
     );
   });
 
-  const s3OperationOptions = [
-    { value: "createBucket", label: "Create Bucket" },
-    { value: "deleteBucket", label: "Delete Bucket" },
-    { value: "listBuckets", label: "List Buckets" },
-    { value: "createFolder", label: "Create Folder" },
-    { value: "deleteFolder", label: "Delete Folder" },
-    { value: "getAllFolder", label: "Get All in Folder" },
-    { value: "copyObject", label: "Copy Object" },
-    { value: "deleteObject", label: "Delete Object" },
-    { value: "getObject", label: "Get Object" },
-    { value: "listObjects", label: "List Objects" },
-    { value: "putObject", label: "Upload Object" },
-
-  ];
-
   const S3_LIST_OBJECTS_MAX_KEYS = 1000;
   const s3MaxKeysWarning = ref("");
-
-  const dataTableOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "find", label: "Find Rows" },
-    { value: "getAll", label: "Get All Rows" },
-    { value: "count", label: "Count Rows" },
-    { value: "getById", label: "Get Row by ID" },
-    { value: "insert", label: "Insert Row" },
-    { value: "update", label: "Update Row" },
-    { value: "remove", label: "Remove Row" },
-    { value: "upsert", label: "Upsert Row" },
-  ];
-
-  const driveOperationOptions = [
-    { value: "get", label: "Get File" },
-    { value: "getAll", label: "Get All Files" },
-    { value: "downloadUrl", label: "Download from URL" },
-    { value: "save", label: "Save from Base64" },
-    { value: "convertFile", label: "Convert File" },
-    { value: "delete", label: "Delete File" },
-    { value: "setPassword", label: "Set Password" },
-    { value: "setTtl", label: "Set TTL (Expiry)" },
-    { value: "setMaxDownloads", label: "Set Max Downloads" },
-  ];
 
   const driveConvertFormatOptions = [
     { value: "pdf", label: "PDF (.pdf)" },
@@ -5618,12 +5472,6 @@ export function usePropertiesPanelController() {
       "Shared RabbitMQ credential (from owner)",
     );
   });
-
-  const rabbitmqOperationOptions = [
-    { value: "", label: "Select operation..." },
-    { value: "send", label: "Send Message" },
-    { value: "receive", label: "Receive Message (Trigger)" },
-  ];
 
   const crawlerCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -8129,7 +7977,9 @@ export function usePropertiesPanelController() {
     githubCredentialOptions,
     linearCredentialOptions,
     linearOperationOptions,
+    linearOperationGroups,
     githubOperationOptions,
+    githubOperationGroups,
     githubStateOptions,
     githubIssueSortOptions,
     githubPullRequestSortOptions,
@@ -8150,10 +8000,12 @@ export function usePropertiesPanelController() {
     bigQueryOperationOptions,
     clickhouseCredentialOptions,
     clickhouseOperationOptions,
+    clickhouseOperationGroups,
     supabaseCredentialOptions,
     supabaseOperationOptions,
     notionCredentialOptions,
     notionOperationOptions,
+    notionOperationGroups,
     notionDataSourceOptions,
     notionAppendPositionOptions,
     notionPageOptions,
@@ -8163,6 +8015,7 @@ export function usePropertiesPanelController() {
     useAllDiscoveredSupabaseColumns,
     s3CredentialOptions,
     s3OperationOptions,
+    s3OperationGroups,
     s3MaxKeysWarning,
     dataTableOperationOptions,
     driveOperationOptions,
@@ -8323,6 +8176,7 @@ export function usePropertiesPanelController() {
     copyOutput,
     canVisitWorkflow,
     visitWorkflow,
+    updateExecuteWorkflowId,
     updateExecuteMapping,
   };
 }

@@ -5,6 +5,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -43,7 +44,7 @@ const {
   handleNotionExpressionFieldNavigate,
   onNotionRegisterExpressionFieldIndex,
   notionCredentialOptions,
-  notionOperationOptions,
+  notionOperationGroups,
   notionDataSourceOptions,
   notionAppendPositionOptions,
   notionPageOptions,
@@ -71,9 +72,11 @@ const {
 
     <div class="space-y-2">
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
+        data-testid="notion-operation-field"
         :model-value="selectedNode.data.notionOperation || ''"
-        :options="notionOperationOptions"
+        :groups="notionOperationGroups"
+        search-placeholder="Search Notion operations..."
         @update:model-value="updateNodeData('notionOperation', $event)"
       />
     </div>

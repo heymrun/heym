@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["090_add_plugins_table"])
+        self.assertEqual(self.script.get_heads(), ["091_dashboard_chat_queue"])
 
     def test_sentry_revision_follows_workflow_timeout(self) -> None:
         sentry_revision = self.script.get_revision("090_add_sentry_credential_type")

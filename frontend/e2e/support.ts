@@ -218,6 +218,21 @@ export async function expectOk(response: APIResponse): Promise<void> {
   expect(response.ok(), await response.text()).toBeTruthy();
 }
 
+export async function selectSearchableOption(
+  page: Page,
+  field: import("@playwright/test").Locator,
+  optionLabel: string,
+): Promise<void> {
+  const combobox = field.getByRole("combobox");
+  await combobox.click();
+  await combobox.fill(optionLabel);
+  const listboxId = await combobox.getAttribute("aria-controls");
+  const listbox = listboxId
+    ? page.locator(`#${listboxId}`)
+    : page.getByRole("listbox").filter({ has: page.getByRole("option", { name: optionLabel }) });
+  await listbox.getByRole("option", { name: optionLabel, exact: true }).click();
+}
+
 export async function acceptNextDialog(
   page: Page,
   action: () => Promise<void>,

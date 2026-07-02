@@ -3,7 +3,7 @@ import { AlertTriangle, ExternalLink } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -18,6 +18,7 @@ const {
   onExecuteMappingRegisterFieldIndex,
   getExpressionWarning,
   updateNodeData,
+  updateExecuteWorkflowId,
   executeMappings,
   handleExecuteMappingNavigate,
   setExecuteMappingInputRef,
@@ -31,10 +32,12 @@ const {
   <template v-if="selectedNode">
     <div class="space-y-2">
       <Label>Target Workflow</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.executeWorkflowId || ''"
         :options="[{ value: '', label: 'Select a workflow...' }, ...workflowOptions]"
-        @update:model-value="updateNodeData('executeWorkflowId', $event)"
+        placeholder="Select a workflow..."
+        search-placeholder="Search workflows..."
+        @update:model-value="updateExecuteWorkflowId"
       />
       <p class="text-xs text-muted-foreground">
         Select which workflow to execute

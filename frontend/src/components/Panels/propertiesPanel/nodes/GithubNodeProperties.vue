@@ -4,6 +4,7 @@ import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -43,7 +44,7 @@ const {
   handleGitHubExpressionFieldNavigate,
   onGitHubRegisterExpressionFieldIndex,
   githubCredentialOptions,
-  githubOperationOptions,
+  githubOperationGroups,
   githubStateOptions,
   githubIssueSortOptions,
   githubPullRequestSortOptions,
@@ -85,9 +86,10 @@ const {
 
     <div class="space-y-2">
       <Label>Operation</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.githubOperation || 'getRepository'"
-        :options="githubOperationOptions"
+        :groups="githubOperationGroups"
+        search-placeholder="Search GitHub operations..."
         @update:model-value="updateNodeData('githubOperation', $event)"
       />
     </div>

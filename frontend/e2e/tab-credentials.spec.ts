@@ -7,6 +7,7 @@ import {
   deleteWorkflow,
   expectOk,
   prepareAuthenticatedPage,
+  selectSearchableOption,
 } from "./support";
 
 test.beforeEach(async ({ page }) => {
@@ -273,14 +274,15 @@ test("configures a Notion node with a saved credential and operation", async ({ 
     await expect(propertiesPanel.getByText("Notion", { exact: true })).toBeVisible();
     const selects = propertiesPanel.locator("select");
     await expect(selects.nth(0)).toHaveValue(credential.id);
-    await expect(selects.nth(1)).toHaveValue("search");
+    const operationField = page.getByTestId("notion-operation-field");
+    await expect(operationField.getByRole("combobox")).toHaveValue("Search");
     await expect(propertiesPanel.getByText("Search Query", { exact: true })).toBeVisible();
 
     await notionNode.dblclick();
     await expect(searchQueryDialogHeading).toBeVisible();
     await page.keyboard.press("Escape");
 
-    await selects.nth(1).selectOption("getPage");
+    await selectSearchableOption(page, operationField, "Get Page");
     await expect(propertiesPanel.getByText("Page ID", { exact: true })).toBeVisible();
     await notionNode.dblclick();
     await expect(page.getByRole("heading", { name: "notion – Page ID" })).toBeVisible();

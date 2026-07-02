@@ -13,13 +13,20 @@ from app.api.chats import (
     clear_conversations,
     create_conversation,
     delete_conversation,
+    delete_queued_message,
     get_conversation,
     list_conversations,
     stream_conversation,
     update_conversation,
+    update_queued_message,
 )
-from app.db.models import CredentialType, DashboardConversation, DashboardMessage
-from app.models.chat_schemas import ConversationCreate, ConversationUpdate
+from app.db.models import (
+    CredentialType,
+    DashboardChatQueueItem,
+    DashboardConversation,
+    DashboardMessage,
+)
+from app.models.chat_schemas import ConversationCreate, ConversationUpdate, QueuedMessageUpdate
 
 
 def _make_user(user_id: uuid.UUID | None = None) -> MagicMock:
@@ -42,10 +49,26 @@ def _make_conversation(
     conv.has_unread = False
     conv.last_credential_id = None
     conv.last_model = None
+    conv.queue_paused_by_message_id = None
     conv.created_at = datetime.now(timezone.utc)
     conv.updated_at = datetime.now(timezone.utc)
     conv.messages = []
+    conv.queue_items = []
     return conv
+
+
+def _make_queue_item(conversation_id: uuid.UUID) -> DashboardChatQueueItem:
+    now = datetime.now(timezone.utc)
+    item = DashboardChatQueueItem()
+    item.id = uuid.uuid4()
+    item.conversation_id = conversation_id
+    item.content = "queued"
+    item.credential_id = uuid.uuid4()
+    item.model = "gpt-4o"
+    item.attachment = None
+    item.created_at = now
+    item.updated_at = now
+    return item
 
 
 def _make_db(scalars_result: list | None = None, scalar_one: object = None) -> AsyncMock:
@@ -179,6 +202,9 @@ class TestGetConversation(unittest.IsolatedAsyncioTestCase):
         msg.content = "Hello"
         msg.created_at = datetime.now(timezone.utc)
         conv.messages = [msg]
+        queued = _make_queue_item(conv.id)
+        queued.content = "Queued follow-up"
+        conv.queue_items = [queued]
 
         mock_db = _make_db(scalar_one=conv)
 
@@ -193,6 +219,8 @@ class TestGetConversation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.last_model, "gpt-4o")
         self.assertEqual(len(result.messages), 1)
         self.assertEqual(result.messages[0].content, "Hello")
+        self.assertEqual(len(result.queued_messages), 1)
+        self.assertEqual(result.queued_messages[0].content, "Queued follow-up")
 
     async def test_raises_404_for_wrong_user(self) -> None:
         user = _make_user()
@@ -284,6 +312,64 @@ class TestDeleteConversation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 404)
 
 
+class TestQueuedMessages(unittest.IsolatedAsyncioTestCase):
+    async def test_update_queued_message_publishes_running_event(self) -> None:
+        user = _make_user()
+        conv = _make_conversation(user.id)
+        conv.is_running = True
+        item = _make_queue_item(conv.id)
+
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = conv
+        item_result = MagicMock()
+        item_result.scalar_one_or_none.return_value = item
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [conv_result, item_result]
+
+        with patch("app.api.chats.registry.publish", new_callable=AsyncMock) as publish:
+            result = await update_queued_message(
+                conversation_id=conv.id,
+                item_id=item.id,
+                body=QueuedMessageUpdate(content="  updated message  "),
+                current_user=user,
+                db=mock_db,
+            )
+
+        self.assertEqual(item.content, "updated message")
+        self.assertEqual(result.content, "updated message")
+        mock_db.commit.assert_awaited_once()
+        publish.assert_awaited_once()
+        self.assertEqual(publish.await_args.args[1]["type"], "queued_message_updated")
+
+    async def test_delete_queued_message_publishes_running_event(self) -> None:
+        user = _make_user()
+        conv = _make_conversation(user.id)
+        conv.is_running = True
+        item = _make_queue_item(conv.id)
+
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = conv
+        item_result = MagicMock()
+        item_result.scalar_one_or_none.return_value = item
+        mock_db = AsyncMock()
+        mock_db.execute.side_effect = [conv_result, item_result]
+
+        with patch("app.api.chats.registry.publish", new_callable=AsyncMock) as publish:
+            await delete_queued_message(
+                conversation_id=conv.id,
+                item_id=item.id,
+                current_user=user,
+                db=mock_db,
+            )
+
+        mock_db.delete.assert_awaited_once_with(item)
+        mock_db.commit.assert_awaited_once()
+        publish.assert_awaited_once_with(
+            str(conv.id),
+            {"type": "queued_message_deleted", "queued_message_id": str(item.id)},
+        )
+
+
 class TestClearConversations(unittest.IsolatedAsyncioTestCase):
     async def test_deletes_all_conversations_for_user(self) -> None:
         user = _make_user()
@@ -328,6 +414,12 @@ class TestStreamConversation(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await stream.__anext__(),
                 'data: {"type": "content", "text": "hello"}\n\n',
+            )
+
+            await queue.put({"type": "assistant_done", "message_id": "msg-1"})
+            self.assertEqual(
+                await stream.__anext__(),
+                'data: {"type": "assistant_done", "message_id": "msg-1"}\n\n',
             )
 
             await queue.put(None)

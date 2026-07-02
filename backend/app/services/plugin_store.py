@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import BinaryIO
 
 from app.models.plugin_schemas import PluginManifest
 
@@ -102,6 +104,36 @@ def _install_dependencies(dependencies: list[str]) -> None:
         raise PluginInstallError(f"Dependency install failed: {result.stderr.strip()}")
 
 
+def _lock_dependency_file(lock_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+
+def _unlock_dependency_file(lock_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def ensure_dependencies_installed(dependencies: list[str]) -> None:
     """Best-effort dependency install used on startup; never raises.
 
@@ -114,19 +146,18 @@ def ensure_dependencies_installed(dependencies: list[str]) -> None:
     # The release image runs uvicorn with multiple workers, so this can be called
     # from several processes at once against the same venv. Serialize with a file
     # lock so only one worker installs at a time (the rest then no-op quickly).
-    import fcntl
-
-    lock_path = plugins_root() / ".deps.lock"
     try:
-        with open(lock_path, "w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        lock_path = plugins_root() / ".deps.lock"
+        lock_path.touch(exist_ok=True)
+        with open(lock_path, "r+b") as lock_file:
+            _lock_dependency_file(lock_file)
             try:
                 _install_dependencies(dependencies)
             finally:
-                fcntl.flock(lock_file, fcntl.LOCK_UN)
+                _unlock_dependency_file(lock_file)
     except PluginInstallError as exc:
         logger.warning("Plugin dependency reinstall failed: %s", exc)
-    except OSError as exc:
+    except (ImportError, OSError) as exc:
         logger.warning("Plugin dependency reinstall could not acquire lock: %s", exc)
 
 
