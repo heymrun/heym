@@ -3569,7 +3569,7 @@ When a merge node (e.g., labeled "mergeResults") combines inputs:
 - `$workflowDescription` - Current workflow's description
 - `$workflowPath` - Relative path of the workflow, e.g. `/workflows/<id>`
 - `$workflowUrl` - Absolute URL of the workflow, e.g. `https://<host>/workflows/<id>`
-- `$executionId` - Current execution's runtime id. **Runtime-only**: empty in the expression preview dialog; populated only while a workflow is executing.
+- `$executionId` - Current execution's id (equals the Execution History entry id, so `/workflows/<id>/<executionId>` opens this run on the canvas). **Runtime-only**: empty in the expression preview dialog; populated only while a workflow is executing.
 - `$vars` - Workflow-local variables (access via `$vars.variableName`; in-memory for current execution)
 - `$global` - Global Variable Store (access via `$global.variableName`; persistent, user-scoped, managed in Variables tab)
 
