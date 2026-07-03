@@ -45,6 +45,10 @@ Click the **History** button (clock icon) to open the dialog.
 - **In Editor** (per-workflow history): Applies immediately to the open workflow and closes the dialog.
 - **From All History** (Dashboard/Evals): Navigates to the workflow editor, then applies the data when the editor loads. Only available for workflow runs—not for chat/assistant runs.
 
+### Execution deep link
+
+Opening a workflow at `/workflows/{workflowId}/{executionId}` automatically brings that execution onto the canvas — the same as selecting the run and choosing **Bring to Canvas**. This makes a specific past run shareable as a URL. If the execution can't be found (wrong or deleted id), the editor falls back to loading the plain workflow.
+
 ### Use cases
 
 - Re-run a workflow with the same inputs
