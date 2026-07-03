@@ -34,6 +34,10 @@ Use the workflow search field beside **New Folder**, or press **Ctrl+F** (or **C
 
 Drag and drop a JSON workflow file onto the workflow area to create a new workflow. The imported nodes and edges are used to create the workflow; the name comes from the `name` field in the JSON or the filename. See [Download & Import](../reference/download-import.md) for the JSON format and import options.
 
+## Sharing
+
+Open a workflow in the editor and click **Share** to invite users by email or share with a [team](./teams-tab.md). Shared collaborators can view, edit, and run the workflow. Credentials and sub-workflows are not shared automatically; share those separately with the same users or teams. See [Workflow Organization](../reference/workflow-organization.md#sharing-workflows) and [Credentials Sharing](../reference/credentials-sharing.md).
+
 ## Editing and Deleting
 
 - **Edit** – Change workflow name and description from the card menu

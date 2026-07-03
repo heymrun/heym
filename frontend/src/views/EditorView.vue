@@ -1568,6 +1568,11 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       @close="shareOpen = false"
     >
       <div class="space-y-6">
+        <p class="text-sm text-muted-foreground">
+          Sharing this workflow lets collaborators view, edit, and run it. Credentials and
+          sub-workflows used by this workflow are not shared automatically. Share each credential
+          and sub-workflow with the same users or teams so recipients can run the workflow.
+        </p>
         <div class="space-y-3">
           <div class="space-y-2">
             <Label>Invite by email</Label>

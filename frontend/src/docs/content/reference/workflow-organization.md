@@ -28,6 +28,17 @@ Folders form a tree. Each folder has:
 
 The tree response includes `children` and `workflows` per folder. Shared workflows can appear in a folder via `WorkflowShare.folder_id`.
 
+## Sharing Workflows
+
+Open **Share** in the workflow editor to invite users by email or share with a [team](./teams.md).
+
+Sharing a workflow grants access to the canvas, execution history, and analysis document. It does **not** automatically share:
+
+- **Credentials** referenced by nodes in the workflow
+- **Sub-workflows** called by [Execute](../nodes/execute-node.md) nodes or agents
+
+Recipients need those credentials and child workflows shared with them separately (same users or teams). Share credentials from the [Credentials tab](../tabs/credentials-tab.md); see [Credentials Sharing](./credentials-sharing.md). Share each sub-workflow from its own editor share dialog.
+
 ## Scheduled for Deletion
 
 Workflows can be scheduled for deletion instead of being removed immediately.
@@ -67,6 +78,8 @@ If any start node is still active, the workflow stays until the next run.
 ## Related
 
 - [Workflows Tab](../tabs/workflows-tab.md) – Create and manage workflows
+- [Credentials Sharing](./credentials-sharing.md) – Share credentials with workflow collaborators
+- [Teams](./teams.md) – Share workflows and credentials with teams
 - [Core Concepts](../getting-started/core-concepts.md) – Workflows, nodes, and execution
 - [Workflow Structure](./workflow-structure.md) – JSON format for workflows
 - [Triggers](./triggers.md) – Start nodes and entry points

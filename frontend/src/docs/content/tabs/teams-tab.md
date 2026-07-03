@@ -34,6 +34,8 @@ Share resources with teams from:
 
 When you share with a team, all team members gain access. See [Teams](../reference/teams.md) for details.
 
+When you share a workflow with a team, also share the credentials and sub-workflows that workflow depends on with the same team. Workflow access alone does not grant credential or child workflow access.
+
 ## Chat Integration
 
 The [Chat tab](./chat-tab.md) AI assistant can list your teams. Ask "my teams" to see which teams you belong to.

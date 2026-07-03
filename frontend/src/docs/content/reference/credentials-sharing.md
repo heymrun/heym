@@ -16,6 +16,10 @@ You can also share credentials with [Teams](./teams.md):
 
 Shared credentials show an indicator in the [Credentials Tab](../tabs/credentials-tab.md) UI.
 
+## Sharing with Workflow Collaborators
+
+When you share a workflow, collaborators can open and run it but cannot use your credentials unless you share those credentials with them too. This applies to credentials in the main workflow and in any sub-workflows it calls. Share each credential with the same users or teams you invited to the workflow. Sub-workflows must also be shared separately from the child workflow's editor. See [Workflow Organization](./workflow-organization.md#sharing-workflows).
+
 ## Execution Context
 
 When a workflow runs, credentials are resolved for the **workflow owner** (or current user when running). `get_credentials_context()` merges:
