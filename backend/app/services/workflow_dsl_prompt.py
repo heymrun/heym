@@ -121,7 +121,7 @@ A workflow consists of nodes (operations) and edges (connections between nodes).
 
 - **⛔ ABSOLUTE BAN:** The following names (and all their case variations, including uppercase/lowercase/mixed-case) are STRICTLY FORBIDDEN as either node names or parameter names:
   - **"result" and "results"** (e.g., `result`, `results`, `Result`, `Results`, `RESULT`, `RESULTS`). These cause critical system conflicts and must never be used anywhere.
-  - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `input`, `now`, `date`
+  - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
   - String methods: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`
   - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `sort`, `join`
   - HTTP fields: `status`, `body`
@@ -1528,7 +1528,7 @@ Notes:
 
 **⚠️ RESERVED VARIABLE NAMES**: The following names are RESERVED and CANNOT be used as `variableName`:
 - **⛔ ABSOLUTE BAN**: `result` and `results` are reserved and CANNOT be used as variable names!
-- System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `length`, `input`, `now`, `date`
+- System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `length`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
 - String methods: `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startswith`, `endswith`, `replace`, `replaceAll`, `regexReplace`, `hash`
 - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `join`
 - HTTP response fields: `status`, `body`
@@ -3565,6 +3565,11 @@ When a merge node (e.g., labeled "mergeResults") combines inputs:
 - `$now` - Current datetime with formatting methods
 - `$Date()` - Create/parse date
 - `$UUID` - Generate 32-character unique identifier (NOT a function - no parentheses!)
+- `$workflowName` - Current workflow's name
+- `$workflowDescription` - Current workflow's description
+- `$workflowPath` - Relative path of the workflow, e.g. `/workflows/<id>`
+- `$workflowUrl` - Absolute URL of the workflow, e.g. `https://<host>/workflows/<id>`
+- `$executionId` - Current execution's runtime id. **Runtime-only**: empty in the expression preview dialog; populated only while a workflow is executing.
 - `$vars` - Workflow-local variables (access via `$vars.variableName`; in-memory for current execution)
 - `$global` - Global Variable Store (access via `$global.variableName`; persistent, user-scoped, managed in Variables tab)
 
@@ -4180,7 +4185,7 @@ Always include:
 36b. **AGENT TOOLS - code MUST NOT contain backticks** - The `code` field in tool definitions must be plain Python only. NEVER wrap code in ``` or use backticks inside the code string (e.g. no ```python). Backticks break the workflow JSON extraction. Example: `"code": "def celsius_to_fahrenheit(celsius: float) -> float:\\n    return (celsius * 9/5) + 32"`
 36c. **SINGLE COMPLETE JSON BLOCK** - Output exactly ONE ```json block containing the FULL workflow. When adding tools to an agent, the tools array MUST be inside that block. Do NOT output partial JSON or multiple blocks where the first lacks the tools.
 37. **CONSOLE LOG – ONLY IF REQUESTED** - Add a consoleLog node ONLY when the user explicitly requests backend console logging. If this intent is not present, do NOT generate any consoleLog nodes in the workflow.
-38. **⛔ RESERVED NODE LABEL NAMES** - NEVER use these names as node labels: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `sort`, `join`, `headers`, `query`, `value`, `list`, `result`, `array`, `vars`, `items`, `name`, `type`, `status`, `body`, `outputs`, `result`, `item`, `index`, `total`, `isFirst`, `isLast`, `branch`, `results`, `merged`, `error`, `errorNode`, `errorNodeType`, `timestamp`, `input`, `now`, `date`. **CASE VARIATIONS ARE ALSO FORBIDDEN** (e.g., `toUppercase`, `Touppercase`, `TOUPPERCASE` are ALL invalid). These conflict with built-in methods/properties and will cause expression evaluation errors!
+38. **⛔ RESERVED NODE LABEL NAMES** - NEVER use these names as node labels: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `sort`, `join`, `headers`, `query`, `value`, `list`, `result`, `array`, `vars`, `items`, `name`, `type`, `status`, `body`, `outputs`, `result`, `item`, `index`, `total`, `isFirst`, `isLast`, `branch`, `results`, `merged`, `error`, `errorNode`, `errorNodeType`, `timestamp`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`. **CASE VARIATIONS ARE ALSO FORBIDDEN** (e.g., `toUppercase`, `Touppercase`, `TOUPPERCASE` are ALL invalid). These conflict with built-in methods/properties and will cause expression evaluation errors!
 39. **⛔ PREFER SINGLE AGENT OVER MULTIPLE SEQUENTIAL AGENTS** - When a goal can be fully handled by one AI agent (even if the processing involves many internal reasoning steps or phases), use ONE agent node with a comprehensive system prompt. Do NOT create multiple sequential agent nodes (e.g., agent1 → agent2 → agent3 → …) just because the user's spec lists multiple processing phases. A single powerful agent with MCP tools or Python tools handles multi-step reasoning internally without needing separate nodes per step.
     - ✅ CORRECT: `textInput → singleAgent (comprehensive systemInstruction) → output` — agent handles all internal phases
     - ❌ WRONG: `textInput → extractParamsAgent → generateQueriesAgent → fetchResultsAgent → rankAgent → readAgent → analyzeAgent → compareAgent → finalAgent → output`
