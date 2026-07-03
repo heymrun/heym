@@ -216,7 +216,7 @@ const inputElement = computed((): HTMLInputElement | HTMLTextAreaElement | null 
 
 const textareaClasses = computed((): string =>
   cn(
-    "flex min-h-[80px] w-full rounded-md border-2 border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground transition-colors focus-visible:border-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none",
+    "flex min-h-[80px] w-full rounded-md border-2 border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground transition-colors focus-visible:border-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-y",
   ),
 );
 

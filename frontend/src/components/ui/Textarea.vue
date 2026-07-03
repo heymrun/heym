@@ -38,7 +38,7 @@ const classes = computed(() =>
     "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15",
     "hover:border-border/80",
     "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-muted/50",
-    "resize-none transition-all duration-200",
+    "resize-y transition-all duration-200",
     "shadow-sm scrollbar-thin"
   )
 );
