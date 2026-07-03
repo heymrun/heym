@@ -92,10 +92,12 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
     const entryId = await latestHistoryEntryId(page, workflow.id);
 
     // Fresh navigation to the deep link must reload the editor and bring the
-    // referenced execution onto the canvas (same "Bring to Canvas" behavior).
+    // referenced execution onto the canvas 1:1 with the dialog's "Bring to Canvas":
+    // node/output mapping (Last Executed Node) AND the Execution Highlights popup.
     await page.goto(`/workflows/${workflow.id}/${entryId}`);
     await expect(page.locator(".vue-flow__node")).toHaveCount(2);
     await expect(page.getByText("Last Executed Node")).toBeVisible();
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible();
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

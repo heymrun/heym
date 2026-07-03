@@ -579,12 +579,17 @@ function downloadWorkflow(): void {
 async function bringExecutionFromRoute(): Promise<void> {
   const execId = route.params.executionId as string | undefined;
   if (!execId) return;
-  try {
-    const entry = await workflowApi.getWorkflowHistoryEntry(workflowId.value, execId);
-    workflowStore.loadHistoryInputs(entry.inputs, entry.node_results);
-  } catch {
-    // Execution not found / not accessible: fall back to the plain workflow.
-  }
+  // Use the same store path as the Execution History dialog's "Bring to Canvas" so
+  // highlights and node/output mapping populate identically (pass the full execution
+  // result, not just node_results). fetchExecutionHistoryEntry returns null when the
+  // execution is missing/inaccessible -> fall back to the plain workflow.
+  const entry = await workflowStore.fetchExecutionHistoryEntry(execId);
+  if (!entry) return;
+  workflowStore.loadHistoryInputs(
+    entry.inputs,
+    entry.result?.node_results || [],
+    entry.result || undefined,
+  );
 }
 
 onMounted(async () => {
