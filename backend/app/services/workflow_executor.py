@@ -7147,10 +7147,16 @@ class WorkflowExecutor:
 
         return results, error_flow_output
 
-    def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
-        """Public entry: wrap the whole workflow run in an OTel root span."""
+    def _ensure_execution_id(self) -> None:
+        """Assign a runtime execution id once per run (empty in the preview evaluator,
+        which never enters a run entry point). Set before nodes run so `$executionId`
+        is stable across all nodes."""
         if not self.execution_id:
             self.execution_id = uuid.uuid4().hex
+
+    def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
+        """Public entry: wrap the whole workflow run in an OTel root span."""
+        self._ensure_execution_id()
         if not tracing.is_enabled():
             return self._execute_inner(workflow_id, initial_inputs)
 
@@ -8778,6 +8784,7 @@ def _execute_workflow_streaming_impl(
         workflow_name=workflow_name,
         workflow_description=workflow_description,
     )
+    wf_executor._ensure_execution_id()
     wf_executor._arm_deadline()
     if executor_holder is not None:
         executor_holder["executor"] = wf_executor

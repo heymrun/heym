@@ -36,6 +36,18 @@ class WorkflowMetadataVariablesTest(unittest.TestCase):
         ctx_after = executor._build_context({})
         self.assertEqual(str(ctx_after["executionId"]), "abc123")
 
+    def test_ensure_execution_id_fills_once_and_is_stable(self) -> None:
+        executor = self._executor(workflow_id=uuid.uuid4())
+        # Empty before a run enters an entry point (matches preview behavior).
+        self.assertEqual(str(executor._build_context({})["executionId"]), "")
+        executor._ensure_execution_id()
+        first = str(executor._build_context({})["executionId"])
+        self.assertNotEqual(first, "")
+        self.assertEqual(len(first), 32)
+        # Idempotent: a second call does not change the id.
+        executor._ensure_execution_id()
+        self.assertEqual(str(executor._build_context({})["executionId"]), first)
+
 
 if __name__ == "__main__":
     unittest.main()

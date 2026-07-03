@@ -107,6 +107,9 @@ class _FakeWorkflowExecutor:
     def _arm_deadline(self) -> None:
         return None
 
+    def _ensure_execution_id(self) -> None:
+        return None
+
     def get_error_flow_nodes(self) -> set[str]:
         return set()
 
