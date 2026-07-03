@@ -216,6 +216,49 @@ export const DATE_BUILTINS: CompletionSuggestion[] = [
   },
 ];
 
+export const WORKFLOW_BUILTINS: CompletionSuggestion[] = [
+  {
+    label: "workflowName",
+    insertText: "workflowName",
+    type: "property",
+    detail: "Workflow name",
+    description: "Current workflow's name",
+    propertyType: "string",
+  },
+  {
+    label: "workflowDescription",
+    insertText: "workflowDescription",
+    type: "property",
+    detail: "Workflow description",
+    description: "Current workflow's description",
+    propertyType: "string",
+  },
+  {
+    label: "workflowPath",
+    insertText: "workflowPath",
+    type: "property",
+    detail: "Workflow path",
+    description: "Relative path, e.g. /workflows/<id>",
+    propertyType: "string",
+  },
+  {
+    label: "workflowUrl",
+    insertText: "workflowUrl",
+    type: "property",
+    detail: "Workflow URL",
+    description: "Absolute URL, e.g. https://<host>/workflows/<id>",
+    propertyType: "string",
+  },
+  {
+    label: "executionId",
+    insertText: "executionId",
+    type: "property",
+    detail: "Execution id (runtime only)",
+    description: "Runtime-only: populated only while executing",
+    propertyType: "string",
+  },
+];
+
 export const DATE_METHODS: CompletionSuggestion[] = [
   {
     label: "format",
