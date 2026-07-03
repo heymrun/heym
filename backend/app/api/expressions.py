@@ -7,7 +7,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ from app.services.expression_evaluator import (
     get_selected_loop_total,
 )
 from app.services.global_variables_service import get_global_variables_context
+from app.services.hitl_service import build_public_base_url
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
 from app.services.workflow_dsl_prompt import (
@@ -291,6 +292,7 @@ async def get_workflow_by_id(
 )
 async def evaluate_expression(
     request: ExpressionEvaluateRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExpressionEvaluateResponse:
@@ -334,6 +336,10 @@ async def evaluate_expression(
         credentials_context=credentials_context,
         global_variables_context=global_variables_context,
         vars_context=vars_context,
+        workflow_id=workflow.id,
+        workflow_name=workflow.name or "",
+        workflow_description=workflow.description or "",
+        public_base_url=build_public_base_url(http_request),
     )
     response = service.evaluate(
         request.expression,

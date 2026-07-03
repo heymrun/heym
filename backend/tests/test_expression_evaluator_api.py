@@ -42,6 +42,11 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
         payload.update(kwargs)
         return ExpressionEvaluateRequest(**payload)
 
+    def _http_request(self) -> MagicMock:
+        req = MagicMock()
+        req.headers.get.return_value = None
+        return req
+
     async def test_route_is_registered(self) -> None:
         from app.main import app
 
@@ -69,7 +74,10 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             response = await evaluate_expression(
-                self._request(), db=self.db, current_user=self.user
+                self._request(),
+                http_request=self._http_request(),
+                db=self.db,
+                current_user=self.user,
             )
 
         self.assertEqual(response.result, "pinned_value")
@@ -99,7 +107,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "canvas_output")
 
@@ -128,14 +138,21 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "pinned_value")
 
     async def test_workflow_not_found_returns_404(self) -> None:
         with patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=None)):
             with self.assertRaises(HTTPException) as context:
-                await evaluate_expression(self._request(), db=self.db, current_user=self.user)
+                await evaluate_expression(
+                    self._request(),
+                    http_request=self._http_request(),
+                    db=self.db,
+                    current_user=self.user,
+                )
 
         self.assertEqual(context.exception.status_code, 404)
 
@@ -153,7 +170,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertIsNotNone(response.error)
         self.assertIsNone(response.result)
@@ -179,7 +198,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result_type, "array")
         self.assertTrue(response.preserved_type)
@@ -227,7 +248,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "World")
         self.assertEqual(response.selected_loop_total, 2)
@@ -291,7 +314,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "Hello")
         self.assertEqual(response.result_type, "string")
@@ -331,7 +356,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(
             response.result,
@@ -363,7 +390,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertFalse(response.preserved_type)
         self.assertEqual(response.result, "Hello Ali")
@@ -397,7 +426,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertIsNone(response.error)
         self.assertIs(response.result, True)
@@ -420,7 +451,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={"units": 10}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertIsNone(response.error)
         self.assertEqual(response.result, 7)
@@ -452,7 +485,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={"baseUrl": "https://api.example.com"}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "Ada")
 
@@ -482,7 +517,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertIsNone(response.result)
         self.assertEqual(response.result_type, "null")
@@ -507,7 +544,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, ["a", "b"])
         self.assertEqual(response.result_type, "array")
@@ -545,7 +584,9 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
         ):
-            response = await evaluate_expression(request, db=self.db, current_user=self.user)
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
 
         self.assertEqual(response.result, "second")
         self.assertEqual(response.result_type, "string")
