@@ -1726,6 +1726,9 @@ class WorkflowExecutor:
         public_base_url: str = "",
         return_on_chart_output: bool = False,
         timeout_seconds: float | None = None,
+        workflow_name: str = "",
+        workflow_description: str = "",
+        execution_id: str = "",
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self.agent_progress_queue = agent_progress_queue
@@ -1746,6 +1749,9 @@ class WorkflowExecutor:
         self.credentials_context = credentials_context or {}
         self.global_variables_context = global_variables_context or {}
         self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.workflow_description = workflow_description
+        self.execution_id = execution_id
         self.trace_user_id = trace_user_id
         self.actor_user_id = actor_user_id
         self.conversation_history = conversation_history
@@ -2201,6 +2207,43 @@ class WorkflowExecutor:
         except Exception:
             self._workflow_name_for_log = str(self.workflow_id)
         return self._workflow_name_for_log
+
+    def _get_workflow_metadata(self) -> tuple[str, str]:
+        """Return (name, description). Prefer explicitly supplied values; otherwise
+        lazily fetch once from the DB by workflow_id (mirrors
+        ``_get_workflow_name_for_log``)."""
+        if self.workflow_name or self.workflow_description:
+            return self.workflow_name, self.workflow_description
+        if not self.workflow_id:
+            return "", ""
+        if hasattr(self, "_workflow_metadata_cache"):
+            return self._workflow_metadata_cache
+        name, description = "", ""
+        try:
+            from app.db.models import Workflow
+            from app.db.session import SessionLocal
+
+            with SessionLocal() as db:
+                w = db.query(Workflow).filter(Workflow.id == self.workflow_id).first()
+                if w is not None:
+                    name = w.name or ""
+                    description = w.description or ""
+        except Exception:
+            pass
+        self._workflow_metadata_cache = (name, description)
+        return self._workflow_metadata_cache
+
+    def _build_workflow_url(self, workflow_path: str) -> str:
+        if not workflow_path:
+            return ""
+        base = (self._base_url or "").rstrip("/")
+        if not base:
+            from app.config import settings
+
+            base = (settings.frontend_url or "").rstrip("/")
+        if not base:
+            return ""
+        return f"{base}{workflow_path}"
 
     def _build_llm_trace_context(
         self, credential_id: str | None, node_id: str | None
@@ -5449,6 +5492,14 @@ class WorkflowExecutor:
         combined["true"] = True
         combined["false"] = False
 
+        workflow_name, workflow_description = self._get_workflow_metadata()
+        workflow_path = f"/workflows/{self.workflow_id}" if self.workflow_id else ""
+        combined["workflowName"] = DotStr(workflow_name)
+        combined["workflowDescription"] = DotStr(workflow_description)
+        combined["workflowPath"] = DotStr(workflow_path)
+        combined["workflowUrl"] = DotStr(self._build_workflow_url(workflow_path))
+        combined["executionId"] = DotStr(self.execution_id or "")
+
         if self.credentials_context:
             credentials_dict = DotDict()
             for name, value in self.credentials_context.items():
@@ -7098,6 +7149,8 @@ class WorkflowExecutor:
 
     def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         """Public entry: wrap the whole workflow run in an OTel root span."""
+        if not self.execution_id:
+            self.execution_id = uuid.uuid4().hex
         if not tracing.is_enabled():
             return self._execute_inner(workflow_id, initial_inputs)
 
@@ -7573,6 +7626,8 @@ def execute_workflow(
     public_base_url: str = "",
     return_on_chart_output: bool = False,
     timeout_seconds: float | None = None,
+    workflow_name: str = "",
+    workflow_description: str = "",
 ) -> ExecutionResult:
     executor = WorkflowExecutor(
         nodes,
@@ -7589,6 +7644,8 @@ def execute_workflow(
         public_base_url=public_base_url,
         return_on_chart_output=return_on_chart_output,
         timeout_seconds=timeout_seconds,
+        workflow_name=workflow_name,
+        workflow_description=workflow_description,
     )
     try:
         result = executor.execute(workflow_id, inputs)
@@ -8697,6 +8754,8 @@ def _execute_workflow_streaming_impl(
     public_base_url: str = "",
     otel_root_context: object | None = None,
     timeout_seconds: float | None = None,
+    workflow_name: str = "",
+    workflow_description: str = "",
 ):
     import queue
 
@@ -8716,6 +8775,8 @@ def _execute_workflow_streaming_impl(
         cancel_event=cancel_event,
         public_base_url=public_base_url,
         timeout_seconds=timeout_seconds,
+        workflow_name=workflow_name,
+        workflow_description=workflow_description,
     )
     wf_executor._arm_deadline()
     if executor_holder is not None:
