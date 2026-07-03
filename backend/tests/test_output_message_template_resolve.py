@@ -179,6 +179,21 @@ class WorkflowExecutorCurlDslTests(unittest.TestCase):
 
 
 class WorkflowExecutorGcPauseTrackingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # These tests drive the global gc.callbacks hook (_workflow_gc_callback)
+        # directly and patch time.perf_counter with an exact call budget. A real
+        # automatic GC collection firing mid-test would invoke the same hook,
+        # record a spurious pause, and consume the patched perf_counter values —
+        # making the assertions flaky (KeyError: 'gc_pause_count' seen in CI).
+        # Disable automatic collection for the duration so only simulated callbacks run.
+        self._gc_was_enabled = gc.isenabled()
+        gc.disable()
+        self.addCleanup(self._restore_gc)
+
+    def _restore_gc(self) -> None:
+        if self._gc_was_enabled:
+            gc.enable()
+
     def test_execute_node_parallel_records_gc_pause_metadata(self) -> None:
         executor = WorkflowExecutor(nodes=[], edges=[])
 
