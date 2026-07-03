@@ -55,6 +55,7 @@ class _FakeRetryStreamingExecutor:
         timeout_seconds: float | None = None,
         workflow_name: str = "",
         workflow_description: str = "",
+        execution_id: str = "",
     ) -> None:
         del (
             workflow_cache,
@@ -70,6 +71,7 @@ class _FakeRetryStreamingExecutor:
             timeout_seconds,
             workflow_name,
             workflow_description,
+            execution_id,
         )
         self.nodes = {node["id"]: node for node in nodes}
         self.edges = list(edges)

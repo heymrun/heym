@@ -89,8 +89,9 @@ class _FakeWorkflowExecutor:
         timeout_seconds: float | None = None,  # noqa: ARG002
         workflow_name: str = "",  # noqa: ARG002
         workflow_description: str = "",  # noqa: ARG002
+        execution_id: str = "",  # noqa: ARG002
     ) -> None:
-        del actor_user_id, timeout_seconds, workflow_name, workflow_description
+        del actor_user_id, timeout_seconds, workflow_name, workflow_description, execution_id
         self.nodes = {node["id"]: node for node in nodes}
         self.edges = list(edges)
         self._active_edges = list(edges)

@@ -7150,9 +7150,11 @@ class WorkflowExecutor:
     def _ensure_execution_id(self) -> None:
         """Assign a runtime execution id once per run (empty in the preview evaluator,
         which never enters a run entry point). Set before nodes run so `$executionId`
-        is stable across all nodes."""
+        is stable across all nodes. The API layer normally passes the same id it uses
+        for the ExecutionHistory row, so `$executionId` is a valid deep-link segment;
+        this fallback (canonical UUID string) only applies when no id was supplied."""
         if not self.execution_id:
-            self.execution_id = uuid.uuid4().hex
+            self.execution_id = str(uuid.uuid4())
 
     def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         """Public entry: wrap the whole workflow run in an OTel root span."""
@@ -7634,6 +7636,7 @@ def execute_workflow(
     timeout_seconds: float | None = None,
     workflow_name: str = "",
     workflow_description: str = "",
+    execution_id: str = "",
 ) -> ExecutionResult:
     executor = WorkflowExecutor(
         nodes,
@@ -7652,6 +7655,7 @@ def execute_workflow(
         timeout_seconds=timeout_seconds,
         workflow_name=workflow_name,
         workflow_description=workflow_description,
+        execution_id=execution_id,
     )
     try:
         result = executor.execute(workflow_id, inputs)
@@ -8762,6 +8766,7 @@ def _execute_workflow_streaming_impl(
     timeout_seconds: float | None = None,
     workflow_name: str = "",
     workflow_description: str = "",
+    execution_id: str = "",
 ):
     import queue
 
@@ -8783,6 +8788,7 @@ def _execute_workflow_streaming_impl(
         timeout_seconds=timeout_seconds,
         workflow_name=workflow_name,
         workflow_description=workflow_description,
+        execution_id=execution_id,
     )
     wf_executor._ensure_execution_id()
     wf_executor._arm_deadline()

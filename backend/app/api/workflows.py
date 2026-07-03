@@ -2427,10 +2427,12 @@ async def execute_workflow_endpoint(
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+            execution_id=str(execution_id),
         )
     except WorkflowCancelledError:
         if not test_run:
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=workflow.id,
                 inputs=enriched_inputs,
                 outputs={},
@@ -2508,6 +2510,7 @@ async def execute_workflow_endpoint(
     history_entry: ExecutionHistory | None = None
     if not test_run:
         history_entry = ExecutionHistory(
+            id=execution_id,
             workflow_id=workflow.id,
             inputs=enriched_inputs,
             outputs=execution_result.outputs,
@@ -3084,6 +3087,7 @@ async def execute_workflow_stream(
                 sse_node_config=workflow.sse_node_config or {},
                 public_base_url=public_base_url,
                 timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+                execution_id=str(execution_id),
             ):
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
@@ -3254,6 +3258,7 @@ async def execute_workflow_stream(
 
             if was_cancelled:
                 cancelled_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=enriched_inputs,
                     outputs={},
@@ -3301,6 +3306,7 @@ async def execute_workflow_stream(
                     final_result.get("sub_workflow_executions", []),
                 )
                 history_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=enriched_inputs,
                     outputs=final_result.get("outputs", {}),

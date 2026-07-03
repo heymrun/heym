@@ -43,10 +43,17 @@ class WorkflowMetadataVariablesTest(unittest.TestCase):
         executor._ensure_execution_id()
         first = str(executor._build_context({})["executionId"])
         self.assertNotEqual(first, "")
-        self.assertEqual(len(first), 32)
+        # Canonical UUID string so it matches an ExecutionHistory row id for deep links.
+        self.assertEqual(uuid.UUID(first).__str__(), first)
         # Idempotent: a second call does not change the id.
         executor._ensure_execution_id()
         self.assertEqual(str(executor._build_context({})["executionId"]), first)
+
+    def test_supplied_execution_id_is_used_verbatim(self) -> None:
+        given = str(uuid.uuid4())
+        executor = self._executor(workflow_id=uuid.uuid4(), execution_id=given)
+        executor._ensure_execution_id()  # must NOT override a supplied id
+        self.assertEqual(str(executor._build_context({})["executionId"]), given)
 
 
 if __name__ == "__main__":
