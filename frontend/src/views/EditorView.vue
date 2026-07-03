@@ -576,6 +576,17 @@ function downloadWorkflow(): void {
   URL.revokeObjectURL(url);
 }
 
+async function bringExecutionFromRoute(): Promise<void> {
+  const execId = route.params.executionId as string | undefined;
+  if (!execId) return;
+  try {
+    const entry = await workflowApi.getWorkflowHistoryEntry(workflowId.value, execId);
+    workflowStore.loadHistoryInputs(entry.inputs, entry.node_results);
+  } catch {
+    // Execution not found / not accessible: fall back to the plain workflow.
+  }
+}
+
 onMounted(async () => {
   window.addEventListener("keydown", handleKeyDown);
   window.addEventListener("storage", handleHitlResolutionStorage);
@@ -615,6 +626,7 @@ onMounted(async () => {
         workflowStore.pendingHistoryExecutionResult || undefined,
       );
     }
+    await bringExecutionFromRoute();
     // Handle node template injection via query param
     const nodeTemplateId = route.query.addNodeTemplate as string | undefined;
     if (nodeTemplateId) {
@@ -703,6 +715,15 @@ watch(
       if (loadedWorkflow) {
         await playRunbookFromQueryIfReady();
       }
+    }
+  },
+);
+
+watch(
+  () => route.params.executionId as string | undefined,
+  async (execId, prevExecId) => {
+    if (execId && execId !== prevExecId) {
+      await bringExecutionFromRoute();
     }
   },
 );
