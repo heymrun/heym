@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
+const e2eBackendUrl = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT || "10106"}`;
+
 interface WorkflowNodeFixture {
   id: string;
   type: string;
@@ -439,7 +441,7 @@ test("captures a failed HTTP response as node output", async ({ page }) => {
     [
       workflowNode("http_error", "http", 120, 160, {
         label: "fetchBrokenApi",
-        curl: "curl -X GET http://127.0.0.1:9/e2e-http-error",
+        curl: `curl -X GET ${e2eBackendUrl}/api/e2e-http-error`,
       }),
       workflowNode("output_status", "output", 380, 160, {
         label: "httpStatusOutput",
