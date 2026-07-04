@@ -19,6 +19,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: File line-limit check
+        run: sh ./scripts/check-file-line-limits.sh
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:

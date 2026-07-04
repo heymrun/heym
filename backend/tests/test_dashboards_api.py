@@ -3,9 +3,12 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException
+
 from app.api import dashboards as dash_api
 from app.api import workflows as workflows_api
 from app.models.dashboard_schemas import WidgetCreateRequest, WidgetLayout
+from app.services.dashboard_widget_policy import DASHBOARD_WIDGET_BLOCKED_NODE_TYPES
 
 
 class _User:
@@ -71,7 +74,7 @@ class TestSeedWidgetNodes(unittest.TestCase):
         nodes, edges = dash_api._seed_widget_nodes("pie")
         types = [n["type"] for n in nodes]
         # Dashboard widgets must not start with a trigger or input node.
-        for trigger in ("textInput", "cron", "slackTrigger", "telegramTrigger", "imapTrigger"):
+        for trigger in DASHBOARD_WIDGET_BLOCKED_NODE_TYPES:
             self.assertNotIn(trigger, types)
         self.assertIn("set", types)
         self.assertIn("chartOutput", types)
@@ -195,7 +198,7 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
 
         fake_dsl = {
             "nodes": [
-                {"id": "a", "type": "textInput", "data": {}},
+                {"id": "a", "type": "set", "data": {}},
                 {"id": "b", "type": "chartOutput", "data": {"chartType": "pie"}},
             ],
             "edges": [{"id": "e", "source": "a", "target": "b"}],
@@ -220,6 +223,43 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
         self.assertEqual(resp.chart_type, "pie")
+
+    async def test_ai_generate_rejects_trigger_nodes(self):
+        user = _User()
+        db = MagicMock()
+        dashboard = MagicMock(id=uuid.uuid4())
+        existing = MagicMock()
+        existing.scalars.return_value.first.return_value = dashboard
+        db.execute = AsyncMock(return_value=existing)
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        _wire_db_inserts(db)
+
+        fake_dsl = {
+            "nodes": [
+                {"id": "a", "type": "textInput", "data": {"label": "input"}},
+                {"id": "b", "type": "chartOutput", "data": {"chartType": "pie"}},
+            ],
+            "edges": [{"id": "e", "source": "a", "target": "b"}],
+        }
+
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiWidgetRequest
+
+        credential = MagicMock(type=CredentialType.openai)
+        with (
+            patch.object(dash_api, "generate_widget_dsl", AsyncMock(return_value=fake_dsl)),
+            patch.object(dash_api, "get_credential_for_user", AsyncMock(return_value=credential)),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dash_api.ai_generate_widget(
+                    body=AiWidgetRequest(prompt="anything", credential_id=uuid.uuid4(), model="m"),
+                    current_user=user,
+                    db=db,
+                )
+
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("input (textInput)", ctx.exception.detail)
 
     async def test_ai_generate_uses_dsl_name_and_description(self):
         user = _User()
@@ -366,6 +406,61 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         record_version.assert_awaited_once()
         self.assertEqual(generate_dsl.await_args.kwargs["workflow_id"], widget.workflow_id)
         self.assertEqual(generate_dsl.await_args.kwargs["node_label"], "AI Widget Fine-tune")
+
+    async def test_refine_rejects_trigger_nodes(self):
+        user = _User()
+        widget = MagicMock()
+        widget.id = uuid.uuid4()
+        widget.workflow_id = uuid.uuid4()
+        widget.chart_type = "bar"
+        widget.position = 0
+        widget.title = "W"
+        widget.description = None
+        widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
+        widget.cache_ttl_seconds = 300
+        workflow = MagicMock()
+        workflow.nodes = [{"id": "c", "type": "chartOutput", "data": {"chartType": "bar"}}]
+        workflow.edges = []
+
+        db = MagicMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
+            ]
+        )
+        db.commit = AsyncMock()
+
+        fake_dsl = {
+            "nodes": [
+                {"id": "cron", "type": "cron", "data": {"label": "hourly"}},
+                {"id": "c", "type": "chartOutput", "data": {"chartType": "line"}},
+            ],
+            "edges": [{"id": "e", "source": "cron", "target": "c"}],
+        }
+
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiRefineRequest
+
+        credential = MagicMock(type=CredentialType.openai)
+        record_version = AsyncMock()
+        with (
+            patch.object(dash_api, "generate_widget_dsl", AsyncMock(return_value=fake_dsl)),
+            patch.object(dash_api, "get_credential_for_user", AsyncMock(return_value=credential)),
+            patch.object(dash_api, "_record_chat_workflow_edit_version", record_version),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dash_api.ai_refine_widget(
+                    widget_id=widget.id,
+                    body=AiRefineRequest(prompt="line it", credential_id=uuid.uuid4(), model="m"),
+                    current_user=user,
+                    db=db,
+                )
+
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("hourly (cron)", ctx.exception.detail)
+        record_version.assert_not_awaited()
+        db.commit.assert_not_awaited()
 
     async def test_refine_records_change_history_snapshot(self):
         user = _User()

@@ -349,6 +349,18 @@ class NodeResultSchema(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class HighlightRecordSchema(BaseModel):
+    node_id: str
+    node_label: str
+    node_type: str
+    kind: str  # "input" | "output" | "agent" | "llm" | "final"
+    runs: list[str] = Field(default_factory=list)
+
+
+class HighlightPayloadSchema(BaseModel):
+    records: list[HighlightRecordSchema] = Field(default_factory=list)
+
+
 class WorkflowExecuteResponse(BaseModel):
     workflow_id: uuid.UUID
     status: str
@@ -356,6 +368,7 @@ class WorkflowExecuteResponse(BaseModel):
     node_results: list[NodeResultSchema] = []
     execution_time_ms: float
     execution_history_id: uuid.UUID | None = None
+    highlight: HighlightPayloadSchema | None = None
 
 
 class ExecutionHistoryResponse(BaseModel):
@@ -369,6 +382,7 @@ class ExecutionHistoryResponse(BaseModel):
     started_at: datetime
     trigger_source: str | None = None
     recovered: bool = False
+    highlight: HighlightPayloadSchema | None = None
 
     class Config:
         from_attributes = True
@@ -387,6 +401,7 @@ class ExecutionHistoryWithWorkflowResponse(BaseModel):
     started_at: datetime
     trigger_source: str | None = None
     recovered: bool = False
+    highlight: HighlightPayloadSchema | None = None
 
 
 class ExecutionHistoryListResponse(BaseModel):

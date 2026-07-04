@@ -19,6 +19,7 @@ import {
   NUMBER_METHODS,
   OBJECT_METHODS,
   STRING_METHODS,
+  WORKFLOW_BUILTINS,
 } from "@/types/expression";
 import type { NodeResult, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 
@@ -845,6 +846,20 @@ export function useExpressionCompletion(
           type: "function",
           detail: dateFunc.detail,
           description: dateFunc.description,
+        });
+      }
+
+      const matchingWorkflowBuiltins = WORKFLOW_BUILTINS.filter((f) =>
+        f.label.toLowerCase().startsWith(prefix.toLowerCase()),
+      );
+
+      for (const workflowVar of matchingWorkflowBuiltins) {
+        suggestions.push({
+          label: `$${workflowVar.label}`,
+          insertText: workflowVar.insertText,
+          type: workflowVar.type,
+          detail: workflowVar.detail,
+          description: workflowVar.description,
         });
       }
 

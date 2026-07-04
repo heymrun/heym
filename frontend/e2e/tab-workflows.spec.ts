@@ -268,9 +268,74 @@ test("shows a failed workflow execution", async ({ page }) => {
 
   await expect(page.getByText("Last Executed Node")).toBeVisible();
   await expect(page.getByText("error", { exact: true })).toBeVisible();
-  await expect(page.getByText(/"httpStatusCode":\s*400/)).toBeVisible();
+  // Scope to the output <pre> — the Execution Highlights popup also renders this
+  // node's output as a preview span, so an unscoped getByText is ambiguous.
+  await expect(
+    page.locator("pre").filter({ hasText: /"httpStatusCode":\s*400/ }),
+  ).toBeVisible();
 
   await deleteWorkflow(page, workflow.id);
+});
+
+test("shows execution highlights after a workflow run", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Highlights Workflow ${Date.now()}`,
+    [
+      {
+        id: "set-highlight",
+        type: "set",
+        position: { x: 120, y: 120 },
+        data: {
+          label: "Build Highlight",
+          mappings: [{ key: "message", value: "Canvas highlight smoke" }],
+          highlight: true,
+        },
+      },
+      {
+        id: "output-final",
+        type: "output",
+        position: { x: 460, y: 120 },
+        data: { label: "Final Output", message: "$input.message" },
+      },
+    ],
+    [
+      {
+        id: "edge-highlight-output",
+        source: "set-highlight",
+        target: "output-final",
+        sourceHandle: "output",
+        targetHandle: "input",
+      },
+    ],
+  );
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+
+    const highlightsPanel = page.getByTestId("execution-highlights-panel");
+
+    await expect(highlightsPanel).toBeVisible();
+    const highlightedNodeRow = highlightsPanel.getByRole("button", { name: /Build Highlight/ });
+    const finalOutputRow = highlightsPanel.getByRole("button", { name: /Final Output/ });
+    await expect(highlightedNodeRow).toContainText("Canvas highlight smoke");
+    await expect(finalOutputRow).toContainText("Canvas highlight smoke");
+
+    await highlightsPanel.getByPlaceholder("Search highlights...").fill("smoke");
+    await expect(highlightsPanel.locator("mark").filter({ hasText: "smoke" }).first()).toBeVisible();
+
+    await highlightsPanel.getByPlaceholder("Search highlights...").fill("not-present");
+    await expect(highlightsPanel.getByText("No matching highlights.")).toBeVisible();
+
+    await highlightsPanel.getByLabel("Clear search").click();
+    await highlightsPanel.getByLabel("Close highlights").click();
+    await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
+    await page.getByTestId("execution-highlights-open").click();
+    await expect(highlightsPanel).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
 });
 
 test("adds and configures a Linear node", async ({ page }) => {

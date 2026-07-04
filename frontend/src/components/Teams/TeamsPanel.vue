@@ -479,7 +479,7 @@ function hasAnySharedEntities(entities: TeamSharedEntities | null): boolean {
         </div>
 
         <div
-          v-if="!showEditDialog"
+          v-if="!showEditDialog && isCreator(selectedTeam)"
           class="flex gap-2"
         >
           <Input
@@ -531,7 +531,7 @@ function hasAnySharedEntities(entities: TeamSharedEntities | null): boolean {
                 </p>
               </div>
               <Button
-                v-if="!isCreatorMember(member)"
+                v-if="!isCreatorMember(member) && isCreator(selectedTeam)"
                 variant="ghost"
                 size="icon"
                 class="h-8 w-8 text-muted-foreground hover:text-destructive"

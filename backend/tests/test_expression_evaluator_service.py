@@ -1,4 +1,5 @@
 import unittest
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -1351,6 +1352,31 @@ class TestConditionEvalRejectsDunderTraversalService(unittest.TestCase):
         self.assertIsNone(response_undefined.error)
         self.assertEqual(response_undefined.result_type, "boolean")
         self.assertTrue(response_undefined.result)
+
+
+class TestWorkflowMetadataVariables(unittest.TestCase):
+    def test_workflow_metadata_variables_resolve_in_preview(self) -> None:
+        wid = uuid.uuid4()
+        service = ExpressionEvaluatorService(
+            workflow_nodes=[],
+            workflow_edges=[],
+            workflow_id=wid,
+            workflow_name="Daily Report",
+            workflow_description="Sends a report",
+            public_base_url="https://app.test",
+        )
+        self.assertEqual(service.evaluate("$workflowName", {}).result, "Daily Report")
+        self.assertEqual(service.evaluate("$workflowPath", {}).result, f"/workflows/{wid}")
+        self.assertEqual(
+            service.evaluate("$workflowUrl", {}).result,
+            f"https://app.test/workflows/{wid}",
+        )
+
+    def test_execution_id_is_empty_in_preview(self) -> None:
+        service = ExpressionEvaluatorService(
+            workflow_nodes=[], workflow_edges=[], workflow_id=uuid.uuid4()
+        )
+        self.assertEqual(service.evaluate("$executionId", {}).result, "")
 
 
 if __name__ == "__main__":

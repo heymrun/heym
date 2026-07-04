@@ -5,7 +5,9 @@ import { onClickOutside } from "@vueuse/core";
 import { ExternalLink, Loader2, MoreVertical, Pencil, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-vue-next";
 
 import type { ChartPayload, DashboardWidget } from "@/types/dashboard";
+import type { HighlightPayload } from "@/types/workflow";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
+import HighlightPopup from "@/components/Canvas/HighlightPopup.vue";
 import { toggleTaskItemLocal, updateOrRemoveTaskItemLocal } from "@/lib/markdownTaskList";
 import { dashboardApi } from "@/services/api";
 
@@ -23,6 +25,9 @@ const emit = defineEmits<{
 }>();
 
 const payload = ref<ChartPayload | null>(null);
+const highlight = ref<HighlightPayload | null>(null);
+const highlightsOpen = ref(false);
+const hasHighlights = computed<boolean>(() => (highlight.value?.records.length ?? 0) > 0);
 const markdownTaskSaving = ref(false);
 // Only surface http(s) links. The url can come from a dynamic expression over upstream
 // data, so reject javascript:/data:/relative values to avoid an injected-link XSS.
@@ -116,6 +121,7 @@ async function loadData(force = false): Promise<void> {
   try {
     const response = await dashboardApi.getWidgetData(props.widget.id, force);
     payload.value = response.payload;
+    highlight.value = response.highlight ?? null;
     error.value = response.error ?? null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Failed to load widget";
@@ -208,7 +214,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-lg border bg-card shadow-sm">
+  <div class="relative flex h-full flex-col rounded-lg border bg-card shadow-sm">
     <div class="flex items-center justify-between gap-2 border-b px-3 py-2">
       <input
         v-if="editingTitle"
@@ -225,6 +231,16 @@ onBeforeUnmount(() => {
         @click="editingTitle = true"
       >
         {{ widget.title }}
+      </button>
+
+      <button
+        v-if="hasHighlights"
+        class="shrink-0 rounded p-1 hover:bg-accent hover:text-foreground"
+        :class="highlightsOpen ? 'text-violet-400' : 'text-muted-foreground'"
+        title="Execution highlights"
+        @click="highlightsOpen = !highlightsOpen"
+      >
+        <Sparkles class="h-3.5 w-3.5" />
       </button>
 
       <a
@@ -317,5 +333,12 @@ onBeforeUnmount(() => {
         @markdown-task-update="onMarkdownTaskUpdate"
       />
     </div>
+
+    <HighlightPopup
+      v-if="highlightsOpen"
+      :payload="highlight"
+      :collapsible="false"
+      @close="highlightsOpen = false"
+    />
   </div>
 </template>

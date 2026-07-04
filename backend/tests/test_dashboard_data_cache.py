@@ -108,6 +108,30 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(resp.cached)
         self.assertEqual(resp.payload, {"type": "bar", "labels": ["x"]})
 
+    async def test_rejects_blocked_trigger_nodes_even_when_cache_is_fresh(self):
+        now = datetime.now(timezone.utc)
+        widget = _widget(
+            cached_payload={"type": "bar", "labels": ["x"]},
+            cached_at=now - timedelta(seconds=10),
+            version="2026-01-01T00:00:00+00:00",
+        )
+        wf = MagicMock()
+        wf.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        wf.nodes = [
+            {"id": "input", "type": "textInput", "data": {"label": "input"}},
+            {"id": "chart", "type": "chartOutput", "data": {}},
+        ]
+        wf.edges = []
+        db = _db_returning_workflow(wf)
+
+        with patch.object(dashboard_data, "execute_workflow") as execute:
+            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=False)
+
+        execute.assert_not_called()
+        self.assertFalse(resp.cached)
+        self.assertIsNone(resp.payload)
+        self.assertIn("input (textInput)", resp.error)
+
     async def test_recomputes_when_forced(self):
         now = datetime.now(timezone.utc)
         widget = _widget(

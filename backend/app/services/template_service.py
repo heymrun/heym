@@ -17,6 +17,51 @@ async def _get_user_team_ids(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
     return {str(row[0]) for row in result.all()}
 
 
+def _is_template_visible(
+    template: WorkflowTemplate | NodeTemplate,
+    user: User,
+    user_team_ids: set[str],
+) -> bool:
+    """Shared visibility predicate for workflow/node templates.
+
+    Mirrors the rules the list endpoints enforce so single-item get/use paths
+    cannot disclose templates the caller is not allowed to see:
+    - own template
+    - visibility='everyone'
+    - visibility='specific_users' and caller email in shared_with
+    - visibility='specific_users' and caller in a team listed in shared_with_teams
+    """
+    if template.author_id == user.id:
+        return True
+    if template.visibility == TemplateVisibility.everyone:
+        return True
+    if template.visibility == TemplateVisibility.specific_users:
+        user_email = getattr(user, "email", None)
+        if (
+            user_email
+            and isinstance(template.shared_with, list)
+            and user_email in template.shared_with
+        ):
+            return True
+        if (
+            isinstance(template.shared_with_teams, list)
+            and user_team_ids
+            and any(str(tid) in user_team_ids for tid in template.shared_with_teams)
+        ):
+            return True
+    return False
+
+
+async def can_view_template(
+    db: AsyncSession,
+    template: WorkflowTemplate | NodeTemplate,
+    user: User,
+) -> bool:
+    """Return True if the user may view or use the given template."""
+    user_team_ids = await _get_user_team_ids(db, user.id)
+    return _is_template_visible(template, user, user_team_ids)
+
+
 async def list_workflow_templates(
     db: AsyncSession,
     user: User,
@@ -44,29 +89,7 @@ async def list_workflow_templates(
     templates = list(result.scalars().all())
 
     user_team_ids = await _get_user_team_ids(db, user.id)
-    visible: list[WorkflowTemplate] = []
-    user_email = getattr(user, "email", None)
-    for template in templates:
-        if template.author_id == user.id:
-            visible.append(template)
-        elif template.visibility == TemplateVisibility.everyone:
-            visible.append(template)
-        elif (
-            template.visibility == TemplateVisibility.specific_users
-            and user_email
-            and isinstance(template.shared_with, list)
-            and user_email in template.shared_with
-        ):
-            visible.append(template)
-        elif (
-            template.visibility == TemplateVisibility.specific_users
-            and isinstance(template.shared_with_teams, list)
-            and user_team_ids
-            and any(str(tid) in user_team_ids for tid in template.shared_with_teams)
-        ):
-            visible.append(template)
-
-    return visible
+    return [t for t in templates if _is_template_visible(t, user, user_team_ids)]
 
 
 async def list_node_templates(
@@ -90,34 +113,17 @@ async def list_node_templates(
     templates = list(result.scalars().all())
 
     user_team_ids = await _get_user_team_ids(db, user.id)
-    visible: list[NodeTemplate] = []
-    user_email = getattr(user, "email", None)
-    for template in templates:
-        if template.author_id == user.id:
-            visible.append(template)
-        elif template.visibility == TemplateVisibility.everyone:
-            visible.append(template)
-        elif (
-            template.visibility == TemplateVisibility.specific_users
-            and user_email
-            and isinstance(template.shared_with, list)
-            and user_email in template.shared_with
-        ):
-            visible.append(template)
-        elif (
-            template.visibility == TemplateVisibility.specific_users
-            and isinstance(template.shared_with_teams, list)
-            and user_team_ids
-            and any(str(tid) in user_team_ids for tid in template.shared_with_teams)
-        ):
-            visible.append(template)
-
-    return visible
+    return [t for t in templates if _is_template_visible(t, user, user_team_ids)]
 
 
-async def get_workflow_template(
+async def get_workflow_template_unchecked(
     db: AsyncSession, template_id: uuid.UUID
 ) -> WorkflowTemplate | None:
+    """Fetch a workflow template by id with NO visibility/authorization check.
+
+    Callers exposing this to a user MUST gate the result: pair with
+    can_view_template for read/use, or an author_id check for edit/delete.
+    """
     result = await db.execute(
         select(WorkflowTemplate)
         .where(WorkflowTemplate.id == template_id)
@@ -126,7 +132,14 @@ async def get_workflow_template(
     return result.scalar_one_or_none()
 
 
-async def get_node_template(db: AsyncSession, template_id: uuid.UUID) -> NodeTemplate | None:
+async def get_node_template_unchecked(
+    db: AsyncSession, template_id: uuid.UUID
+) -> NodeTemplate | None:
+    """Fetch a node template by id with NO visibility/authorization check.
+
+    Callers exposing this to a user MUST gate the result: pair with
+    can_view_template for read/use, or an author_id check for edit/delete.
+    """
     result = await db.execute(
         select(NodeTemplate)
         .where(NodeTemplate.id == template_id)

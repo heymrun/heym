@@ -1,3 +1,5 @@
+import type { HighlightPayload } from "@/types/workflow";
+
 export interface ChartSeries {
   name: string;
   // number[] for pie/bar/line; [x, y] tuples for scatter
@@ -67,6 +69,7 @@ export interface WidgetDataResponse {
   cached: boolean;
   computed_at: string | null;
   error?: string | null;
+  highlight?: HighlightPayload | null;
 }
 
 export interface WidgetCreateRequest {

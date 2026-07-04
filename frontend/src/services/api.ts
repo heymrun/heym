@@ -858,6 +858,7 @@ export const workflowApi = {
                   execution_time_ms: data.execution_time_ms,
                   node_results: data.node_results,
                   execution_history_id: data.execution_history_id,
+                  highlight: data.highlight ?? null,
                 });
               }
             }

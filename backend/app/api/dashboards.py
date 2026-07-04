@@ -27,6 +27,7 @@ from app.models.dashboard_schemas import (
     WidgetUpdateRequest,
 )
 from app.services.dashboard_data import compute_widget_data
+from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -52,8 +53,9 @@ _AI_WIDGET_SUFFIX = (
     "For markdown checklists / task lists, use chartType text and put GFM task list lines "
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
-    "explicit number to display (e.g. 9. Title\\n8. Title); use a loop with "
-    "total - index to count down and join lines before chartOutput valueField."
+    "explicit number to display (e.g. 9. Title\\n8. Title); use a loop with total - index "
+    "to count down and join lines before chartOutput valueField. Do not include trigger, "
+    "input, error-handler, or RabbitMQ nodes in dashboard widget workflows."
 )
 
 
@@ -443,6 +445,12 @@ async def ai_generate_widget(
     )
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
+    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
+    if blocked_error is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=blocked_error,
+        )
     chart_nodes = [n for n in nodes if n.get("type") == "chartOutput"]
     if not chart_nodes:
         raise HTTPException(
@@ -522,6 +530,12 @@ async def ai_refine_widget(
     )
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
+    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
+    if blocked_error is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=blocked_error,
+        )
     chart_nodes = [n for n in nodes if n.get("type") == "chartOutput"]
     if not chart_nodes:
         raise HTTPException(

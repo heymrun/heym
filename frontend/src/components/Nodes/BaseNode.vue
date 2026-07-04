@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -520,6 +520,11 @@ const hasThrowErrorWarning = computed(() => {
             v-if="data.retryEnabled"
             class="w-3 h-3 text-accent-blue shrink-0"
             title="Retry on failure enabled"
+          />
+          <Sparkles
+            v-if="data.highlight"
+            class="w-3 h-3 text-violet-400 shrink-0"
+            title="Highlight node output"
           />
           <span
             v-if="isRunning && data.retryAttempt && data.retryAttempt > 1"

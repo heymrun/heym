@@ -6,6 +6,7 @@ import ast
 import inspect
 import json
 import re
+import uuid
 from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
@@ -1061,12 +1062,20 @@ class ExpressionEvaluatorService:
         credentials_context: dict[str, str] | None = None,
         global_variables_context: dict[str, Any] | None = None,
         vars_context: dict[str, Any] | None = None,
+        workflow_id: uuid.UUID | None = None,
+        workflow_name: str = "",
+        workflow_description: str = "",
+        public_base_url: str = "",
     ) -> None:
         self.workflow_nodes = workflow_nodes or []
         self.workflow_edges = workflow_edges or []
         self.credentials_context = credentials_context or {}
         self.global_variables_context = global_variables_context or {}
         self.vars_context = vars_context or {}
+        self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.workflow_description = workflow_description
+        self.public_base_url = public_base_url
 
     def evaluate(
         self,
@@ -1096,6 +1105,10 @@ class ExpressionEvaluatorService:
             edges=self.workflow_edges,
             credentials_context=self.credentials_context,
             global_variables_context=self.global_variables_context,
+            workflow_id=self.workflow_id,
+            workflow_name=self.workflow_name,
+            workflow_description=self.workflow_description,
+            public_base_url=self.public_base_url,
         )
         executor.vars = dict(self.vars_context)
         raw_trimmed = expression.strip()

@@ -173,8 +173,8 @@ async def get_workflow_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WorkflowTemplateResponse:
-    template = await template_service.get_workflow_template(db, template_id)
-    if not template:
+    template = await template_service.get_workflow_template_unchecked(db, template_id)
+    if not template or not await template_service.can_view_template(db, template, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     return _wf_response(template)
 
@@ -185,8 +185,8 @@ async def get_node_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> NodeTemplateResponse:
-    template = await template_service.get_node_template(db, template_id)
-    if not template:
+    template = await template_service.get_node_template_unchecked(db, template_id)
+    if not template or not await template_service.can_view_template(db, template, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     return _nd_response(template)
 
@@ -197,8 +197,8 @@ async def use_workflow_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WorkflowTemplateResponse:
-    template = await template_service.get_workflow_template(db, template_id)
-    if not template:
+    template = await template_service.get_workflow_template_unchecked(db, template_id)
+    if not template or not await template_service.can_view_template(db, template, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     template = await template_service.increment_workflow_template_use(db, template)
     return _wf_response(template)
@@ -210,8 +210,8 @@ async def use_node_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> NodeTemplateResponse:
-    template = await template_service.get_node_template(db, template_id)
-    if not template:
+    template = await template_service.get_node_template_unchecked(db, template_id)
+    if not template or not await template_service.can_view_template(db, template, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     template = await template_service.increment_node_template_use(db, template)
     return _nd_response(template)
@@ -225,7 +225,7 @@ async def update_workflow_template(
     current_user: User = Depends(get_current_user),
 ) -> WorkflowTemplateResponse:
     """Update editable fields of a workflow template. Only the author can edit."""
-    template = await template_service.get_workflow_template(db, template_id)
+    template = await template_service.get_workflow_template_unchecked(db, template_id)
     if not template:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     if template.author_id != current_user.id:
@@ -240,7 +240,7 @@ async def update_workflow_template(
         shared_with=payload.shared_with,
         shared_with_teams=payload.shared_with_teams,
     )
-    template = await template_service.get_workflow_template(db, template.id)
+    template = await template_service.get_workflow_template_unchecked(db, template.id)
     return _wf_response(template)
 
 
@@ -252,7 +252,7 @@ async def update_node_template(
     current_user: User = Depends(get_current_user),
 ) -> NodeTemplateResponse:
     """Update editable fields of a node template. Only the author can edit."""
-    template = await template_service.get_node_template(db, template_id)
+    template = await template_service.get_node_template_unchecked(db, template_id)
     if not template:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     if template.author_id != current_user.id:
@@ -267,7 +267,7 @@ async def update_node_template(
         shared_with=payload.shared_with,
         shared_with_teams=payload.shared_with_teams,
     )
-    template = await template_service.get_node_template(db, template.id)
+    template = await template_service.get_node_template_unchecked(db, template.id)
     return _nd_response(template)
 
 
@@ -277,7 +277,7 @@ async def delete_workflow_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    template = await template_service.get_workflow_template(db, template_id)
+    template = await template_service.get_workflow_template_unchecked(db, template_id)
     if not template:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     if template.author_id != current_user.id:
@@ -291,7 +291,7 @@ async def delete_node_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    template = await template_service.get_node_template(db, template_id)
+    template = await template_service.get_node_template_unchecked(db, template_id)
     if not template:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     if template.author_id != current_user.id:

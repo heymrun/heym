@@ -42,6 +42,7 @@ from app.models.schemas import (
     ExecutionHistoryWithWorkflowResponse,
     ExecutionTokenCreate,
     ExecutionTokenResponse,
+    HighlightPayloadSchema,
     HistoryListResponse,
     InputFieldSchema,
     OutputNodeSchema,
@@ -62,6 +63,7 @@ from app.models.schemas import (
 from app.services import file_intake_service
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
+from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     cancel_execution as cancel_active_execution,
@@ -79,6 +81,7 @@ from app.services.global_variables_service import (
     get_global_variables_context,
     upsert_global_variable,
 )
+from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
@@ -799,6 +802,9 @@ async def get_execution_history_entry(
             started_at=history.started_at,
             trigger_source=history.trigger_source,
             recovered=history.recovered,
+            highlight=build_highlight_payload(
+                history.node_results or [], workflow.nodes or [], history.inputs or {}
+            ),
         )
     # Try RunHistory
     run_result = await db.execute(
@@ -809,6 +815,7 @@ async def get_execution_history_entry(
     )
     run = run_result.scalar_one_or_none()
     if run:
+        run_node_results = _run_steps_to_node_results(getattr(run, "steps", None) or [])
         return ExecutionHistoryWithWorkflowResponse(
             id=run.id,
             workflow_id=run.workflow_id,
@@ -816,11 +823,12 @@ async def get_execution_history_entry(
             run_type=run.run_type,
             inputs=run.inputs,
             outputs=run.outputs,
-            node_results=_run_steps_to_node_results(getattr(run, "steps", None) or []),
+            node_results=run_node_results,
             status=run.status,
             execution_time_ms=run.execution_time_ms,
             started_at=run.started_at,
             trigger_source=run.trigger_source,
+            highlight=build_highlight_payload(run_node_results, [], run.inputs or {}),
         )
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -1096,6 +1104,14 @@ async def update_workflow(
     sanitized_nodes = _sanitize_invalid_unicode(workflow_data.nodes)
     sanitized_edges = _sanitize_invalid_unicode(workflow_data.edges)
     sanitized_sse_node_config = _sanitize_invalid_unicode(workflow_data.sse_node_config)
+
+    if getattr(workflow, "kind", None) == "dashboard_widget" and (
+        sanitized_nodes is not None or sanitized_edges is not None
+    ):
+        candidate_nodes = sanitized_nodes if sanitized_nodes is not None else workflow.nodes
+        blocked_error = dashboard_widget_blocked_nodes_error(candidate_nodes)
+        if blocked_error is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
 
     if workflow_data.name is not None:
         workflow.name = workflow_data.name
@@ -1583,10 +1599,17 @@ async def revert_workflow_to_version(
             detail="Revert confirmation required",
         )
 
+    reverted_nodes = _sanitize_invalid_unicode(version.nodes)
+    reverted_edges = _sanitize_invalid_unicode(version.edges)
+    if getattr(workflow, "kind", None) == "dashboard_widget":
+        blocked_error = dashboard_widget_blocked_nodes_error(reverted_nodes)
+        if blocked_error is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
+
     workflow.name = version.name
     workflow.description = version.description
-    workflow.nodes = _sanitize_invalid_unicode(version.nodes)
-    workflow.edges = _sanitize_invalid_unicode(version.edges)
+    workflow.nodes = reverted_nodes
+    workflow.edges = reverted_edges
     workflow.auth_type = version.auth_type
     workflow.auth_header_key = version.auth_header_key
     workflow.auth_header_value = version.auth_header_value
@@ -2406,10 +2429,12 @@ async def execute_workflow_endpoint(
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+            execution_id=str(execution_id),
         )
     except WorkflowCancelledError:
         if not test_run:
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=workflow.id,
                 inputs=enriched_inputs,
                 outputs={},
@@ -2465,6 +2490,9 @@ async def execute_workflow_endpoint(
             node_results=execution_result.node_results,
             execution_time_ms=execution_result.execution_time_ms,
             execution_history_id=history_entry.id,
+            highlight=build_highlight_payload(
+                execution_result.node_results, workflow.nodes or [], enriched_inputs
+            ),
         )
 
     if (
@@ -2484,6 +2512,7 @@ async def execute_workflow_endpoint(
     history_entry: ExecutionHistory | None = None
     if not test_run:
         history_entry = ExecutionHistory(
+            id=execution_id,
             workflow_id=workflow.id,
             inputs=enriched_inputs,
             outputs=execution_result.outputs,
@@ -2541,6 +2570,9 @@ async def execute_workflow_endpoint(
                 node_results=execution_result.node_results,
                 execution_time_ms=execution_result.execution_time_ms,
                 execution_history_id=history_entry.id,
+                highlight=build_highlight_payload(
+                    execution_result.node_results, workflow.nodes or [], enriched_inputs
+                ),
             )
 
         for sub_exec in execution_result.sub_workflow_executions:
@@ -2612,6 +2644,9 @@ async def execute_workflow_endpoint(
         node_results=execution_result.node_results,
         execution_time_ms=execution_result.execution_time_ms,
         execution_history_id=history_entry.id if history_entry is not None else None,
+        highlight=build_highlight_payload(
+            execution_result.node_results, workflow.nodes or [], enriched_inputs
+        ),
     )
 
 
@@ -2644,7 +2679,13 @@ async def get_workflow_execution_history_entry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Execution history entry not found",
         )
-    return ExecutionHistoryResponse.model_validate(history)
+    response = ExecutionHistoryResponse.model_validate(history)
+    response.highlight = HighlightPayloadSchema.model_validate(
+        build_highlight_payload(
+            history.node_results or [], workflow.nodes or [], history.inputs or {}
+        )
+    )
+    return response
 
 
 @router.get("/{workflow_id}/history/{entry_id}/stream")
@@ -2701,7 +2742,13 @@ async def stream_workflow_execution_history_entry(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 break
 
-            entry_payload = ExecutionHistoryResponse.model_validate(history).model_dump(mode="json")
+            entry_response = ExecutionHistoryResponse.model_validate(history)
+            entry_response.highlight = HighlightPayloadSchema.model_validate(
+                build_highlight_payload(
+                    history.node_results or [], workflow.nodes or [], history.inputs or {}
+                )
+            )
+            entry_payload = entry_response.model_dump(mode="json")
             serialized_payload = json.dumps(entry_payload, sort_keys=True)
             if serialized_payload != last_payload:
                 update_event = {"type": "history_update", "entry": entry_payload}
@@ -3042,6 +3089,7 @@ async def execute_workflow_stream(
                 sse_node_config=workflow.sse_node_config or {},
                 public_base_url=public_base_url,
                 timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+                execution_id=str(execution_id),
             ):
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
@@ -3212,6 +3260,7 @@ async def execute_workflow_stream(
 
             if was_cancelled:
                 cancelled_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=enriched_inputs,
                     outputs={},
@@ -3259,6 +3308,7 @@ async def execute_workflow_stream(
                     final_result.get("sub_workflow_executions", []),
                 )
                 history_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=enriched_inputs,
                     outputs=final_result.get("outputs", {}),

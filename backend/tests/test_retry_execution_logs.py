@@ -53,6 +53,9 @@ class _FakeRetryStreamingExecutor:
         cancel_event: object | None = None,
         public_base_url: str = "",
         timeout_seconds: float | None = None,
+        workflow_name: str = "",
+        workflow_description: str = "",
+        execution_id: str = "",
     ) -> None:
         del (
             workflow_cache,
@@ -66,6 +69,9 @@ class _FakeRetryStreamingExecutor:
             agent_progress_queue,
             public_base_url,
             timeout_seconds,
+            workflow_name,
+            workflow_description,
+            execution_id,
         )
         self.nodes = {node["id"]: node for node in nodes}
         self.edges = list(edges)
@@ -81,6 +87,9 @@ class _FakeRetryStreamingExecutor:
         self._sequence = 0
 
     def _arm_deadline(self) -> None:
+        return None
+
+    def _ensure_execution_id(self) -> None:
         return None
 
     def get_error_flow_nodes(self) -> set[str]:

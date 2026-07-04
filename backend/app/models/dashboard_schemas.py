@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.models.schemas import HighlightPayloadSchema
+
 
 class WidgetLayout(BaseModel):
     x: int = 0
@@ -61,6 +63,7 @@ class WidgetDataResponse(BaseModel):
     cached: bool
     computed_at: datetime | None
     error: str | None = None
+    highlight: HighlightPayloadSchema | None = None
 
 
 class AiWidgetRequest(BaseModel):

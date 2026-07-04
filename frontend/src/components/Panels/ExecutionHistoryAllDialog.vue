@@ -737,22 +737,13 @@ function openExternal(url: string): void {
 
 function bringToCanvas(): void {
   if (!selectedEntry.value?.workflow_id) return;
-  workflowStore.pendingHistoryInputs = selectedEntry.value.inputs;
-  workflowStore.pendingHistoryNodeResults = selectedEntry.value.node_results || [];
-  workflowStore.pendingHistoryExecutionResult = {
-    workflow_id: selectedEntry.value.workflow_id,
-    status:
-      selectedEntry.value.status === "error"
-        ? "error"
-        : selectedEntry.value.status === "pending"
-          ? "pending"
-        : "success",
-    outputs: selectedEntry.value.outputs,
-    execution_time_ms: selectedEntry.value.execution_time_ms,
-    node_results: selectedEntry.value.node_results || [],
-    execution_history_id: selectedEntry.value.id,
-  };
-  router.push({ name: "editor", params: { id: selectedEntry.value.workflow_id } });
+  void router.push({
+    name: "editor",
+    params: {
+      id: selectedEntry.value.workflow_id,
+      executionId: selectedEntry.value.id,
+    },
+  });
   emit("close");
 }
 </script>

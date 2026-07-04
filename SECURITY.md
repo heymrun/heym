@@ -78,3 +78,7 @@ vulnerabilities in Heym:
   for reporting multiple authentication and RCE vulnerabilities in the workflow
   condition evaluator, Slack/Telegram webhooks, OAuth redirect_uri validation,
   and token-at-rest storage (GHSA-pm6h-x3h5-j38h).
+- [@sajdakabir](https://github.com/sajdakabir) for reporting a horizontal IDOR
+  in template get-by-id (GHSA-5748-x76g-v68m) and a missing creator gate in team
+  member management that let any member alter the roster and reach team-shared
+  credentials (GHSA-vxpw-x7j7-8723).

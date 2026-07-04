@@ -46,6 +46,7 @@ from app.services.expression_evaluator import (
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
+from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
@@ -1725,6 +1726,9 @@ class WorkflowExecutor:
         public_base_url: str = "",
         return_on_chart_output: bool = False,
         timeout_seconds: float | None = None,
+        workflow_name: str = "",
+        workflow_description: str = "",
+        execution_id: str = "",
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self.agent_progress_queue = agent_progress_queue
@@ -1745,6 +1749,9 @@ class WorkflowExecutor:
         self.credentials_context = credentials_context or {}
         self.global_variables_context = global_variables_context or {}
         self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.workflow_description = workflow_description
+        self.execution_id = execution_id
         self.trace_user_id = trace_user_id
         self.actor_user_id = actor_user_id
         self.conversation_history = conversation_history
@@ -2200,6 +2207,43 @@ class WorkflowExecutor:
         except Exception:
             self._workflow_name_for_log = str(self.workflow_id)
         return self._workflow_name_for_log
+
+    def _get_workflow_metadata(self) -> tuple[str, str]:
+        """Return (name, description). Prefer explicitly supplied values; otherwise
+        lazily fetch once from the DB by workflow_id (mirrors
+        ``_get_workflow_name_for_log``)."""
+        if self.workflow_name or self.workflow_description:
+            return self.workflow_name, self.workflow_description
+        if not self.workflow_id:
+            return "", ""
+        if hasattr(self, "_workflow_metadata_cache"):
+            return self._workflow_metadata_cache
+        name, description = "", ""
+        try:
+            from app.db.models import Workflow
+            from app.db.session import SessionLocal
+
+            with SessionLocal() as db:
+                w = db.query(Workflow).filter(Workflow.id == self.workflow_id).first()
+                if w is not None:
+                    name = w.name or ""
+                    description = w.description or ""
+        except Exception:
+            pass
+        self._workflow_metadata_cache = (name, description)
+        return self._workflow_metadata_cache
+
+    def _build_workflow_url(self, workflow_path: str) -> str:
+        if not workflow_path:
+            return ""
+        base = (self._base_url or "").rstrip("/")
+        if not base:
+            from app.config import settings
+
+            base = (settings.frontend_url or "").rstrip("/")
+        if not base:
+            return ""
+        return f"{base}{workflow_path}"
 
     def _build_llm_trace_context(
         self, credential_id: str | None, node_id: str | None
@@ -5448,6 +5492,14 @@ class WorkflowExecutor:
         combined["true"] = True
         combined["false"] = False
 
+        workflow_name, workflow_description = self._get_workflow_metadata()
+        workflow_path = f"/workflows/{self.workflow_id}" if self.workflow_id else ""
+        combined["workflowName"] = DotStr(workflow_name)
+        combined["workflowDescription"] = DotStr(workflow_description)
+        combined["workflowPath"] = DotStr(workflow_path)
+        combined["workflowUrl"] = DotStr(self._build_workflow_url(workflow_path))
+        combined["executionId"] = DotStr(self.execution_id or "")
+
         if self.credentials_context:
             credentials_dict = DotDict()
             for name, value in self.credentials_context.items():
@@ -7095,8 +7147,18 @@ class WorkflowExecutor:
 
         return results, error_flow_output
 
+    def _ensure_execution_id(self) -> None:
+        """Assign a runtime execution id once per run (empty in the preview evaluator,
+        which never enters a run entry point). Set before nodes run so `$executionId`
+        is stable across all nodes. The API layer normally passes the same id it uses
+        for the ExecutionHistory row, so `$executionId` is a valid deep-link segment;
+        this fallback (canonical UUID string) only applies when no id was supplied."""
+        if not self.execution_id:
+            self.execution_id = str(uuid.uuid4())
+
     def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         """Public entry: wrap the whole workflow run in an OTel root span."""
+        self._ensure_execution_id()
         if not tracing.is_enabled():
             return self._execute_inner(workflow_id, initial_inputs)
 
@@ -7572,6 +7634,9 @@ def execute_workflow(
     public_base_url: str = "",
     return_on_chart_output: bool = False,
     timeout_seconds: float | None = None,
+    workflow_name: str = "",
+    workflow_description: str = "",
+    execution_id: str = "",
 ) -> ExecutionResult:
     executor = WorkflowExecutor(
         nodes,
@@ -7588,6 +7653,9 @@ def execute_workflow(
         public_base_url=public_base_url,
         return_on_chart_output=return_on_chart_output,
         timeout_seconds=timeout_seconds,
+        workflow_name=workflow_name,
+        workflow_description=workflow_description,
+        execution_id=execution_id,
     )
     try:
         result = executor.execute(workflow_id, inputs)
@@ -8696,6 +8764,9 @@ def _execute_workflow_streaming_impl(
     public_base_url: str = "",
     otel_root_context: object | None = None,
     timeout_seconds: float | None = None,
+    workflow_name: str = "",
+    workflow_description: str = "",
+    execution_id: str = "",
 ):
     import queue
 
@@ -8715,7 +8786,11 @@ def _execute_workflow_streaming_impl(
         cancel_event=cancel_event,
         public_base_url=public_base_url,
         timeout_seconds=timeout_seconds,
+        workflow_name=workflow_name,
+        workflow_description=workflow_description,
+        execution_id=execution_id,
     )
+    wf_executor._ensure_execution_id()
     wf_executor._arm_deadline()
     if executor_holder is not None:
         executor_holder["executor"] = wf_executor
@@ -9055,6 +9130,11 @@ def _execute_workflow_streaming_impl(
             "node_results": _serialized_graph_plus_delegated_node_results(
                 node_results, wf_executor
             ),
+            "highlight": build_highlight_payload(
+                _serialized_graph_plus_delegated_node_results(node_results, wf_executor),
+                nodes,
+                inputs,
+            ),
             "sub_workflow_executions": _serialize_sub_workflow_executions(
                 wf_executor.sub_workflow_executions
             ),
@@ -9094,15 +9174,17 @@ def _execute_workflow_streaming_impl(
                     yield event
 
         final_outputs = error_flow_final_output or {"error": error_result.error}
+        serialized_results = _serialized_graph_plus_delegated_node_results(
+            node_results, wf_executor
+        )
         yield {
             "type": "execution_complete",
             "workflow_id": str(workflow_id),
             "status": "error",
             "outputs": _to_json_compatible(final_outputs),
             "execution_time_ms": (time.time() - start_time) * 1000,
-            "node_results": _serialized_graph_plus_delegated_node_results(
-                node_results, wf_executor
-            ),
+            "node_results": serialized_results,
+            "highlight": build_highlight_payload(serialized_results, nodes, inputs),
             "sub_workflow_executions": _serialize_sub_workflow_executions(
                 wf_executor.sub_workflow_executions
             ),
@@ -9121,13 +9203,15 @@ def _execute_workflow_streaming_impl(
 
     final_outputs = unwrap_single_json_output_terminal_outputs(wf_executor, final_outputs)
 
+    serialized_results = _serialized_graph_plus_delegated_node_results(node_results, wf_executor)
     yield {
         "type": "execution_complete",
         "workflow_id": str(workflow_id),
         "status": "success",
         "outputs": _to_json_compatible(final_outputs),
         "execution_time_ms": (time.time() - start_time) * 1000,
-        "node_results": _serialized_graph_plus_delegated_node_results(node_results, wf_executor),
+        "node_results": serialized_results,
+        "highlight": build_highlight_payload(serialized_results, nodes, inputs),
         "sub_workflow_executions": _serialize_sub_workflow_executions(
             wf_executor.sub_workflow_executions
         ),

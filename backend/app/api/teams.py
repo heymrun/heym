@@ -169,6 +169,15 @@ async def _get_team_for_member(
     return result.scalar_one_or_none()
 
 
+def _require_team_creator(team: Team, user_id: uuid.UUID) -> None:
+    """Authorize creator-only team management (rename, roster changes)."""
+    if team.creator_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the team creator can manage this team",
+        )
+
+
 @router.get("/{team_id}", response_model=TeamDetailResponse)
 async def get_team(
     team_id: uuid.UUID,
@@ -320,6 +329,7 @@ async def update_team(
     team = await _get_team_for_member(db, team_id, current_user.id)
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    _require_team_creator(team, current_user.id)
 
     if data.name is not None:
         team.name = data.name
@@ -376,6 +386,7 @@ async def add_team_member(
     team = await _get_team_for_member(db, team_id, current_user.id)
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    _require_team_creator(team, current_user.id)
 
     user_result = await db.execute(select(User).where(User.email == payload.email))
     user = user_result.scalar_one_or_none()
@@ -415,6 +426,7 @@ async def remove_team_member(
     team = await _get_team_for_member(db, team_id, current_user.id)
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    _require_team_creator(team, current_user.id)
 
     if user_id == team.creator_id:
         raise HTTPException(

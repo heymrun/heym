@@ -35,7 +35,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: "/workflows/:id",
+      path: "/workflows/:id/:executionId?",
       name: "editor",
       component: () => import("@/views/EditorView.vue"),
       meta: { requiresAuth: true },

@@ -612,6 +612,8 @@ export interface NodeData {
   retryWaitSeconds?: number;
   onErrorEnabled?: boolean;
   retryAttempt?: number;
+  /** When true, this node's output is surfaced in the Canvas Execution Highlights popup. */
+  highlight?: boolean;
   /** Transient UI flag: triggers the Runbook slide-in entrance animation in BaseNode. */
   __runbookEntrance?: boolean;
   rabbitmqOperation?: string;
@@ -861,6 +863,20 @@ export interface ExecutionToken {
   revoked: boolean;
 }
 
+export type HighlightRecordKind = "input" | "output" | "agent" | "llm" | "final";
+
+export interface HighlightRecord {
+  node_id: string;
+  node_label: string;
+  node_type: string;
+  kind: HighlightRecordKind;
+  runs: string[];
+}
+
+export interface HighlightPayload {
+  records: HighlightRecord[];
+}
+
 export interface ExecutionResult {
   workflow_id: string;
   status: "success" | "error" | "pending" | "awaiting_file_upload";
@@ -868,6 +884,7 @@ export interface ExecutionResult {
   execution_time_ms: number;
   node_results: NodeResult[];
   execution_history_id?: string | null;
+  highlight?: HighlightPayload | null;
 }
 
 export interface FileUploadSlotStatus {
@@ -905,6 +922,7 @@ export interface AllExecutionHistoryEntry {
   started_at: string;
   trigger_source?: string | null;
   recovered?: boolean;
+  highlight?: HighlightPayload | null;
 }
 
 /** Lightweight list item without inputs/outputs/node_results. */
@@ -943,6 +961,7 @@ export interface ServerExecutionHistory {
   started_at: string;
   trigger_source?: string | null;
   recovered?: boolean;
+  highlight?: HighlightPayload | null;
 }
 
 export interface NodeResult {

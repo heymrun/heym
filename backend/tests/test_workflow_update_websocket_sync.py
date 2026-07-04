@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from app.api.workflows import update_workflow
 from app.models.schemas import WebhookBodyMode, WorkflowAuthType, WorkflowUpdate
 
@@ -168,6 +170,64 @@ class WorkflowUpdateWebSocketSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(widget.cached_payload)
         self.assertIsNone(widget.cached_at)
         self.assertIsNone(widget.cached_workflow_version)
+
+    async def test_dashboard_widget_workflow_update_rejects_trigger_nodes(self) -> None:
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            kind="dashboard_widget",
+            name="Widget workflow",
+            description=None,
+            nodes=[
+                {
+                    "id": "chart",
+                    "type": "chartOutput",
+                    "data": {"chartType": "bar"},
+                }
+            ],
+            edges=[],
+            auth_type=WorkflowAuthType.anonymous,
+            auth_header_key=None,
+            auth_header_value=None,
+            webhook_body_mode=WebhookBodyMode.generic,
+            cache_ttl_seconds=None,
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            sse_enabled=False,
+            sse_node_config=None,
+            allow_anonymous=True,
+            owner_id=owner_id,
+            folder_id=None,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        current_user = SimpleNamespace(id=owner_id)
+        db = AsyncMock()
+        db.commit = AsyncMock()
+        payload = WorkflowUpdate(
+            nodes=[
+                {"id": "input", "type": "textInput", "data": {"label": "input"}},
+                {"id": "chart", "type": "chartOutput", "data": {"chartType": "bar"}},
+            ],
+            edges=[{"id": "e", "source": "input", "target": "chart"}],
+        )
+
+        with patch(
+            "app.api.workflows.get_workflow_for_user",
+            AsyncMock(return_value=workflow),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await update_workflow(
+                    workflow_id=workflow_id,
+                    workflow_data=payload,
+                    current_user=current_user,
+                    db=db,
+                )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("input (textInput)", ctx.exception.detail)
+        db.commit.assert_not_awaited()
 
 
 if __name__ == "__main__":

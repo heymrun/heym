@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import {
   ArrowDownToLine,
   ChevronDown,
@@ -48,6 +49,7 @@ const emit = defineEmits<{
 }>();
 
 const workflowStore = useWorkflowStore();
+const router = useRouter();
 const selectedId = ref<string | null>(null);
 const expandedNodes = ref<Set<string>>(new Set());
 const activeExecutions = ref<ActiveExecutionItem[]>([]);
@@ -586,10 +588,17 @@ function openExternal(url: string): void {
 }
 
 function bringToCanvas(): void {
-  if (!selectedEntry.value) return;
+  if (!selectedEntry.value || !workflowStore.currentWorkflow?.id) return;
   const nodeResultsFromHistory = selectedEntry.value.result?.node_results || [];
   const executionResultFromHistory = selectedEntry.value.result || undefined;
   workflowStore.loadHistoryInputs(selectedEntry.value.inputs, nodeResultsFromHistory, executionResultFromHistory);
+  void router.push({
+    name: "editor",
+    params: {
+      id: workflowStore.currentWorkflow.id,
+      executionId: selectedEntry.value.id,
+    },
+  });
   emit("close");
 }
 </script>

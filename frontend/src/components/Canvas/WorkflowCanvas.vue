@@ -17,6 +17,7 @@ import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 import BaseNode from "@/components/Nodes/BaseNode.vue";
 import InsertableEdge from "@/components/Canvas/InsertableEdge.vue";
 import NodeContextMenu from "@/components/Canvas/NodeContextMenu.vue";
+import HighlightPopup from "@/components/Canvas/HighlightPopup.vue";
 import StickyNoteNode from "@/components/Nodes/StickyNoteNode.vue";
 import AgentMemoryGraphDialog from "@/components/Dialogs/AgentMemoryGraphDialog.vue";
 import ExtractSubWorkflowDialog from "@/components/Dialogs/ExtractSubWorkflowDialog.vue";
@@ -1886,6 +1887,8 @@ watch(
         />
       </Transition>
     </VueFlow>
+
+    <HighlightPopup :payload="workflowStore.highlightPayload" />
 
     <NodeContextMenu
       :visible="contextMenuVisible"
