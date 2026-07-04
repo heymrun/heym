@@ -89,6 +89,20 @@ def merge_credential_config_for_update(
             merged_config["auth_mode"] = incoming_auth_mode
         return merged_config
 
+    if credential_type == CredentialType.sentry:
+        merged_config = dict(existing_config)
+
+        incoming_api_token = str(incoming_config.get("api_token", "") or "").strip()
+        if incoming_api_token:
+            merged_config["api_token"] = incoming_api_token
+
+        if "base_url" in incoming_config:
+            incoming_base_url = str(incoming_config.get("base_url", "") or "").strip()
+            if incoming_base_url:
+                merged_config["base_url"] = incoming_base_url
+
+        return merged_config
+
     if credential_type != CredentialType.github:
         return incoming_config
 

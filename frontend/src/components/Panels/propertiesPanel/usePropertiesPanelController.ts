@@ -20,6 +20,7 @@ import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, ma
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
+import { getSentryExpressionFields, type SentryExpressionFieldKey } from "@/lib/sentryExpressionFields";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
 import type { MCPFetchToolItem } from "@/services/api";
@@ -644,6 +645,24 @@ export function usePropertiesPanelController() {
   const githubWorkflowIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const githubWorkflowInputsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentGitHubExpressionFieldIndex = ref(0);
+  const sentryOrganizationSlugExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryProjectSlugExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryTeamSlugExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryIssueIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryEventIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryReleaseVersionExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentrySlugExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryPlatformExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryStatusExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryAssignedToExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryStatsPeriodExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryLimitExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryReleaseProjectsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryReleaseRefsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const sentryPayloadExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const currentSentryExpressionFieldIndex = ref(0);
   const linearLimitExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const linearAfterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const linearTeamIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2101,6 +2120,7 @@ export function usePropertiesPanelController() {
     closeMCPCallExpressionDialogs();
     closeChartOutputExpressionDialogs();
     closeGitHubExpressionDialogs();
+    closeSentryExpressionDialogs();
     closeLinearExpressionDialogs();
   }
 
@@ -2510,6 +2530,28 @@ export function usePropertiesPanelController() {
         const field = githubExpressionFields.value[startIndex];
         if (field && githubExpressionInputRefForKey(field.key)) {
           nextTick(() => openGitHubExpressionFieldAtIndex(startIndex));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "sentry") {
+      const startIndex = resolveSentryExpressionStartIndex();
+      currentSentryExpressionFieldIndex.value = startIndex;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        const n = workflowStore.selectedNode;
+        if (!n || n.type !== "sentry") {
+          return;
+        }
+        if (sentryExpressionFieldCount.value === 0) {
+          return;
+        }
+        const field = sentryExpressionFields.value[startIndex];
+        if (field && sentryExpressionInputRefForKey(field.key)) {
+          nextTick(() => openSentryExpressionFieldAtIndex(startIndex));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -3175,6 +3217,7 @@ export function usePropertiesPanelController() {
       currentPlaywrightExpressionFieldIndex.value = 0;
       currentMCPCallExpressionFieldIndex.value = 0;
       currentGitHubExpressionFieldIndex.value = 0;
+      currentSentryExpressionFieldIndex.value = 0;
       currentLinearExpressionFieldIndex.value = 0;
       currentNotionExpressionFieldIndex.value = 0;
       playwrightExprRefsBySlotKey.value = {};
@@ -3854,6 +3897,17 @@ export function usePropertiesPanelController() {
 
   const githubExpressionFieldCount = computed((): number => githubExpressionFields.value.length);
 
+  const sentryExpressionFields = computed(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "sentry") {
+      return [];
+    }
+    const operation = (n.data.sentryOperation as string | undefined) || "listIssues";
+    return getSentryExpressionFields(operation);
+  });
+
+  const sentryExpressionFieldCount = computed((): number => sentryExpressionFields.value.length);
+
   const linearExpressionFields = computed(() => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "linear") {
@@ -4208,6 +4262,144 @@ export function usePropertiesPanelController() {
 
   function onGitHubRegisterExpressionFieldIndex(index: number): void {
     currentGitHubExpressionFieldIndex.value = index;
+  }
+
+  function sentryExpressionFieldIndex(key: SentryExpressionFieldKey): number {
+    const index = sentryExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : -1;
+  }
+
+  function sentryExpressionFieldLabel(key: SentryExpressionFieldKey): string {
+    return sentryExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+  }
+
+  function sentryExpressionNavBindings(key: SentryExpressionFieldKey): {
+    navigationEnabled: boolean;
+    navigationIndex: number;
+    navigationTotal: number;
+    dialogNodeLabel: string;
+    dialogKeyLabel: string;
+  } {
+    const index = sentryExpressionFieldIndex(key);
+    return {
+      navigationEnabled: sentryExpressionFieldCount.value > 1 && index >= 0,
+      navigationIndex: index >= 0 ? index : 0,
+      navigationTotal: sentryExpressionFieldCount.value,
+      dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+      dialogKeyLabel: sentryExpressionFieldLabel(key),
+    };
+  }
+
+  function sentryExpressionInputRefForKey(
+    key: SentryExpressionFieldKey,
+  ): ExpandableFieldRef | null {
+    switch (key) {
+      case "sentryOrganizationSlug":
+        return sentryOrganizationSlugExpressionInputRef.value;
+      case "sentryProjectSlug":
+        return sentryProjectSlugExpressionInputRef.value;
+      case "sentryTeamSlug":
+        return sentryTeamSlugExpressionInputRef.value;
+      case "sentryIssueId":
+        return sentryIssueIdExpressionInputRef.value;
+      case "sentryEventId":
+        return sentryEventIdExpressionInputRef.value;
+      case "sentryReleaseVersion":
+        return sentryReleaseVersionExpressionInputRef.value;
+      case "sentryName":
+        return sentryNameExpressionInputRef.value;
+      case "sentrySlug":
+        return sentrySlugExpressionInputRef.value;
+      case "sentryPlatform":
+        return sentryPlatformExpressionInputRef.value;
+      case "sentryStatus":
+        return sentryStatusExpressionInputRef.value;
+      case "sentryAssignedTo":
+        return sentryAssignedToExpressionInputRef.value;
+      case "sentryQuery":
+        return sentryQueryExpressionInputRef.value;
+      case "sentryStatsPeriod":
+        return sentryStatsPeriodExpressionInputRef.value;
+      case "sentryLimit":
+        return sentryLimitExpressionInputRef.value;
+      case "sentryReleaseProjects":
+        return sentryReleaseProjectsExpressionInputRef.value;
+      case "sentryReleaseRefs":
+        return sentryReleaseRefsExpressionInputRef.value;
+      case "sentryPayload":
+        return sentryPayloadExpressionInputRef.value;
+      default:
+        return null;
+    }
+  }
+
+  function resolveSentryExpressionStartIndex(): number {
+    const focusField = workflowStore.focusField;
+    if (focusField) {
+      const index = sentryExpressionFieldIndex(focusField as SentryExpressionFieldKey);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return 0;
+  }
+
+  function openSentryExpressionFieldAtIndex(index: number): boolean {
+    const n = selectedNode.value;
+    if (!n || n.type !== "sentry") {
+      return false;
+    }
+    const field = sentryExpressionFields.value[index];
+    if (!field) {
+      return false;
+    }
+    currentSentryExpressionFieldIndex.value = index;
+    const input = sentryExpressionInputRefForKey(field.key);
+    if (!input) {
+      return false;
+    }
+    input.openExpandDialog();
+    return true;
+  }
+
+  function closeSentryExpressionDialogs(): void {
+    sentryOrganizationSlugExpressionInputRef.value?.closeExpandDialog();
+    sentryProjectSlugExpressionInputRef.value?.closeExpandDialog();
+    sentryTeamSlugExpressionInputRef.value?.closeExpandDialog();
+    sentryIssueIdExpressionInputRef.value?.closeExpandDialog();
+    sentryEventIdExpressionInputRef.value?.closeExpandDialog();
+    sentryReleaseVersionExpressionInputRef.value?.closeExpandDialog();
+    sentryNameExpressionInputRef.value?.closeExpandDialog();
+    sentrySlugExpressionInputRef.value?.closeExpandDialog();
+    sentryPlatformExpressionInputRef.value?.closeExpandDialog();
+    sentryStatusExpressionInputRef.value?.closeExpandDialog();
+    sentryAssignedToExpressionInputRef.value?.closeExpandDialog();
+    sentryQueryExpressionInputRef.value?.closeExpandDialog();
+    sentryStatsPeriodExpressionInputRef.value?.closeExpandDialog();
+    sentryLimitExpressionInputRef.value?.closeExpandDialog();
+    sentryReleaseProjectsExpressionInputRef.value?.closeExpandDialog();
+    sentryReleaseRefsExpressionInputRef.value?.closeExpandDialog();
+    sentryPayloadExpressionInputRef.value?.closeExpandDialog();
+  }
+
+  function handleSentryExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = sentryExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentSentryExpressionFieldIndex.value - 1
+        : currentSentryExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeSentryExpressionDialogs();
+    currentSentryExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openSentryExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onSentryRegisterExpressionFieldIndex(index: number): void {
+    currentSentryExpressionFieldIndex.value = index;
   }
 
   function bqMappingInputRef(index: number, el: ExpandableFieldRef | null): void {
@@ -7775,6 +7967,23 @@ export function usePropertiesPanelController() {
     githubReleaseIdExpressionInputRef,
     githubWorkflowIdExpressionInputRef,
     githubWorkflowInputsExpressionInputRef,
+    sentryOrganizationSlugExpressionInputRef,
+    sentryProjectSlugExpressionInputRef,
+    sentryTeamSlugExpressionInputRef,
+    sentryIssueIdExpressionInputRef,
+    sentryEventIdExpressionInputRef,
+    sentryReleaseVersionExpressionInputRef,
+    sentryNameExpressionInputRef,
+    sentrySlugExpressionInputRef,
+    sentryPlatformExpressionInputRef,
+    sentryStatusExpressionInputRef,
+    sentryAssignedToExpressionInputRef,
+    sentryQueryExpressionInputRef,
+    sentryStatsPeriodExpressionInputRef,
+    sentryLimitExpressionInputRef,
+    sentryReleaseProjectsExpressionInputRef,
+    sentryReleaseRefsExpressionInputRef,
+    sentryPayloadExpressionInputRef,
     linearLimitExpressionInputRef,
     linearAfterExpressionInputRef,
     linearTeamIdExpressionInputRef,
@@ -7936,6 +8145,9 @@ export function usePropertiesPanelController() {
     githubExpressionNavBindings,
     handleGitHubExpressionFieldNavigate,
     onGitHubRegisterExpressionFieldIndex,
+    sentryExpressionNavBindings,
+    handleSentryExpressionFieldNavigate,
+    onSentryRegisterExpressionFieldIndex,
     bqMappingInputRef,
     s3ExpressionFieldCount,
     handleS3ExpressionFieldNavigate,

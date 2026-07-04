@@ -16,7 +16,31 @@ import type { CredentialListItem } from "@/types/credential";
 
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
-const { selectedNode, workflowStore, updateNodeData } = usePropertiesPanelContext();
+const {
+  selectedNode,
+  workflowStore,
+  sentryOrganizationSlugExpressionInputRef,
+  sentryProjectSlugExpressionInputRef,
+  sentryTeamSlugExpressionInputRef,
+  sentryIssueIdExpressionInputRef,
+  sentryEventIdExpressionInputRef,
+  sentryReleaseVersionExpressionInputRef,
+  sentryNameExpressionInputRef,
+  sentrySlugExpressionInputRef,
+  sentryPlatformExpressionInputRef,
+  sentryStatusExpressionInputRef,
+  sentryAssignedToExpressionInputRef,
+  sentryQueryExpressionInputRef,
+  sentryStatsPeriodExpressionInputRef,
+  sentryLimitExpressionInputRef,
+  sentryReleaseProjectsExpressionInputRef,
+  sentryReleaseRefsExpressionInputRef,
+  sentryPayloadExpressionInputRef,
+  sentryExpressionNavBindings,
+  handleSentryExpressionFieldNavigate,
+  onSentryRegisterExpressionFieldIndex,
+  updateNodeData,
+} = usePropertiesPanelContext();
 
 const sentryCredentials = ref<CredentialListItem[]>([]);
 
@@ -111,6 +135,7 @@ watch(
     >
       <Label>Organization Slug</Label>
       <ExpressionInput
+        ref="sentryOrganizationSlugExpressionInputRef"
         :model-value="selectedNode.data.sentryOrganizationSlug || ''"
         placeholder="acme"
         single-line
@@ -119,6 +144,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryOrganizationSlug"
+        v-bind="sentryExpressionNavBindings('sentryOrganizationSlug')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryOrganizationSlug', $event)"
       />
     </div>
@@ -129,6 +157,7 @@ watch(
     >
       <Label>{{ selectedNode.data.sentryOperation === "listIssues" ? "Project ID or Slug" : "Project Slug" }}</Label>
       <ExpressionInput
+        ref="sentryProjectSlugExpressionInputRef"
         :model-value="selectedNode.data.sentryProjectSlug || ''"
         placeholder="web-app"
         single-line
@@ -137,6 +166,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryProjectSlug"
+        v-bind="sentryExpressionNavBindings('sentryProjectSlug')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryProjectSlug', $event)"
       />
     </div>
@@ -147,6 +179,7 @@ watch(
     >
       <Label>Team Slug</Label>
       <ExpressionInput
+        ref="sentryTeamSlugExpressionInputRef"
         :model-value="selectedNode.data.sentryTeamSlug || ''"
         placeholder="frontend"
         single-line
@@ -155,6 +188,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryTeamSlug"
+        v-bind="sentryExpressionNavBindings('sentryTeamSlug')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryTeamSlug', $event)"
       />
     </div>
@@ -165,6 +201,7 @@ watch(
     >
       <Label>Name</Label>
       <ExpressionInput
+        ref="sentryNameExpressionInputRef"
         :model-value="selectedNode.data.sentryName || ''"
         placeholder="Web App"
         single-line
@@ -173,6 +210,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryName"
+        v-bind="sentryExpressionNavBindings('sentryName')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryName', $event)"
       />
     </div>
@@ -183,6 +223,7 @@ watch(
     >
       <Label>Slug</Label>
       <ExpressionInput
+        ref="sentrySlugExpressionInputRef"
         :model-value="selectedNode.data.sentrySlug || ''"
         placeholder="web-app"
         single-line
@@ -191,6 +232,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentrySlug"
+        v-bind="sentryExpressionNavBindings('sentrySlug')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentrySlug', $event)"
       />
     </div>
@@ -201,6 +245,7 @@ watch(
     >
       <Label>Platform</Label>
       <ExpressionInput
+        ref="sentryPlatformExpressionInputRef"
         :model-value="selectedNode.data.sentryPlatform || ''"
         placeholder="javascript"
         single-line
@@ -209,6 +254,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryPlatform"
+        v-bind="sentryExpressionNavBindings('sentryPlatform')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryPlatform', $event)"
       />
     </div>
@@ -219,6 +267,7 @@ watch(
     >
       <Label>Query</Label>
       <ExpressionInput
+        ref="sentryQueryExpressionInputRef"
         :model-value="selectedNode.data.sentryQuery || ''"
         placeholder="is:unresolved level:error"
         single-line
@@ -227,6 +276,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryQuery"
+        v-bind="sentryExpressionNavBindings('sentryQuery')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryQuery', $event)"
       />
     </div>
@@ -237,6 +289,7 @@ watch(
     >
       <Label>Stats Period</Label>
       <ExpressionInput
+        ref="sentryStatsPeriodExpressionInputRef"
         :model-value="selectedNode.data.sentryStatsPeriod || '14d'"
         placeholder="14d"
         single-line
@@ -245,6 +298,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryStatsPeriod"
+        v-bind="sentryExpressionNavBindings('sentryStatsPeriod')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryStatsPeriod', $event)"
       />
     </div>
@@ -255,6 +311,7 @@ watch(
     >
       <Label>Limit</Label>
       <ExpressionInput
+        ref="sentryLimitExpressionInputRef"
         :model-value="selectedNode.data.sentryLimit || '25'"
         placeholder="25"
         single-line
@@ -263,6 +320,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryLimit"
+        v-bind="sentryExpressionNavBindings('sentryLimit')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryLimit', $event)"
       />
     </div>
@@ -273,6 +333,7 @@ watch(
     >
       <Label>Issue ID</Label>
       <ExpressionInput
+        ref="sentryIssueIdExpressionInputRef"
         :model-value="selectedNode.data.sentryIssueId || ''"
         placeholder="PROJECT-1"
         single-line
@@ -281,6 +342,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryIssueId"
+        v-bind="sentryExpressionNavBindings('sentryIssueId')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryIssueId', $event)"
       />
     </div>
@@ -291,6 +355,7 @@ watch(
     >
       <Label>Status</Label>
       <ExpressionInput
+        ref="sentryStatusExpressionInputRef"
         :model-value="selectedNode.data.sentryStatus || ''"
         placeholder="resolved"
         single-line
@@ -299,6 +364,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryStatus"
+        v-bind="sentryExpressionNavBindings('sentryStatus')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryStatus', $event)"
       />
     </div>
@@ -309,6 +377,7 @@ watch(
     >
       <Label>Assigned To</Label>
       <ExpressionInput
+        ref="sentryAssignedToExpressionInputRef"
         :model-value="selectedNode.data.sentryAssignedTo || ''"
         placeholder="user@example.com"
         single-line
@@ -317,6 +386,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryAssignedTo"
+        v-bind="sentryExpressionNavBindings('sentryAssignedTo')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryAssignedTo', $event)"
       />
     </div>
@@ -327,6 +399,7 @@ watch(
     >
       <Label>Event ID</Label>
       <ExpressionInput
+        ref="sentryEventIdExpressionInputRef"
         :model-value="selectedNode.data.sentryEventId || ''"
         placeholder="event-id"
         single-line
@@ -335,6 +408,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryEventId"
+        v-bind="sentryExpressionNavBindings('sentryEventId')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryEventId', $event)"
       />
     </div>
@@ -345,6 +421,7 @@ watch(
     >
       <Label>Release Version</Label>
       <ExpressionInput
+        ref="sentryReleaseVersionExpressionInputRef"
         :model-value="selectedNode.data.sentryReleaseVersion || ''"
         placeholder="1.0.0"
         single-line
@@ -353,6 +430,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryReleaseVersion"
+        v-bind="sentryExpressionNavBindings('sentryReleaseVersion')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryReleaseVersion', $event)"
       />
     </div>
@@ -363,6 +443,7 @@ watch(
     >
       <Label>Release Projects JSON</Label>
       <ExpressionInput
+        ref="sentryReleaseProjectsExpressionInputRef"
         :model-value="selectedNode.data.sentryReleaseProjects || '[]'"
         placeholder="[&quot;web-app&quot;]"
         :nodes="workflowStore.nodes"
@@ -370,6 +451,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryReleaseProjects"
+        v-bind="sentryExpressionNavBindings('sentryReleaseProjects')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryReleaseProjects', $event)"
       />
     </div>
@@ -380,6 +464,7 @@ watch(
     >
       <Label>Release Refs JSON</Label>
       <ExpressionInput
+        ref="sentryReleaseRefsExpressionInputRef"
         :model-value="selectedNode.data.sentryReleaseRefs || '[]'"
         placeholder="[{&quot;repository&quot;:&quot;repo&quot;,&quot;commit&quot;:&quot;sha&quot;}]"
         :nodes="workflowStore.nodes"
@@ -387,6 +472,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryReleaseRefs"
+        v-bind="sentryExpressionNavBindings('sentryReleaseRefs')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryReleaseRefs', $event)"
       />
     </div>
@@ -397,6 +485,7 @@ watch(
     >
       <Label>Payload JSON</Label>
       <ExpressionInput
+        ref="sentryPayloadExpressionInputRef"
         :model-value="selectedNode.data.sentryPayload || '{}'"
         placeholder="{&quot;name&quot;:&quot;New name&quot;}"
         :nodes="workflowStore.nodes"
@@ -404,6 +493,9 @@ watch(
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="sentryPayload"
+        v-bind="sentryExpressionNavBindings('sentryPayload')"
+        @navigate="handleSentryExpressionFieldNavigate"
+        @register-field-index="onSentryRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('sentryPayload', $event)"
       />
     </div>

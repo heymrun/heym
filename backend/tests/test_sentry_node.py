@@ -4,7 +4,11 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from app.api.credentials import get_masked_value, validate_credential_config
+from app.api.credentials import (
+    get_masked_value,
+    merge_credential_config_for_update,
+    validate_credential_config,
+)
 from app.db.models import CredentialType
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import sentry_node
@@ -38,6 +42,37 @@ class SentryCredentialTests(unittest.TestCase):
         masked = get_masked_value(CredentialType.sentry, {"api_token": "sntrys_1234567890"})
         self.assertIsNotNone(masked)
         self.assertNotEqual(masked, "sntrys_1234567890")
+
+    def test_update_merge_preserves_existing_api_token_when_only_base_url_changes(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.sentry,
+            {
+                "api_token": "sntrys_old",
+                "base_url": "https://old-sentry.example.com",
+            },
+            {
+                "api_token": "",
+                "base_url": "https://new-sentry.example.com",
+            },
+        )
+
+        self.assertEqual(merged["api_token"], "sntrys_old")
+        self.assertEqual(merged["base_url"], "https://new-sentry.example.com")
+
+    def test_update_merge_preserves_existing_base_url_when_omitted(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.sentry,
+            {
+                "api_token": "sntrys_old",
+                "base_url": "https://sentry.example.com",
+            },
+            {
+                "api_token": "sntrys_new",
+            },
+        )
+
+        self.assertEqual(merged["api_token"], "sntrys_new")
+        self.assertEqual(merged["base_url"], "https://sentry.example.com")
 
 
 class SentryServiceTests(unittest.TestCase):

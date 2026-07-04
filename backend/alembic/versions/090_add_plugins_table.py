@@ -1,7 +1,7 @@
 """add plugins table
 
 Revision ID: 090_add_plugins_table
-Revises: 090_add_sentry_credential_type
+Revises: 089_workflow_timeout
 Create Date: 2026-06-29
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "090_add_plugins_table"
-down_revision: str | None = "090_add_sentry_credential_type"
+down_revision: str | None = "089_workflow_timeout"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
