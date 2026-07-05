@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     codex_workspace_dir: str = Field(
         default="./data/codex-workspaces", validation_alias="HEYM_CODEX_WORKSPACE_DIR"
     )
+    # Git identity for Codex commits. The avatar shown next to it on GitHub is derived from the
+    # email (a matching GitHub account, else Gravatar) — point the email at a branded one to
+    # display a logo.
+    codex_git_author_name: str = Field(
+        default="Heym Codex", validation_alias="HEYM_CODEX_GIT_AUTHOR_NAME"
+    )
+    codex_git_author_email: str = Field(
+        default="support@heym.run", validation_alias="HEYM_CODEX_GIT_AUTHOR_EMAIL"
+    )
     # ChatGPT-subscription OAuth (PKCE) for the Codex node. Defaults mirror the public OpenAI
     # Codex CLI client; override via env if OpenAI changes the client id or endpoints.
     codex_oauth_client_id: str = Field(

@@ -102,6 +102,22 @@ lifetimes) that override these code defaults when you copy it.
 | `HEYM_PLUGIN_ADMIN_EMAILS` | Comma-separated operator emails allowed to install/uninstall plugins. | — |
 | `HEYM_PLUGINS_DIR` | Directory where installed plugins are stored. | `data/plugins` |
 
+## Codex node
+
+The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH (both are bundled in the Docker images; locally, `./run.sh` installs `@openai/codex`).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_CODEX_CLI_COMMAND` | Path/name of the Codex CLI binary. | `codex` |
+| `HEYM_CODEX_WORKSPACE_DIR` | Directory for cloned repo workspaces (its `<workspace>.codex-home` sibling holds the auth bundle, outside the repo). | `./data/codex-workspaces` |
+| `HEYM_CODEX_GIT_AUTHOR_NAME` | Author name for commits Codex creates. | `Heym Codex` |
+| `HEYM_CODEX_GIT_AUTHOR_EMAIL` | Author email for Codex commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
+| `HEYM_CODEX_OAUTH_CLIENT_ID` | OpenAI OAuth client id for "Sign in with ChatGPT". Defaults to the public Codex CLI client. | `app_EMoamEEZ73f0CkXaXp7hrann` |
+| `HEYM_CODEX_OAUTH_ISSUER` | OpenAI OAuth issuer base URL. | `https://auth.openai.com` |
+| `HEYM_CODEX_OAUTH_REDIRECT_URI` | OAuth redirect URI (fixed by OpenAI's Codex client; used for the paste-back flow). | `http://localhost:1455/auth/callback` |
+
+> `HEYM_CODEX_CLI_VERSION` is a **Docker build arg** (not a runtime env var) that pins the `@openai/codex` npm version installed into the image. Default `latest`.
+
 ## OpenTelemetry tracing
 
 | Variable | Description | Default |

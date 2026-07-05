@@ -64,6 +64,30 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn("Heym will commit and push", CodexRunnerService._build_prompt("x", "open_pr"))
 
 
+class TestCommitMessage(unittest.TestCase):
+    def test_commit_title_truncates_at_word_boundary(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="Added n8n10 to docker-compose.yml using host port 2245, internal port 3032",
+        )
+        subject = CodexRunnerService._commit_title(result)
+        self.assertLessEqual(len(subject), 72)
+        self.assertFalse(subject.endswith(" "))
+        self.assertTrue(result.summary.startswith(subject))
+
+    def test_commit_title_keeps_short_summary(self) -> None:
+        result = CodexRunResult(status="completed", summary="Fix typo")
+        self.assertEqual(CodexRunnerService._commit_title(result), "Fix typo")
+
+    def test_commit_body_has_full_summary_and_validation(self) -> None:
+        result = CodexRunResult(
+            status="completed", summary="X" * 100, validation="ran docker compose config"
+        )
+        body = CodexRunnerService._commit_body(result)
+        self.assertIn("X" * 100, body)
+        self.assertIn("ran docker compose config", body)
+
+
 class TestPublishDispatch(unittest.TestCase):
     def setUp(self) -> None:
         self.runner = CodexRunnerService()

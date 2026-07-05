@@ -616,19 +616,20 @@ class CodexRunnerService:
         if new_branch:
             self._run_command(["git", "checkout", "-B", branch], cwd=workspace)
         self._run_command(["git", "add", "-A"], cwd=workspace)
-        self._run_command(
-            [
-                "git",
-                "-c",
-                "user.name=Heym Codex",
-                "-c",
-                "user.email=codex@heym.run",
-                "commit",
-                "-m",
-                self._commit_title(result),
-            ],
-            cwd=workspace,
-        )
+        commit_cmd = [
+            "git",
+            "-c",
+            f"user.name={settings.codex_git_author_name}",
+            "-c",
+            f"user.email={settings.codex_git_author_email}",
+            "commit",
+            "-m",
+            self._commit_title(result),
+        ]
+        body = self._commit_body(result)
+        if body and body != self._commit_title(result):
+            commit_cmd.extend(["-m", body])
+        self._run_command(commit_cmd, cwd=workspace)
 
     def _push_branch(self, workspace: Path, request: CodexRunRequest, branch: str) -> None:
         remote_url = self._clone_url_with_token(request.repository_url, request.github_config)
@@ -787,7 +788,22 @@ class CodexRunnerService:
         summary = re.sub(r"\s+", " ", result.summary).strip()
         if not summary:
             return "Apply Codex changes"
-        return summary[:72]
+        if len(summary) <= 72:
+            return summary
+        # Truncate the subject at a word boundary so it is not cut mid-word.
+        return summary[:72].rsplit(" ", 1)[0] or summary[:72]
+
+    @staticmethod
+    def _commit_body(result: CodexRunResult) -> str:
+        """Full commit body so the message is not lost when the subject is truncated to 72 chars."""
+        parts: list[str] = []
+        summary = str(result.summary or "").strip()
+        if summary:
+            parts.append(summary)
+        validation = str(result.validation or "").strip()
+        if validation:
+            parts.append(f"Validation:\n{validation}")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _clone_url_with_token(repository_url: str, github_config: dict) -> str:
