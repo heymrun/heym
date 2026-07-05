@@ -65,15 +65,11 @@ class TestPublishModeConstants(unittest.TestCase):
 
 
 class TestCommitMessage(unittest.TestCase):
-    def test_commit_title_truncates_at_word_boundary(self) -> None:
-        result = CodexRunResult(
-            status="completed",
-            summary="Added n8n10 to docker-compose.yml using host port 2245, internal port 3032",
-        )
-        subject = CodexRunnerService._commit_title(result)
-        self.assertLessEqual(len(subject), 72)
-        self.assertFalse(subject.endswith(" "))
-        self.assertTrue(result.summary.startswith(subject))
+    def test_commit_title_keeps_full_single_sentence(self) -> None:
+        # A long run-on summary (no early period) is kept whole, not cut at ~72 chars.
+        summary = "Added n8n10 to docker-compose.yml using host port 2245, internal port 3032"
+        result = CodexRunResult(status="completed", summary=summary)
+        self.assertEqual(CodexRunnerService._commit_title(result), summary)
 
     def test_commit_title_keeps_short_summary(self) -> None:
         result = CodexRunResult(status="completed", summary="Fix typo")
@@ -85,18 +81,6 @@ class TestCommitMessage(unittest.TestCase):
             summary="README.md translated. Headings, tables, notes localized; commands preserved.",
         )
         self.assertEqual(CodexRunnerService._commit_title(result), "README.md translated.")
-
-    def test_commit_title_no_trailing_punctuation_when_truncated(self) -> None:
-        result = CodexRunResult(
-            status="completed",
-            summary=(
-                "Added service alpha, beta, gamma, delta, epsilon, zeta, eta, "
-                "theta, iota, kappa and lambda to the compose file"
-            ),
-        )
-        subject = CodexRunnerService._commit_title(result)
-        self.assertLessEqual(len(subject), 72)
-        self.assertFalse(subject.endswith((",", ";", ":", " ")))
 
     def test_commit_body_has_full_summary_and_validation(self) -> None:
         result = CodexRunResult(

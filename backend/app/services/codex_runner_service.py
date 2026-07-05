@@ -788,15 +788,10 @@ class CodexRunnerService:
         summary = re.sub(r"\s+", " ", result.summary).strip()
         if not summary:
             return "Apply Codex changes"
-        # Prefer the first sentence as a clean subject when it fits.
-        first_sentence = re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0]
-        if len(first_sentence) <= 72:
-            return first_sentence
-        if len(summary) <= 72:
-            return summary
-        # Otherwise truncate at a word boundary and drop any trailing punctuation.
-        subject = summary[:72].rsplit(" ", 1)[0] or summary[:72]
-        return subject.rstrip(" ,;:.") or subject
+        # Subject = the full first sentence (no length cap). Truncating here cut the title
+        # mid-thought; GitHub itself elides overly long subjects in list views while keeping the
+        # complete text in the commit.
+        return re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0]
 
     @staticmethod
     def _commit_body(result: CodexRunResult) -> str:
