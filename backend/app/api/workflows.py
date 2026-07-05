@@ -63,6 +63,10 @@ from app.models.schemas import (
 from app.services import file_intake_service
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
+from app.services.codex_followup_service import (
+    is_codex_pending_execution,
+    persist_pending_codex_followup_execution,
+)
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -1964,6 +1968,8 @@ async def get_credentials_context(
                 context[cred.name] = NotionService.resolve_bearer_token(config)
             elif cred.type == CredentialType.sentry:
                 context[cred.name] = config.get("api_token", "")
+            elif cred.type == CredentialType.codex:
+                continue
             else:
                 context[cred.name] = config.get("api_key", "")
         except Exception:
@@ -2462,16 +2468,28 @@ async def execute_workflow_endpoint(
         clear_active_execution(execution_id)
 
     if execution_result.status == "pending":
-        history_entry, _ = await persist_pending_hitl_execution(
-            db=db,
-            workflow=workflow,
-            enriched_inputs=enriched_inputs,
-            execution_result=execution_result,
-            trigger_source=trigger_source,
-            credentials_owner_id=credentials_owner_id,
-            trace_user_id=trace_user_id,
-            public_base_url=build_public_base_url(request),
-        )
+        if is_codex_pending_execution(execution_result):
+            history_entry, _ = await persist_pending_codex_followup_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs=enriched_inputs,
+                execution_result=execution_result,
+                trigger_source=trigger_source,
+                credentials_owner_id=credentials_owner_id,
+                trace_user_id=trace_user_id,
+                public_base_url=build_public_base_url(request),
+            )
+        else:
+            history_entry, _ = await persist_pending_hitl_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs=enriched_inputs,
+                execution_result=execution_result,
+                trigger_source=trigger_source,
+                credentials_owner_id=credentials_owner_id,
+                trace_user_id=trace_user_id,
+                public_base_url=build_public_base_url(request),
+            )
         await upsert_workflow_analytics_snapshot(
             db,
             workflow_id=workflow.id,
@@ -3166,16 +3184,28 @@ async def execute_workflow_stream(
                             pending_review=event.get("_pending_review"),
                             resume_snapshot=event.get("_resume_snapshot"),
                         )
-                        history_entry, _ = await persist_pending_hitl_execution(
-                            db=db,
-                            workflow=workflow,
-                            enriched_inputs=enriched_inputs,
-                            execution_result=pending_result,
-                            trigger_source=trigger_source,
-                            credentials_owner_id=credentials_owner_id,
-                            trace_user_id=trace_user_id,
-                            public_base_url=public_base_url,
-                        )
+                        if is_codex_pending_execution(pending_result):
+                            history_entry, _ = await persist_pending_codex_followup_execution(
+                                db=db,
+                                workflow=workflow,
+                                enriched_inputs=enriched_inputs,
+                                execution_result=pending_result,
+                                trigger_source=trigger_source,
+                                credentials_owner_id=credentials_owner_id,
+                                trace_user_id=trace_user_id,
+                                public_base_url=public_base_url,
+                            )
+                        else:
+                            history_entry, _ = await persist_pending_hitl_execution(
+                                db=db,
+                                workflow=workflow,
+                                enriched_inputs=enriched_inputs,
+                                execution_result=pending_result,
+                                trigger_source=trigger_source,
+                                credentials_owner_id=credentials_owner_id,
+                                trace_user_id=trace_user_id,
+                                public_base_url=public_base_url,
+                            )
                         await upsert_workflow_analytics_snapshot(
                             db,
                             workflow_id=workflow.id,
@@ -3219,16 +3249,31 @@ async def execute_workflow_stream(
                                     pending_review=event.get("_pending_review"),
                                     resume_snapshot=event.get("_resume_snapshot"),
                                 )
-                                history_entry, _ = await persist_pending_hitl_execution(
-                                    db=db,
-                                    workflow=workflow,
-                                    enriched_inputs=enriched_inputs,
-                                    execution_result=pending_result,
-                                    trigger_source=trigger_source,
-                                    credentials_owner_id=credentials_owner_id,
-                                    trace_user_id=trace_user_id,
-                                    public_base_url=public_base_url,
-                                )
+                                if is_codex_pending_execution(pending_result):
+                                    (
+                                        history_entry,
+                                        _,
+                                    ) = await persist_pending_codex_followup_execution(
+                                        db=db,
+                                        workflow=workflow,
+                                        enriched_inputs=enriched_inputs,
+                                        execution_result=pending_result,
+                                        trigger_source=trigger_source,
+                                        credentials_owner_id=credentials_owner_id,
+                                        trace_user_id=trace_user_id,
+                                        public_base_url=public_base_url,
+                                    )
+                                else:
+                                    history_entry, _ = await persist_pending_hitl_execution(
+                                        db=db,
+                                        workflow=workflow,
+                                        enriched_inputs=enriched_inputs,
+                                        execution_result=pending_result,
+                                        trigger_source=trigger_source,
+                                        credentials_owner_id=credentials_owner_id,
+                                        trace_user_id=trace_user_id,
+                                        public_base_url=public_base_url,
+                                    )
                                 await upsert_workflow_analytics_snapshot(
                                     db,
                                     workflow_id=workflow.id,

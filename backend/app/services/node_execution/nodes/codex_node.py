@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import copy
+import re
+import time
+from importlib import import_module
+
+from app.services.codex_runner_service import (
+    CodexResumeRequest,
+    CodexRunnerService,
+    CodexRunRequest,
+)
+from app.services.node_execution.base import NodeExecutionContext
+
+
+def execute(ctx: NodeExecutionContext) -> object:
+    """Execute the Codex node."""
+    _workflow_executor = import_module("app.services.workflow_executor")
+    NodeResult = _workflow_executor.NodeResult  # noqa: N806
+
+    self = ctx.executor
+    node_id = ctx.node_id
+    inputs = ctx.inputs
+    node_data = ctx.node_data
+    node_label = ctx.node_label
+
+    codex_config, github_config = _load_credentials(self, node_data)
+    timeout_seconds = _coerce_timeout(node_data.get("timeoutSeconds"))
+    publish_mode = str(node_data.get("publishMode") or "diff_only").strip()
+    if publish_mode not in {"diff_only", "draft_pr"}:
+        publish_mode = "diff_only"
+
+    resume_context = copy.deepcopy(self.hitl_resume_context.get(node_id) or {})
+    runner = CodexRunnerService()
+    resolved_repository_url = ""
+    resolved_base_branch = "main"
+    resolved_task_prompt = ""
+    resolved_branch_name = _resolve_branch_name(self, node_data, inputs, node_id)
+    if resume_context:
+        answer_text = str(resume_context.get("answerText") or resume_context.get("answer") or "")
+        resolved_repository_url = str(resume_context.get("repositoryUrl") or "").strip()
+        resolved_base_branch = str(resume_context.get("baseBranch") or "main").strip() or "main"
+        resolved_task_prompt = str(resume_context.get("taskPrompt") or answer_text).strip()
+        resolved_branch_name = (
+            str(resume_context.get("branchName") or "").strip() or resolved_branch_name
+        )
+        result = runner.resume_task(
+            CodexResumeRequest(
+                answer_text=answer_text,
+                thread_id=str(resume_context.get("threadId") or "").strip() or None,
+                workspace_path=str(resume_context.get("workspacePath") or "").strip(),
+                branch_name=resolved_branch_name,
+                publish_mode=publish_mode,
+                base_branch=resolved_base_branch,
+                repository_url=resolved_repository_url,
+                codex_access_token=str(codex_config.get("access_token") or ""),
+                github_config=github_config,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    else:
+        repository_url = self.evaluate_message_template(
+            str(node_data.get("repositoryUrl") or ""), inputs, node_id
+        ).strip()
+        if not repository_url:
+            raise ValueError("Codex node requires a repository URL")
+        resolved_repository_url = repository_url
+        base_branch = (
+            self.evaluate_message_template(
+                str(node_data.get("baseBranch") or "main"), inputs, node_id
+            ).strip()
+            or "main"
+        )
+        resolved_base_branch = base_branch
+        task_prompt = self.evaluate_message_template(
+            str(node_data.get("taskPrompt") or "$input.text"), inputs, node_id
+        ).strip()
+        if not task_prompt:
+            raise ValueError("Codex node requires a task prompt")
+        resolved_task_prompt = task_prompt
+        setup_command = self.evaluate_message_template(
+            str(node_data.get("setupCommand") or ""), inputs, node_id
+        ).strip()
+        result = runner.run_task(
+            CodexRunRequest(
+                repository_url=repository_url,
+                base_branch=base_branch,
+                task_prompt=task_prompt,
+                branch_name=resolved_branch_name,
+                publish_mode=publish_mode,
+                setup_command=setup_command,
+                timeout_seconds=timeout_seconds,
+                codex_access_token=str(codex_config.get("access_token") or ""),
+                github_config=github_config,
+            )
+        )
+
+    output = result.to_output()
+    if result.status == "needs_input":
+        question = result.question or "Codex needs more information to continue."
+        pending_output = {
+            "status": "needs_input",
+            "summary": result.summary or "Codex needs more information.",
+            "question": question,
+            "answerUrl": None,
+            "requestId": None,
+            "expiresAt": None,
+            "shareText": None,
+            "shareMarkdown": None,
+            "threadId": result.thread_id,
+            "workspacePath": result.workspace_path,
+            "branchName": result.branch_name,
+        }
+        return NodeResult(
+            node_id=node_id,
+            node_label=node_label,
+            node_type=ctx.node_type,
+            status="pending",
+            output=pending_output,
+            execution_time_ms=(time.time() - ctx.start_time) * 1000,
+            metadata={
+                "codex": {
+                    "kind": "codex",
+                    "summary": pending_output["summary"],
+                    "question": question,
+                    "task_prompt": resolved_task_prompt,
+                    "repository_url": resolved_repository_url,
+                    "base_branch": resolved_base_branch,
+                    "branch_name": result.branch_name,
+                    "thread_id": result.thread_id,
+                    "workspace_path": result.workspace_path,
+                    "original_output": output,
+                }
+            },
+        )
+
+    output["status"] = "completed"
+    output["_skip_source_handles"] = ["question"]
+    return output
+
+
+def _load_credentials(executor: object, node_data: dict) -> tuple[dict, dict]:
+    from app.db.models import CredentialType
+    from app.db.session import SessionLocal
+    from app.services.encryption import decrypt_config
+
+    codex_credential_id = node_data.get("credentialId")
+    github_credential_id = node_data.get("githubCredentialId")
+    if not codex_credential_id:
+        raise ValueError("Codex node requires a Codex access token credential")
+    if not github_credential_id:
+        raise ValueError("Codex node requires a GitHub credential")
+
+    codex_config: dict = {}
+    github_config: dict = {}
+    with SessionLocal() as db:
+        codex_credential = executor._get_accessible_credential(db, codex_credential_id)
+        if codex_credential is None or codex_credential.type != CredentialType.codex:
+            raise ValueError("Codex node requires a Codex credential")
+        codex_config = decrypt_config(codex_credential.encrypted_config)
+
+        github_credential = executor._get_accessible_credential(db, github_credential_id)
+        if github_credential is None or github_credential.type != CredentialType.github:
+            raise ValueError("Codex node requires a GitHub credential")
+        github_config = decrypt_config(github_credential.encrypted_config)
+
+    if not str(codex_config.get("access_token") or "").strip():
+        raise ValueError("Codex credential is missing access_token")
+    if not str(github_config.get("api_key") or "").strip():
+        raise ValueError("GitHub credential is missing api_key")
+    return codex_config, github_config
+
+
+def _coerce_timeout(value: object) -> float:
+    try:
+        timeout = float(value or 3600)
+    except (TypeError, ValueError):
+        timeout = 3600.0
+    return max(60.0, min(timeout, 21600.0))
+
+
+def _resolve_branch_name(executor: object, node_data: dict, inputs: dict, node_id: str) -> str:
+    raw_branch = str(node_data.get("branchName") or "").strip()
+    if raw_branch:
+        resolved = executor.evaluate_message_template(raw_branch, inputs, node_id).strip()
+    else:
+        execution_id = str(getattr(executor, "execution_id", "") or "")
+        resolved = f"codex/{execution_id[:8] or 'run'}"
+    cleaned = re.sub(r"[^A-Za-z0-9._/-]+", "-", resolved).strip("-/")
+    return cleaned or "codex/run"

@@ -11,6 +11,7 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
   "switch",
   "loop",
   "agent",
+  "codex",
   "llm",
   "condition",
   "execute",

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Brain, Database, Globe, Key, MessageSquare, Plus, Share2, Shield, Trash2, Users, X } from "lucide-vue-next";
+import { Brain, Database, Globe, Key, MessageSquare, Plus, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
 
 import type { Credential, CredentialListItem, CredentialShare, CredentialType } from "@/types/credential";
 import type { Team, TeamShare } from "@/types/team";
@@ -55,6 +55,8 @@ function getTypeIcon(type: CredentialType): typeof Brain {
   switch (type) {
     case "openai":
       return Brain;
+    case "codex":
+      return Terminal;
     case "google":
       return Brain;
     case "github":
@@ -86,6 +88,8 @@ function getTypeColor(type: CredentialType): string {
   switch (type) {
     case "openai":
       return "bg-green-500/10 text-green-500";
+    case "codex":
+      return "bg-teal-500/10 text-teal-600 dark:text-teal-400";
     case "google":
       return "bg-blue-500/10 text-blue-500";
     case "github":

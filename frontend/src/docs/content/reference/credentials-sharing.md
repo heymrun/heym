@@ -54,6 +54,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 | Node Type | Field | Description |
 |-----------|-------|-------------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), Image Gen | `credentialId` | LLM API credential |
+| [Codex](../nodes/codex-node.md) | `credentialId`, `githubCredentialId` | Codex access token credential and GitHub credential |
 | [Notion](../nodes/notion-node.md) | `credentialId` | Notion internal token or OAuth workspace credential |
 | [Sentry](../nodes/sentry-node.md) | `credentialId` | Sentry auth token and optional base URL |
 | [Supabase](../nodes/supabase-node.md) | `credentialId` | Supabase project URL and API key |
@@ -76,5 +77,5 @@ After execution, `mask_sensitive_output()` replaces credential values in outputs
 - [Third-Party Integrations](./integrations.md) – Detailed setup for each credential type
 - [Teams](./teams.md) – Share with teams
 - [Expression DSL](./expression-dsl.md) – `$credentials` syntax
-- [Node Types](./node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [Linear](../nodes/linear-node.md), [RAG](../nodes/rag-node.md), [Playwright](../nodes/playwright-node.md), [HTTP](../nodes/http-node.md), [Notion](../nodes/notion-node.md), [Sentry](../nodes/sentry-node.md), [Supabase](../nodes/supabase-node.md), [ClickHouse](../nodes/clickhouse-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md))
+- [Node Types](./node-types.md) – Nodes that use credentials ([LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [Codex](../nodes/codex-node.md), [Linear](../nodes/linear-node.md), [RAG](../nodes/rag-node.md), [Playwright](../nodes/playwright-node.md), [HTTP](../nodes/http-node.md), [Notion](../nodes/notion-node.md), [Sentry](../nodes/sentry-node.md), [Supabase](../nodes/supabase-node.md), [ClickHouse](../nodes/clickhouse-node.md), [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord](../nodes/discord-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [Slack](../nodes/slack-node.md))
 - [Agent Node](../nodes/agent-node.md) – Uses `credentialId` for LLM

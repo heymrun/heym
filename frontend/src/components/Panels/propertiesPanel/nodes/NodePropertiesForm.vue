@@ -9,6 +9,7 @@ import ImapTriggerNodeProperties from "./ImapTriggerNodeProperties.vue";
 import WebsocketTriggerNodeProperties from "./WebsocketTriggerNodeProperties.vue";
 import LlmNodeProperties from "./LlmNodeProperties.vue";
 import AgentNodeProperties from "./AgentNodeProperties.vue";
+import CodexNodeProperties from "./CodexNodeProperties.vue";
 import ConditionNodeProperties from "./ConditionNodeProperties.vue";
 import SwitchNodeProperties from "./SwitchNodeProperties.vue";
 import ExecuteNodeProperties from "./ExecuteNodeProperties.vue";
@@ -65,6 +66,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <WebsocketTriggerNodeProperties v-else-if="selectedNode?.type === 'websocketTrigger'" />
   <LlmNodeProperties v-else-if="selectedNode?.type === 'llm'" />
   <AgentNodeProperties v-else-if="selectedNode?.type === 'agent'" />
+  <CodexNodeProperties v-else-if="selectedNode?.type === 'codex'" />
   <ConditionNodeProperties v-else-if="selectedNode?.type === 'condition'" />
   <SwitchNodeProperties v-else-if="selectedNode?.type === 'switch'" />
   <ExecuteNodeProperties v-else-if="selectedNode?.type === 'execute'" />

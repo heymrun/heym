@@ -31,6 +31,7 @@ const icons = {
   fileUploadTrigger: Upload,
   llm: Brain,
   agent: Bot,
+  codex: Terminal,
   condition: GitBranch,
   switch: Shuffle,
   execute: Play,
@@ -86,6 +87,7 @@ const nodeColorMap = {
   fileUploadTrigger: "node-websocket",
   llm: "node-llm",
   agent: "node-agent",
+  codex: "node-codex",
   condition: "node-condition",
   switch: "node-switch",
   execute: "node-execute",
@@ -178,6 +180,9 @@ const hasMultiOutput = computed(() => props.type === "switch");
 const hasHitlOutput = computed(
   () => !isToolNode.value && !isSubAgentNode.value && props.type === "agent" && props.data.hitlEnabled === true
 );
+const hasCodexQuestionOutput = computed(
+  () => !isToolNode.value && !isSubAgentNode.value && props.type === "codex"
+);
 const hasBatchStatusOutput = computed(
   () => !isToolNode.value && !isSubAgentNode.value && props.type === "llm" && props.data.batchModeEnabled === true,
 );
@@ -197,12 +202,13 @@ const hasErrorOutput = computed(() => {
   return props.data.onErrorEnabled === true;
 });
 const specialOutputCount = computed(
-  () => Number(hasHitlOutput.value) + Number(hasBatchStatusOutput.value) + Number(hasErrorOutput.value),
+  () => Number(hasHitlOutput.value) + Number(hasCodexQuestionOutput.value) + Number(hasBatchStatusOutput.value) + Number(hasErrorOutput.value),
 );
 const outputStackPaddingClass = computed(() => {
   if (specialOutputCount.value >= 3) return "pr-32";
   if (specialOutputCount.value === 2) return "pr-28";
   if (hasBatchStatusOutput.value) return "pr-28";
+  if (hasCodexQuestionOutput.value) return "pr-28";
   if (hasHitlOutput.value) return "pr-24";
   if (hasErrorOutput.value) return "pr-16";
   return "";
@@ -715,6 +721,18 @@ const hasThrowErrorWarning = computed(() => {
         <span class="text-[9px] uppercase tracking-[0.16em] text-node-agent font-semibold mr-1.5 px-1.5 py-0.5 rounded bg-node-agent/12">HITL</span>
         <Handle
           id="hitl"
+          type="source"
+          :position="Position.Right"
+          class="!w-3.5 !h-3.5 !relative !transform-none !top-0 !right-0"
+        />
+      </div>
+      <div
+        v-if="hasCodexQuestionOutput"
+        class="flex items-center"
+      >
+        <span class="text-[9px] uppercase tracking-[0.16em] text-node-codex font-semibold mr-1.5 px-1.5 py-0.5 rounded bg-node-codex/12">QUESTION</span>
+        <Handle
+          id="question"
           type="source"
           :position="Position.Right"
           class="!w-3.5 !h-3.5 !relative !transform-none !top-0 !right-0"

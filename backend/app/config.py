@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     plugins_enabled: bool = Field(default=False, validation_alias="HEYM_PLUGINS_ENABLED")
     plugin_admin_emails: str = Field(default="", validation_alias="HEYM_PLUGIN_ADMIN_EMAILS")
     plugins_dir: str = Field(default="data/plugins", validation_alias="HEYM_PLUGINS_DIR")
+    codex_cli_command: str = Field(default="codex", validation_alias="HEYM_CODEX_CLI_COMMAND")
+    codex_workspace_dir: str = Field(
+        default="./data/codex-workspaces", validation_alias="HEYM_CODEX_WORKSPACE_DIR"
+    )
     # Keep above file_max_size_mb so multipart metadata can fit around a max-size file.
     request_body_max_size_mb: int = 100
     mcp_protocol_max_concurrency: int = 20

@@ -62,6 +62,18 @@ interface ExpandableFieldRef {
   closeExpandDialog(): void;
 }
 
+type CodexExpressionFieldKey =
+  | "repositoryUrl"
+  | "baseBranch"
+  | "taskPrompt"
+  | "branchName"
+  | "setupCommand";
+
+interface CodexExpressionField {
+  key: CodexExpressionFieldKey;
+  label: string;
+}
+
 export function usePropertiesPanelController() {
   const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
     chartOutput: BarChart3,
@@ -71,6 +83,7 @@ export function usePropertiesPanelController() {
     fileUploadTrigger: Upload,
     llm: Brain,
     agent: Bot,
+    codex: Terminal,
     condition: GitBranch,
     switch: Shuffle,
     execute: Play,
@@ -126,6 +139,7 @@ export function usePropertiesPanelController() {
     fileUploadTrigger: "node-websocket",
     llm: "node-llm",
     agent: "node-agent",
+    codex: "node-codex",
     condition: "node-condition",
     switch: "node-switch",
     execute: "node-execute",
@@ -181,6 +195,7 @@ export function usePropertiesPanelController() {
     fileUploadTrigger: "file-upload-trigger-node",
     llm: "llm-node",
     agent: "agent-node",
+    codex: "codex-node",
     condition: "condition-node",
     switch: "switch-node",
     execute: "execute-node",
@@ -500,6 +515,12 @@ export function usePropertiesPanelController() {
   const agentImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const agentMcpEnvInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentAgentExpressionFieldIndex = ref(0);
+  const codexRepositoryUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const codexBaseBranchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const codexTaskPromptExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const codexBranchNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const codexSetupCommandExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const currentCodexExpressionFieldIndex = ref(0);
   const variableValueInputRef = ref<ExpandableFieldRef | null>(null);
   const throwErrorMessageInputRef = ref<ExpandableFieldRef | null>(null);
 
@@ -520,6 +541,7 @@ export function usePropertiesPanelController() {
   const smtpCredentials = ref<CredentialListItem[]>([]);
   const redisCredentials = ref<CredentialListItem[]>([]);
   const gristCredentials = ref<CredentialListItem[]>([]);
+  const codexCredentials = ref<CredentialListItem[]>([]);
   const githubCredentials = ref<CredentialListItem[]>([]);
   const linearCredentials = ref<CredentialListItem[]>([]);
   const googleSheetsCredentials = ref<CredentialListItem[]>([]);
@@ -992,6 +1014,19 @@ export function usePropertiesPanelController() {
       }
 
       if (type === "github") {
+        try {
+          githubCredentials.value = await credentialsApi.listByType("github");
+        } catch {
+          githubCredentials.value = [];
+        }
+      }
+
+      if (type === "codex") {
+        try {
+          codexCredentials.value = await credentialsApi.listByType("codex");
+        } catch {
+          codexCredentials.value = [];
+        }
         try {
           githubCredentials.value = await credentialsApi.listByType("github");
         } catch {
@@ -2119,6 +2154,7 @@ export function usePropertiesPanelController() {
     closeS3ExpressionDialogs();
     closeMCPCallExpressionDialogs();
     closeChartOutputExpressionDialogs();
+    closeCodexExpressionDialogs();
     closeGitHubExpressionDialogs();
     closeSentryExpressionDialogs();
     closeLinearExpressionDialogs();
@@ -2513,6 +2549,25 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "codex") {
+      const startIndex = resolveCodexExpressionStartIndex();
+      currentCodexExpressionFieldIndex.value = startIndex;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        const n = workflowStore.selectedNode;
+        if (!n || n.type !== "codex") {
+          return;
+        }
+        const field = codexExpressionFields.value[startIndex];
+        if (field && codexExpressionInputRefForKey(field.key)) {
+          nextTick(() => openCodexExpressionFieldAtIndex(startIndex));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "github") {
       const startIndex = resolveGitHubExpressionStartIndex();
       currentGitHubExpressionFieldIndex.value = startIndex;
@@ -2884,6 +2939,7 @@ export function usePropertiesPanelController() {
       case "variable":
       case "redis":
       case "rag":
+      case "codex":
       case "github":
       case "linear":
       case "throwError":
@@ -3205,6 +3261,7 @@ export function usePropertiesPanelController() {
       cancelEditingPinnedData();
       currentLlmExpressionFieldIndex.value = 0;
       currentAgentExpressionFieldIndex.value = 0;
+      currentCodexExpressionFieldIndex.value = 0;
       currentSetMappingIndex.value = 0;
       currentExecuteMappingIndex.value = 0;
       currentGristExpressionFieldIndex.value = 0;
@@ -3886,6 +3943,21 @@ export function usePropertiesPanelController() {
     currentSupabaseExpressionFieldIndex.value = index;
   }
 
+  const codexExpressionFields = computed<CodexExpressionField[]>(() => {
+    if (!workflowStore.selectedNode || workflowStore.selectedNode.type !== "codex") {
+      return [];
+    }
+    return [
+      { key: "repositoryUrl", label: "Repository URL" },
+      { key: "baseBranch", label: "Base branch" },
+      { key: "taskPrompt", label: "Task prompt" },
+      { key: "branchName", label: "Branch name" },
+      { key: "setupCommand", label: "Setup command" },
+    ];
+  });
+
+  const codexExpressionFieldCount = computed((): number => codexExpressionFields.value.length);
+
   const githubExpressionFields = computed(() => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "github") {
@@ -4088,6 +4160,108 @@ export function usePropertiesPanelController() {
 
   function onLinearRegisterExpressionFieldIndex(index: number): void {
     currentLinearExpressionFieldIndex.value = index;
+  }
+
+  function codexExpressionFieldIndex(key: CodexExpressionFieldKey): number {
+    const index = codexExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : -1;
+  }
+
+  function codexExpressionFieldLabel(key: CodexExpressionFieldKey): string {
+    return codexExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+  }
+
+  function codexExpressionNavBindings(key: CodexExpressionFieldKey): {
+    navigationEnabled: boolean;
+    navigationIndex: number;
+    navigationTotal: number;
+    dialogNodeLabel: string;
+    dialogKeyLabel: string;
+  } {
+    const index = codexExpressionFieldIndex(key);
+    return {
+      navigationEnabled: codexExpressionFieldCount.value > 1 && index >= 0,
+      navigationIndex: index >= 0 ? index : 0,
+      navigationTotal: codexExpressionFieldCount.value,
+      dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+      dialogKeyLabel: codexExpressionFieldLabel(key),
+    };
+  }
+
+  function codexExpressionInputRefForKey(
+    key: CodexExpressionFieldKey,
+  ): ExpandableFieldRef | null {
+    switch (key) {
+      case "repositoryUrl":
+        return codexRepositoryUrlExpressionInputRef.value;
+      case "baseBranch":
+        return codexBaseBranchExpressionInputRef.value;
+      case "taskPrompt":
+        return codexTaskPromptExpressionInputRef.value;
+      case "branchName":
+        return codexBranchNameExpressionInputRef.value;
+      case "setupCommand":
+        return codexSetupCommandExpressionInputRef.value;
+      default:
+        return null;
+    }
+  }
+
+  function resolveCodexExpressionStartIndex(): number {
+    const focusField = workflowStore.focusField;
+    if (focusField) {
+      const index = codexExpressionFieldIndex(focusField as CodexExpressionFieldKey);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return 2;
+  }
+
+  function openCodexExpressionFieldAtIndex(index: number): boolean {
+    const n = selectedNode.value;
+    if (!n || n.type !== "codex") {
+      return false;
+    }
+    const field = codexExpressionFields.value[index];
+    if (!field) {
+      return false;
+    }
+    currentCodexExpressionFieldIndex.value = index;
+    const input = codexExpressionInputRefForKey(field.key);
+    if (!input) {
+      return false;
+    }
+    input.openExpandDialog();
+    return true;
+  }
+
+  function closeCodexExpressionDialogs(): void {
+    codexRepositoryUrlExpressionInputRef.value?.closeExpandDialog();
+    codexBaseBranchExpressionInputRef.value?.closeExpandDialog();
+    codexTaskPromptExpressionInputRef.value?.closeExpandDialog();
+    codexBranchNameExpressionInputRef.value?.closeExpandDialog();
+    codexSetupCommandExpressionInputRef.value?.closeExpandDialog();
+  }
+
+  function handleCodexExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = codexExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentCodexExpressionFieldIndex.value - 1
+        : currentCodexExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeCodexExpressionDialogs();
+    currentCodexExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openCodexExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onCodexRegisterExpressionFieldIndex(index: number): void {
+    currentCodexExpressionFieldIndex.value = index;
   }
 
   function githubExpressionFieldIndex(key: GitHubExpressionFieldKey): number {
@@ -5244,6 +5418,41 @@ export function usePropertiesPanelController() {
       "Shared Grist credential (from owner)",
     );
   });
+
+  const codexCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "codex"
+        ? (node.data.credentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      codexCredentials.value,
+      selectedCredentialId,
+      "Select Codex credential...",
+      "Shared Codex credential (from owner)",
+    );
+  });
+
+  const codexGithubCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "codex"
+        ? (node.data.githubCredentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      githubCredentials.value,
+      selectedCredentialId,
+      "Select GitHub credential...",
+      "Shared GitHub credential (from owner)",
+    );
+  });
+
+  const codexPublishModeOptions = [
+    { value: "diff_only", label: "Diff only" },
+    { value: "draft_pr", label: "Draft PR" },
+  ];
 
   const githubCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -7893,6 +8102,11 @@ export function usePropertiesPanelController() {
     llmImageExpressionInputRef,
     agentSystemInstructionInputRef,
     agentImageExpressionInputRef,
+    codexRepositoryUrlExpressionInputRef,
+    codexBaseBranchExpressionInputRef,
+    codexTaskPromptExpressionInputRef,
+    codexBranchNameExpressionInputRef,
+    codexSetupCommandExpressionInputRef,
     variableValueInputRef,
     throwErrorMessageInputRef,
     loadingModels,
@@ -8110,6 +8324,9 @@ export function usePropertiesPanelController() {
     handleSendEmailExpressionFieldNavigate,
     onSendEmailRegisterExpressionFieldIndex,
     handleAgentExpressionFieldNavigate,
+    codexExpressionNavBindings,
+    handleCodexExpressionFieldNavigate,
+    onCodexRegisterExpressionFieldIndex,
     setAgentMCPEnvInputRef,
     agentMCPEnvExpressionIndex,
     handleMCPCallExpressionFieldNavigate,
@@ -8186,6 +8403,9 @@ export function usePropertiesPanelController() {
     ragOperationOptions,
     redisOperationOptions,
     gristCredentialOptions,
+    codexCredentialOptions,
+    codexGithubCredentialOptions,
+    codexPublishModeOptions,
     githubCredentialOptions,
     linearCredentialOptions,
     linearOperationOptions,

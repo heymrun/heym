@@ -135,6 +135,7 @@ export type NodeType =
   | "fileUploadTrigger"
   | "llm"
   | "agent"
+  | "codex"
   | "condition"
   | "switch"
   | "execute"
@@ -414,6 +415,13 @@ export interface NodeData {
   mappings?: MappingField[];
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
+  githubCredentialId?: string;
+  repositoryUrl?: string;
+  baseBranch?: string;
+  taskPrompt?: string;
+  publishMode?: "diff_only" | "draft_pr";
+  branchName?: string;
+  setupCommand?: string;
   systemInstruction?: string;
   userMessage?: string;
   batchModeEnabled?: boolean;
@@ -1065,6 +1073,27 @@ export interface HITLDecisionPayload {
   action: "accept" | "edit" | "refuse";
   edited_text?: string;
   refusal_reason?: string;
+}
+
+export interface CodexFollowup {
+  request_id: string;
+  workflow_name: string;
+  codex_label: string;
+  summary: string;
+  question: string;
+  task_prompt: string;
+  repository_url: string;
+  base_branch: string;
+  branch_name: string;
+  status: string;
+  answer_text?: string | null;
+  resolved_output: Record<string, unknown>;
+  expires_at: string;
+  answered_at?: string | null;
+}
+
+export interface CodexFollowupAnswerPayload {
+  answer_text: string;
 }
 
 export interface WorkflowVersion {

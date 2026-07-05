@@ -42,6 +42,8 @@ import type {
   AgentProgressEvent,
   AllExecutionHistoryEntry,
   AllExecutionHistoryEntryLight,
+  CodexFollowup,
+  CodexFollowupAnswerPayload,
   ExpressionEvaluateRequest,
   ExpressionEvaluateResponse,
   ExecutionResult,
@@ -2384,6 +2386,24 @@ export const hitlApi = {
   ): Promise<{ request_id: string; status: string }> => {
     const response = await api.post<{ request_id: string; status: string }>(
       `/hitl/${token}/decision`,
+      payload,
+    );
+    return response.data;
+  },
+};
+
+export const codexFollowupApi = {
+  get: async (token: string): Promise<CodexFollowup> => {
+    const response = await api.get<CodexFollowup>(`/codex/followups/${token}`);
+    return response.data;
+  },
+
+  answer: async (
+    token: string,
+    payload: CodexFollowupAnswerPayload,
+  ): Promise<{ request_id: string; status: string }> => {
+    const response = await api.post<{ request_id: string; status: string }>(
+      `/codex/followups/${token}/answer`,
       payload,
     );
     return response.data;

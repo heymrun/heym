@@ -1432,6 +1432,17 @@ def _attach_node_io(span: object, inputs: object, output: object, limit: int = 4
         pass
 
 
+def _extract_pending_metadata(result: "NodeResult") -> dict:
+    metadata = result.metadata or {}
+    codex_metadata = metadata.get("codex")
+    if isinstance(codex_metadata, dict):
+        return copy.deepcopy(codex_metadata)
+    hitl_metadata = metadata.get("hitl")
+    if isinstance(hitl_metadata, dict):
+        return copy.deepcopy(hitl_metadata)
+    return {}
+
+
 @dataclass
 class SubWorkflowExecution:
     workflow_id: str
@@ -7524,7 +7535,7 @@ class WorkflowExecutor:
             for future in running_futures:
                 future.cancel()
 
-            pending_review = copy.deepcopy(pending_result.metadata.get("hitl") or {})
+            pending_review = _extract_pending_metadata(pending_result)
             resume_snapshot = self.build_resume_snapshot(
                 initial_inputs=initial_inputs,
                 node_results=node_results,
@@ -8046,7 +8057,7 @@ def resume_workflow_execution(
         for future in running_futures:
             future.cancel()
 
-        pending_review = copy.deepcopy(pending_result.metadata.get("hitl") or {})
+        pending_review = _extract_pending_metadata(pending_result)
         resume_snapshot = wf_executor.build_resume_snapshot(
             initial_inputs=snapshot.get("initial_inputs") or {},
             node_results=node_results,
@@ -8375,6 +8386,7 @@ def execute_hitl_notification_branch(
     *,
     snapshot: dict,
     pending_output: dict,
+    source_handle: str = "hitl",
     credentials_context: dict[str, str] | None = None,
     global_variables_context: dict[str, object] | None = None,
     trace_user_id: uuid.UUID | None = None,
@@ -8541,7 +8553,7 @@ def execute_hitl_notification_branch(
                         running_futures[new_future] = target
 
     with pending_lock:
-        schedule_downstream(paused_node_id, only_source_handles={"hitl"})
+        schedule_downstream(paused_node_id, only_source_handles={source_handle})
 
     while running_futures:
         done, _ = wait(running_futures.keys(), return_when=FIRST_COMPLETED)
@@ -9110,7 +9122,7 @@ def _execute_workflow_streaming_impl(
         for future in running_futures:
             future.cancel()
 
-        pending_review = copy.deepcopy(pending_result.metadata.get("hitl") or {})
+        pending_review = _extract_pending_metadata(pending_result)
         resume_snapshot = wf_executor.build_resume_snapshot(
             initial_inputs=inputs,
             node_results=node_results,

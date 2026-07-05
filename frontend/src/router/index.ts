@@ -53,6 +53,12 @@ const router = createRouter({
       meta: { guest: false, requiresAuth: false },
     },
     {
+      path: "/codex/followup/:token",
+      name: "codex-followup",
+      component: () => import("@/views/CodexFollowupView.vue"),
+      meta: { guest: false, requiresAuth: false },
+    },
+    {
       path: "/evals",
       name: "evals",
       component: () => import("@/views/EvalsView.vue"),

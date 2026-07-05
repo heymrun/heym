@@ -1,5 +1,6 @@
 export type CredentialType =
   | "openai"
+  | "codex"
   | "google"
   | "github"
   | "linear"
@@ -75,6 +76,10 @@ export interface LLMModel {
 
 export interface CredentialConfigOpenAI {
   api_key: string;
+}
+
+export interface CredentialConfigCodex {
+  access_token: string;
 }
 
 export interface CredentialConfigGoogle {
@@ -236,6 +241,7 @@ export interface CredentialConfigSentry {
 
 export type CredentialConfig =
   | CredentialConfigOpenAI
+  | CredentialConfigCodex
   | CredentialConfigGoogle
   | CredentialConfigGitHub
   | CredentialConfigLinear
@@ -334,6 +340,7 @@ export interface NotionPagesResponse {
 
 export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   openai: "OpenAI",
+  codex: "OpenAI Codex",
   google: "Google AI",
   github: "GitHub",
   linear: "Linear",
@@ -366,6 +373,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
 
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   openai: "Connect to OpenAI API for GPT models",
+  codex: "Use a ChatGPT/Codex access token for the local Codex runner",
   google: "Connect to Google AI for Gemini models",
   github: "Store a GitHub personal access token for GitHub API, MCP, and agent workflows",
   linear: "Connect to Linear for workspace, project, issue, and comment automation",

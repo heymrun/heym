@@ -43,6 +43,7 @@
     --node-cron: 217 91% 60%;
     --node-llm: 252 87% 62%;
     --node-agent: 180 80% 45%;
+    --node-codex: 168 76% 32%;
     --node-condition: 25 95% 53%;
     --node-switch: 189 94% 43%;
     --node-execute: 217 91% 60%;
@@ -115,6 +116,7 @@
     --node-cron: 217 91% 65%;
     --node-llm: 252 87% 67%;
     --node-agent: 180 80% 50%;
+    --node-codex: 168 68% 50%;
     --node-condition: 25 95% 58%;
     --node-switch: 189 94% 48%;
     --node-execute: 217 91% 65%;

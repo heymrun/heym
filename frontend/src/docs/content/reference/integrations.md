@@ -11,8 +11,9 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | Type | Used By | Key Fields |
 |------|---------|------------|
 | **OpenAI** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md) | `api_key` |
+| **OpenAI Codex** | [Codex](../nodes/codex-node.md) | `access_token` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
-| **GitHub** | [GitHub](../nodes/github-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
+| **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
@@ -74,8 +75,31 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 ### Used By
 
 - [GitHub node](../nodes/github-node.md)
+- [Codex node](../nodes/codex-node.md)
 - [Agent node](../nodes/agent-node.md)
 - [HTTP node](../nodes/http-node.md)
+
+---
+
+## OpenAI Codex
+
+The OpenAI Codex credential stores a ChatGPT/Codex access token for the [Codex node](../nodes/codex-node.md). It is separate from the OpenAI API key credential used by LLM, Agent, and RAG nodes.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `access_token` | Codex access token passed only to the local Codex CLI process |
+
+### Notes
+
+- API keys are rejected for this credential type.
+- Codex tokens are not exposed through `$credentials.Name`.
+- The Codex node also needs a GitHub credential for repository clone, branch push, and draft PR creation.
+
+### Used By
+
+- [Codex node](../nodes/codex-node.md)
 
 ---
 

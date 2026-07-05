@@ -390,17 +390,35 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             return
 
         if resumed_result.status == "pending":
-            await persist_pending_hitl_execution(
-                db=db,
-                workflow=workflow,
-                enriched_inputs=history_entry.inputs,
-                execution_result=resumed_result,
-                trigger_source=trigger_source,
-                credentials_owner_id=credentials_owner_id,
-                trace_user_id=trace_user_id,
-                public_base_url=public_base_url,
-                history_entry=history_entry,
+            from app.services.codex_followup_service import (
+                is_codex_pending_execution,
+                persist_pending_codex_followup_execution,
             )
+
+            if is_codex_pending_execution(resumed_result):
+                await persist_pending_codex_followup_execution(
+                    db=db,
+                    workflow=workflow,
+                    enriched_inputs=history_entry.inputs,
+                    execution_result=resumed_result,
+                    trigger_source=trigger_source,
+                    credentials_owner_id=credentials_owner_id,
+                    trace_user_id=trace_user_id,
+                    public_base_url=public_base_url,
+                    history_entry=history_entry,
+                )
+            else:
+                await persist_pending_hitl_execution(
+                    db=db,
+                    workflow=workflow,
+                    enriched_inputs=history_entry.inputs,
+                    execution_result=resumed_result,
+                    trigger_source=trigger_source,
+                    credentials_owner_id=credentials_owner_id,
+                    trace_user_id=trace_user_id,
+                    public_base_url=public_base_url,
+                    history_entry=history_entry,
+                )
             await db.commit()
             return
 

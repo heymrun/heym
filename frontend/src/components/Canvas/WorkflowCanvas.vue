@@ -1035,6 +1035,18 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       hitlEnabled: false,
       hitlSummary: "",
     },
+    codex: {
+      label: "codex",
+      credentialId: "",
+      githubCredentialId: "",
+      repositoryUrl: "",
+      baseBranch: "main",
+      taskPrompt: "$input.text",
+      publishMode: "diff_only",
+      branchName: "codex/$executionId",
+      timeoutSeconds: 3600,
+      setupCommand: "",
+    },
     condition: { label: "condition", condition: "$input.text.length > 0" },
     switch: { label: "switch", expression: "$input.text", cases: ["case1", "case2"] },
     execute: { label: "execute", executeTargets: [], executeInput: "$input.text", executeWorkflowId: "" },
@@ -1219,7 +1231,7 @@ function tidyUp(): void {
         if (handle === "batchStatus") return 1;
         if (handle === "true") return 0;
         if (handle === "false") return 1;
-        if (handle === "hitl") return 1;
+        if (handle === "hitl" || handle === "question") return 1;
         if (handle === "error") return 2;
         if (handle === "loop") return 0;
         if (handle === "done") return 1;

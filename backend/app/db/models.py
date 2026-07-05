@@ -27,6 +27,7 @@ class Base(DeclarativeBase):
 
 class CredentialType(str, PyEnum):
     openai = "openai"
+    codex = "codex"
     google = "google"
     github = "github"
     linear = "linear"
@@ -324,6 +325,9 @@ class Workflow(Base):
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(
         "HITLRequest", back_populates="workflow", cascade="all, delete-orphan"
     )
+    codex_followup_requests: Mapped[list["CodexFollowupRequest"]] = relationship(
+        "CodexFollowupRequest", back_populates="workflow", cascade="all, delete-orphan"
+    )
     versions: Mapped[list["WorkflowVersion"]] = relationship(
         "WorkflowVersion", back_populates="workflow", cascade="all, delete-orphan"
     )
@@ -526,6 +530,9 @@ class ExecutionHistory(Base):
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(
         "HITLRequest", back_populates="execution_history", cascade="all, delete-orphan"
+    )
+    codex_followup_requests: Mapped[list["CodexFollowupRequest"]] = relationship(
+        "CodexFollowupRequest", back_populates="execution_history", cascade="all, delete-orphan"
     )
 
 
@@ -1118,6 +1125,54 @@ class HITLRequest(Base):
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="hitl_requests")
     execution_history: Mapped["ExecutionHistory"] = relationship(
         "ExecutionHistory", back_populates="hitl_requests"
+    )
+
+
+class CodexFollowupRequest(Base):
+    __tablename__ = "codex_followup_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    execution_history_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("execution_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    public_token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    codex_node_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    codex_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    question: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    task_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    repository_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    base_branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
+    branch_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_output: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    resolved_output: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    execution_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
+    answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resume_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    workflow: Mapped["Workflow"] = relationship(
+        "Workflow", back_populates="codex_followup_requests"
+    )
+    execution_history: Mapped["ExecutionHistory"] = relationship(
+        "ExecutionHistory", back_populates="codex_followup_requests"
     )
 
 

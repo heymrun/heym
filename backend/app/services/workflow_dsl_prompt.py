@@ -4076,6 +4076,82 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 36. codex (OpenAI Codex Coding Agent)
+- **Type**: `codex`
+- **Purpose**: Run a coding task against a Git repository using the Codex CLI inside Heym's
+  isolated runner. This node is access-token-only; do not use OpenAI API keys.
+- **Inputs**: 1 | **Outputs**: 1, plus optional `question` branch when Codex needs input
+- **Required setup**:
+  - `credentialId`: UUID of an owned `codex` credential containing a ChatGPT/Codex access token
+  - `githubCredentialId`: UUID of an owned GitHub credential for cloning, pushing, and draft PRs
+- **Common data fields**:
+  - `label`: Node identifier
+  - `repositoryUrl`: HTTPS GitHub/GitHub Enterprise repository URL
+  - `baseBranch`: Base branch to clone, usually `main`
+  - `taskPrompt`: Coding task; usually `$input.text` or a composed prompt from earlier nodes
+  - `publishMode`: `diff_only` or `draft_pr` (default `diff_only`)
+  - `branchName`: Optional branch name for draft PR mode, e.g. `codex/$executionId`
+  - `timeoutSeconds`: Node timeout in seconds (default 3600)
+  - `setupCommand`: Optional repository setup command before Codex runs
+- **Outputs**:
+  - Completed output includes `{status, summary, diff, changedFiles, validation, branchName,
+    pullRequestUrl?, usage?, threadId?}`.
+  - If Codex needs input, the node pauses with `{status:"needs_input", question, answerUrl,
+    requestId, shareText, shareMarkdown, threadId}` and exposes sourceHandle `"question"`.
+- **Routing**: Connect the Codex node's `question` handle to Slack, email, Discord, or another
+  notification node when the user should be alerted to answer Codex.
+
+**Codex example with question notification branch**:
+```json
+{
+  "nodes": [
+    {
+      "id": "task",
+      "type": "textInput",
+      "position": {"x": 100, "y": 120},
+      "data": {"label": "task", "inputFields": [{"key": "text"}]}
+    },
+    {
+      "id": "codex_1",
+      "type": "codex",
+      "position": {"x": 380, "y": 120},
+      "data": {
+        "label": "codexFix",
+        "credentialId": "codex-credential-uuid",
+        "githubCredentialId": "github-credential-uuid",
+        "repositoryUrl": "https://github.com/acme/web-app.git",
+        "baseBranch": "main",
+        "taskPrompt": "$task.text",
+        "publishMode": "draft_pr",
+        "branchName": "codex/$executionId",
+        "timeoutSeconds": 3600
+      }
+    },
+    {
+      "id": "notify",
+      "type": "slack",
+      "position": {"x": 660, "y": 260},
+      "data": {
+        "label": "notifyCodexQuestion",
+        "credentialId": "slack-credential-uuid",
+        "message": "$codexFix.shareMarkdown"
+      }
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "position": {"x": 680, "y": 120},
+      "data": {"label": "result", "message": "$codexFix.summary"}
+    }
+  ],
+  "edges": [
+    {"id": "e1", "source": "task", "target": "codex_1"},
+    {"id": "e2", "source": "codex_1", "target": "output"},
+    {"id": "e3", "source": "codex_1", "sourceHandle": "question", "target": "notify"}
+  ]
+}
+```
+
 ## Edge Connections
 
 Edges connect nodes. Handle specification depends on the node type:
@@ -4115,6 +4191,12 @@ Switch nodes have multiple outputs. You MUST specify sourceHandle:
   "sourceHandle": "case-0"
 }
 ```
+
+### Codex Question Output
+Codex nodes can expose a follow-up question branch. You MUST specify sourceHandle:
+- `"question"` = Codex needs user input before it can continue
+- Use this handle for notification branches that send `$codexLabel.answerUrl`,
+  `$codexLabel.shareText`, or `$codexLabel.shareMarkdown`
 
 ### Merge Node Inputs
 Merge nodes have multiple inputs. You MUST specify targetHandle:
@@ -4207,7 +4289,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

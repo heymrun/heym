@@ -219,6 +219,7 @@ const icons = {
   fileUploadTrigger: Upload,
   llm: Brain,
   agent: Bot,
+  codex: Terminal,
   condition: GitBranch,
   switch: Shuffle,
   execute: Play,

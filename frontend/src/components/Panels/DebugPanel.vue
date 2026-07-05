@@ -1851,7 +1851,7 @@ function tidyUpNodes(): void {
         if (handle === "batchStatus") return 1;
         if (handle === "true") return 0;
         if (handle === "false") return 1;
-        if (handle === "hitl") return 1;
+        if (handle === "hitl" || handle === "question") return 1;
         if (handle === "error") return 2;
         if (handle === "loop") return 0;
         if (handle === "done") return 1;

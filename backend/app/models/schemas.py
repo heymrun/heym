@@ -469,6 +469,7 @@ class LLMTraceListResponse(BaseModel):
 
 class CredentialType(str, Enum):
     openai = "openai"
+    codex = "codex"
     google = "google"
     github = "github"
     linear = "linear"
@@ -501,6 +502,10 @@ class CredentialType(str, Enum):
 
 class CredentialConfigOpenAI(BaseModel):
     api_key: str
+
+
+class CredentialConfigCodex(BaseModel):
+    access_token: str
 
 
 class CredentialConfigGoogle(BaseModel):
@@ -1170,6 +1175,32 @@ class HITLDecisionRequest(BaseModel):
 
 
 class HITLDecisionResponse(BaseModel):
+    request_id: uuid.UUID
+    status: str
+
+
+class CodexFollowupPublicResponse(BaseModel):
+    request_id: uuid.UUID
+    workflow_name: str
+    codex_label: str
+    summary: str
+    question: str
+    task_prompt: str
+    repository_url: str
+    base_branch: str
+    branch_name: str
+    status: str
+    answer_text: str | None = None
+    resolved_output: dict = Field(default_factory=dict)
+    expires_at: datetime
+    answered_at: datetime | None = None
+
+
+class CodexFollowupAnswerRequest(BaseModel):
+    answer_text: str = Field(min_length=1)
+
+
+class CodexFollowupAnswerResponse(BaseModel):
     request_id: uuid.UUID
     status: str
 

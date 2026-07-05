@@ -121,6 +121,9 @@ def merge_credential_config_for_update(
 
 
 def get_masked_value(credential_type: CredentialType, config: dict) -> str | None:
+    if credential_type == CredentialType.codex:
+        access_token = str(config.get("access_token", "")).strip()
+        return mask_api_key(access_token) if access_token else None
     if credential_type == CredentialType.header:
         header_value = config.get("header_value", "")
         return mask_api_key(header_value)
@@ -1260,6 +1263,17 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OpenAI credential requires api_key",
+            )
+    elif credential_type == CredentialType.codex:
+        if str(config.get("api_key") or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Codex credential requires access_token and does not accept api_key",
+            )
+        if "access_token" not in config or not str(config["access_token"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Codex credential requires access_token",
             )
     elif credential_type == CredentialType.google:
         if "api_key" not in config or not config["api_key"]:

@@ -10,6 +10,7 @@ const NODE_COLOR_MAP: Record<string, string> = {
   "node-cron": "bg-node-cron/15 border-node-cron/40",
   "node-llm": "bg-node-llm/15 border-node-llm/40",
   "node-agent": "bg-node-agent/15 border-node-agent/40",
+  "node-codex": "bg-node-codex/15 border-node-codex/40",
   "node-condition": "bg-node-condition/15 border-node-condition/40",
   "node-switch": "bg-node-switch/15 border-node-switch/40",
   "node-execute": "bg-node-execute/15 border-node-execute/40",

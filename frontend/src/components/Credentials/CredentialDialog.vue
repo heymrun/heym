@@ -38,6 +38,7 @@ const isEditing = computed(() => !!props.credential);
 const name = ref("");
 const type = ref<CredentialType>("openai");
 const apiKey = ref("");
+const codexAccessToken = ref("");
 const baseUrl = ref("");
 const bearerToken = ref("");
 const headerKey = ref("");
@@ -176,6 +177,7 @@ const hasSupabaseCredentialConfigChange = computed((): boolean => {
 
 const typeOptions = [
   { value: "openai", label: CREDENTIAL_TYPE_LABELS.openai },
+  { value: "codex", label: CREDENTIAL_TYPE_LABELS.codex },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
   { value: "github", label: CREDENTIAL_TYPE_LABELS.github },
   { value: "linear", label: CREDENTIAL_TYPE_LABELS.linear },
@@ -218,6 +220,7 @@ watch(
         name.value = props.credential.name;
         type.value = props.credential.type;
         apiKey.value = "";
+        codexAccessToken.value = "";
         baseUrl.value = "";
         bearerToken.value = "";
         headerKey.value = props.credential.header_key || "";
@@ -321,6 +324,7 @@ watch(
         name.value = "";
         type.value = props.presetType ?? "openai";
         apiKey.value = "";
+        codexAccessToken.value = "";
         baseUrl.value = "";
         bearerToken.value = "";
         headerKey.value = "";
@@ -438,6 +442,8 @@ const isValid = computed(() => {
     type.value === "elevenlabs"
   ) {
     return !!apiKey.value.trim() || isEditing.value;
+  } else if (type.value === "codex") {
+    return !!codexAccessToken.value.trim() || isEditing.value;
   } else if (type.value === "custom") {
     return (!!apiKey.value.trim() && !!baseUrl.value.trim()) || isEditing.value;
   } else if (type.value === "bearer") {
@@ -568,6 +574,8 @@ const canTestLinearConnection = computed((): boolean => {
 function buildConfig(): CredentialConfig {
   if (type.value === "openai") {
     return { api_key: apiKey.value };
+  } else if (type.value === "codex") {
+    return { access_token: codexAccessToken.value.trim() };
   } else if (type.value === "google") {
     return { api_key: apiKey.value };
   } else if (type.value === "github") {
@@ -1216,6 +1224,7 @@ async function handleSave(): Promise<void> {
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
         (apiKey.value.trim() ||
+          codexAccessToken.value.trim() ||
           baseUrl.value.trim() ||
           bearerToken.value.trim() ||
           headerKeyChanged ||
@@ -1319,8 +1328,17 @@ async function handleSave(): Promise<void> {
           placeholder="my-api-key"
           :disabled="saving"
         />
-        <p class="text-xs text-muted-foreground">
+        <p
+          v-if="type !== 'codex'"
+          class="text-xs text-muted-foreground"
+        >
           Access via: <code class="bg-muted px-1 rounded">${{ `credentials.${name || 'name'}` }}</code>
+        </p>
+        <p
+          v-else
+          class="text-xs text-muted-foreground"
+        >
+          Codex tokens are only exposed to the isolated Codex runner.
         </p>
       </div>
 
@@ -1388,6 +1406,41 @@ async function handleSave(): Promise<void> {
           class="text-xs text-muted-foreground"
         >
           Use a Sentry auth token with access to the organizations and projects you want to automate.
+        </p>
+      </div>
+
+      <div
+        v-if="type === 'codex'"
+        class="space-y-2"
+      >
+        <Label for="cred-codex-access-token">Access Token</Label>
+        <div class="relative">
+          <Input
+            id="cred-codex-access-token"
+            v-model="codexAccessToken"
+            :type="showApiKey ? 'text' : 'password'"
+            :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Codex access token'"
+            :disabled="saving"
+            class="pr-10"
+          />
+          <button
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="showApiKey = !showApiKey"
+          >
+            <EyeOff
+              v-if="showApiKey"
+              class="w-4 h-4"
+            />
+            <Eye
+              v-else
+              class="w-4 h-4"
+            />
+          </button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Paste a ChatGPT/Codex access token. API keys are intentionally not accepted for this
+          credential type.
         </p>
       </div>
 
