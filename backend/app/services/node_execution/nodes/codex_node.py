@@ -6,6 +6,7 @@ import time
 from importlib import import_module
 
 from app.services.codex_runner_service import (
+    CODEX_PUBLISH_MODES,
     CodexResumeRequest,
     CodexRunnerService,
     CodexRunRequest,
@@ -27,7 +28,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     codex_config, github_config = _load_credentials(self, node_data)
     timeout_seconds = _coerce_timeout(node_data.get("timeoutSeconds"))
     publish_mode = str(node_data.get("publishMode") or "diff_only").strip()
-    if publish_mode not in {"diff_only", "draft_pr"}:
+    if publish_mode not in CODEX_PUBLISH_MODES:
         publish_mode = "diff_only"
 
     resume_context = copy.deepcopy(self.hitl_resume_context.get(node_id) or {})
@@ -136,9 +137,59 @@ def execute(ctx: NodeExecutionContext) -> object:
             },
         )
 
+    if publish_mode == "patch_artifact":
+        patch_url = _store_patch_artifact(self, node_id, node_label, result.diff)
+        if patch_url:
+            output["patchUrl"] = patch_url
+
     output["status"] = "completed"
     output["_skip_source_handles"] = ["question"]
     return output
+
+
+def _store_patch_artifact(executor: object, node_id: str, node_label: str, diff_text: str) -> str:
+    """Store the Codex diff as a downloadable Drive file and return its download URL."""
+    if not str(diff_text or "").strip():
+        return ""
+    import secrets
+    import uuid
+
+    from app.db.models import FileAccessToken, GeneratedFile
+    from app.db.session import SessionLocal
+    from app.services.file_storage import _safe_storage_path, build_download_url
+
+    owner_id = getattr(executor, "trace_user_id", None)
+    if not owner_id:
+        raise ValueError("Codex patch_artifact mode requires an owner context")
+
+    diff_bytes = diff_text.encode("utf-8")
+    filename = "codex-changes.patch"
+    file_uuid = uuid.uuid4()
+    rel_path = f"{owner_id}/{file_uuid}/{filename}"
+    abs_path = _safe_storage_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(diff_bytes)
+
+    with SessionLocal() as db:
+        db.add(
+            GeneratedFile(
+                id=file_uuid,
+                owner_id=owner_id,
+                workflow_id=getattr(executor, "workflow_id", None),
+                filename=filename,
+                storage_path=rel_path,
+                mime_type="text/x-patch",
+                size_bytes=len(diff_bytes),
+                source_node_id=node_id,
+                source_node_label=node_label,
+                metadata_json={"kind": "codex_patch"},
+            )
+        )
+        token_str = secrets.token_urlsafe(32)
+        db.add(FileAccessToken(file_id=file_uuid, token=token_str, created_by_id=owner_id))
+        db.commit()
+
+    return build_download_url(getattr(executor, "_base_url", ""), token_str)
 
 
 def _load_credentials(executor: object, node_data: dict) -> tuple[dict, dict]:

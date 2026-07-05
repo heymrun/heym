@@ -1303,9 +1303,10 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Codex credential requires access_token",
             )
-        if str(config.get("auth_mode") or "").strip() == "chatgpt" and not str(
-            config.get("refresh_token") or ""
-        ).strip():
+        if (
+            str(config.get("auth_mode") or "").strip() == "chatgpt"
+            and not str(config.get("refresh_token") or "").strip()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ChatGPT Codex credential requires refresh_token; complete the ChatGPT "

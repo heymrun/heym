@@ -5452,7 +5452,23 @@ export function usePropertiesPanelController() {
   const codexPublishModeOptions = [
     { value: "diff_only", label: "Diff only" },
     { value: "draft_pr", label: "Draft PR" },
+    { value: "open_pr", label: "Open PR" },
+    { value: "commit_push", label: "Commit & push" },
+    { value: "direct_commit", label: "Direct commit" },
+    { value: "update_existing_pr", label: "Update existing PR" },
+    { value: "patch_artifact", label: "Patch artifact" },
   ];
+
+  const codexPublishModeDescriptions: Record<string, string> = {
+    diff_only: "Edits files locally and returns the patch and changed files. Nothing is pushed.",
+    draft_pr: "Commits to the branch, pushes it, and opens a draft pull request.",
+    open_pr: "Commits to the branch, pushes it, and opens a review-ready (non-draft) pull request.",
+    commit_push: "Commits to the branch and pushes it, without opening a pull request.",
+    direct_commit: "Commits and pushes straight to the base branch (no separate branch or PR).",
+    update_existing_pr:
+      "Adds a commit to the existing branch/PR; opens one if none exists yet.",
+    patch_artifact: "Saves the diff as a downloadable file and returns a patchUrl (nothing pushed).",
+  };
 
   const githubCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -8406,6 +8422,7 @@ export function usePropertiesPanelController() {
     codexCredentialOptions,
     codexGithubCredentialOptions,
     codexPublishModeOptions,
+    codexPublishModeDescriptions,
     githubCredentialOptions,
     linearCredentialOptions,
     linearOperationOptions,

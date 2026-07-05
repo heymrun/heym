@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { AlertTriangle } from "lucide-vue-next";
 
-import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
@@ -19,6 +18,7 @@ const {
   codexCredentialOptions,
   codexGithubCredentialOptions,
   codexPublishModeOptions,
+  codexPublishModeDescriptions,
   codexExpressionNavBindings,
   handleCodexExpressionFieldNavigate,
   onCodexRegisterExpressionFieldIndex,
@@ -61,13 +61,7 @@ const {
     </div>
 
     <div class="space-y-2">
-      <div class="flex items-center justify-between gap-2">
-        <Label>Repository URL <span class="text-destructive">*</span></Label>
-        <AgentFieldToggle
-          :node-id="selectedNode.id"
-          field-key="repositoryUrl"
-        />
-      </div>
+      <Label>Repository URL <span class="text-destructive">*</span></Label>
       <ExpressionInput
         ref="codexRepositoryUrlExpressionInputRef"
         :model-value="selectedNode.data.repositoryUrl || ''"
@@ -119,13 +113,7 @@ const {
     </div>
 
     <div class="space-y-2">
-      <div class="flex items-center justify-between gap-2">
-        <Label>Task Prompt <span class="text-destructive">*</span></Label>
-        <AgentFieldToggle
-          :node-id="selectedNode.id"
-          field-key="taskPrompt"
-        />
-      </div>
+      <Label>Task Prompt <span class="text-destructive">*</span></Label>
       <ExpressionInput
         ref="codexTaskPromptExpressionInputRef"
         :model-value="selectedNode.data.taskPrompt || ''"
@@ -143,34 +131,39 @@ const {
       />
     </div>
 
-    <div class="grid grid-cols-2 gap-3">
-      <div class="space-y-2">
-        <Label>Publish Mode</Label>
-        <Select
-          :model-value="selectedNode.data.publishMode || 'diff_only'"
-          :options="codexPublishModeOptions"
-          @update:model-value="updateNodeData('publishMode', $event)"
-        />
-      </div>
+    <div class="space-y-2">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="space-y-2">
+          <Label>Branch Name</Label>
+          <ExpressionInput
+            ref="codexBranchNameExpressionInputRef"
+            :model-value="selectedNode.data.branchName || 'codex/$executionId'"
+            placeholder="codex/$executionId"
+            single-line
+            :nodes="workflowStore.nodes"
+            :node-results="workflowStore.nodeResults"
+            :edges="workflowStore.edges"
+            :current-node-id="selectedNode.id"
+            field-key="branchName"
+            v-bind="codexExpressionNavBindings('branchName')"
+            @navigate="handleCodexExpressionFieldNavigate"
+            @register-field-index="onCodexRegisterExpressionFieldIndex"
+            @update:model-value="updateNodeData('branchName', $event)"
+          />
+        </div>
 
-      <div class="space-y-2">
-        <Label>Branch Name</Label>
-        <ExpressionInput
-          ref="codexBranchNameExpressionInputRef"
-          :model-value="selectedNode.data.branchName || 'codex/$executionId'"
-          placeholder="codex/$executionId"
-          single-line
-          :nodes="workflowStore.nodes"
-          :node-results="workflowStore.nodeResults"
-          :edges="workflowStore.edges"
-          :current-node-id="selectedNode.id"
-          field-key="branchName"
-          v-bind="codexExpressionNavBindings('branchName')"
-          @navigate="handleCodexExpressionFieldNavigate"
-          @register-field-index="onCodexRegisterExpressionFieldIndex"
-          @update:model-value="updateNodeData('branchName', $event)"
-        />
+        <div class="space-y-2">
+          <Label>Publish Mode</Label>
+          <Select
+            :model-value="selectedNode.data.publishMode || 'diff_only'"
+            :options="codexPublishModeOptions"
+            @update:model-value="updateNodeData('publishMode', $event)"
+          />
+        </div>
       </div>
+      <p class="text-xs text-muted-foreground">
+        {{ codexPublishModeDescriptions[selectedNode.data.publishMode || "diff_only"] }}
+      </p>
     </div>
 
     <div class="space-y-2">

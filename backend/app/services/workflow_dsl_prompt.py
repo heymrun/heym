@@ -4089,19 +4089,26 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   - `repositoryUrl`: HTTPS GitHub/GitHub Enterprise repository URL
   - `baseBranch`: Base branch to clone, usually `main`
   - `taskPrompt`: Coding task; usually `$input.text` or a composed prompt from earlier nodes
-  - `publishMode`: `diff_only` or `draft_pr` (default `diff_only`)
-  - `branchName`: Optional branch name for draft PR mode, e.g. `codex/$executionId`
+  - `publishMode` (default `diff_only`): how Codex's changes are delivered —
+    - `diff_only`: edit locally, return the patch/changed files; nothing pushed
+    - `draft_pr`: commit + push `branchName`, open a draft pull request
+    - `open_pr`: commit + push `branchName`, open a review-ready (non-draft) pull request
+    - `commit_push`: commit + push `branchName`, no pull request
+    - `direct_commit`: commit + push straight to `baseBranch` (no separate branch/PR)
+    - `update_existing_pr`: add a commit to the existing `branchName`/PR (opens one if none exists)
+    - `patch_artifact`: save the diff as a downloadable file, return `patchUrl`; nothing pushed
+  - `branchName`: Working branch for PR/commit modes, e.g. `codex/$executionId`
   - `timeoutSeconds`: Node timeout in seconds (default 3600)
   - `setupCommand`: Optional repository setup command before Codex runs
-- **As an agent tool**: The Codex node can be attached to an agent's `tool-input` handle. Mark
-  `taskPrompt` (and optionally `repositoryUrl`) with the agent-provided toggle
-  (`agentProvidedFields`) so the agent supplies them at call time; the credential, GitHub
-  credential, and other fixed settings stay configured on the node. When run as a tool, a
-  `needs_input` result is returned inline to the agent (no workflow pause), so the agent can
-  refine the task and call Codex again.
+- **As an agent tool**: The Codex node can be attached to an agent's `tool-input` handle. Any of
+  its expression fields (`taskPrompt`, `repositoryUrl`, `baseBranch`, `branchName`, `setupCommand`)
+  can be marked with the agent-provided toggle (`agentProvidedFields`) so the agent supplies them
+  at call time; the credential and GitHub credential stay configured on the node. When run as a
+  tool, a `needs_input` result is returned inline to the agent (no workflow pause), so the agent
+  can refine the task and call Codex again.
 - **Outputs**:
   - Completed output includes `{status, summary, diff, changedFiles, validation, branchName,
-    pullRequestUrl?, usage?, threadId?}`.
+    pullRequestUrl?, pushedBranch?, patchUrl?, usage?, threadId?}`.
   - If Codex needs input, the node pauses with `{status:"needs_input", question, answerUrl,
     requestId, shareText, shareMarkdown, threadId}` and exposes sourceHandle `"question"`.
 - **Routing**: Connect the Codex node's `question` handle to Slack, email, Discord, or another

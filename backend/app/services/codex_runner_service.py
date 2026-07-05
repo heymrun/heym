@@ -28,6 +28,23 @@ CODEX_FINAL_OUTPUT_SCHEMA: dict = {
     "required": ["status", "summary"],
 }
 
+# Supported publish modes. ``diff_only`` and ``patch_artifact`` never touch the remote; the others
+# commit and push. ``patch_artifact`` storage is handled by the node handler (needs user context).
+CODEX_PUBLISH_MODES: frozenset[str] = frozenset(
+    {
+        "diff_only",
+        "draft_pr",
+        "open_pr",
+        "commit_push",
+        "direct_commit",
+        "update_existing_pr",
+        "patch_artifact",
+    }
+)
+_CODEX_REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
+    {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
+)
+
 
 @dataclass(frozen=True)
 class CodexRunRequest:
@@ -76,6 +93,7 @@ class CodexRunResult:
     workspace_path: str | None = None
     branch_name: str = ""
     pull_request_url: str | None = None
+    pushed_branch: str = ""
     usage: dict | None = None
     raw_events: list[dict] = field(default_factory=list)
 
@@ -91,6 +109,7 @@ class CodexRunResult:
             "workspacePath": self.workspace_path,
             "branchName": self.branch_name,
             "pullRequestUrl": self.pull_request_url,
+            "pushedBranch": self.pushed_branch,
             "usage": self.usage or {},
         }
         return {key: value for key, value in output.items() if value not in (None, "", [])}
@@ -277,13 +296,25 @@ class CodexRunnerService:
     def _prepare_workspace(self, request: CodexRunRequest) -> Path:
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         workspace = (self.workspace_root / str(uuid.uuid4())).resolve()
+        # ``update_existing_pr`` clones the existing PR branch so Codex works on top of it; if that
+        # branch does not exist yet it falls back to the base branch and creates it.
+        if request.publish_mode == "update_existing_pr":
+            try:
+                self._clone_branch(workspace, request, request.branch_name)
+                return workspace
+            except ValueError:
+                shutil.rmtree(workspace, ignore_errors=True)
+        self._clone_branch(workspace, request, request.base_branch)
+        return workspace
+
+    def _clone_branch(self, workspace: Path, request: CodexRunRequest, branch: str) -> None:
         clone_url = self._clone_url_with_token(request.repository_url, request.github_config)
         self._run_command(
             [
                 "git",
                 "clone",
                 "--branch",
-                request.base_branch,
+                branch,
                 "--single-branch",
                 clone_url,
                 str(workspace),
@@ -292,7 +323,6 @@ class CodexRunnerService:
             timeout_seconds=request.timeout_seconds,
             sensitive_values=[request.github_config.get("api_key", "")],
         )
-        return workspace
 
     def _authenticate(
         self,
@@ -412,19 +442,59 @@ class CodexRunnerService:
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
-        if result.status == "completed" and request.publish_mode == "draft_pr":
-            result.pull_request_url = self._publish_draft_pr(workspace, request, result)
+        if result.status == "completed" and request.publish_mode in _CODEX_REMOTE_PUBLISH_MODES:
+            self._publish(workspace, request, result)
         return result
 
-    def _publish_draft_pr(
+    def _publish(
         self,
         workspace: Path,
         request: CodexRunRequest,
         result: CodexRunResult,
-    ) -> str | None:
+    ) -> None:
+        """Commit and push Codex's changes according to the requested publish mode."""
         if not result.changed_files:
-            return None
-        self._run_command(["git", "checkout", "-B", request.branch_name], cwd=workspace)
+            return
+        mode = request.publish_mode
+        if mode == "direct_commit":
+            # Commit straight onto the base branch that was cloned.
+            self._commit_changes(workspace, request.base_branch, result, new_branch=False)
+            self._push_branch(workspace, request, request.base_branch)
+            result.pushed_branch = request.base_branch
+            return
+        if mode == "update_existing_pr":
+            on_existing = self._current_branch(workspace) == request.branch_name
+            self._commit_changes(workspace, request.branch_name, result, new_branch=not on_existing)
+            self._push_branch(workspace, request, request.branch_name)
+            result.pushed_branch = request.branch_name
+            result.pull_request_url = self._open_pr_url_for_head(
+                request, request.branch_name
+            ) or self._create_pr(request, result, request.branch_name, draft=False)
+            return
+
+        # draft_pr / open_pr / commit_push all create and push a fresh working branch.
+        self._commit_changes(workspace, request.branch_name, result, new_branch=True)
+        self._push_branch(workspace, request, request.branch_name)
+        result.pushed_branch = request.branch_name
+        if mode == "draft_pr":
+            result.pull_request_url = self._create_pr(
+                request, result, request.branch_name, draft=True
+            )
+        elif mode == "open_pr":
+            result.pull_request_url = self._create_pr(
+                request, result, request.branch_name, draft=False
+            )
+
+    def _commit_changes(
+        self,
+        workspace: Path,
+        branch: str,
+        result: CodexRunResult,
+        *,
+        new_branch: bool,
+    ) -> None:
+        if new_branch:
+            self._run_command(["git", "checkout", "-B", branch], cwd=workspace)
         self._run_command(["git", "add", "-A"], cwd=workspace)
         self._run_command(
             [
@@ -439,24 +509,47 @@ class CodexRunnerService:
             ],
             cwd=workspace,
         )
+
+    def _push_branch(self, workspace: Path, request: CodexRunRequest, branch: str) -> None:
         remote_url = self._clone_url_with_token(request.repository_url, request.github_config)
         self._run_command(["git", "remote", "set-url", "origin", remote_url], cwd=workspace)
         self._run_command(
-            ["git", "push", "-u", "origin", request.branch_name],
+            ["git", "push", "-u", "origin", branch],
             cwd=workspace,
             sensitive_values=[request.github_config.get("api_key", "")],
         )
+
+    def _current_branch(self, workspace: Path) -> str:
+        return self._git_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], workspace).strip()
+
+    def _create_pr(
+        self,
+        request: CodexRunRequest,
+        result: CodexRunResult,
+        head: str,
+        *,
+        draft: bool,
+    ) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
         pr = GitHubService(request.github_config).create_pull_request(
             owner,
             repo,
             self._commit_title(result),
-            request.branch_name,
+            head,
             request.base_branch,
             body=result.summary or None,
-            draft=True,
+            draft=draft,
         )
         return str(pr.get("html_url") or "").strip() or None
+
+    def _open_pr_url_for_head(self, request: CodexRunRequest, head: str) -> str | None:
+        owner, repo = self._parse_github_owner_repo(request.repository_url)
+        for pr in GitHubService(request.github_config).list_pull_requests(
+            owner, repo, state="open", per_page=100
+        ):
+            if str((pr.get("head") or {}).get("ref") or "") == head:
+                return str(pr.get("html_url") or "").strip() or None
+        return None
 
     def _run_command(
         self,
@@ -535,9 +628,9 @@ class CodexRunnerService:
     @staticmethod
     def _build_prompt(task_prompt: str, publish_mode: str) -> str:
         mode_instruction = (
-            "Prepare changes only; Heym will create the draft pull request."
-            if publish_mode == "draft_pr"
-            else "Do not create a pull request or push branches."
+            "Do not create a pull request or push branches; only edit files locally."
+            if publish_mode in ("diff_only", "patch_artifact")
+            else "Prepare changes only; Heym will commit and push (and open a pull request if needed)."
         )
         return (
             "You are running as the Heym Codex node inside a local cloned repository.\n"

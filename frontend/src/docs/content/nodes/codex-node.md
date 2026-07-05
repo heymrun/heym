@@ -40,10 +40,22 @@ OpenAI references:
 | Repository URL | HTTPS GitHub repository URL |
 | Base Branch | Branch to clone before Codex runs, default `main` |
 | Task Prompt | Coding task for Codex; supports expressions such as `$input.text` |
-| Publish Mode | `diff_only` returns a patch; `draft_pr` pushes a branch and opens a draft PR |
-| Branch Name | Branch name for draft PR mode, default `codex/$executionId` |
+| Publish Mode | How changes are delivered (see table below) |
+| Branch Name | Working branch for PR/commit modes, default `codex/$executionId` |
 | Timeout | Maximum Codex execution time in seconds |
 | Setup Command | Optional command to run before Codex, without Codex/OpenAI secrets in env |
+
+## Publish Modes
+
+| Mode | What it does |
+|------|--------------|
+| `diff_only` | Edits files locally and returns the patch and changed files. Nothing is pushed. |
+| `draft_pr` | Commits to the branch, pushes it, and opens a draft pull request. |
+| `open_pr` | Commits to the branch, pushes it, and opens a review-ready (non-draft) pull request. |
+| `commit_push` | Commits to the branch and pushes it, without opening a pull request. |
+| `direct_commit` | Commits and pushes straight to the base branch (no separate branch or PR). |
+| `update_existing_pr` | Adds a commit to the existing branch/PR; opens one if none exists yet. |
+| `patch_artifact` | Saves the diff as a downloadable file and returns `patchUrl`. Nothing is pushed. |
 
 ## Outputs
 
@@ -56,7 +68,9 @@ OpenAI references:
 | `changedFiles` | Changed file paths |
 | `threadId` | Codex thread/session id when available |
 | `branchName` | Working branch name |
-| `pullRequestUrl` | Draft PR URL in `draft_pr` mode |
+| `pullRequestUrl` | PR URL in `draft_pr`, `open_pr`, and `update_existing_pr` modes |
+| `pushedBranch` | Branch that was pushed in commit/PR modes |
+| `patchUrl` | Download link for the diff in `patch_artifact` mode |
 | `usage` | Usage metadata reported by Codex CLI when available |
 
 ## Follow-up Questions

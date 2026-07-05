@@ -419,7 +419,14 @@ export interface NodeData {
   repositoryUrl?: string;
   baseBranch?: string;
   taskPrompt?: string;
-  publishMode?: "diff_only" | "draft_pr";
+  publishMode?:
+    | "diff_only"
+    | "draft_pr"
+    | "open_pr"
+    | "commit_push"
+    | "direct_commit"
+    | "update_existing_pr"
+    | "patch_artifact";
   branchName?: string;
   setupCommand?: string;
   systemInstruction?: string;
