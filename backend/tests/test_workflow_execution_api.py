@@ -477,6 +477,80 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 await stream.__anext__()
 
 
+class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_emits_hidden_heartbeat_while_waiting_for_workflow_events(self) -> None:
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Canvas Workflow",
+            nodes=[{"id": "n1", "type": "textInput", "data": {"label": "Input"}}],
+            edges=[],
+            sse_enabled=True,
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            cache_ttl_seconds=None,
+            sse_node_config={},
+            workflow_timeout_seconds=None,
+        )
+        release_executor = Event()
+
+        def fake_streaming_executor(**_kwargs: object):
+            release_executor.wait(timeout=2)
+            yield {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "success",
+                "outputs": {},
+                "node_results": [],
+                "sub_workflow_executions": [],
+                "execution_time_ms": 0,
+            }
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_ScalarResult(workflow))
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+
+        with (
+            patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.register_execution", return_value=Event()),
+            patch("app.api.workflows.clear_active_execution"),
+            patch("app.api.workflows.execute_workflow_streaming", fake_streaming_executor),
+            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows.WORKFLOW_SSE_HEARTBEAT_SECONDS", 0.001),
+        ):
+            response = await execute_workflow_stream(
+                workflow_id=workflow.id,
+                request=make_request(
+                    query_string=b"trigger_source=Canvas",
+                    headers=[(b"x-simple-response", b"false")],
+                ),
+                current_user=None,
+                db=db,
+            )
+
+            stream = response.body_iterator
+            self.assertIn('"type": "execution_started"', await stream.__anext__())
+            self.assertEqual(await stream.__anext__(), ": heartbeat\n\n")
+
+            release_executor.set()
+            complete_chunk = ""
+            for _ in range(100):
+                chunk = await stream.__anext__()
+                if '"type": "execution_complete"' in chunk:
+                    complete_chunk = chunk
+                    break
+                self.assertEqual(chunk, ": heartbeat\n\n")
+
+            self.assertIn('"type": "execution_complete"', complete_chunk)
+            with self.assertRaises(StopAsyncIteration):
+                await stream.__anext__()
+
+
 class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_external_sse_request_when_workflow_sse_disabled(self) -> None:
         workflow = SimpleNamespace(

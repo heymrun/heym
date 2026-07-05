@@ -116,6 +116,7 @@ _SENSITIVE_HEADERS: frozenset[str] = frozenset(
     }
 )
 _INTERNAL_STREAM_TRIGGER_SOURCES: frozenset[str] = frozenset({"Canvas", "Quick Drawer"})
+WORKFLOW_SSE_HEARTBEAT_SECONDS = 10.0
 
 
 def _coerce_bool(value: object, *, default: bool = False) -> bool:
@@ -3151,6 +3152,7 @@ async def execute_workflow_stream(
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
+            last_heartbeat_at = loop.time()
             yield (
                 "data: "
                 + json.dumps(
@@ -3161,6 +3163,7 @@ async def execute_workflow_stream(
                 )
                 + "\n\n"
             )
+            last_heartbeat_at = loop.time()
 
             while True:
                 if await request.is_disconnected():
@@ -3170,6 +3173,7 @@ async def execute_workflow_stream(
                     event = event_queue.get(block=True, timeout=0.01)
                     if event is None:
                         break
+                    last_heartbeat_at = loop.time()
                     if (
                         event.get("type") == "execution_complete"
                         and event.get("status") == "pending"
@@ -3228,11 +3232,17 @@ async def execute_workflow_stream(
                     if await request.is_disconnected():
                         cancel_event.set()
                         break
+                    now = loop.time()
+                    if now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
+                        last_heartbeat_at = now
+                        yield ": heartbeat\n\n"
+                        continue
                     if future.done():
                         while not event_queue.empty():
                             event = event_queue.get_nowait()
                             if event is None:
                                 break
+                            last_heartbeat_at = loop.time()
                             if (
                                 event.get("type") == "execution_complete"
                                 and event.get("status") == "pending"
