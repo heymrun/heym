@@ -14,18 +14,27 @@ from urllib.parse import quote, urlparse, urlunparse
 from app.config import settings
 from app.services.github_service import GitHubService
 
+# OpenAI strict structured output requires every property to appear in `required` when
+# `additionalProperties` is false; optional fields are expressed as nullable instead.
 CODEX_FINAL_OUTPUT_SCHEMA: dict = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "status": {"type": "string", "enum": ["completed", "needs_input"]},
         "summary": {"type": "string"},
-        "question": {"type": "string"},
-        "validation": {"type": "string"},
-        "pull_request_title": {"type": "string"},
-        "pull_request_body": {"type": "string"},
+        "question": {"type": ["string", "null"]},
+        "validation": {"type": ["string", "null"]},
+        "pull_request_title": {"type": ["string", "null"]},
+        "pull_request_body": {"type": ["string", "null"]},
     },
-    "required": ["status", "summary"],
+    "required": [
+        "status",
+        "summary",
+        "question",
+        "validation",
+        "pull_request_title",
+        "pull_request_body",
+    ],
 }
 
 # Supported publish modes. ``diff_only`` and ``patch_artifact`` never touch the remote; the others
@@ -179,6 +188,18 @@ class CodexJsonlParser:
     def _extract_final_payload(self, event: dict) -> dict | None:
         if str(event.get("status") or "") in {"completed", "needs_input"}:
             return event
+        # codex exec emits the schema-conforming output as an agent_message item's `text`,
+        # e.g. {"type":"item.completed","item":{"type":"agent_message","text":"{...}"}}.
+        item = event.get("item")
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                parsed = self._parse_embedded_json(text)
+                if parsed is not None and str(parsed.get("status") or "") in {
+                    "completed",
+                    "needs_input",
+                }:
+                    return parsed
         for key in ("result", "final", "final_output", "output", "data"):
             value = event.get(key)
             if isinstance(value, dict) and str(value.get("status") or "") in {
@@ -306,10 +327,12 @@ class CodexRunnerService:
         if request.publish_mode == "update_existing_pr":
             try:
                 self._clone_branch(workspace, request, request.branch_name)
+                self._exclude_runner_files(workspace)
                 return workspace
             except ValueError:
                 shutil.rmtree(workspace, ignore_errors=True)
         self._clone_branch(workspace, request, request.base_branch)
+        self._exclude_runner_files(workspace)
         return workspace
 
     def _clone_branch(self, workspace: Path, request: CodexRunRequest, branch: str) -> None:
@@ -328,6 +351,24 @@ class CodexRunnerService:
             timeout_seconds=request.timeout_seconds,
             sensitive_values=[request.github_config.get("api_key", "")],
         )
+
+    @staticmethod
+    def _exclude_runner_files(workspace: Path) -> None:
+        """Keep the runner's own scaffolding out of git so commit/PR modes never stage or push it.
+
+        ``.codex-home`` holds ``auth.json`` (the ChatGPT token bundle) and the plugin cache; the
+        schema file is an internal artifact. Writing them into ``.git/info/exclude`` makes git treat
+        them as ignored, so ``git add -A`` / ``git status`` skip them.
+        """
+        exclude = workspace / ".git" / "info" / "exclude"
+        try:
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            with exclude.open("a", encoding="utf-8") as handle:
+                handle.write("\n# Heym Codex runner scaffolding\n")
+                handle.write("/.codex-home/\n")
+                handle.write("/.codex-output-schema.json\n")
+        except OSError:
+            pass
 
     def _authenticate(
         self,
@@ -354,6 +395,8 @@ class CodexRunnerService:
         if not access_token and not id_token:
             raise ValueError("Codex ChatGPT credential is missing tokens; re-run the sign-in")
         auth_payload = {
+            # `auth_mode` is required by the codex CLI (0.142.x) to recognize a ChatGPT login.
+            "auth_mode": "chatgpt",
             "OPENAI_API_KEY": None,
             "tokens": {
                 "id_token": id_token,
@@ -438,13 +481,66 @@ class CodexRunnerService:
                 prompt,
             ]
         )
-        completed = self._run_command(
-            cmd,
-            cwd=workspace,
-            timeout_seconds=timeout_seconds,
-            env=self._codex_env(workspace, codex_access_token),
-        )
+        try:
+            completed = subprocess.run(
+                cmd,
+                cwd=workspace,
+                env=self._codex_env(workspace, codex_access_token),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "Codex CLI is not installed or not on PATH (install '@openai/codex')"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError(f"Codex timed out after {timeout_seconds:.0f} seconds") from exc
+
+        # codex exec reports real failures as JSONL error events on stdout; the process may still
+        # exit non-zero with only status noise on stderr. Prefer the stdout error message.
+        stdout_error = self._extract_exec_error(completed.stdout)
+        if completed.returncode != 0 or stdout_error:
+            detail = (
+                stdout_error
+                or self._clean_codex_stderr(completed.stderr)
+                or f"Codex exec failed (exit code {completed.returncode})"
+            )
+            raise ValueError(self._mask_sensitive(detail, [codex_access_token]))
         return self.parser.parse(completed.stdout)
+
+    @staticmethod
+    def _extract_exec_error(stdout: str) -> str:
+        """Return the last error message from codex exec JSONL events, if any."""
+        message = ""
+        for raw_line in (stdout or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "error" and event.get("message"):
+                message = str(event["message"]).strip()
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "error" and item.get("message"):
+                message = str(item["message"]).strip()
+        return message
+
+    @staticmethod
+    def _clean_codex_stderr(stderr: str) -> str:
+        """Drop codex's non-error status noise (e.g. the stdin prompt) from stderr."""
+        lines = [
+            line
+            for line in (stderr or "").splitlines()
+            if line.strip() and "Reading additional input from stdin" not in line
+        ]
+        return "\n".join(lines).strip()
 
     def _finalize_result(
         self,

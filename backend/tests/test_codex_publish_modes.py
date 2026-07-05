@@ -4,11 +4,21 @@ from unittest.mock import MagicMock
 
 from app.services.codex_runner_service import (
     _CODEX_REMOTE_PUBLISH_MODES,
+    CODEX_FINAL_OUTPUT_SCHEMA,
     CODEX_PUBLISH_MODES,
     CodexRunnerService,
     CodexRunRequest,
     CodexRunResult,
 )
+
+
+class TestOutputSchema(unittest.TestCase):
+    def test_required_covers_all_properties(self) -> None:
+        # OpenAI strict structured output rejects schemas whose `required` omits any property.
+        self.assertEqual(
+            set(CODEX_FINAL_OUTPUT_SCHEMA["required"]),
+            set(CODEX_FINAL_OUTPUT_SCHEMA["properties"]),
+        )
 
 
 def _request(publish_mode: str) -> CodexRunRequest:

@@ -30,6 +30,7 @@ class TestCodexRunnerAuth(unittest.TestCase):
         auth_path = self.workspace / ".codex-home" / "auth.json"
         self.assertTrue(auth_path.exists())
         payload = json.loads(auth_path.read_text())
+        self.assertEqual(payload["auth_mode"], "chatgpt")
         self.assertIsNone(payload["OPENAI_API_KEY"])
         self.assertEqual(payload["tokens"]["access_token"], "at-1")
         self.assertEqual(payload["tokens"]["refresh_token"], "rt-1")
@@ -79,43 +80,84 @@ class TestCodexRunnerAuth(unittest.TestCase):
             self.runner._run_command(["definitely-not-git-xyz", "status"], cwd=self.workspace)
         self.assertIn("definitely-not-git-xyz", str(ctx.exception))
 
-    def _capture_exec_cmd(self, model: str) -> list[str]:
+    def _run_exec_with(
+        self, model: str = "", *, returncode: int = 0, stdout: str = "{}", stderr: str = ""
+    ) -> list[str]:
         import subprocess
+        from unittest.mock import patch
 
         captured: dict[str, list[str]] = {}
 
-        def fake_run_command(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess:
+        def fake_run(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess:
             captured["cmd"] = cmd
-            return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
-        self.runner._run_command = fake_run_command  # type: ignore[method-assign]
-        self.runner._run_codex_exec(
-            workspace=self.workspace,
-            prompt="do it",
-            timeout_seconds=60.0,
-            resume_thread_id=None,
-            codex_access_token="",
-            model=model,
-        )
+        with patch("app.services.codex_runner_service.subprocess.run", side_effect=fake_run):
+            self.runner._run_codex_exec(
+                workspace=self.workspace,
+                prompt="do it",
+                timeout_seconds=60.0,
+                resume_thread_id=None,
+                codex_access_token="",
+                model=model,
+            )
         return captured["cmd"]
 
     def test_model_flag_added_when_set(self) -> None:
-        cmd = self._capture_exec_cmd("gpt-5.4")
+        cmd = self._run_exec_with("gpt-5.4")
         self.assertIn("--model", cmd)
         self.assertEqual(cmd[cmd.index("--model") + 1], "gpt-5.4")
 
     def test_model_flag_omitted_when_empty(self) -> None:
-        self.assertNotIn("--model", self._capture_exec_cmd(""))
+        self.assertNotIn("--model", self._run_exec_with(""))
 
     def test_exec_uses_valid_flags(self) -> None:
         # codex exec has no --ask-for-approval flag; approval is set via config override.
-        cmd = self._capture_exec_cmd("")
+        cmd = self._run_exec_with("")
         self.assertNotIn("--ask-for-approval", cmd)
         self.assertIn("-c", cmd)
         self.assertIn('approval_policy="never"', cmd)
         self.assertIn("--sandbox", cmd)
         self.assertIn("--disable", cmd)
         self.assertEqual(cmd[cmd.index("--disable") + 1], "plugins")
+
+    def test_exec_surfaces_stdout_error_over_stdin_noise(self) -> None:
+        stdout = '{"type":"error","message":"401 Unauthorized"}'
+        with self.assertRaises(ValueError) as ctx:
+            self._run_exec_with(
+                returncode=1, stdout=stdout, stderr="Reading additional input from stdin...\n"
+            )
+        self.assertIn("401 Unauthorized", str(ctx.exception))
+        self.assertNotIn("Reading additional input", str(ctx.exception))
+
+    def test_runner_scaffolding_excluded_from_git(self) -> None:
+        import subprocess
+
+        ws = self.workspace
+        subprocess.run(["git", "init", "-q", str(ws)], check=True)
+        (ws / ".codex-home").mkdir()
+        (ws / ".codex-home" / "auth.json").write_text("secret-token")
+        (ws / ".codex-output-schema.json").write_text("{}")
+        (ws / "real.txt").write_text("x")
+        self.runner._exclude_runner_files(ws)
+        status = subprocess.run(
+            ["git", "-C", str(ws), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("real.txt", status)
+        self.assertNotIn(".codex-home", status)
+        self.assertNotIn(".codex-output-schema.json", status)
+
+    def test_exec_strips_stdin_noise_from_stderr(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._run_exec_with(
+                returncode=1,
+                stdout="",
+                stderr="Reading additional input from stdin...\nboom: real failure\n",
+            )
+        self.assertIn("real failure", str(ctx.exception))
+        self.assertNotIn("Reading additional input", str(ctx.exception))
 
 
 if __name__ == "__main__":

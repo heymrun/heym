@@ -82,6 +82,56 @@ class TestCodexJsonlParser(unittest.TestCase):
         self.assertEqual(result.status, "needs_input")
         self.assertEqual(result.question, "Should I update the API contract?")
 
+    def test_parse_agent_message_final_payload(self) -> None:
+        # codex exec 0.142.x emits the schema output as an agent_message item's text.
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "thread-9"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "agent_message",
+                            "text": json.dumps(
+                                {
+                                    "status": "completed",
+                                    "summary": "Translated the README to Turkish.",
+                                    "validation": "make lint",
+                                }
+                            ),
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {"output_tokens": 12}}),
+            ]
+        )
+        result = CodexJsonlParser().parse(stdout)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.summary, "Translated the README to Turkish.")
+        self.assertEqual(result.validation, "make lint")
+        self.assertEqual(result.thread_id, "thread-9")
+        self.assertEqual(result.usage, {"output_tokens": 12})
+
+    def test_parse_agent_message_needs_input(self) -> None:
+        stdout = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "agent_message",
+                    "text": json.dumps(
+                        {
+                            "status": "needs_input",
+                            "summary": "Need a decision",
+                            "question": "Which port should n8n9 use?",
+                        }
+                    ),
+                },
+            }
+        )
+        result = CodexJsonlParser().parse(stdout)
+        self.assertEqual(result.status, "needs_input")
+        self.assertEqual(result.question, "Which port should n8n9 use?")
+
     def test_parse_invalid_status_defaults_to_completed(self) -> None:
         result = CodexJsonlParser().parse(
             json.dumps({"status": "error", "summary": "Something happened"})
