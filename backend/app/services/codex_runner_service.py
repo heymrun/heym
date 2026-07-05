@@ -61,8 +61,8 @@ _CODEX_LOCAL_ONLY_RULES = (
     "Apply ALL changes by editing files on disk in the current working directory. Do NOT run git; "
     "do NOT commit, push, or create branches; and do NOT use the GitHub API, a GitHub connector, "
     "or any remote/network tool to modify the repository — Heym performs every git and GitHub "
-    "operation after you finish. Network access is disabled, so do not attempt remote calls; just "
-    "leave your edits on disk."
+    "operation after you finish. If network access is available, use it only for read-only "
+    "downloads or dependency lookups needed to complete the local file edits."
 )
 
 
@@ -494,6 +494,8 @@ class CodexRunnerService:
         # `codex exec` has no --ask-for-approval flag; set the policy via config override so it
         # runs autonomously without prompting.
         cmd.extend(["-c", 'approval_policy="never"'])
+        if settings.codex_network_access:
+            cmd.extend(["-c", "sandbox_workspace_write.network_access=true"])
         if resume_thread_id:
             # `codex exec resume` rejects --sandbox; set the sandbox via config override instead.
             cmd.extend(["-c", 'sandbox_mode="workspace-write"'])

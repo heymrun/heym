@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     codex_workspace_dir: str = Field(
         default="./data/codex-workspaces", validation_alias="HEYM_CODEX_WORKSPACE_DIR"
     )
+    codex_network_access: bool = Field(default=False, validation_alias="HEYM_CODEX_NETWORK_ACCESS")
     # Git identity for Codex commits. The avatar shown next to it on GitHub is derived from the
     # email (a matching GitHub account, else Gravatar) — point the email at a branded one to
     # display a logo.

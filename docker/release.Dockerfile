@@ -46,11 +46,16 @@ FROM python:3.14-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bubblewrap \
+    ca-certificates \
     curl \
-    tzdata \
+    git \
     nodejs \
     npm \
-    git \
+    ripgrep \
+    tzdata \
+    unzip \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenAI Codex CLI (required by the Codex node). Pin via the HEYM_CODEX_CLI_VERSION build arg.
@@ -108,11 +113,18 @@ COPY --from=frontend-builder /app/package.json /app/frontend/package.json
 COPY --from=frontend-builder /app/node_modules /app/frontend/node_modules
 COPY --from=frontend-builder /app/vite.config.ts /app/frontend/vite.config.ts
 COPY docker/release-entrypoint.sh /app/release-entrypoint.sh
+COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
 
 # Playwright: install Chromium and final-stage system dependencies into the release image.
 RUN cd /app/backend && uv run python -m playwright install --with-deps chromium
 
-RUN chmod +x /app/release-entrypoint.sh
+ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
+    HEYM_CODEX_DOCKER_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
+    HEYM_CODEX_DOCKER_WORKSPACE_VOLUME=heym-codex-workspaces \
+    HEYM_CODEX_NETWORK_ACCESS=true \
+    HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces
+
+RUN chmod +x /app/release-entrypoint.sh /usr/local/bin/heym-codex-docker
 
 EXPOSE 4017
 

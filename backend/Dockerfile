@@ -3,11 +3,16 @@ FROM python:3.14-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bubblewrap \
     curl \
+    ca-certificates \
     tzdata \
     nodejs \
     npm \
     git \
+    ripgrep \
+    unzip \
+    wget \
     weasyprint \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,6 +48,7 @@ RUN uv run python -m playwright install --with-deps chromium
 ENV PLAYWRIGHT_INSTALL_AT_STARTUP=false
 
 COPY backend/ .
+COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
 
 # AGENTS.md for dashboard chat system prompt (Heym platform context)
 COPY AGENTS.md /app/AGENTS.md
@@ -52,7 +58,13 @@ COPY VERSION /app/VERSION
 COPY frontend/src/docs/content /app/docs
 ENV DOCS_DIR=/app/docs
 
-RUN chmod +x entrypoint.sh
+ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
+    HEYM_CODEX_DOCKER_IMAGE=heym-backend:local \
+    HEYM_CODEX_DOCKER_WORKSPACE_VOLUME=heym-codex-workspaces \
+    HEYM_CODEX_NETWORK_ACCESS=true \
+    HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces
+
+RUN chmod +x entrypoint.sh /usr/local/bin/heym-codex-docker
 
 EXPOSE 10105
 

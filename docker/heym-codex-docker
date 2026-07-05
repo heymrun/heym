@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Run the Codex CLI inside Heym's dedicated Codex runner container."""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+
+def _env_value(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
+def _append_env(cmd: list[str], name: str) -> None:
+    value = os.environ.get(name)
+    if value:
+        cmd.extend(["--env", f"{name}={value}"])
+
+
+def _current_container_id() -> str:
+    try:
+        return Path("/etc/hostname").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _inspect_current_container() -> dict:
+    container_id = _current_container_id()
+    if not container_id:
+        return {}
+    try:
+        completed = subprocess.run(
+            ["docker", "inspect", container_id],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if completed.returncode != 0:
+        return {}
+    try:
+        parsed = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+        return parsed[0]
+    return {}
+
+
+def _runner_image() -> str:
+    configured = _env_value("HEYM_CODEX_DOCKER_IMAGE")
+    if configured:
+        return configured
+    inspected = _inspect_current_container()
+    image = str((inspected.get("Config") or {}).get("Image") or "").strip()
+    return image or "heym-backend:local"
+
+
+def _workspace_mount(workspace_dir: Path) -> list[str]:
+    volume = _env_value("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME")
+    if volume:
+        return ["--mount", f"type=volume,src={volume},dst={workspace_dir}"]
+
+    source = _env_value("HEYM_CODEX_HOST_WORKSPACE_DIR")
+    if not source:
+        inspected = _inspect_current_container()
+        for mount in inspected.get("Mounts") or []:
+            if str(mount.get("Destination") or "") != str(workspace_dir):
+                continue
+            if mount.get("Type") == "volume" and mount.get("Name"):
+                return ["--mount", f"type=volume,src={mount['Name']},dst={workspace_dir}"]
+            if mount.get("Type") == "bind" and mount.get("Source"):
+                source = str(mount["Source"])
+                break
+    if not source:
+        print(
+            "Codex Docker runner needs HEYM_CODEX_DOCKER_WORKSPACE_VOLUME, "
+            "HEYM_CODEX_HOST_WORKSPACE_DIR, or a Docker mount at HEYM_CODEX_WORKSPACE_DIR.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return ["--mount", f"type=bind,src={source},dst={workspace_dir}"]
+
+
+def main() -> int:
+    image = _runner_image()
+    workspace_dir = Path(_env_value("HEYM_CODEX_WORKSPACE_DIR") or "/app/data/codex-workspaces")
+    workspace_dir = workspace_dir.resolve()
+    cwd = Path.cwd().resolve()
+    codex_home = Path(os.environ.get("CODEX_HOME") or workspace_dir / ".codex-home").resolve()
+
+    try:
+        cwd.relative_to(workspace_dir)
+    except ValueError:
+        print(
+            f"Codex runner cwd {cwd} is outside HEYM_CODEX_WORKSPACE_DIR {workspace_dir}",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not codex_home.exists():
+        codex_home.mkdir(parents=True, exist_ok=True)
+
+    name = f"heym-codex-{uuid.uuid4().hex}"
+    entrypoint = _env_value("HEYM_CODEX_DOCKER_ENTRYPOINT") or "codex"
+    memory = _env_value("HEYM_CODEX_DOCKER_MEMORY") or "2g"
+    network = _env_value("HEYM_CODEX_DOCKER_NETWORK") or "bridge"
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        name,
+        "--network",
+        network,
+        "--workdir",
+        str(cwd),
+        *_workspace_mount(workspace_dir),
+        "--cap-add",
+        "SYS_ADMIN",
+        "--security-opt",
+        "seccomp=unconfined",
+        "--security-opt",
+        "apparmor=unconfined",
+        "--pids-limit",
+        _env_value("HEYM_CODEX_DOCKER_PIDS") or "1024",
+        "--memory",
+        memory,
+        "--memory-swap",
+        memory,
+        "--cpus",
+        _env_value("HEYM_CODEX_DOCKER_CPUS") or "2",
+        "--env",
+        f"CODEX_HOME={codex_home}",
+        "--env",
+        "HOME=/tmp",
+    ]
+    for name_to_forward in (
+        "CODEX_ACCESS_TOKEN",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "CODEX_CA_CERTIFICATE",
+    ):
+        _append_env(cmd, name_to_forward)
+
+    extra_args = _env_value("HEYM_CODEX_DOCKER_EXTRA_ARGS")
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    cmd.extend(["--entrypoint", entrypoint, image, *sys.argv[1:]])
+    try:
+        return subprocess.run(cmd, stdin=sys.stdin, check=False).returncode
+    except FileNotFoundError:
+        print("Docker CLI is not installed or not on PATH", file=sys.stderr)
+        return 127
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

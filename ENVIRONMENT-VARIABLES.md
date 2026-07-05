@@ -104,12 +104,20 @@ lifetimes) that override these code defaults when you copy it.
 
 ## Codex node
 
-The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH (both are bundled in the Docker images; locally, `./run.sh` installs `@openai/codex`).
+The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH. Local `./run.sh` uses the native `codex` CLI. Docker deployments use the bundled `heym-codex-docker` wrapper, which starts a sibling container from the same Heym image so Codex's bubblewrap sandbox can create Linux namespaces outside the backend container.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HEYM_CODEX_CLI_COMMAND` | Path/name of the Codex CLI binary. | `codex` |
 | `HEYM_CODEX_WORKSPACE_DIR` | Directory for cloned repo workspaces (its `<workspace>.codex-home` sibling holds the auth bundle, outside the repo). | `./data/codex-workspaces` |
+| `HEYM_CODEX_NETWORK_ACCESS` | Allow outbound network access for commands inside Codex's `workspace-write` sandbox. Docker deploys set this to `true` so Codex can download files/dependencies while still writing only inside the workspace. | `false` |
+| `HEYM_CODEX_DOCKER_IMAGE` | Image used by `heym-codex-docker`. Compose defaults to the locally built backend image (`heym-backend:local`). The release image defaults to the same single GHCR image (`ghcr.io/heymrun/heym:<version>`). | auto |
+| `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` | Docker volume mounted into each Codex runner at `HEYM_CODEX_WORKSPACE_DIR`. Docker Compose uses `heym-codex-workspaces`. | — |
+| `HEYM_CODEX_HOST_WORKSPACE_DIR` | Absolute host path for `HEYM_CODEX_WORKSPACE_DIR` when using bind mounts instead of a Docker volume. | — |
+| `HEYM_CODEX_DOCKER_NETWORK` | Docker network mode for Codex runner containers. | `bridge` |
+| `HEYM_CODEX_DOCKER_CPUS` | CPU limit passed to Codex runner containers. | `2` |
+| `HEYM_CODEX_DOCKER_MEMORY` | Memory limit passed to Codex runner containers. | `2g` |
+| `HEYM_CODEX_DOCKER_PIDS` | PID limit passed to Codex runner containers. | `1024` |
 | `HEYM_CODEX_GIT_AUTHOR_NAME` | Author name for commits Codex creates. | `Heym Codex` |
 | `HEYM_CODEX_GIT_AUTHOR_EMAIL` | Author email for Codex commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
 | `HEYM_CODEX_OAUTH_CLIENT_ID` | OpenAI OAuth client id for "Sign in with ChatGPT". Defaults to the public Codex CLI client. | `app_EMoamEEZ73f0CkXaXp7hrann` |

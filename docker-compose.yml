@@ -36,9 +36,12 @@ services:
       - heym_network
 
   backend:
+    image: ${HEYM_BACKEND_IMAGE:-heym-backend:local}
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        HEYM_CODEX_CLI_VERSION: ${HEYM_CODEX_CLI_VERSION:-latest}
     container_name: heym-backend
     shm_size: "2gb"
     environment:
@@ -61,6 +64,13 @@ services:
       HEYM_PLUGINS_ENABLED: ${HEYM_PLUGINS_ENABLED:-false}
       HEYM_PLUGIN_ADMIN_EMAILS: ${HEYM_PLUGIN_ADMIN_EMAILS:-}
       HEYM_PLUGINS_DIR: ${HEYM_PLUGINS_DIR:-/app/data/plugins}
+      # Codex node: run Codex CLI in a dedicated sibling runner container so
+      # bubblewrap sandboxing works inside Docker without exposing backend secrets.
+      HEYM_CODEX_CLI_COMMAND: ${HEYM_CODEX_CLI_COMMAND:-/usr/local/bin/heym-codex-docker}
+      HEYM_CODEX_DOCKER_IMAGE: ${HEYM_CODEX_DOCKER_IMAGE:-heym-backend:local}
+      HEYM_CODEX_DOCKER_WORKSPACE_VOLUME: ${HEYM_CODEX_DOCKER_WORKSPACE_VOLUME:-heym-codex-workspaces}
+      HEYM_CODEX_WORKSPACE_DIR: ${HEYM_CODEX_WORKSPACE_DIR:-/app/data/codex-workspaces}
+      HEYM_CODEX_NETWORK_ACCESS: ${HEYM_CODEX_NETWORK_ACCESS:-true}
       # Python tool sandbox: untrusted user tools run in a hardened, throwaway
       # sibling container (no network, no docker socket, read-only, non-root).
       # Empty image = auto-detect this backend image.
@@ -82,6 +92,8 @@ services:
       - ./data/files:/app/data/files
       # Persist installed plugins across restarts.
       - ./data/plugins:/app/data/plugins
+      # Codex workspaces are shared with the throwaway Codex runner containers.
+      - codex-workspaces:/app/data/codex-workspaces
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,3 +130,7 @@ networks:
       driver: default
       config:
         - subnet: 172.35.0.0/16
+
+volumes:
+  codex-workspaces:
+    name: heym-codex-workspaces

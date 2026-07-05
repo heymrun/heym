@@ -193,10 +193,13 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v "$(pwd)/data/plugins:/app/data/plugins" \
+  -v heym-codex-workspaces:/app/data/codex-workspaces \
   ghcr.io/heymrun/heym:latest
 ```
 
 > **Docker socket access.** Mounting `/var/run/docker.sock` gives the backend broad control over the host Docker daemon. The default Docker Compose service and the direct `docker run` example include it for Docker-based MCP stdio tools that run `docker` commands. The Logs tab still requires `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS` with a comma-separated list of trusted user emails. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email. User-defined Python tools do **not** get this socket: they run in a separate hardened container with no Docker socket. See [Security](../reference/security.md#python-tool-sandbox).
+
+> **Codex runner.** The Codex node uses the same `ghcr.io/heymrun/heym` image as a sibling runner container (`--entrypoint codex`) so Codex's Linux sandbox can create namespaces. Keep the `heym-codex-workspaces` volume mount if you want Codex workflows in the direct image setup; the runner does not receive the Docker socket or backend secrets.
 
 **Minimum environment variables for direct image runs:**
 
@@ -220,6 +223,8 @@ docker run --rm \
 | `HEYM_PLUGINS_DIR` | Optional | Where plugin files are stored; defaults to `data/plugins` (mount it to persist) |
 | `HEYM_PYTHON_TOOL_SANDBOX` | Optional | Python tool isolation mode; defaults to `auto` (hardened Docker sandbox, fail closed). See [Security](../reference/security.md#python-tool-sandbox) |
 | `HEYM_PYTHON_TOOL_IMAGE` | Optional | Override the Python tool sandbox image; empty = auto-detect the backend image |
+| `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` | Optional | Docker volume used by sibling Codex runner containers; defaults to `heym-codex-workspaces` in Docker deployments |
+| `HEYM_CODEX_NETWORK_ACCESS` | Optional | Allow Codex's sandboxed commands to download files/dependencies; Docker deployments enable this by default |
 
 **Notes:**
 

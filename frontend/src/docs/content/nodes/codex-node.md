@@ -24,6 +24,8 @@ API keys are not accepted for the Codex credential. The node does not submit clo
 
 The node also requires a **GitHub** credential for cloning private repositories, pushing the working branch, and creating draft pull requests.
 
+In Docker deployments, Heym runs Codex inside a sibling container from the same Heym image (not a separate GHCR image). That container mounts only the Codex workspace volume and lets Codex's own bubblewrap sandbox create namespaces, which avoids the common Docker error `bwrap: No permissions to create a new namespace`.
+
 OpenAI references:
 
 - [Codex authentication](https://developers.openai.com/codex/auth)
