@@ -79,6 +79,25 @@ class TestCommitMessage(unittest.TestCase):
         result = CodexRunResult(status="completed", summary="Fix typo")
         self.assertEqual(CodexRunnerService._commit_title(result), "Fix typo")
 
+    def test_commit_title_uses_first_sentence(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="README.md translated. Headings, tables, notes localized; commands preserved.",
+        )
+        self.assertEqual(CodexRunnerService._commit_title(result), "README.md translated.")
+
+    def test_commit_title_no_trailing_punctuation_when_truncated(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary=(
+                "Added service alpha, beta, gamma, delta, epsilon, zeta, eta, "
+                "theta, iota, kappa and lambda to the compose file"
+            ),
+        )
+        subject = CodexRunnerService._commit_title(result)
+        self.assertLessEqual(len(subject), 72)
+        self.assertFalse(subject.endswith((",", ";", ":", " ")))
+
     def test_commit_body_has_full_summary_and_validation(self) -> None:
         result = CodexRunResult(
             status="completed", summary="X" * 100, validation="ran docker compose config"
