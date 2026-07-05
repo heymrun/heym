@@ -427,8 +427,10 @@ class CodexRunnerService:
                 str(schema_path),
                 "--sandbox",
                 "workspace-write",
-                "--ask-for-approval",
-                "never",
+                # `codex exec` has no --ask-for-approval flag; set the policy via config override
+                # so it runs autonomously without prompting.
+                "-c",
+                'approval_policy="never"',
                 prompt,
             ]
         )
@@ -573,6 +575,9 @@ class CodexRunnerService:
                 cmd,
                 cwd=cwd,
                 env=env if env is not None else self._safe_env(),
+                # `codex exec` appends piped stdin to the prompt; give it EOF so it never blocks
+                # reading the server's stdin (git commands don't need stdin either).
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,

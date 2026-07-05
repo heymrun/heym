@@ -107,6 +107,14 @@ class TestCodexRunnerAuth(unittest.TestCase):
     def test_model_flag_omitted_when_empty(self) -> None:
         self.assertNotIn("--model", self._capture_exec_cmd(""))
 
+    def test_exec_uses_valid_flags(self) -> None:
+        # codex exec has no --ask-for-approval flag; approval is set via config override.
+        cmd = self._capture_exec_cmd("")
+        self.assertNotIn("--ask-for-approval", cmd)
+        self.assertIn("-c", cmd)
+        self.assertIn('approval_policy="never"', cmd)
+        self.assertIn("--sandbox", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()
