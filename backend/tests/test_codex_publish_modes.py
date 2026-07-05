@@ -75,6 +75,16 @@ class TestCommitMessage(unittest.TestCase):
         result = CodexRunResult(status="completed", summary="Fix typo")
         self.assertEqual(CodexRunnerService._commit_title(result), "Fix typo")
 
+    def test_commit_title_prefers_pull_request_title(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="A long detailed summary sentence describing everything that changed in depth.",
+            pull_request_title="Add n8n10 service to compose and Traefik",
+        )
+        self.assertEqual(
+            CodexRunnerService._commit_title(result), "Add n8n10 service to compose and Traefik"
+        )
+
     def test_commit_title_uses_first_sentence(self) -> None:
         result = CodexRunResult(
             status="completed",

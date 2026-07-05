@@ -98,6 +98,8 @@ class CodexRunResult:
     summary: str = ""
     question: str = ""
     validation: str = ""
+    pull_request_title: str = ""
+    pull_request_body: str = ""
     diff: str = ""
     changed_files: list[str] = field(default_factory=list)
     thread_id: str | None = None
@@ -176,6 +178,8 @@ class CodexJsonlParser:
             summary=str(final_payload.get("summary") or "").strip(),
             question=str(final_payload.get("question") or "").strip(),
             validation=str(final_payload.get("validation") or "").strip(),
+            pull_request_title=str(final_payload.get("pull_request_title") or "").strip(),
+            pull_request_body=str(final_payload.get("pull_request_body") or "").strip(),
             thread_id=thread_id
             or self._find_string_key(
                 final_payload,
@@ -652,13 +656,14 @@ class CodexRunnerService:
         draft: bool,
     ) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
+        pr_body = str(result.pull_request_body or "").strip() or result.summary or None
         pr = GitHubService(request.github_config).create_pull_request(
             owner,
             repo,
             self._commit_title(result),
             head,
             request.base_branch,
-            body=result.summary or None,
+            body=pr_body,
             draft=draft,
         )
         return str(pr.get("html_url") or "").strip() or None
@@ -771,7 +776,9 @@ class CodexRunnerService:
             f"{mode_instruction}\n"
             "If you need missing requirements, secrets, or a product decision, return "
             "`status: needs_input` with one concise question. Otherwise implement the task "
-            "and return `status: completed` with a summary and validation notes.\n\n"
+            "and return `status: completed` with a summary and validation notes. Always set "
+            "`pull_request_title` to a concise, complete one-line change description "
+            "(imperative mood, ideally <=72 characters) suitable as a commit subject.\n\n"
             f"Task:\n{task_prompt}"
         )
 
@@ -785,12 +792,15 @@ class CodexRunnerService:
 
     @staticmethod
     def _commit_title(result: CodexRunResult) -> str:
+        # Prefer Codex's dedicated pull_request_title — a concise, complete one-line subject.
+        title = re.sub(r"\s+", " ", str(result.pull_request_title or "")).strip()
+        if title:
+            return title
         summary = re.sub(r"\s+", " ", result.summary).strip()
         if not summary:
             return "Apply Codex changes"
-        # Subject = the full first sentence (no length cap). Truncating here cut the title
-        # mid-thought; GitHub itself elides overly long subjects in list views while keeping the
-        # complete text in the commit.
+        # Fall back to the full first sentence of the summary (no length cap — GitHub itself
+        # elides overly long subjects in list views while keeping the complete text).
         return re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0]
 
     @staticmethod

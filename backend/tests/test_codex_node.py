@@ -112,6 +112,27 @@ class TestCodexJsonlParser(unittest.TestCase):
         self.assertEqual(result.thread_id, "thread-9")
         self.assertEqual(result.usage, {"output_tokens": 12})
 
+    def test_parse_extracts_pull_request_fields(self) -> None:
+        stdout = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "agent_message",
+                    "text": json.dumps(
+                        {
+                            "status": "completed",
+                            "summary": "Did the thing.",
+                            "pull_request_title": "Add feature X",
+                            "pull_request_body": "This PR adds X.",
+                        }
+                    ),
+                },
+            }
+        )
+        result = CodexJsonlParser().parse(stdout)
+        self.assertEqual(result.pull_request_title, "Add feature X")
+        self.assertEqual(result.pull_request_body, "This PR adds X.")
+
     def test_parse_agent_message_needs_input(self) -> None:
         stdout = json.dumps(
             {
