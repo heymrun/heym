@@ -247,9 +247,11 @@ fi
 echo -e "\n${YELLOW}Starting backend on port ${BACKEND_PORT:-10105}...${NC}"
 if [ "$DEBUG_MODE" = true ]; then
     echo -e "${BLUE}Debug mode enabled - showing DEBUG level logs${NC}"
-    LOG_LEVEL=DEBUG uv run python -m uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-10105} --reload --log-level debug &
+    # Only watch app/ for reload — codex writes many files under data/codex-workspaces which
+    # would otherwise restart the server mid-execution and kill the Codex subprocess.
+    LOG_LEVEL=DEBUG uv run python -m uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-10105} --reload --reload-dir app --log-level debug &
 else
-    uv run python -m uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-10105} --reload &
+    uv run python -m uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-10105} --reload --reload-dir app &
 fi
 BACKEND_PID=$!
 sleep 2

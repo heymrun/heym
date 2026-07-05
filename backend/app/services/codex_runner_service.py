@@ -431,6 +431,10 @@ class CodexRunnerService:
                 # so it runs autonomously without prompting.
                 "-c",
                 'approval_policy="never"',
+                # Skip the plugin/skill marketplace download — the runner uses a fresh CODEX_HOME
+                # per run, so leaving it on re-clones hundreds of files every execution.
+                "--disable",
+                "plugins",
                 prompt,
             ]
         )

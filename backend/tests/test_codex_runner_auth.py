@@ -114,6 +114,8 @@ class TestCodexRunnerAuth(unittest.TestCase):
         self.assertIn("-c", cmd)
         self.assertIn('approval_policy="never"', cmd)
         self.assertIn("--sandbox", cmd)
+        self.assertIn("--disable", cmd)
+        self.assertEqual(cmd[cmd.index("--disable") + 1], "plugins")
 
 
 if __name__ == "__main__":
