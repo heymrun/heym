@@ -60,6 +60,7 @@ class CodexRunRequest:
     codex_access_token: str
     github_config: dict
     codex_auth: dict = field(default_factory=dict)
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ class CodexResumeRequest:
     github_config: dict
     timeout_seconds: float
     codex_auth: dict = field(default_factory=dict)
+    model: str = ""
 
 
 @dataclass
@@ -261,6 +263,7 @@ class CodexRunnerService:
             timeout_seconds=request.timeout_seconds,
             resume_thread_id=None,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
+            model=request.model,
         )
         return self._finalize_result(result, workspace, request)
 
@@ -278,6 +281,7 @@ class CodexRunnerService:
             timeout_seconds=request.timeout_seconds,
             resume_thread_id=request.thread_id,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
+            model=request.model,
         )
         run_request = CodexRunRequest(
             repository_url=request.repository_url,
@@ -290,6 +294,7 @@ class CodexRunnerService:
             codex_access_token=request.codex_access_token,
             github_config=request.github_config,
             codex_auth=request.codex_auth,
+            model=request.model,
         )
         return self._finalize_result(result, workspace, run_request)
 
@@ -406,12 +411,15 @@ class CodexRunnerService:
         timeout_seconds: float,
         resume_thread_id: str | None,
         codex_access_token: str,
+        model: str = "",
     ) -> CodexRunResult:
         schema_path = workspace / ".codex-output-schema.json"
         schema_path.write_text(json.dumps(CODEX_FINAL_OUTPUT_SCHEMA), encoding="utf-8")
         cmd = [self.cli_command, "exec"]
         if resume_thread_id:
             cmd.extend(["resume", resume_thread_id])
+        if model.strip():
+            cmd.extend(["--model", model.strip()])
         cmd.extend(
             [
                 "--json",

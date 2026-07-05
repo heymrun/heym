@@ -429,6 +429,7 @@ export interface NodeData {
     | "patch_artifact";
   branchName?: string;
   setupCommand?: string;
+  codexModel?: string;
   systemInstruction?: string;
   userMessage?: string;
   batchModeEnabled?: boolean;

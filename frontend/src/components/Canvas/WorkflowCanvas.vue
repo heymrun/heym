@@ -1046,6 +1046,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       branchName: "codex/$executionId",
       timeoutSeconds: 3600,
       setupCommand: "",
+      codexModel: "",
     },
     condition: { label: "condition", condition: "$input.text.length > 0" },
     switch: { label: "switch", expression: "$input.text", cases: ["case1", "case2"] },

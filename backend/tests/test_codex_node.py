@@ -92,12 +92,21 @@ class TestCodexJsonlParser(unittest.TestCase):
 class TestCodexNodeHandler(unittest.TestCase):
     def _executor(self) -> SimpleNamespace:
         def evaluate_message_template(value: str, inputs: dict, _node_id: str) -> str:
+            # Mirror the real footgun: a blank template resolves to str(inputs).
+            if not value:
+                return str(inputs)
             return value.replace("$input.text", str(inputs.get("text") or ""))
+
+        def evaluate_nonempty_message_template(value: str, inputs: dict, _node_id: str) -> str:
+            if not str(value or "").strip():
+                return ""
+            return evaluate_message_template(value, inputs, _node_id)
 
         return SimpleNamespace(
             execution_id="abc12345-0000",
             hitl_resume_context={},
             evaluate_message_template=evaluate_message_template,
+            evaluate_nonempty_message_template=evaluate_nonempty_message_template,
         )
 
     def _ctx(self, node_data: dict, inputs: dict | None = None) -> NodeExecutionContext:
@@ -140,6 +149,7 @@ class TestCodexNodeHandler(unittest.TestCase):
                     "baseBranch": "main",
                     "taskPrompt": "$input.text",
                     "publishMode": "diff_only",
+                    "codexModel": "gpt-5.4",
                 }
             )
         )
@@ -150,6 +160,9 @@ class TestCodexNodeHandler(unittest.TestCase):
         request = runner.run_task.call_args.args[0]
         self.assertEqual(request.task_prompt, "Fix the bug")
         self.assertEqual(request.repository_url, "https://github.com/acme/app")
+        self.assertEqual(request.model, "gpt-5.4")
+        # Regression: an unset setupCommand must stay empty, not become str(inputs).
+        self.assertEqual(request.setup_command, "")
 
     @patch("app.services.node_execution.nodes.codex_node._load_credentials")
     @patch("app.services.node_execution.nodes.codex_node.CodexRunnerService")

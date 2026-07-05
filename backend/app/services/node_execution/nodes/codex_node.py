@@ -37,6 +37,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     resolved_base_branch = "main"
     resolved_task_prompt = ""
     resolved_branch_name = _resolve_branch_name(self, node_data, inputs, node_id)
+    codex_model = self.evaluate_nonempty_message_template(
+        str(node_data.get("codexModel") or ""), inputs, node_id
+    ).strip()
     if resume_context:
         answer_text = str(resume_context.get("answerText") or resume_context.get("answer") or "")
         resolved_repository_url = str(resume_context.get("repositoryUrl") or "").strip()
@@ -58,29 +61,32 @@ def execute(ctx: NodeExecutionContext) -> object:
                 github_config=github_config,
                 timeout_seconds=timeout_seconds,
                 codex_auth=codex_config,
+                model=codex_model,
             )
         )
     else:
-        repository_url = self.evaluate_message_template(
+        # Use the nonempty variant: evaluate_message_template("") returns str(inputs), which for
+        # an unset optional field (e.g. setupCommand) would run garbage as a shell command.
+        repository_url = self.evaluate_nonempty_message_template(
             str(node_data.get("repositoryUrl") or ""), inputs, node_id
         ).strip()
         if not repository_url:
             raise ValueError("Codex node requires a repository URL")
         resolved_repository_url = repository_url
         base_branch = (
-            self.evaluate_message_template(
+            self.evaluate_nonempty_message_template(
                 str(node_data.get("baseBranch") or "main"), inputs, node_id
             ).strip()
             or "main"
         )
         resolved_base_branch = base_branch
-        task_prompt = self.evaluate_message_template(
+        task_prompt = self.evaluate_nonempty_message_template(
             str(node_data.get("taskPrompt") or "$input.text"), inputs, node_id
         ).strip()
         if not task_prompt:
             raise ValueError("Codex node requires a task prompt")
         resolved_task_prompt = task_prompt
-        setup_command = self.evaluate_message_template(
+        setup_command = self.evaluate_nonempty_message_template(
             str(node_data.get("setupCommand") or ""), inputs, node_id
         ).strip()
         result = runner.run_task(
@@ -95,6 +101,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 codex_access_token=str(codex_config.get("access_token") or ""),
                 github_config=github_config,
                 codex_auth=codex_config,
+                model=codex_model,
             )
         )
 

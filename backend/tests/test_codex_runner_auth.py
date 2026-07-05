@@ -79,6 +79,34 @@ class TestCodexRunnerAuth(unittest.TestCase):
             self.runner._run_command(["definitely-not-git-xyz", "status"], cwd=self.workspace)
         self.assertIn("definitely-not-git-xyz", str(ctx.exception))
 
+    def _capture_exec_cmd(self, model: str) -> list[str]:
+        import subprocess
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_run_command(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess:
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+        self.runner._run_command = fake_run_command  # type: ignore[method-assign]
+        self.runner._run_codex_exec(
+            workspace=self.workspace,
+            prompt="do it",
+            timeout_seconds=60.0,
+            resume_thread_id=None,
+            codex_access_token="",
+            model=model,
+        )
+        return captured["cmd"]
+
+    def test_model_flag_added_when_set(self) -> None:
+        cmd = self._capture_exec_cmd("gpt-5.4")
+        self.assertIn("--model", cmd)
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gpt-5.4")
+
+    def test_model_flag_omitted_when_empty(self) -> None:
+        self.assertNotIn("--model", self._capture_exec_cmd(""))
+
 
 if __name__ == "__main__":
     unittest.main()

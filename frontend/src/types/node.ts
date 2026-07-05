@@ -187,6 +187,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       branchName: "codex/$executionId",
       timeoutSeconds: 3600,
       setupCommand: "",
+      codexModel: "",
     },
   },
   condition: {

@@ -4100,6 +4100,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   - `branchName`: Working branch for PR/commit modes, e.g. `codex/$executionId`
   - `timeoutSeconds`: Node timeout in seconds (default 3600)
   - `setupCommand`: Optional repository setup command before Codex runs
+  - `codexModel`: Optional Codex model id (e.g. `gpt-5.4`); empty uses Codex's default
 - **As an agent tool**: The Codex node can be attached to an agent's `tool-input` handle. Any of
   its expression fields (`taskPrompt`, `repositoryUrl`, `baseBranch`, `branchName`, `setupCommand`)
   can be marked with the agent-provided toggle (`agentProvidedFields`) so the agent supplies them

@@ -24,6 +24,17 @@ const {
   onCodexRegisterExpressionFieldIndex,
   updateNodeData,
 } = usePropertiesPanelContext();
+
+// Codex model suggestions (developers.openai.com/codex/models). Editable — any plan-supported
+// model can be typed; leave empty to use Codex's default.
+const codexModelOptions = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex-spark",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+];
 </script>
 
 <template>
@@ -110,6 +121,27 @@ const {
           @update:model-value="updateNodeData('timeoutSeconds', parseInt($event as string, 10) || 3600)"
         />
       </div>
+    </div>
+
+    <div class="space-y-2">
+      <Label>Model</Label>
+      <Input
+        :model-value="selectedNode.data.codexModel || ''"
+        list="codex-model-options"
+        placeholder="Default (Codex decides) — pick or type a model"
+        @update:model-value="updateNodeData('codexModel', $event)"
+      />
+      <datalist id="codex-model-options">
+        <option
+          v-for="m in codexModelOptions"
+          :key="m"
+          :value="m"
+        />
+      </datalist>
+      <p class="text-xs text-muted-foreground">
+        Leave empty for Codex's default. Pick a suggestion or type any model your ChatGPT plan
+        supports.
+      </p>
     </div>
 
     <div class="space-y-2">
