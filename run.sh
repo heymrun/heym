@@ -107,9 +107,18 @@ check_command "bun"
 check_command "uv"
 echo -e "${GREEN}All prerequisites found.${NC}"
 
-# Codex CLI is only needed by the Codex node — warn (don't fail) if it's missing.
+# Codex CLI is only needed by the Codex node. Auto-install it (best-effort) when missing.
 if ! command -v codex &> /dev/null; then
-    echo -e "${YELLOW}Note: 'codex' CLI not found. The Codex node needs it — install with 'npm install -g @openai/codex' (or set HEYM_CODEX_CLI_COMMAND).${NC}"
+    if command -v npm &> /dev/null; then
+        echo -e "${YELLOW}Installing Codex CLI (@openai/codex) for the Codex node...${NC}"
+        if npm install -g @openai/codex >/dev/null 2>&1; then
+            echo -e "${GREEN}Codex CLI installed.${NC}"
+        else
+            echo -e "${YELLOW}Could not auto-install Codex CLI (npm global install failed — may need sudo). Install manually: npm install -g @openai/codex (or set HEYM_CODEX_CLI_COMMAND).${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Note: 'codex' CLI and npm not found. The Codex node needs '@openai/codex' — install Node/npm, then 'npm install -g @openai/codex'.${NC}"
+    fi
 fi
 
 ENV_FILE="$PROJECT_ROOT/.env"

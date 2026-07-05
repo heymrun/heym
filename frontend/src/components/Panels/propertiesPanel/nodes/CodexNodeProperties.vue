@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle } from "lucide-vue-next";
+import { AlertTriangle, ChevronDown } from "lucide-vue-next";
 
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
@@ -125,19 +125,25 @@ const codexModelOptions = [
 
     <div class="space-y-2">
       <Label>Model</Label>
-      <Input
-        :model-value="selectedNode.data.codexModel || ''"
-        list="codex-model-options"
-        placeholder="Default (Codex decides) — pick or type a model"
-        @update:model-value="updateNodeData('codexModel', $event)"
-      />
-      <datalist id="codex-model-options">
-        <option
-          v-for="m in codexModelOptions"
-          :key="m"
-          :value="m"
+      <div class="codex-model-field relative">
+        <Input
+          :model-value="selectedNode.data.codexModel || ''"
+          list="codex-model-options"
+          placeholder="Codex default"
+          class="pr-10"
+          @update:model-value="updateNodeData('codexModel', $event)"
         />
-      </datalist>
+        <ChevronDown
+          class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <datalist id="codex-model-options">
+          <option
+            v-for="m in codexModelOptions"
+            :key="m"
+            :value="m"
+          />
+        </datalist>
+      </div>
       <p class="text-xs text-muted-foreground">
         Leave empty for Codex's default. Pick a suggestion or type any model your ChatGPT plan
         supports.
@@ -218,3 +224,12 @@ const codexModelOptions = [
     </div>
   </template>
 </template>
+
+<style scoped>
+/* Keep the native datalist picker clickable (opacity 0) so our own always-visible chevron
+   is the only arrow shown, across browsers. */
+.codex-model-field :deep(input[list])::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+}
+</style>
