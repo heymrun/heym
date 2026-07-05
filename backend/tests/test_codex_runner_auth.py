@@ -68,6 +68,17 @@ class TestCodexRunnerAuth(unittest.TestCase):
         env_with = self.runner._codex_env(self.workspace, "tok")
         self.assertEqual(env_with["CODEX_ACCESS_TOKEN"], "tok")
 
+    def test_missing_codex_cli_gives_clear_error(self) -> None:
+        runner = CodexRunnerService(cli_command="definitely-not-a-real-codex-binary")
+        with self.assertRaises(ValueError) as ctx:
+            runner._run_command([runner.cli_command, "exec"], cwd=self.workspace)
+        self.assertIn("Codex CLI is not installed", str(ctx.exception))
+
+    def test_missing_other_binary_names_the_binary(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self.runner._run_command(["definitely-not-git-xyz", "status"], cwd=self.workspace)
+        self.assertIn("definitely-not-git-xyz", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

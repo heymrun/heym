@@ -107,6 +107,11 @@ check_command "bun"
 check_command "uv"
 echo -e "${GREEN}All prerequisites found.${NC}"
 
+# Codex CLI is only needed by the Codex node — warn (don't fail) if it's missing.
+if ! command -v codex &> /dev/null; then
+    echo -e "${YELLOW}Note: 'codex' CLI not found. The Codex node needs it — install with 'npm install -g @openai/codex' (or set HEYM_CODEX_CLI_COMMAND).${NC}"
+fi
+
 ENV_FILE="$PROJECT_ROOT/.env"
 ENCRYPTION_KEY_PLACEHOLDER="change_this_to_a_random_32_byte_hex_value"
 

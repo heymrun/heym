@@ -7,8 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     nodejs \
     npm \
+    git \
     weasyprint \
     && rm -rf /var/lib/apt/lists/*
+
+# OpenAI Codex CLI (required by the Codex node). Pin via the HEYM_CODEX_CLI_VERSION build arg.
+ARG HEYM_CODEX_CLI_VERSION=latest
+RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
 # Install Docker CLI (static binary — no daemon needed, connects via mounted socket)
 RUN ARCH="$(uname -m)" \

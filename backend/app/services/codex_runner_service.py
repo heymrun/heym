@@ -570,6 +570,14 @@ class CodexRunnerService:
                 timeout=timeout_seconds,
                 check=True,
             )
+        except FileNotFoundError as exc:
+            binary = cmd[0] if cmd else "command"
+            hint = (
+                "Codex CLI is not installed or not on PATH (install '@openai/codex')"
+                if binary == self.cli_command
+                else f"'{binary}' is not installed or not on PATH"
+            )
+            raise ValueError(hint) from exc
         except subprocess.TimeoutExpired as exc:
             raise ValueError(f"Command timed out after {timeout_seconds:.0f} seconds") from exc
         except subprocess.CalledProcessError as exc:
