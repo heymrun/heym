@@ -54,14 +54,17 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertNotIn("diff_only", _CODEX_REMOTE_PUBLISH_MODES)
         self.assertNotIn("patch_artifact", _CODEX_REMOTE_PUBLISH_MODES)
 
-    def test_build_prompt_local_vs_remote(self) -> None:
-        self.assertIn(
-            "Do not create a pull request", CodexRunnerService._build_prompt("x", "diff_only")
-        )
-        self.assertIn(
-            "Do not create a pull request", CodexRunnerService._build_prompt("x", "patch_artifact")
-        )
-        self.assertIn("Heym will commit and push", CodexRunnerService._build_prompt("x", "open_pr"))
+    def test_build_prompt_forbids_git_and_github(self) -> None:
+        prompt = CodexRunnerService._build_prompt("translate the readme")
+        self.assertIn("Do NOT run git", prompt)
+        self.assertIn("GitHub API", prompt)
+        self.assertIn("Heym performs every git", prompt)
+        self.assertIn("translate the readme", prompt)
+
+    def test_resume_prompt_forbids_git_and_github(self) -> None:
+        prompt = CodexRunnerService._build_resume_prompt("use port 1234")
+        self.assertIn("Do NOT run git", prompt)
+        self.assertIn("use port 1234", prompt)
 
 
 class TestCommitMessage(unittest.TestCase):

@@ -54,6 +54,17 @@ _CODEX_REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
     {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
 )
 
+# Codex must only edit files on disk; Heym owns all git/GitHub operations. Codex's own GitHub
+# tools/API are network calls that the sandbox blocks, which otherwise makes Codex loop on
+# needs_input asking to "approve write tool calls".
+_CODEX_LOCAL_ONLY_RULES = (
+    "Apply ALL changes by editing files on disk in the current working directory. Do NOT run git; "
+    "do NOT commit, push, or create branches; and do NOT use the GitHub API, a GitHub connector, "
+    "or any remote/network tool to modify the repository — Heym performs every git and GitHub "
+    "operation after you finish. Network access is disabled, so do not attempt remote calls; just "
+    "leave your edits on disk."
+)
+
 
 @dataclass(frozen=True)
 class CodexRunRequest:
@@ -281,7 +292,7 @@ class CodexRunnerService:
         )
         if request.setup_command.strip():
             self._run_setup_command(workspace, request.setup_command, request.timeout_seconds)
-        prompt = self._build_prompt(request.task_prompt, request.publish_mode)
+        prompt = self._build_prompt(request.task_prompt)
         result = self._run_codex_exec(
             workspace=workspace,
             prompt=prompt,
@@ -302,7 +313,7 @@ class CodexRunnerService:
         self._authenticate(
             workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
         )
-        prompt = self._build_resume_prompt(request.answer_text, request.publish_mode)
+        prompt = self._build_resume_prompt(request.answer_text)
         result = self._run_codex_exec(
             workspace=workspace,
             prompt=prompt,
@@ -765,15 +776,10 @@ class CodexRunnerService:
         shutil.rmtree(self._codex_home_dir(path), ignore_errors=True)
 
     @staticmethod
-    def _build_prompt(task_prompt: str, publish_mode: str) -> str:
-        mode_instruction = (
-            "Do not create a pull request or push branches; only edit files locally."
-            if publish_mode in ("diff_only", "patch_artifact")
-            else "Prepare changes only; Heym will commit and push (and open a pull request if needed)."
-        )
+    def _build_prompt(task_prompt: str) -> str:
         return (
-            "You are running as the Heym Codex node inside a local cloned repository.\n"
-            f"{mode_instruction}\n"
+            "You are running as the Heym Codex node inside a local cloned git repository.\n"
+            f"{_CODEX_LOCAL_ONLY_RULES}\n"
             "If you need missing requirements, secrets, or a product decision, return "
             "`status: needs_input` with one concise question. Otherwise implement the task "
             "and return `status: completed` with a summary and validation notes. Always set "
@@ -783,11 +789,12 @@ class CodexRunnerService:
         )
 
     @staticmethod
-    def _build_resume_prompt(answer_text: str, publish_mode: str) -> str:
+    def _build_resume_prompt(answer_text: str) -> str:
         return (
-            "The user answered your previous follow-up question. Continue the same task. "
-            "Return `needs_input` only if one more user decision is essential. "
-            f"Publish mode: {publish_mode}.\n\nAnswer:\n{answer_text}"
+            "The user answered your previous follow-up question. Continue the same task.\n"
+            f"{_CODEX_LOCAL_ONLY_RULES}\n"
+            "Return `needs_input` only if one more user decision is truly essential.\n\n"
+            f"Answer:\n{answer_text}"
         )
 
     @staticmethod
