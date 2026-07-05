@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -41,6 +42,7 @@ class CodexRunRequest:
     timeout_seconds: float
     codex_access_token: str
     github_config: dict
+    codex_auth: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class CodexResumeRequest:
     codex_access_token: str
     github_config: dict
     timeout_seconds: float
+    codex_auth: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -227,7 +230,9 @@ class CodexRunnerService:
 
     def run_task(self, request: CodexRunRequest) -> CodexRunResult:
         workspace = self._prepare_workspace(request)
-        self._codex_login(workspace, request.codex_access_token, request.timeout_seconds)
+        self._authenticate(
+            workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
+        )
         if request.setup_command.strip():
             self._run_setup_command(workspace, request.setup_command, request.timeout_seconds)
         prompt = self._build_prompt(request.task_prompt, request.publish_mode)
@@ -236,7 +241,7 @@ class CodexRunnerService:
             prompt=prompt,
             timeout_seconds=request.timeout_seconds,
             resume_thread_id=None,
-            codex_access_token=request.codex_access_token,
+            codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
         )
         return self._finalize_result(result, workspace, request)
 
@@ -244,14 +249,16 @@ class CodexRunnerService:
         workspace = Path(request.workspace_path).resolve()
         if not workspace.exists() or not workspace.is_dir():
             raise ValueError("Codex workspace is no longer available")
-        self._codex_login(workspace, request.codex_access_token, request.timeout_seconds)
+        self._authenticate(
+            workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
+        )
         prompt = self._build_resume_prompt(request.answer_text, request.publish_mode)
         result = self._run_codex_exec(
             workspace=workspace,
             prompt=prompt,
             timeout_seconds=request.timeout_seconds,
             resume_thread_id=request.thread_id,
-            codex_access_token=request.codex_access_token,
+            codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
         )
         run_request = CodexRunRequest(
             repository_url=request.repository_url,
@@ -263,6 +270,7 @@ class CodexRunnerService:
             timeout_seconds=request.timeout_seconds,
             codex_access_token=request.codex_access_token,
             github_config=request.github_config,
+            codex_auth=request.codex_auth,
         )
         return self._finalize_result(result, workspace, run_request)
 
@@ -285,6 +293,44 @@ class CodexRunnerService:
             sensitive_values=[request.github_config.get("api_key", "")],
         )
         return workspace
+
+    def _authenticate(
+        self,
+        workspace: Path,
+        codex_auth: dict,
+        access_token: str,
+        timeout_seconds: float,
+    ) -> None:
+        """Authenticate the Codex CLI for this run.
+
+        ChatGPT-subscription credentials write ``auth.json`` directly (no per-token API cost);
+        access-token credentials use ``codex login --with-access-token``.
+        """
+        if str((codex_auth or {}).get("auth_mode") or "").strip() == "chatgpt":
+            self._write_chatgpt_auth(workspace, codex_auth)
+            return
+        self._codex_login(workspace, access_token, timeout_seconds)
+
+    def _write_chatgpt_auth(self, workspace: Path, codex_auth: dict) -> None:
+        codex_home = workspace / ".codex-home"
+        codex_home.mkdir(parents=True, exist_ok=True)
+        access_token = str(codex_auth.get("access_token") or "").strip()
+        id_token = str(codex_auth.get("id_token") or "").strip()
+        if not access_token and not id_token:
+            raise ValueError("Codex ChatGPT credential is missing tokens; re-run the sign-in")
+        auth_payload = {
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "id_token": id_token,
+                "access_token": access_token,
+                "refresh_token": str(codex_auth.get("refresh_token") or ""),
+                "account_id": str(codex_auth.get("account_id") or ""),
+            },
+            "last_refresh": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        auth_path = codex_home / "auth.json"
+        auth_path.write_text(json.dumps(auth_payload), encoding="utf-8")
+        auth_path.chmod(0o600)
 
     def _codex_login(self, workspace: Path, access_token: str, timeout_seconds: float) -> None:
         codex_home = workspace / ".codex-home"
@@ -444,10 +490,18 @@ class CodexRunnerService:
         env.pop("OPENAI_API_KEY", None)
         return env
 
+    @staticmethod
+    def _exec_token(codex_auth: dict, access_token: str) -> str:
+        """Access token to expose to ``codex exec``; empty for ChatGPT mode (uses auth.json)."""
+        if str((codex_auth or {}).get("auth_mode") or "").strip() == "chatgpt":
+            return ""
+        return access_token
+
     def _codex_env(self, workspace: Path, access_token: str) -> dict[str, str]:
         env = self._safe_env()
         env["CODEX_HOME"] = str(workspace / ".codex-home")
-        env["CODEX_ACCESS_TOKEN"] = access_token
+        if access_token:
+            env["CODEX_ACCESS_TOKEN"] = access_token
         return env
 
     def _git_output(self, cmd: list[str], workspace: Path) -> str:

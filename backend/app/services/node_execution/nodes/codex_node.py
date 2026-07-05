@@ -56,6 +56,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 codex_access_token=str(codex_config.get("access_token") or ""),
                 github_config=github_config,
                 timeout_seconds=timeout_seconds,
+                codex_auth=codex_config,
             )
         )
     else:
@@ -92,6 +93,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 timeout_seconds=timeout_seconds,
                 codex_access_token=str(codex_config.get("access_token") or ""),
                 github_config=github_config,
+                codex_auth=codex_config,
             )
         )
 
@@ -158,6 +160,7 @@ def _load_credentials(executor: object, node_data: dict) -> tuple[dict, dict]:
         if codex_credential is None or codex_credential.type != CredentialType.codex:
             raise ValueError("Codex node requires a Codex credential")
         codex_config = decrypt_config(codex_credential.encrypted_config)
+        codex_config = _refresh_chatgpt_tokens_if_needed(db, codex_credential, codex_config)
 
         github_credential = executor._get_accessible_credential(db, github_credential_id)
         if github_credential is None or github_credential.type != CredentialType.github:
@@ -169,6 +172,38 @@ def _load_credentials(executor: object, node_data: dict) -> tuple[dict, dict]:
     if not str(github_config.get("api_key") or "").strip():
         raise ValueError("GitHub credential is missing api_key")
     return codex_config, github_config
+
+
+def _refresh_chatgpt_tokens_if_needed(db: object, credential: object, codex_config: dict) -> dict:
+    """Refresh an expired ChatGPT token bundle and persist the rotated tokens.
+
+    Access-token credentials are returned unchanged. Refresh failures are non-fatal: the existing
+    (possibly stale) bundle is returned so the runner can still attempt the run.
+    """
+    if str(codex_config.get("auth_mode") or "").strip() != "chatgpt":
+        return codex_config
+    from app.services.codex_oauth_service import (
+        CodexOAuthError,
+        CodexOAuthService,
+        bundle_is_expired,
+    )
+
+    if not bundle_is_expired(codex_config.get("expires_at")):
+        return codex_config
+    refresh_token = str(codex_config.get("refresh_token") or "").strip()
+    if not refresh_token:
+        return codex_config
+    try:
+        bundle = CodexOAuthService().refresh_tokens(refresh_token)
+    except CodexOAuthError:
+        return codex_config
+
+    from app.services.encryption import encrypt_config
+
+    updated = {**codex_config, **bundle.to_config()}
+    credential.encrypted_config = encrypt_config(updated)
+    db.commit()
+    return updated
 
 
 def _coerce_timeout(value: object) -> float:

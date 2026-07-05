@@ -19,6 +19,7 @@ from app.api import (
     bigquery_oauth,
     chats,
     codex_followups,
+    codex_oauth,
     config,
     credentials,
     dashboards,
@@ -300,6 +301,11 @@ app.include_router(
     linear_oauth.router,
     prefix="/api/credentials/linear/oauth",
     tags=["Linear OAuth"],
+)
+app.include_router(
+    codex_oauth.router,
+    prefix="/api/credentials/codex/oauth",
+    tags=["Codex OAuth"],
 )
 app.include_router(
     global_variables.router, prefix="/api/global-variables", tags=["Global Variables"]

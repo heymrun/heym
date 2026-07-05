@@ -678,7 +678,7 @@ const hasThrowErrorWarning = computed(() => {
     </div>
 
     <div
-      v-if="hasOutput && !hasSecondOutput && !hasErrorOutput && !hasHitlOutput && !hasBatchStatusOutput"
+      v-if="hasOutput && !hasSecondOutput && !hasErrorOutput && !hasHitlOutput && !hasBatchStatusOutput && !hasCodexQuestionOutput"
       class="absolute right-0 top-1/2 -translate-y-1/2"
     >
       <Handle
@@ -690,7 +690,7 @@ const hasThrowErrorWarning = computed(() => {
     </div>
 
     <div
-      v-if="hasOutput && !hasSecondOutput && (hasErrorOutput || hasHitlOutput || hasBatchStatusOutput)"
+      v-if="hasOutput && !hasSecondOutput && (hasErrorOutput || hasHitlOutput || hasBatchStatusOutput || hasCodexQuestionOutput)"
       class="absolute -right-1 top-1/2 -translate-y-1/2 flex flex-col items-end gap-2.5"
     >
       <div class="flex items-center">

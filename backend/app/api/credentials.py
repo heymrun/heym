@@ -89,6 +89,27 @@ def merge_credential_config_for_update(
             merged_config["auth_mode"] = incoming_auth_mode
         return merged_config
 
+    if credential_type == CredentialType.codex:
+        merged_config = dict(existing_config)
+        incoming_auth_mode = str(incoming_config.get("auth_mode", "") or "").strip()
+        chatgpt_keys = ("access_token", "refresh_token", "id_token", "account_id", "expires_at")
+        if incoming_auth_mode == "chatgpt":
+            # Full ChatGPT bundle from a fresh sign-in replaces any prior token/bundle.
+            for key in (*chatgpt_keys, "auth_mode"):
+                merged_config.pop(key, None)
+            for key in (*chatgpt_keys, "auth_mode"):
+                if key in incoming_config:
+                    merged_config[key] = incoming_config[key]
+            return merged_config
+        incoming_access_token = str(incoming_config.get("access_token", "") or "").strip()
+        if incoming_access_token:
+            # A pasted access token switches the credential to token mode.
+            for key in ("refresh_token", "id_token", "account_id", "expires_at"):
+                merged_config.pop(key, None)
+            merged_config["access_token"] = incoming_access_token
+            merged_config["auth_mode"] = "access_token"
+        return merged_config
+
     if credential_type == CredentialType.sentry:
         merged_config = dict(existing_config)
 
@@ -253,6 +274,13 @@ def get_public_credential_fields(
     if credential_type == CredentialType.linear:
         auth_mode = str(config.get("auth_mode", "api_key")).strip() or "api_key"
         return {"auth_mode": auth_mode}
+    if credential_type == CredentialType.codex:
+        auth_mode = str(config.get("auth_mode", "access_token")).strip() or "access_token"
+        fields: dict[str, str | None] = {"auth_mode": auth_mode}
+        if auth_mode == "chatgpt":
+            account_id = str(config.get("account_id", "")).strip()
+            fields["account_id"] = account_id or None
+        return fields
     return {}
 
 
@@ -1274,6 +1302,14 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Codex credential requires access_token",
+            )
+        if str(config.get("auth_mode") or "").strip() == "chatgpt" and not str(
+            config.get("refresh_token") or ""
+        ).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ChatGPT Codex credential requires refresh_token; complete the ChatGPT "
+                "sign-in again",
             )
     elif credential_type == CredentialType.google:
         if "api_key" not in config or not config["api_key"]:

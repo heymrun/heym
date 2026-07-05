@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle } from "lucide-vue-next";
 
+import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
@@ -60,7 +61,13 @@ const {
     </div>
 
     <div class="space-y-2">
-      <Label>Repository URL <span class="text-destructive">*</span></Label>
+      <div class="flex items-center justify-between gap-2">
+        <Label>Repository URL <span class="text-destructive">*</span></Label>
+        <AgentFieldToggle
+          :node-id="selectedNode.id"
+          field-key="repositoryUrl"
+        />
+      </div>
       <ExpressionInput
         ref="codexRepositoryUrlExpressionInputRef"
         :model-value="selectedNode.data.repositoryUrl || ''"
@@ -112,7 +119,13 @@ const {
     </div>
 
     <div class="space-y-2">
-      <Label>Task Prompt <span class="text-destructive">*</span></Label>
+      <div class="flex items-center justify-between gap-2">
+        <Label>Task Prompt <span class="text-destructive">*</span></Label>
+        <AgentFieldToggle
+          :node-id="selectedNode.id"
+          field-key="taskPrompt"
+        />
+      </div>
       <ExpressionInput
         ref="codexTaskPromptExpressionInputRef"
         :model-value="selectedNode.data.taskPrompt || ''"

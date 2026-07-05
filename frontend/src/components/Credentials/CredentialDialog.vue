@@ -39,6 +39,13 @@ const name = ref("");
 const type = ref<CredentialType>("openai");
 const apiKey = ref("");
 const codexAccessToken = ref("");
+const codexAuthMode = ref<"chatgpt" | "access_token">("chatgpt");
+const codexOAuthConfig = ref<Record<string, unknown> | null>(null);
+const codexOAuthState = ref("");
+const codexRedirectUrl = ref("");
+const codexSigningIn = ref(false);
+const codexSignInError = ref("");
+const codexSignedInAccount = ref("");
 const baseUrl = ref("");
 const bearerToken = ref("");
 const headerKey = ref("");
@@ -221,6 +228,13 @@ watch(
         type.value = props.credential.type;
         apiKey.value = "";
         codexAccessToken.value = "";
+        resetCodexOAuthState();
+        codexAuthMode.value =
+          props.credential.public_fields?.auth_mode === "access_token"
+            ? "access_token"
+            : "chatgpt";
+        codexSignedInAccount.value =
+          props.credential.public_fields?.account_id || "";
         baseUrl.value = "";
         bearerToken.value = "";
         headerKey.value = props.credential.header_key || "";
@@ -325,6 +339,9 @@ watch(
         type.value = props.presetType ?? "openai";
         apiKey.value = "";
         codexAccessToken.value = "";
+        codexAuthMode.value = "chatgpt";
+        resetCodexOAuthState();
+        codexSignedInAccount.value = "";
         baseUrl.value = "";
         bearerToken.value = "";
         headerKey.value = "";
@@ -443,6 +460,9 @@ const isValid = computed(() => {
   ) {
     return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "codex") {
+    if (codexAuthMode.value === "chatgpt") {
+      return !!codexOAuthConfig.value || isEditing.value;
+    }
     return !!codexAccessToken.value.trim() || isEditing.value;
   } else if (type.value === "custom") {
     return (!!apiKey.value.trim() && !!baseUrl.value.trim()) || isEditing.value;
@@ -571,11 +591,62 @@ const canTestLinearConnection = computed((): boolean => {
   return isEditing.value && !!props.credential?.id;
 });
 
+function resetCodexOAuthState(): void {
+  codexOAuthConfig.value = null;
+  codexOAuthState.value = "";
+  codexRedirectUrl.value = "";
+  codexSignInError.value = "";
+  codexSigningIn.value = false;
+}
+
+async function startCodexSignIn(): Promise<void> {
+  codexSignInError.value = "";
+  codexOAuthConfig.value = null;
+  try {
+    const { authorize_url, state } = await credentialsApi.codexOAuthStart();
+    codexOAuthState.value = state;
+    window.open(authorize_url, "_blank", "noopener,noreferrer");
+  } catch {
+    codexSignInError.value = "Could not start ChatGPT sign-in. Try again.";
+  }
+}
+
+async function completeCodexSignIn(): Promise<void> {
+  if (!codexOAuthState.value) {
+    codexSignInError.value = "Start the sign-in first.";
+    return;
+  }
+  if (!codexRedirectUrl.value.trim()) {
+    codexSignInError.value = "Paste the redirect URL from your browser.";
+    return;
+  }
+  codexSigningIn.value = true;
+  codexSignInError.value = "";
+  try {
+    const { config, account_id } = await credentialsApi.codexOAuthComplete(
+      codexOAuthState.value,
+      codexRedirectUrl.value.trim(),
+    );
+    codexOAuthConfig.value = config;
+    codexSignedInAccount.value = account_id || "ChatGPT account";
+    codexRedirectUrl.value = "";
+  } catch (error) {
+    codexSignInError.value =
+      (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+      "ChatGPT sign-in failed. Restart and try again.";
+  } finally {
+    codexSigningIn.value = false;
+  }
+}
+
 function buildConfig(): CredentialConfig {
   if (type.value === "openai") {
     return { api_key: apiKey.value };
   } else if (type.value === "codex") {
-    return { access_token: codexAccessToken.value.trim() };
+    if (codexAuthMode.value === "chatgpt" && codexOAuthConfig.value) {
+      return codexOAuthConfig.value as unknown as CredentialConfig;
+    }
+    return { access_token: codexAccessToken.value.trim(), auth_mode: "access_token" };
   } else if (type.value === "google") {
     return { api_key: apiKey.value };
   } else if (type.value === "github") {
@@ -1225,6 +1296,7 @@ async function handleSave(): Promise<void> {
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
         (apiKey.value.trim() ||
           codexAccessToken.value.trim() ||
+          !!codexOAuthConfig.value ||
           baseUrl.value.trim() ||
           bearerToken.value.trim() ||
           headerKeyChanged ||
@@ -1409,40 +1481,106 @@ async function handleSave(): Promise<void> {
         </p>
       </div>
 
-      <div
-        v-if="type === 'codex'"
-        class="space-y-2"
-      >
-        <Label for="cred-codex-access-token">Access Token</Label>
-        <div class="relative">
-          <Input
-            id="cred-codex-access-token"
-            v-model="codexAccessToken"
-            :type="showApiKey ? 'text' : 'password'"
-            :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Codex access token'"
+      <template v-if="type === 'codex'">
+        <div class="space-y-2">
+          <Label>Authentication</Label>
+          <Select
+            :model-value="codexAuthMode"
+            :options="[
+              { value: 'chatgpt', label: 'Sign in with ChatGPT (subscription, no API cost)' },
+              { value: 'access_token', label: 'Access token' },
+            ]"
             :disabled="saving"
-            class="pr-10"
+            @update:model-value="codexAuthMode = $event as 'chatgpt' | 'access_token'"
           />
-          <button
-            type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            @click="showApiKey = !showApiKey"
-          >
-            <EyeOff
-              v-if="showApiKey"
-              class="w-4 h-4"
-            />
-            <Eye
-              v-else
-              class="w-4 h-4"
-            />
-          </button>
         </div>
-        <p class="text-xs text-muted-foreground">
-          Paste a ChatGPT/Codex access token. API keys are intentionally not accepted for this
-          credential type.
-        </p>
-      </div>
+
+        <div
+          v-if="codexAuthMode === 'chatgpt'"
+          class="space-y-2"
+        >
+          <div
+            v-if="codexOAuthConfig || (isEditing && codexSignedInAccount)"
+            class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400"
+          >
+            Connected to ChatGPT{{ codexSignedInAccount ? ` (${codexSignedInAccount})` : "" }}.
+            <template v-if="isEditing && !codexOAuthConfig">
+              Sign in again only if you need to reconnect.
+            </template>
+          </div>
+
+          <div class="space-y-2">
+            <Button
+              type="button"
+              variant="outline"
+              :disabled="saving || codexSigningIn"
+              class="w-full"
+              @click="startCodexSignIn"
+            >
+              {{ codexOAuthConfig || codexSignedInAccount ? "Re-sign in with ChatGPT" : "Sign in with ChatGPT" }}
+            </Button>
+            <p class="text-xs text-muted-foreground">
+              A new tab opens the OpenAI sign-in. After you authorize, your browser lands on a
+              <code class="bg-muted px-1 rounded">localhost:1455</code> page (it may fail to load —
+              that is expected). Copy that full URL from the address bar and paste it below.
+            </p>
+            <Input
+              v-model="codexRedirectUrl"
+              placeholder="http://localhost:1455/auth/callback?code=..."
+              :disabled="saving || codexSigningIn || !codexOAuthState"
+            />
+            <Button
+              type="button"
+              :disabled="saving || codexSigningIn || !codexOAuthState || !codexRedirectUrl.trim()"
+              class="w-full"
+              @click="completeCodexSignIn"
+            >
+              {{ codexSigningIn ? "Finishing sign-in..." : "Finish sign-in" }}
+            </Button>
+            <p
+              v-if="codexSignInError"
+              class="text-xs text-destructive"
+            >
+              {{ codexSignInError }}
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="space-y-2"
+        >
+          <Label for="cred-codex-access-token">Access Token</Label>
+          <div class="relative">
+            <Input
+              id="cred-codex-access-token"
+              v-model="codexAccessToken"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Codex access token'"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Paste a ChatGPT/Codex access token. API keys are intentionally not accepted for this
+            credential type.
+          </p>
+        </div>
+      </template>
 
       <template v-if="type === 'linear'">
         <div class="space-y-2">

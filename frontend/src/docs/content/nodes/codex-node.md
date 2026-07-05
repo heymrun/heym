@@ -13,13 +13,14 @@ The **Codex** node runs the OpenAI Codex CLI in an isolated Heym workspace again
 
 ## Authentication
 
-Codex uses a dedicated **OpenAI Codex** credential with one field:
+The **OpenAI Codex** credential supports two authentication modes:
 
-| Field | Description |
-|-------|-------------|
-| `access_token` | ChatGPT/Codex access token used only by the local Codex runner |
+| Mode | Description |
+|------|-------------|
+| **Sign in with ChatGPT** (recommended) | OAuth (PKCE) sign-in that uses your ChatGPT Plus/Pro subscription, so runs do **not** incur per-token API costs. Click **Sign in with ChatGPT** in the credential dialog, authorize in your browser, then paste the `localhost:1455` redirect URL back into Heym. Heym stores the resulting token bundle and refreshes it automatically as it expires. |
+| **Access token** | Paste a ChatGPT/Codex `access_token` used only by the local Codex runner. |
 
-API keys are not accepted for the Codex credential. The node does not submit cloud Codex tasks; it clones the repository inside the Heym runtime, passes `CODEX_ACCESS_TOKEN` only to the Codex process, and keeps the token out of `$credentials`.
+API keys are not accepted for the Codex credential. The node does not submit cloud Codex tasks; it clones the repository inside the Heym runtime, writes the ChatGPT token bundle to an isolated `auth.json` (or passes `CODEX_ACCESS_TOKEN`) only to the Codex process, and keeps the token out of `$credentials`.
 
 The node also requires a **GitHub** credential for cloning private repositories, pushing the working branch, and creating draft pull requests.
 
@@ -34,7 +35,7 @@ OpenAI references:
 
 | Field | Description |
 |-------|-------------|
-| Codex Credential | OpenAI Codex credential containing `access_token` |
+| Codex Credential | OpenAI Codex credential (ChatGPT sign-in or `access_token`) |
 | GitHub Credential | GitHub PAT credential used for repository access |
 | Repository URL | HTTPS GitHub repository URL |
 | Base Branch | Branch to clone before Codex runs, default `main` |
@@ -63,6 +64,10 @@ OpenAI references:
 If Codex needs missing requirements or a product decision, it returns `needs_input`. Heym pauses the execution and exposes a `question` output handle. Connect that handle to a notification branch, for example Slack or Send Email, to send the reviewer the public follow-up link.
 
 When the reviewer answers, Heym resumes the same execution snapshot and Codex thread from the saved workspace metadata.
+
+## As an agent tool
+
+The Codex node can be attached to an **AI Agent** node's tool handle so the agent can delegate coding tasks. Configure the credential, GitHub credential, and repository on the node, then mark **Task Prompt** (and optionally **Repository URL**) with the agent-provided toggle so the agent supplies them at call time. When Codex runs as a tool, a `needs_input` result is returned inline to the agent instead of pausing the workflow, so the agent can refine the request and call Codex again.
 
 ## Example
 

@@ -1280,6 +1280,25 @@ export const credentialsApi = {
     );
     return response.data;
   },
+
+  codexOAuthStart: async (): Promise<{ authorize_url: string; state: string }> => {
+    const response = await api.post<{ authorize_url: string; state: string }>(
+      "/credentials/codex/oauth/start",
+      {},
+    );
+    return response.data;
+  },
+
+  codexOAuthComplete: async (
+    state: string,
+    redirectUrl: string,
+  ): Promise<{ config: Record<string, unknown>; account_id: string }> => {
+    const response = await api.post<{ config: Record<string, unknown>; account_id: string }>(
+      "/credentials/codex/oauth/complete",
+      { state, redirect_url: redirectUrl },
+    );
+    return response.data;
+  },
 };
 
 export interface VoiceInfo {

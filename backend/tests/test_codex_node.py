@@ -153,6 +153,38 @@ class TestCodexNodeHandler(unittest.TestCase):
 
     @patch("app.services.node_execution.nodes.codex_node._load_credentials")
     @patch("app.services.node_execution.nodes.codex_node.CodexRunnerService")
+    def test_chatgpt_auth_is_forwarded_to_runner(
+        self,
+        runner_cls: MagicMock,
+        load_credentials: MagicMock,
+    ) -> None:
+        chatgpt_config = {
+            "auth_mode": "chatgpt",
+            "access_token": "at",
+            "refresh_token": "rt",
+        }
+        load_credentials.return_value = (chatgpt_config, {"api_key": "ghp-token"})
+        runner = runner_cls.return_value
+        runner.run_task.return_value = CodexRunResult(status="completed", summary="Done")
+
+        codex_node.execute(
+            self._ctx(
+                {
+                    "label": "CodexFix",
+                    "credentialId": "codex-id",
+                    "githubCredentialId": "github-id",
+                    "repositoryUrl": "https://github.com/acme/app",
+                    "taskPrompt": "$input.text",
+                }
+            )
+        )
+
+        request = runner.run_task.call_args.args[0]
+        self.assertEqual(request.codex_auth["auth_mode"], "chatgpt")
+        self.assertEqual(request.codex_auth["refresh_token"], "rt")
+
+    @patch("app.services.node_execution.nodes.codex_node._load_credentials")
+    @patch("app.services.node_execution.nodes.codex_node.CodexRunnerService")
     def test_needs_input_returns_pending_node_result_with_codex_metadata(
         self,
         runner_cls: MagicMock,

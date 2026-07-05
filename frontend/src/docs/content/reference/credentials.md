@@ -13,7 +13,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | Node type | Typical credential | Purpose |
 |-----------|--------------------|---------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
-| [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | Codex access token for the runner and GitHub PAT for repository operations |
+| [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
 | [Linear](../nodes/linear-node.md) | Linear | Personal API key or OAuth2 for teams, projects, issues, and comments |
 | [HTTP](../nodes/http-node.md) | Bearer, Header | Auth for requests |
@@ -53,7 +53,7 @@ Notion setup details.
 
 Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression.
 
-Codex credentials are intentionally excluded from `$credentials`. The `access_token` is only passed to the local Codex runner process.
+Codex credentials are intentionally excluded from `$credentials`. Whether you sign in with ChatGPT (subscription, no per-token API cost) or paste a Codex `access_token`, the tokens are only passed to the local Codex runner process. ChatGPT sign-in tokens are refreshed automatically as they expire.
 
 | Credential type | Value exposed to `$credentials.Name` |
 |-----------------|--------------------------------------|

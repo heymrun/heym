@@ -124,9 +124,9 @@ See also [LLM](../nodes/llm-node.md), [Agent Architecture](./agent-architecture.
 
 #### [Codex](../nodes/codex-node.md)
 
-The Codex node runs the OpenAI Codex CLI inside an isolated Heym workspace. It accepts a Codex access-token credential, a GitHub credential, repository URL, base branch, task prompt, publish mode (`diff_only` or `draft_pr`), branch name, timeout, and optional setup command. The runner clones the repository locally, passes `CODEX_ACCESS_TOKEN` only to the Codex process, and returns a structured summary, validation notes, changed files, diff, usage metadata, and an optional draft PR URL.
+The Codex node runs the OpenAI Codex CLI inside an isolated Heym workspace. It accepts a Codex credential (sign in with ChatGPT to use your subscription without per-token API costs, or paste an access token), a GitHub credential, repository URL, base branch, task prompt, publish mode (`diff_only` or `draft_pr`), branch name, timeout, and optional setup command. The runner clones the repository locally, passes the ChatGPT token bundle or `CODEX_ACCESS_TOKEN` only to the Codex process, and returns a structured summary, validation notes, changed files, diff, usage metadata, and an optional draft PR URL.
 
-When Codex returns `needs_input`, the workflow pauses and exposes the `question` branch. Connect that branch to Slack, email, or another notification node; the public follow-up link resumes the saved execution snapshot after the answer is submitted.
+When Codex returns `needs_input`, the workflow pauses and exposes the `question` branch. Connect that branch to Slack, email, or another notification node; the public follow-up link resumes the saved execution snapshot after the answer is submitted. The Codex node can also be attached to an AI Agent as a tool, letting the agent delegate coding tasks; as a tool, a `needs_input` result is returned inline to the agent instead of pausing the workflow.
 
 See also [GitHub](../nodes/github-node.md), [Credentials](./credentials.md), [Credentials Sharing](./credentials-sharing.md), and [Node Types](./node-types.md).
 

@@ -80,6 +80,11 @@ export interface CredentialConfigOpenAI {
 
 export interface CredentialConfigCodex {
   access_token: string;
+  auth_mode?: "chatgpt" | "access_token";
+  refresh_token?: string;
+  id_token?: string;
+  account_id?: string;
+  expires_at?: string | null;
 }
 
 export interface CredentialConfigGoogle {

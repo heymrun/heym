@@ -83,13 +83,14 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 
 ## OpenAI Codex
 
-The OpenAI Codex credential stores a ChatGPT/Codex access token for the [Codex node](../nodes/codex-node.md). It is separate from the OpenAI API key credential used by LLM, Agent, and RAG nodes.
+The OpenAI Codex credential authenticates the [Codex node](../nodes/codex-node.md). It is separate from the OpenAI API key credential used by LLM, Agent, and RAG nodes.
 
-### Required Fields
+### Authentication Modes
 
-| Field | Description |
-|-------|-------------|
-| `access_token` | Codex access token passed only to the local Codex CLI process |
+| Mode | Description |
+|------|-------------|
+| **Sign in with ChatGPT** (recommended) | OAuth (PKCE) sign-in that uses your ChatGPT Plus/Pro subscription, so runs avoid per-token API costs. Heym stores and auto-refreshes the token bundle. |
+| **Access token** | A ChatGPT/Codex `access_token` passed only to the local Codex CLI process. |
 
 ### Notes
 

@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     codex_workspace_dir: str = Field(
         default="./data/codex-workspaces", validation_alias="HEYM_CODEX_WORKSPACE_DIR"
     )
+    # ChatGPT-subscription OAuth (PKCE) for the Codex node. Defaults mirror the public OpenAI
+    # Codex CLI client; override via env if OpenAI changes the client id or endpoints.
+    codex_oauth_client_id: str = Field(
+        default="app_EMoamEEZ73f0CkXaXp7hrann", validation_alias="HEYM_CODEX_OAUTH_CLIENT_ID"
+    )
+    codex_oauth_issuer: str = Field(
+        default="https://auth.openai.com", validation_alias="HEYM_CODEX_OAUTH_ISSUER"
+    )
+    codex_oauth_redirect_uri: str = Field(
+        default="http://localhost:1455/auth/callback",
+        validation_alias="HEYM_CODEX_OAUTH_REDIRECT_URI",
+    )
     # Keep above file_max_size_mb so multipart metadata can fit around a max-size file.
     request_body_max_size_mb: int = 100
     mcp_protocol_max_concurrency: int = 20
