@@ -27,7 +27,7 @@ class TestCodexRunnerAuth(unittest.TestCase):
                 "account_id": "acct-1",
             },
         )
-        auth_path = self.workspace / ".codex-home" / "auth.json"
+        auth_path = self.runner._codex_home_dir(self.workspace) / "auth.json"
         self.assertTrue(auth_path.exists())
         payload = json.loads(auth_path.read_text())
         self.assertEqual(payload["auth_mode"], "chatgpt")
@@ -35,6 +35,13 @@ class TestCodexRunnerAuth(unittest.TestCase):
         self.assertEqual(payload["tokens"]["access_token"], "at-1")
         self.assertEqual(payload["tokens"]["refresh_token"], "rt-1")
         self.assertEqual(payload["tokens"]["account_id"], "acct-1")
+
+    def test_codex_home_is_outside_repo_workspace(self) -> None:
+        # CODEX_HOME (auth.json token bundle) must never live inside the cloned repo.
+        home = self.runner._codex_home_dir(self.workspace)
+        self.assertFalse(str(home).startswith(str(self.workspace) + "/"))
+        env = self.runner._codex_env(self.workspace, "")
+        self.assertFalse(env["CODEX_HOME"].startswith(str(self.workspace) + "/"))
 
     def test_write_chatgpt_auth_requires_tokens(self) -> None:
         with self.assertRaises(ValueError):
@@ -81,7 +88,13 @@ class TestCodexRunnerAuth(unittest.TestCase):
         self.assertIn("definitely-not-git-xyz", str(ctx.exception))
 
     def _run_exec_with(
-        self, model: str = "", *, returncode: int = 0, stdout: str = "{}", stderr: str = ""
+        self,
+        model: str = "",
+        *,
+        returncode: int = 0,
+        stdout: str = "{}",
+        stderr: str = "",
+        resume_thread_id: str | None = None,
     ) -> list[str]:
         import subprocess
         from unittest.mock import patch
@@ -97,11 +110,21 @@ class TestCodexRunnerAuth(unittest.TestCase):
                 workspace=self.workspace,
                 prompt="do it",
                 timeout_seconds=60.0,
-                resume_thread_id=None,
+                resume_thread_id=resume_thread_id,
                 codex_access_token="",
                 model=model,
             )
         return captured["cmd"]
+
+    def test_resume_command_uses_valid_flags(self) -> None:
+        # `codex exec resume` has no --sandbox flag; sandbox is set via config, and the session id
+        # is a positional before the prompt.
+        cmd = self._run_exec_with("gpt-5.4", resume_thread_id="sess-123")
+        self.assertEqual(cmd[:3], [self.runner.cli_command, "exec", "resume"])
+        self.assertNotIn("--sandbox", cmd)
+        self.assertIn('sandbox_mode="workspace-write"', cmd)
+        self.assertIn("sess-123", cmd)
+        self.assertLess(cmd.index("sess-123"), cmd.index("do it"))
 
     def test_model_flag_added_when_set(self) -> None:
         cmd = self._run_exec_with("gpt-5.4")

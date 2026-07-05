@@ -292,6 +292,9 @@ class CodexRunnerService:
         workspace = Path(request.workspace_path).resolve()
         if not workspace.exists() or not workspace.is_dir():
             raise ValueError("Codex workspace is no longer available")
+        # Defense for workspaces created before CODEX_HOME moved out of the repo: keep any stale
+        # in-repo scaffolding out of git so a resume never stages/pushes a leftover auth.json.
+        self._exclude_runner_files(workspace)
         self._authenticate(
             workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
         )
@@ -370,6 +373,12 @@ class CodexRunnerService:
         except OSError:
             pass
 
+    @staticmethod
+    def _codex_home_dir(workspace: Path) -> Path:
+        """CODEX_HOME lives OUTSIDE the cloned repo (a sibling dir) so its auth.json token bundle
+        can never be staged or pushed by commit/PR modes, on fresh runs or resumes."""
+        return Path(f"{workspace}.codex-home")
+
     def _authenticate(
         self,
         workspace: Path,
@@ -388,7 +397,7 @@ class CodexRunnerService:
         self._codex_login(workspace, access_token, timeout_seconds)
 
     def _write_chatgpt_auth(self, workspace: Path, codex_auth: dict) -> None:
-        codex_home = workspace / ".codex-home"
+        codex_home = self._codex_home_dir(workspace)
         codex_home.mkdir(parents=True, exist_ok=True)
         access_token = str(codex_auth.get("access_token") or "").strip()
         id_token = str(codex_auth.get("id_token") or "").strip()
@@ -411,7 +420,7 @@ class CodexRunnerService:
         auth_path.chmod(0o600)
 
     def _codex_login(self, workspace: Path, access_token: str, timeout_seconds: float) -> None:
-        codex_home = workspace / ".codex-home"
+        codex_home = self._codex_home_dir(workspace)
         codex_home.mkdir(parents=True, exist_ok=True)
         env = self._codex_env(workspace, access_token)
         try:
@@ -456,31 +465,32 @@ class CodexRunnerService:
         codex_access_token: str,
         model: str = "",
     ) -> CodexRunResult:
-        schema_path = workspace / ".codex-output-schema.json"
+        # Write the schema outside the repo (in CODEX_HOME) so it is never a git candidate.
+        codex_home = self._codex_home_dir(workspace)
+        codex_home.mkdir(parents=True, exist_ok=True)
+        schema_path = codex_home / "output-schema.json"
         schema_path.write_text(json.dumps(CODEX_FINAL_OUTPUT_SCHEMA), encoding="utf-8")
         cmd = [self.cli_command, "exec"]
         if resume_thread_id:
-            cmd.extend(["resume", resume_thread_id])
+            cmd.append("resume")
         if model.strip():
             cmd.extend(["--model", model.strip()])
-        cmd.extend(
-            [
-                "--json",
-                "--output-schema",
-                str(schema_path),
-                "--sandbox",
-                "workspace-write",
-                # `codex exec` has no --ask-for-approval flag; set the policy via config override
-                # so it runs autonomously without prompting.
-                "-c",
-                'approval_policy="never"',
-                # Skip the plugin/skill marketplace download — the runner uses a fresh CODEX_HOME
-                # per run, so leaving it on re-clones hundreds of files every execution.
-                "--disable",
-                "plugins",
-                prompt,
-            ]
-        )
+        cmd.extend(["--json", "--output-schema", str(schema_path)])
+        # `codex exec` has no --ask-for-approval flag; set the policy via config override so it
+        # runs autonomously without prompting.
+        cmd.extend(["-c", 'approval_policy="never"'])
+        if resume_thread_id:
+            # `codex exec resume` rejects --sandbox; set the sandbox via config override instead.
+            cmd.extend(["-c", 'sandbox_mode="workspace-write"'])
+        else:
+            cmd.extend(["--sandbox", "workspace-write"])
+        # Skip the plugin/skill marketplace download — the runner uses a fresh CODEX_HOME per run,
+        # so leaving it on re-clones hundreds of files every execution.
+        cmd.extend(["--disable", "plugins"])
+        # For resume, the positional session id precedes the prompt: `resume [OPTIONS] <ID> [PROMPT]`.
+        if resume_thread_id:
+            cmd.append(resume_thread_id)
+        cmd.append(prompt)
         try:
             completed = subprocess.run(
                 cmd,
@@ -713,7 +723,7 @@ class CodexRunnerService:
 
     def _codex_env(self, workspace: Path, access_token: str) -> dict[str, str]:
         env = self._safe_env()
-        env["CODEX_HOME"] = str(workspace / ".codex-home")
+        env["CODEX_HOME"] = str(self._codex_home_dir(workspace))
         if access_token:
             env["CODEX_ACCESS_TOKEN"] = access_token
         return env
@@ -745,6 +755,8 @@ class CodexRunnerService:
         if path == root or root not in path.parents:
             return
         shutil.rmtree(path, ignore_errors=True)
+        # Remove the external CODEX_HOME sibling (holds the token bundle) as well.
+        shutil.rmtree(self._codex_home_dir(path), ignore_errors=True)
 
     @staticmethod
     def _build_prompt(task_prompt: str, publish_mode: str) -> str:

@@ -35,7 +35,7 @@ import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isRetry
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
-import { aiApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
+import { aiApi, codexFollowupApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
@@ -750,8 +750,90 @@ function getHitlDisplayDraftText(payload: HITLPendingPayload): string {
   return getDedupedReviewText(payload.draftText, payload.summary);
 }
 
+interface CodexPendingPayload {
+  summary: string;
+  question: string;
+  answerUrl: string;
+  requestId: string;
+  shareText: string | null;
+}
+
+function getCodexPendingPayload(output: unknown): CodexPendingPayload | null {
+  if (!output || typeof output !== "object") return null;
+  const o = output as Record<string, unknown>;
+  if (o.status !== "needs_input") return null;
+  const answerUrl = typeof o.answerUrl === "string" ? o.answerUrl : "";
+  const question = typeof o.question === "string" ? o.question : "";
+  if (!answerUrl && !question) return null;
+  return {
+    summary: typeof o.summary === "string" ? o.summary : "",
+    question,
+    answerUrl,
+    requestId: typeof o.requestId === "string" ? o.requestId : "",
+    shareText: typeof o.shareText === "string" ? o.shareText : null,
+  };
+}
+
+const codexAnswerTextByRequestId = ref<Record<string, string>>({});
+const codexSubmittingRequestId = ref<string | null>(null);
+const codexSubmittedRequestIds = ref<Set<string>>(new Set());
+const codexErrorByRequestId = ref<Record<string, string>>({});
+
+function getCodexAnswerText(requestId: string): string {
+  return codexAnswerTextByRequestId.value[requestId] ?? "";
+}
+function setCodexAnswerText(requestId: string, value: string): void {
+  codexAnswerTextByRequestId.value = { ...codexAnswerTextByRequestId.value, [requestId]: value };
+}
+function isCodexSubmitting(requestId: string): boolean {
+  return codexSubmittingRequestId.value === requestId;
+}
+function isCodexSubmitted(requestId: string): boolean {
+  return codexSubmittedRequestIds.value.has(requestId);
+}
+function getCodexError(requestId: string): string | null {
+  return codexErrorByRequestId.value[requestId] || null;
+}
+function codexTokenFromUrl(url: string): string {
+  const path = url.split("?")[0].replace(/\/+$/, "");
+  const parts = path.split("/").filter(Boolean);
+  return parts[parts.length - 1] || "";
+}
+async function submitCodexAnswer(payload: CodexPendingPayload): Promise<void> {
+  const token = codexTokenFromUrl(payload.answerUrl);
+  const answerText = getCodexAnswerText(payload.requestId).trim();
+  if (!token) return;
+  if (!answerText) {
+    codexErrorByRequestId.value = {
+      ...codexErrorByRequestId.value,
+      [payload.requestId]: "Enter an answer first.",
+    };
+    return;
+  }
+  if (codexSubmittingRequestId.value || isCodexSubmitted(payload.requestId)) return;
+  codexSubmittingRequestId.value = payload.requestId;
+  codexErrorByRequestId.value = { ...codexErrorByRequestId.value, [payload.requestId]: "" };
+  try {
+    await codexFollowupApi.answer(token, { answer_text: answerText });
+    const next = new Set(codexSubmittedRequestIds.value);
+    next.add(payload.requestId);
+    codexSubmittedRequestIds.value = next;
+  } catch {
+    codexErrorByRequestId.value = {
+      ...codexErrorByRequestId.value,
+      [payload.requestId]: "Failed to submit answer. Try the answer page.",
+    };
+  } finally {
+    codexSubmittingRequestId.value = null;
+  }
+}
+
 function shouldShowGenericResultOutput(rawOutput: unknown): boolean {
-  return !getHitlPendingPayload(rawOutput) && getHitlHistory(rawOutput).length === 0;
+  return (
+    !getHitlPendingPayload(rawOutput) &&
+    getHitlHistory(rawOutput).length === 0 &&
+    !getCodexPendingPayload(rawOutput)
+  );
 }
 
 interface HITLResolvedPayload {
@@ -2656,6 +2738,88 @@ function renderContent(content: string): string {
               </div>
             </div>
             <template v-else>
+              <div
+                v-if="getCodexPendingPayload(result.rawOutput)"
+                class="mt-2 rounded border border-sky-500/30 bg-sky-500/10 p-3 text-xs"
+              >
+                <div class="font-medium text-sky-600 dark:text-sky-300">
+                  Codex needs your input
+                </div>
+                <div class="mt-1 whitespace-pre-wrap text-muted-foreground">
+                  {{
+                    getCodexPendingPayload(result.rawOutput)!.question ||
+                      getCodexPendingPayload(result.rawOutput)!.summary
+                  }}
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    class="gap-1"
+                    @click="openExternal(getCodexPendingPayload(result.rawOutput)!.answerUrl)"
+                  >
+                    <ExternalLink class="h-3.5 w-3.5" />
+                    Open Answer Page
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="gap-1"
+                    @click="copyText(getCodexPendingPayload(result.rawOutput)!.answerUrl)"
+                  >
+                    <Copy class="h-3.5 w-3.5" />
+                    Copy Answer Link
+                  </Button>
+                  <Button
+                    v-if="getCodexPendingPayload(result.rawOutput)!.shareText"
+                    variant="outline"
+                    size="sm"
+                    class="gap-1"
+                    @click="copyText(getCodexPendingPayload(result.rawOutput)!.shareText!)"
+                  >
+                    <Copy class="h-3.5 w-3.5" />
+                    Copy Share Text
+                  </Button>
+                </div>
+                <div
+                  v-if="!isCodexSubmitted(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                  class="mt-3 space-y-2 border-t border-sky-500/20 pt-3"
+                >
+                  <Textarea
+                    :model-value="getCodexAnswerText(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                    :disabled="isCodexSubmitting(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                    :rows="4"
+                    placeholder="Type your answer for Codex..."
+                    @update:model-value="setCodexAnswerText(getCodexPendingPayload(result.rawOutput)!.requestId, $event)"
+                  />
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      v-if="getCodexError(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                      class="text-destructive"
+                    >
+                      {{ getCodexError(getCodexPendingPayload(result.rawOutput)!.requestId) }}
+                    </span>
+                    <span v-else />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      class="gap-1"
+                      :loading="isCodexSubmitting(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                      :disabled="isCodexSubmitting(getCodexPendingPayload(result.rawOutput)!.requestId)"
+                      @click="submitCodexAnswer(getCodexPendingPayload(result.rawOutput)!)"
+                    >
+                      <Send class="h-3.5 w-3.5" />
+                      Submit Answer
+                    </Button>
+                  </div>
+                </div>
+                <div
+                  v-else
+                  class="mt-3 rounded border border-sky-500/20 bg-background/60 px-3 py-2 text-muted-foreground"
+                >
+                  Answer submitted. Codex is resuming.
+                </div>
+              </div>
               <div
                 v-if="getHitlPendingPayload(result.rawOutput)"
                 class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs"
