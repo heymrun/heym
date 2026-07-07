@@ -59,17 +59,29 @@ function circleToCirclePath(
   return { edgePath, labelX, labelY };
 }
 
+/** Vue Flow's computedPosition is the node box's top-left corner, not its center. Since
+ * flowNodes now sets each node's width/height to exactly its circle's diameter (see
+ * AgentMemoryGraphDialog.vue), the circle's true center is always top-left + radius on both
+ * axes — this no longer drifts with caption text width the way the old flex-centered layout
+ * did (that made the box wider than the circle, so computedPosition-as-center pointed at the
+ * box's center, not the circle's). */
+function circleCenterOf(nodeComputedPosition: { x: number; y: number }, radius: number): { x: number; y: number } {
+  return { x: nodeComputedPosition.x + radius, y: nodeComputedPosition.y + radius };
+}
+
 const path = computed(() => {
   const sourceNode = findNode(props.source);
   const targetNode = findNode(props.target);
   if (!sourceNode || !targetNode) {
     return { edgePath: "", labelX: props.sourceX, labelY: props.sourceY };
   }
+  const sourceRadius = radiusOf(props.source);
+  const targetRadius = radiusOf(props.target);
   return circleToCirclePath(
-    sourceNode.position,
-    radiusOf(props.source),
-    targetNode.position,
-    radiusOf(props.target),
+    circleCenterOf(sourceNode.computedPosition, sourceRadius),
+    sourceRadius,
+    circleCenterOf(targetNode.computedPosition, targetRadius),
+    targetRadius,
     pathCurvatureFromData(),
   );
 });
@@ -187,12 +199,13 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
   <EdgeLabelRenderer>
     <div
       v-if="relationshipLabel && isActive()"
-      class="agent-memory-edge-label nodrag nopan pointer-events-none max-w-[220px] text-center"
+      class="agent-memory-edge-label nodrag nopan pointer-events-none max-w-[220px] text-center transition-opacity duration-150"
       :style="{
         position: 'absolute',
         left: 0,
         top: 0,
         transform: `translate(-50%, -50%) translate(${path.labelX}px, ${path.labelY}px)`,
+        opacity: revealProgress >= 0.98 ? 1 : 0,
       }"
     >
       <span

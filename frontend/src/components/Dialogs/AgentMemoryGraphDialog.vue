@@ -262,11 +262,6 @@ function toggleLabels(): void {
   }, COMPACT_MODE_ANIMATION_MS);
 }
 
-function flowNodeRadius(data: Record<string, unknown> | undefined): number {
-  const r = data?.radius;
-  return typeof r === "number" ? r : 20;
-}
-
 function flowNodeColor(data: Record<string, unknown> | undefined): string {
   const c = data?.color;
   return typeof c === "string" ? c : "#60a5fa";
@@ -391,9 +386,18 @@ const flowNodes = computed<Node[]>(() => {
   const degrees = computeDegrees(g.nodes, g.edges);
   return g.nodes.map((node) => {
     const degree = degrees.get(node.id) ?? 0;
+    const diameter = nodeRadius(degree) * 2;
     return {
       id: node.id,
       type: "default",
+      // Fix the node's own box to exactly the circle's size (not the wider/taller box a
+      // flex-centered caption would otherwise produce) so `computedPosition` + radius is a
+      // reliable, caption-independent way to find the circle's true center — see
+      // AgentMemoryGraphEdge.vue's circleToCirclePath, which depends on this invariant to draw
+      // edges to the actual rendered rim instead of drifting toward wherever a wide caption
+      // happened to push the node's hit-box.
+      width: diameter,
+      height: diameter,
       position: knownPositions.value.get(node.id) ??
         seeds.get(node.id) ?? { x: 480, y: 320 },
       data: {
@@ -721,7 +725,7 @@ watch(graphCanvasFullscreen, (fs, wasFs) => {
 });
 
 function onNodeClick(ev: { node: Node }): void {
-  selectedNodeId.value = ev.node.id;
+  selectedNodeId.value = selectedNodeId.value === ev.node.id ? null : ev.node.id;
 }
 
 function onPaneClick(): void {
@@ -1313,24 +1317,22 @@ function handleDialogEscape(event: KeyboardEvent): void {
             @delete-selection="onFlowDeleteSelection"
           >
             <template #node-default="{ id, data }">
-              <div
-                class="agent-memory-node-inner flex flex-col items-center gap-1 cursor-pointer select-none"
-              >
+              <!-- Sized to exactly fill the node's own box (width/height = diameter, set in
+                   flowNodes) so computedPosition + radius reliably lands on the circle's true
+                   center — the caption is an absolutely-positioned overlay precisely so it
+                   cannot widen/heighten this box the way a normal flex sibling would. -->
+              <div class="agent-memory-node-inner relative w-full h-full cursor-pointer select-none">
                 <div
-                  class="agent-memory-node-circle rounded-full shadow-sm"
+                  class="agent-memory-node-circle absolute inset-0 rounded-full shadow-sm"
                   :class="[
                     selectedNodeId === id ? 'ring-2 ring-pink-500 ring-offset-2 ring-offset-background' : '',
                     isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
                   ]"
-                  :style="{
-                    width: `${flowNodeRadius(data) * 2}px`,
-                    height: `${flowNodeRadius(data) * 2}px`,
-                    background: flowNodeColor(data),
-                  }"
+                  :style="{ background: flowNodeColor(data) }"
                 />
                 <div
                   v-if="!labelsHidden"
-                  class="agent-memory-node-caption max-w-[110px] truncate text-center text-[10px] font-medium text-foreground"
+                  class="agent-memory-node-caption absolute left-1/2 top-full mt-1 max-w-[110px] -translate-x-1/2 truncate text-center text-[10px] font-medium text-foreground"
                   :class="isNodeDimmed(id) ? 'agent-memory-node-dimmed' : ''"
                 >
                   {{ flowNodeTitle(data) }}
@@ -1736,7 +1738,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
 
 .agent-memory-graph-flow :deep(.vue-flow__node-default) {
   padding: 0 !important;
-  width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
   background: transparent !important;
