@@ -1961,6 +1961,16 @@ function handleDialogEscape(event: KeyboardEvent): void {
   outline: none !important;
 }
 
+/* Vue Flow's own DOM order paints .vue-flow__nodes (node captions included) above
+   .vue-flow__edge-labels, and neither sets a z-index — so a dimmed background node's caption
+   that happens to land where a relationship label sits would otherwise paint over it instead of
+   behind it. Raise the labels layer above nodes; it's pointer-events:none already (both from Vue
+   Flow's own base style and our own label div), so this is purely visual and doesn't block
+   clicking/dragging the node underneath. */
+.agent-memory-graph-flow :deep(.vue-flow__edge-labels) {
+  z-index: 5;
+}
+
 .agent-memory-graph-flow :deep(.vue-flow__edge-textbg) {
   fill: hsl(var(--card)) !important;
 }
