@@ -2367,13 +2367,17 @@ class WorkflowExecutor:
     def get_node_inputs_for_edges(self, node_id: str, edges: list[dict]) -> dict:
         inputs = {}
         execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
         for edge in edges:
             if edge["target"] == node_id:
                 source_id = edge["source"]
-                if source_id in self.node_outputs and source_id not in self.skipped_nodes:
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
                     source_label = self.get_node_label(source_id)
-                    source_output = self.node_outputs[source_id]
-                    execution_context.update(self.node_execution_contexts.get(source_id, {}))
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
                     execution_context[source_label] = source_output
                     inputs[source_label] = source_output
         if execution_context:
@@ -2383,13 +2387,17 @@ class WorkflowExecutor:
     def get_node_inputs(self, node_id: str) -> dict:
         inputs = {}
         execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
         for edge in self.edges:
             if edge["target"] == node_id:
                 source_id = edge["source"]
-                if source_id in self.node_outputs and source_id not in self.skipped_nodes:
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
                     source_label = self.get_node_label(source_id)
-                    source_output = self.node_outputs[source_id]
-                    execution_context.update(self.node_execution_contexts.get(source_id, {}))
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
                     execution_context[source_label] = source_output
                     inputs[source_label] = source_output
         if execution_context:

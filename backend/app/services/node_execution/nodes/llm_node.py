@@ -176,7 +176,14 @@ def execute(ctx: NodeExecutionContext) -> object:
             )
             output["failed"] = sum(1 for item in parsed_results if item.get("status") != "success")
         else:
-            parsed = self._parse_json_output(str(output.get("text", "")))
+            try:
+                parsed = self._parse_json_output(str(output.get("text", "")))
+            except Exception as exc:
+                if trace_id:
+                    raise NodeTraceableExecutionError(
+                        f"LLM JSON parse error: {exc}", trace_id
+                    ) from exc
+                raise ValueError(f"LLM JSON parse error: {exc}") from exc
             if isinstance(parsed, dict):
                 output = dict(parsed)
             else:

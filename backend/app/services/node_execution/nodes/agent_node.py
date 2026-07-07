@@ -43,11 +43,18 @@ def execute(ctx: NodeExecutionContext) -> object:
     pending_meta = output.pop("_hitl_pending", None)
     if agent_json_output_enabled and not output.get("error"):
         agent_output = output
-        parsed = self._parse_json_output(str(output.get("text", "")))
-        if isinstance(parsed, dict):
-            output = dict(parsed)
-        else:
-            output = {"value": parsed}
+        try:
+            parsed = self._parse_json_output(str(output.get("text", "")))
+            if isinstance(parsed, dict):
+                output = dict(parsed)
+            else:
+                output = {"value": parsed}
+        except Exception as exc:
+            if trace_id:
+                raise NodeTraceableExecutionError(
+                    f"Agent JSON parse error: {exc}", trace_id
+                ) from exc
+            raise ValueError(f"Agent JSON parse error: {exc}") from exc
         if agent_output.get("fallbackUsed") is not None:
             output["fallbackUsed"] = agent_output["fallbackUsed"]
         if agent_output.get("model"):
