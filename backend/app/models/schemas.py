@@ -472,6 +472,7 @@ class CredentialType(str, Enum):
     codex = "codex"
     google = "google"
     github = "github"
+    jira = "jira"
     linear = "linear"
     custom = "custom"
     bearer = "bearer"
@@ -515,6 +516,13 @@ class CredentialConfigGoogle(BaseModel):
 class CredentialConfigGitHub(BaseModel):
     api_key: str
     base_url: str | None = None
+
+
+class CredentialConfigJira(BaseModel):
+    email: str
+    api_token: str
+    base_url: str
+    api_version: str | None = None
 
 
 class CredentialConfigLinear(BaseModel):

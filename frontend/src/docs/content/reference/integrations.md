@@ -14,6 +14,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenAI Codex** | [Codex](../nodes/codex-node.md) | `access_token` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
+| **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, optional `api_version` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
@@ -149,6 +150,41 @@ OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and re
 ### Used By
 
 - [Linear node](../nodes/linear-node.md)
+
+---
+
+## Jira
+
+The Jira credential stores an Atlassian account email, Jira API token, Jira site base URL, and optional REST API version for the [Jira node](../nodes/jira-node.md). Heym defaults to Jira REST API v3 for Jira Cloud; use `api_version` `2` for older Jira Server or Data Center sites.
+
+### Setup
+
+1. In Atlassian account settings, create an API token.
+2. In Heym Dashboard → **Credentials** → **New** → type **Jira**.
+3. Enter the Atlassian email, API token, and Jira site URL such as `https://your-domain.atlassian.net`.
+4. Use **Test Connection** to verify the credential.
+
+### Fields
+
+| Field | Description |
+| --- | --- |
+| `email` | Atlassian account email |
+| `api_token` | Jira API token |
+| `base_url` | Jira site base URL |
+| `api_version` | REST API version; defaults to `3` for Jira Cloud |
+
+### Notes
+
+- The Jira node sends issue descriptions and comments as Atlassian Document Format text documents.
+- Attachment upload accepts base64 or data URL content and is subject to the platform file size limit (default 99 MB). Attachment download can return base64 content when enabled.
+- User creation, deletion, and issue notification require the authenticated Jira account to have the relevant Jira site or organization permissions.
+- Use List Projects, Search Issues, and List Transitions to discover project keys, issue keys, and transition IDs.
+- For custom endpoints not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token`) in the cURL command, or a Header credential with `Authorization: Basic <base64(email:api_token)>`.
+
+See also:
+
+- [Jira node](../nodes/jira-node.md)
+- [Credentials](./credentials.md)
 
 ---
 

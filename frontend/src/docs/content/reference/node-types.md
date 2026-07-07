@@ -59,6 +59,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Redis](../nodes/redis-node.md) | Redis operations (set, get, hasKey, deleteKey) | 1 | 1 |
 | [Grist](../nodes/grist-node.md) | Read/write Grist spreadsheets | 1 | 1 |
 | [GitHub](../nodes/github-node.md) | Manage repositories, users, issues, pull requests, reviews, releases, Actions workflows, and files through the GitHub REST API | 1 | 1 |
+| [Jira](../nodes/jira-node.md) | Manage Jira projects, issues, comments, attachments, users, notifications, and workflow transitions through the Jira REST API | 1 | 1 |
 | [Linear](../nodes/linear-node.md) | Manage Linear teams, projects, issues, workflow states, and comments through GraphQL | 1 | 1 |
 | [Google Sheets](../nodes/google-sheets-node.md) | Read/write Google Sheets via OAuth2 | 1 | 1 |
 | [BigQuery](../nodes/bigquery-node.md) | Run SQL queries and insert rows in BigQuery | 1 | 1 |

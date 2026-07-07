@@ -18,6 +18,7 @@ import { createAgentSkillZipBlob, getSkillZipFileName, parseSkillZip } from "@/l
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
+import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jiraExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
 import { getSentryExpressionFields, type SentryExpressionFieldKey } from "@/lib/sentryExpressionFields";
@@ -45,6 +46,14 @@ import {
   githubOperationOptions,
   googleSheetsOperationOptions,
   gristOperationOptions,
+  jiraOperationGroups,
+  jiraAccountIdOperations,
+  jiraAttachmentIdOperations,
+  jiraCommentIdOperations,
+  jiraIssueKeyOperations,
+  jiraOperationOptions,
+  jiraPaginatedOperations,
+  jiraStartAtPaginatedOperations,
   linearOperationGroups,
   linearOperationOptions,
   notionOperationGroups,
@@ -111,6 +120,7 @@ export function usePropertiesPanelController() {
     rag: Search,
     grist: Table2,
     github: Github,
+    jira: ListTodo,
     linear: ListTodo,
     googleSheets: Sheet,
     bigquery: Database,
@@ -167,6 +177,7 @@ export function usePropertiesPanelController() {
     rag: "node-rag",
     grist: "node-grist",
     github: "node-github",
+    jira: "node-jira",
     linear: "node-linear",
     googleSheets: "node-google-sheets",
     bigquery: "node-google-sheets",
@@ -223,6 +234,7 @@ export function usePropertiesPanelController() {
     rag: "rag-node",
     grist: "grist-node",
     github: "github-node",
+    jira: "jira-node",
     linear: "linear-node",
     googleSheets: "google-sheets-node",
     bigquery: "bigquery-node",
@@ -543,6 +555,7 @@ export function usePropertiesPanelController() {
   const gristCredentials = ref<CredentialListItem[]>([]);
   const codexCredentials = ref<CredentialListItem[]>([]);
   const githubCredentials = ref<CredentialListItem[]>([]);
+  const jiraCredentials = ref<CredentialListItem[]>([]);
   const linearCredentials = ref<CredentialListItem[]>([]);
   const googleSheetsCredentials = ref<CredentialListItem[]>([]);
   const bigqueryCredentials = ref<CredentialListItem[]>([]);
@@ -685,6 +698,35 @@ export function usePropertiesPanelController() {
   const sentryReleaseRefsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const sentryPayloadExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentSentryExpressionFieldIndex = ref(0);
+  const jiraLimitExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraStartAtExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraNextPageTokenExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraFieldsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraProjectKeyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraIssueKeyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraIssueTypeExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraIssueTypeIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraSummaryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraDescriptionExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraJqlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAssigneeAccountIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraLabelsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraCommentBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraCommentIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraTransitionIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAttachmentIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAttachmentFilenameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAttachmentBase64ExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAttachmentMimeTypeExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraNotifySubjectExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraNotifyTextBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraNotifyHtmlBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraNotifyToExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraAccountIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraUserEmailExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraUserDisplayNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraUserProductsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const currentJiraExpressionFieldIndex = ref(0);
   const linearLimitExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const linearAfterExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const linearTeamIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -1018,6 +1060,14 @@ export function usePropertiesPanelController() {
           githubCredentials.value = await credentialsApi.listByType("github");
         } catch {
           githubCredentials.value = [];
+        }
+      }
+
+      if (type === "jira") {
+        try {
+          jiraCredentials.value = await credentialsApi.listByType("jira");
+        } catch {
+          jiraCredentials.value = [];
         }
       }
 
@@ -2612,6 +2662,28 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "jira") {
+      const startIndex = resolveJiraExpressionStartIndex();
+      currentJiraExpressionFieldIndex.value = startIndex;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        const n = workflowStore.selectedNode;
+        if (!n || n.type !== "jira") {
+          return;
+        }
+        if (jiraExpressionFieldCount.value === 0) {
+          return;
+        }
+        const field = jiraExpressionFields.value[startIndex];
+        if (field && jiraExpressionInputRefForKey(field.key)) {
+          nextTick(() => openJiraExpressionFieldAtIndex(startIndex));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "linear") {
       const startIndex = resolveLinearExpressionStartIndex();
       currentLinearExpressionFieldIndex.value = startIndex;
@@ -2941,6 +3013,7 @@ export function usePropertiesPanelController() {
       case "rag":
       case "codex":
       case "github":
+      case "jira":
       case "linear":
       case "throwError":
       case "crawler":
@@ -3275,6 +3348,7 @@ export function usePropertiesPanelController() {
       currentMCPCallExpressionFieldIndex.value = 0;
       currentGitHubExpressionFieldIndex.value = 0;
       currentSentryExpressionFieldIndex.value = 0;
+      currentJiraExpressionFieldIndex.value = 0;
       currentLinearExpressionFieldIndex.value = 0;
       currentNotionExpressionFieldIndex.value = 0;
       playwrightExprRefsBySlotKey.value = {};
@@ -3980,6 +4054,17 @@ export function usePropertiesPanelController() {
 
   const sentryExpressionFieldCount = computed((): number => sentryExpressionFields.value.length);
 
+  const jiraExpressionFields = computed(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "jira") {
+      return [];
+    }
+    const operation = (n.data.jiraOperation as string | undefined) || "searchIssues";
+    return getJiraExpressionFields(operation);
+  });
+
+  const jiraExpressionFieldCount = computed((): number => jiraExpressionFields.value.length);
+
   const linearExpressionFields = computed(() => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "linear") {
@@ -3992,6 +4077,207 @@ export function usePropertiesPanelController() {
   });
 
   const linearExpressionFieldCount = computed((): number => linearExpressionFields.value.length);
+
+  function selectedJiraOperation(): string {
+    return (workflowStore.selectedNode?.data.jiraOperation as string | undefined) || "searchIssues";
+  }
+
+  function isJiraPaginatedOperation(): boolean {
+    return jiraPaginatedOperations.has(selectedJiraOperation());
+  }
+
+  function isJiraSearchOperation(): boolean {
+    return selectedJiraOperation() === "searchIssues";
+  }
+
+  function isJiraStartAtPaginatedOperation(): boolean {
+    return jiraStartAtPaginatedOperations.has(selectedJiraOperation());
+  }
+
+  function isJiraIssueKeyOperation(): boolean {
+    return jiraIssueKeyOperations.has(selectedJiraOperation());
+  }
+
+  function isJiraCommentIdOperation(): boolean {
+    return jiraCommentIdOperations.has(selectedJiraOperation());
+  }
+
+  function isJiraAttachmentIdOperation(): boolean {
+    return jiraAttachmentIdOperations.has(selectedJiraOperation());
+  }
+
+  function isJiraAccountIdOperation(): boolean {
+    return jiraAccountIdOperations.has(selectedJiraOperation());
+  }
+
+  function jiraExpressionFieldIndex(key: JiraExpressionFieldKey): number {
+    const index = jiraExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : -1;
+  }
+
+  function jiraExpressionFieldLabel(key: JiraExpressionFieldKey): string {
+    return jiraExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+  }
+
+  function jiraExpressionNavBindings(key: JiraExpressionFieldKey): {
+    navigationEnabled: boolean;
+    navigationIndex: number;
+    navigationTotal: number;
+    dialogNodeLabel: string;
+    dialogKeyLabel: string;
+  } {
+    const index = jiraExpressionFieldIndex(key);
+    return {
+      navigationEnabled: jiraExpressionFieldCount.value > 1 && index >= 0,
+      navigationIndex: index >= 0 ? index : 0,
+      navigationTotal: jiraExpressionFieldCount.value,
+      dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+      dialogKeyLabel: jiraExpressionFieldLabel(key),
+    };
+  }
+
+  function jiraExpressionInputRefForKey(key: JiraExpressionFieldKey): ExpandableFieldRef | null {
+    switch (key) {
+      case "jiraLimit":
+        return jiraLimitExpressionInputRef.value;
+      case "jiraStartAt":
+        return jiraStartAtExpressionInputRef.value;
+      case "jiraNextPageToken":
+        return jiraNextPageTokenExpressionInputRef.value;
+      case "jiraFields":
+        return jiraFieldsExpressionInputRef.value;
+      case "jiraProjectKey":
+        return jiraProjectKeyExpressionInputRef.value;
+      case "jiraIssueKey":
+        return jiraIssueKeyExpressionInputRef.value;
+      case "jiraIssueType":
+        return jiraIssueTypeExpressionInputRef.value;
+      case "jiraIssueTypeId":
+        return jiraIssueTypeIdExpressionInputRef.value;
+      case "jiraSummary":
+        return jiraSummaryExpressionInputRef.value;
+      case "jiraDescription":
+        return jiraDescriptionExpressionInputRef.value;
+      case "jiraJql":
+        return jiraJqlExpressionInputRef.value;
+      case "jiraAssigneeAccountId":
+        return jiraAssigneeAccountIdExpressionInputRef.value;
+      case "jiraLabels":
+        return jiraLabelsExpressionInputRef.value;
+      case "jiraCommentBody":
+        return jiraCommentBodyExpressionInputRef.value;
+      case "jiraCommentId":
+        return jiraCommentIdExpressionInputRef.value;
+      case "jiraTransitionId":
+        return jiraTransitionIdExpressionInputRef.value;
+      case "jiraAttachmentId":
+        return jiraAttachmentIdExpressionInputRef.value;
+      case "jiraAttachmentFilename":
+        return jiraAttachmentFilenameExpressionInputRef.value;
+      case "jiraAttachmentBase64":
+        return jiraAttachmentBase64ExpressionInputRef.value;
+      case "jiraAttachmentMimeType":
+        return jiraAttachmentMimeTypeExpressionInputRef.value;
+      case "jiraNotifySubject":
+        return jiraNotifySubjectExpressionInputRef.value;
+      case "jiraNotifyTextBody":
+        return jiraNotifyTextBodyExpressionInputRef.value;
+      case "jiraNotifyHtmlBody":
+        return jiraNotifyHtmlBodyExpressionInputRef.value;
+      case "jiraNotifyTo":
+        return jiraNotifyToExpressionInputRef.value;
+      case "jiraAccountId":
+        return jiraAccountIdExpressionInputRef.value;
+      case "jiraUserEmail":
+        return jiraUserEmailExpressionInputRef.value;
+      case "jiraUserDisplayName":
+        return jiraUserDisplayNameExpressionInputRef.value;
+      case "jiraUserProducts":
+        return jiraUserProductsExpressionInputRef.value;
+      default:
+        return null;
+    }
+  }
+
+  function resolveJiraExpressionStartIndex(): number {
+    const focusField = workflowStore.focusField;
+    if (focusField) {
+      const index = jiraExpressionFieldIndex(focusField as JiraExpressionFieldKey);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return 0;
+  }
+
+  function openJiraExpressionFieldAtIndex(index: number): boolean {
+    const n = selectedNode.value;
+    if (!n || n.type !== "jira") {
+      return false;
+    }
+    const field = jiraExpressionFields.value[index];
+    if (!field) {
+      return false;
+    }
+    currentJiraExpressionFieldIndex.value = index;
+    const input = jiraExpressionInputRefForKey(field.key);
+    if (!input) {
+      return false;
+    }
+    input.openExpandDialog();
+    return true;
+  }
+
+  function closeJiraExpressionDialogs(): void {
+    jiraLimitExpressionInputRef.value?.closeExpandDialog();
+    jiraStartAtExpressionInputRef.value?.closeExpandDialog();
+    jiraNextPageTokenExpressionInputRef.value?.closeExpandDialog();
+    jiraFieldsExpressionInputRef.value?.closeExpandDialog();
+    jiraProjectKeyExpressionInputRef.value?.closeExpandDialog();
+    jiraIssueKeyExpressionInputRef.value?.closeExpandDialog();
+    jiraIssueTypeExpressionInputRef.value?.closeExpandDialog();
+    jiraIssueTypeIdExpressionInputRef.value?.closeExpandDialog();
+    jiraSummaryExpressionInputRef.value?.closeExpandDialog();
+    jiraDescriptionExpressionInputRef.value?.closeExpandDialog();
+    jiraJqlExpressionInputRef.value?.closeExpandDialog();
+    jiraAssigneeAccountIdExpressionInputRef.value?.closeExpandDialog();
+    jiraLabelsExpressionInputRef.value?.closeExpandDialog();
+    jiraCommentBodyExpressionInputRef.value?.closeExpandDialog();
+    jiraCommentIdExpressionInputRef.value?.closeExpandDialog();
+    jiraTransitionIdExpressionInputRef.value?.closeExpandDialog();
+    jiraAttachmentIdExpressionInputRef.value?.closeExpandDialog();
+    jiraAttachmentFilenameExpressionInputRef.value?.closeExpandDialog();
+    jiraAttachmentBase64ExpressionInputRef.value?.closeExpandDialog();
+    jiraAttachmentMimeTypeExpressionInputRef.value?.closeExpandDialog();
+    jiraNotifySubjectExpressionInputRef.value?.closeExpandDialog();
+    jiraNotifyTextBodyExpressionInputRef.value?.closeExpandDialog();
+    jiraNotifyHtmlBodyExpressionInputRef.value?.closeExpandDialog();
+    jiraNotifyToExpressionInputRef.value?.closeExpandDialog();
+    jiraAccountIdExpressionInputRef.value?.closeExpandDialog();
+    jiraUserEmailExpressionInputRef.value?.closeExpandDialog();
+    jiraUserDisplayNameExpressionInputRef.value?.closeExpandDialog();
+    jiraUserProductsExpressionInputRef.value?.closeExpandDialog();
+  }
+
+  function handleJiraExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = jiraExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentJiraExpressionFieldIndex.value - 1
+        : currentJiraExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeJiraExpressionDialogs();
+    currentJiraExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openJiraExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onJiraRegisterExpressionFieldIndex(index: number): void {
+    currentJiraExpressionFieldIndex.value = index;
+  }
 
   const linearPaginatedOperations = new Set([
     "listTeams",
@@ -5497,6 +5783,21 @@ export function usePropertiesPanelController() {
       selectedCredentialId,
       "Select Linear credential...",
       "Shared Linear credential (from owner)",
+    );
+  });
+
+  const jiraCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "jira"
+        ? (node.data.credentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      jiraCredentials.value,
+      selectedCredentialId,
+      "Select Jira credential...",
+      "Shared Jira credential (from owner)",
     );
   });
 
@@ -8214,6 +8515,34 @@ export function usePropertiesPanelController() {
     sentryReleaseProjectsExpressionInputRef,
     sentryReleaseRefsExpressionInputRef,
     sentryPayloadExpressionInputRef,
+    jiraLimitExpressionInputRef,
+    jiraStartAtExpressionInputRef,
+    jiraNextPageTokenExpressionInputRef,
+    jiraFieldsExpressionInputRef,
+    jiraProjectKeyExpressionInputRef,
+    jiraIssueKeyExpressionInputRef,
+    jiraIssueTypeExpressionInputRef,
+    jiraIssueTypeIdExpressionInputRef,
+    jiraSummaryExpressionInputRef,
+    jiraDescriptionExpressionInputRef,
+    jiraJqlExpressionInputRef,
+    jiraAssigneeAccountIdExpressionInputRef,
+    jiraLabelsExpressionInputRef,
+    jiraCommentBodyExpressionInputRef,
+    jiraCommentIdExpressionInputRef,
+    jiraTransitionIdExpressionInputRef,
+    jiraAttachmentIdExpressionInputRef,
+    jiraAttachmentFilenameExpressionInputRef,
+    jiraAttachmentBase64ExpressionInputRef,
+    jiraAttachmentMimeTypeExpressionInputRef,
+    jiraNotifySubjectExpressionInputRef,
+    jiraNotifyTextBodyExpressionInputRef,
+    jiraNotifyHtmlBodyExpressionInputRef,
+    jiraNotifyToExpressionInputRef,
+    jiraAccountIdExpressionInputRef,
+    jiraUserEmailExpressionInputRef,
+    jiraUserDisplayNameExpressionInputRef,
+    jiraUserProductsExpressionInputRef,
     linearLimitExpressionInputRef,
     linearAfterExpressionInputRef,
     linearTeamIdExpressionInputRef,
@@ -8372,6 +8701,16 @@ export function usePropertiesPanelController() {
     isLinearPaginatedOperation,
     isLinearIssueIdOperation,
     isLinearCommentIdOperation,
+    isJiraPaginatedOperation,
+    isJiraSearchOperation,
+    isJiraStartAtPaginatedOperation,
+    isJiraIssueKeyOperation,
+    isJiraCommentIdOperation,
+    isJiraAttachmentIdOperation,
+    isJiraAccountIdOperation,
+    jiraExpressionNavBindings,
+    handleJiraExpressionFieldNavigate,
+    onJiraRegisterExpressionFieldIndex,
     linearExpressionNavBindings,
     handleLinearExpressionFieldNavigate,
     onLinearRegisterExpressionFieldIndex,
@@ -8424,6 +8763,9 @@ export function usePropertiesPanelController() {
     codexPublishModeOptions,
     codexPublishModeDescriptions,
     githubCredentialOptions,
+    jiraCredentialOptions,
+    jiraOperationOptions,
+    jiraOperationGroups,
     linearCredentialOptions,
     linearOperationOptions,
     linearOperationGroups,

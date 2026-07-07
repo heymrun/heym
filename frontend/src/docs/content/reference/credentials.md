@@ -15,6 +15,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
+| [Jira](../nodes/jira-node.md) | Jira | Atlassian account email, Jira API token, Jira site base URL, and optional REST API version |
 | [Linear](../nodes/linear-node.md) | Linear | Personal API key or OAuth2 for teams, projects, issues, and comments |
 | [HTTP](../nodes/http-node.md) | Bearer, Header | Auth for requests |
 | [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md) | Telegram | Bot token and optional webhook secret |
@@ -42,7 +43,7 @@ Enterprise Server instead of GitHub.com. When you edit a GitHub credential to ro
 leaving `base_url` empty preserves the existing Enterprise endpoint. Enter a new URL only when
 you want to change that endpoint.
 
-Linear, Supabase, Notion, Sentry, and ClickHouse credentials expose **Test Connection** in the credential dialog. For Linear,
+Jira, Linear, Supabase, Notion, Sentry, and ClickHouse credentials expose **Test Connection** in the credential dialog. For Jira, the check calls Jira's current user endpoint. For Linear,
 the check calls the Linear API with `getViewer` and confirms the API key or OAuth token is valid.
 When editing, you can test without re-entering the API key if the stored secret is still present. For Notion,
 choose **Internal token** or **OAuth** in the dialog; OAuth uses the Client ID and Client Secret
@@ -54,6 +55,8 @@ Notion setup details.
 Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression.
 
 Codex credentials are intentionally excluded from `$credentials`. Whether you sign in with ChatGPT (subscription, no per-token API cost) or paste a Codex `access_token`, the tokens are only passed to the local Codex runner process. ChatGPT sign-in tokens are refreshed automatically as they expire.
+
+Jira credentials are also excluded from `$credentials`. The [Jira node](../nodes/jira-node.md) loads the credential by `credentialId` at run time. For custom Jira REST calls not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token`), for example `curl -u you@example.com:YOUR_API_TOKEN https://your-domain.atlassian.net/rest/api/3/myself`. You can also use a [Header](../nodes/http-node.md) credential with `Authorization: Basic <base64(email:api_token)>`.
 
 | Credential type | Value exposed to `$credentials.Name` |
 |-----------------|--------------------------------------|
@@ -76,6 +79,7 @@ Use the Notion **node** for native database, page, and block operations. Use `$c
 
 - [Credentials Tab](../tabs/credentials-tab.md) – Add, edit, delete credentials
 - [GitHub Node](../nodes/github-node.md) – Native GitHub REST operations
+- [Jira Node](../nodes/jira-node.md) – Jira project, issue, comment, attachment, user, notification, and transition automation
 - [Linear Node](../nodes/linear-node.md) – Linear GraphQL workspace and issue automation
 - [Notion Node](../nodes/notion-node.md) – Search and manage Notion content
 - [Sentry Node](../nodes/sentry-node.md) – Sentry organization, project, team, issue, event, and release automation

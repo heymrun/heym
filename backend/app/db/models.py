@@ -30,6 +30,7 @@ class CredentialType(str, PyEnum):
     codex = "codex"
     google = "google"
     github = "github"
+    jira = "jira"
     linear = "linear"
     custom = "custom"
     bearer = "bearer"

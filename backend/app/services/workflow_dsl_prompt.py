@@ -4003,6 +4003,87 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 35. jira (Jira REST Operations)
+- **Type**: `jira`
+- **Purpose**: Manage Jira projects, issues, comments, attachments, users, notifications, and workflow transitions
+- **Inputs**: 1 | **Outputs**: 1
+- **Required setup**: `credentialId` must point to an owned Jira credential with email,
+  API token, and Jira base URL
+- **Operations**:
+  - `getMyself`: authenticated Jira user
+  - `listProjects`: projects visible to the user
+  - `searchIssues`: search issues with `jiraJql` via `/search/jql`; defaults to
+    `updated >= -30d ORDER BY updated DESC`; optional `jiraFields` (defaults to
+    `key`, `summary`, `status`, `assignee`, `issuetype`) and `jiraNextPageToken`
+  - `getIssue`: fetch by key or ID such as `ENG-123`
+  - `createIssue`: requires `jiraProjectKey` and `jiraSummary`; optional `jiraIssueType`,
+    `jiraIssueTypeId`, `jiraDescription`, `jiraAssigneeAccountId`, and `jiraLabels`
+  - `updateIssue`: requires `jiraIssueKey` and at least one changed field
+  - `deleteIssue`: requires `jiraIssueKey`
+  - `getIssueChangelog`: changelog entries for `jiraIssueKey`
+  - `notifyIssue`: requires `jiraIssueKey`, `jiraNotifySubject`, and `jiraNotifyTextBody`
+  - `listComments`: comments for `jiraIssueKey`
+  - `createComment`: requires `jiraIssueKey` and `jiraCommentBody`
+  - `getComment`: requires `jiraIssueKey` and `jiraCommentId`
+  - `updateComment`: requires `jiraIssueKey`, `jiraCommentId`, and `jiraCommentBody`
+  - `deleteComment`: requires `jiraIssueKey` and `jiraCommentId`
+  - `listTransitions`: available transitions for `jiraIssueKey`
+  - `transitionIssue`: requires `jiraIssueKey` and `jiraTransitionId`
+  - `addAttachment`: requires `jiraIssueKey`, `jiraAttachmentFilename`, and `jiraAttachmentBase64`
+  - `getAttachment`: requires `jiraAttachmentId`; optional `jiraIncludeBinary`
+  - `listAttachments`: requires `jiraIssueKey`; optional `jiraIncludeBinary`
+  - `deleteAttachment`: requires `jiraAttachmentId`
+  - `getUser`: requires `jiraAccountId`
+  - `createUser`: requires `jiraUserEmail`; optional `jiraUserDisplayName` and `jiraUserProducts`
+    (admin permissions on Jira Cloud)
+  - `deleteUser`: requires `jiraAccountId` (admin permissions on Jira Cloud)
+- **Fields**: `jiraOperation`, `jiraProjectKey`, `jiraIssueKey`, `jiraIssueType`,
+  `jiraIssueTypeId`, `jiraSummary`, `jiraDescription`, `jiraJql`, `jiraFields`,
+  `jiraAssigneeAccountId`, `jiraLabels`, `jiraCommentBody`, `jiraCommentId`,
+  `jiraTransitionId`, `jiraNotifySubject`, `jiraAttachmentId`, `jiraAttachmentFilename`,
+  `jiraAttachmentBase64`, `jiraAttachmentMimeType`, `jiraIncludeBinary`,
+  `jiraNotifyTextBody`, `jiraNotifyHtmlBody`, `jiraNotifyTo`, `jiraAccountId`,
+  `jiraUserEmail`, `jiraUserDisplayName`, `jiraUserProducts`, `jiraLimit` (1-100),
+  `jiraStartAt`, `jiraNextPageToken`
+- Text fields support expressions. `jiraLabels`, `jiraUserProducts`, and `jiraFields` may be a
+  JSON array of strings or comma-separated text. `jiraNotifyTo` must be a JSON object and
+  defaults to `{"assignee":true}` when omitted. `searchIssues` pagination uses
+  `pagination.nextPageToken` instead of `startAt`.
+- List outputs contain `{success, operation, count, projects|issues|comments|changelog|attachments, pagination}`.
+  `searchIssues` uses cursor pagination (`pagination.nextPageToken`); other paginated lists use
+  `startAt`. `listAttachments` pagination is client-side after fetching all issue attachments.
+- Issue outputs contain `{success, operation, issue, key}`.
+- Comment get/create/update outputs `{success, operation, comment}`; comment delete outputs
+  `{success, operation, deleted}`.
+- `listTransitions` outputs `{success, operation, transitions, count}` without pagination.
+  `transitionIssue` outputs `{success, operation, transition, issue, key}`.
+- Attachment add outputs `{success, operation, attachments, count}`. List attachments also
+  includes `pagination`. Attachment get outputs `{success, operation, attachment}` and includes
+  `attachment.content_base64` when `jiraIncludeBinary` is true. Attachment delete outputs
+  `{success, operation, deleted}`.
+- User get/create outputs `{success, operation, user}`; delete outputs `{success, operation, deleted}`.
+- Notify outputs `{success, operation, notified}`.
+- Set update fields to `null` to clear description or assignee.
+
+**Example — create a Jira issue:**
+```json
+{
+  "id": "jira-1",
+  "type": "jira",
+  "position": {"x": 500, "y": 100},
+  "data": {
+    "label": "createJiraIssue",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "jiraOperation": "createIssue",
+    "jiraProjectKey": "ENG",
+    "jiraIssueType": "Task",
+    "jiraSummary": "$input.title",
+    "jiraDescription": "$input.description",
+    "jiraLabels": "[\"automation\"]"
+  }
+}
+```
+
 ### 35. github (GitHub REST Operations)
 - **Type**: `github`
 - **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
@@ -4303,7 +4384,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

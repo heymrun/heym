@@ -2455,6 +2455,163 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
+      if (node.type === "jira") {
+        const operation = node.data.jiraOperation;
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Credential is not selected",
+          });
+        }
+        if (!operation) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Operation is not selected",
+          });
+        }
+        if (
+          operation === "createIssue" &&
+          (!node.data.jiraProjectKey?.trim() || !node.data.jiraSummary?.trim())
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Project key and summary are required to create an issue",
+          });
+        }
+        if (operation === "updateIssue") {
+          const hasUpdateField =
+            !!node.data.jiraSummary?.trim() ||
+            !!node.data.jiraDescription?.trim() ||
+            !!node.data.jiraAssigneeAccountId?.trim() ||
+            !!node.data.jiraLabels?.trim();
+          if (!hasUpdateField) {
+            errors.push({
+              nodeId: node.id,
+              nodeLabel: node.data.label,
+              nodeType: "Jira",
+              message: "At least one field to update is required",
+            });
+          }
+        }
+        if (
+          (
+            operation === "getIssue" ||
+            operation === "updateIssue" ||
+            operation === "deleteIssue" ||
+            operation === "getIssueChangelog" ||
+            operation === "notifyIssue" ||
+            operation === "listComments" ||
+            operation === "createComment" ||
+            operation === "getComment" ||
+            operation === "updateComment" ||
+            operation === "deleteComment" ||
+            operation === "listTransitions" ||
+            operation === "transitionIssue" ||
+            operation === "addAttachment" ||
+            operation === "listAttachments"
+          ) &&
+          !node.data.jiraIssueKey?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Issue key or ID is required for this operation",
+          });
+        }
+        if (
+          (operation === "getComment" ||
+            operation === "updateComment" ||
+            operation === "deleteComment") &&
+          !node.data.jiraCommentId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Comment ID is required",
+          });
+        }
+        if (
+          (operation === "createComment" || operation === "updateComment") &&
+          !node.data.jiraCommentBody?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Comment body is required",
+          });
+        }
+        if (
+          operation === "notifyIssue" &&
+          (!node.data.jiraNotifySubject?.trim() || !node.data.jiraNotifyTextBody?.trim())
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Notification subject and text body are required",
+          });
+        }
+        if (operation === "transitionIssue" && !node.data.jiraTransitionId?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Transition ID is required",
+          });
+        }
+        if (
+          (operation === "getAttachment" || operation === "deleteAttachment") &&
+          !node.data.jiraAttachmentId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Attachment ID is required",
+          });
+        }
+        if (
+          operation === "addAttachment" &&
+          (!node.data.jiraAttachmentFilename?.trim() ||
+            !node.data.jiraAttachmentBase64?.trim())
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Attachment filename and base64 content are required",
+          });
+        }
+        if (
+          (operation === "getUser" || operation === "deleteUser") &&
+          !node.data.jiraAccountId?.trim()
+        ) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "Account ID is required",
+          });
+        }
+        if (operation === "createUser" && !node.data.jiraUserEmail?.trim()) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Jira",
+            message: "User email is required",
+          });
+        }
+      }
+
       if (node.type === "sentry") {
         const operation = node.data.sentryOperation;
 

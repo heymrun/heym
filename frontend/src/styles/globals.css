@@ -66,6 +66,7 @@
     --node-rag: 252 87% 62%;
     --node-grist: 162 94% 35%;
     --node-github: 222 47% 25%;
+    --node-jira: 217 91% 50%;
     --node-linear: 252 83% 58%;
     --node-google-sheets: 153 82% 33%;
     --node-datatable: 190 95% 39%;
@@ -139,6 +140,7 @@
     --node-rag: 252 87% 67%;
     --node-grist: 162 94% 45%;
     --node-github: 210 30% 78%;
+    --node-jira: 217 91% 62%;
     --node-linear: 252 83% 68%;
     --node-google-sheets: 153 82% 42%;
     --node-datatable: 190 95% 49%;

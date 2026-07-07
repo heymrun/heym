@@ -3,6 +3,7 @@ export type CredentialType =
   | "codex"
   | "google"
   | "github"
+  | "jira"
   | "linear"
   | "custom"
   | "bearer"
@@ -94,6 +95,13 @@ export interface CredentialConfigGoogle {
 export interface CredentialConfigGitHub {
   api_key: string;
   base_url?: string;
+}
+
+export interface CredentialConfigJira {
+  email: string;
+  api_token: string;
+  base_url: string;
+  api_version?: string;
 }
 
 export interface CredentialConfigLinear {
@@ -249,6 +257,7 @@ export type CredentialConfig =
   | CredentialConfigCodex
   | CredentialConfigGoogle
   | CredentialConfigGitHub
+  | CredentialConfigJira
   | CredentialConfigLinear
   | CredentialConfigCustom
   | CredentialConfigBearer
@@ -348,6 +357,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   codex: "OpenAI Codex",
   google: "Google AI",
   github: "GitHub",
+  jira: "Jira",
   linear: "Linear",
   custom: "Custom (OpenAI Compatible)",
   bearer: "Authorization Bearer Token",
@@ -381,6 +391,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   codex: "Use a ChatGPT/Codex access token for the local Codex runner",
   google: "Connect to Google AI for Gemini models",
   github: "Store a GitHub personal access token for GitHub API, MCP, and agent workflows",
+  jira: "Connect to Jira for project, issue, comment, attachment, user, notification, and transition automation",
   linear: "Connect to Linear for workspace, project, issue, and comment automation",
   custom: "Connect to any OpenAI-compatible API endpoint",
   bearer: "Store a Bearer token for Authorization header",

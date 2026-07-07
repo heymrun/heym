@@ -124,6 +124,14 @@ def merge_credential_config_for_update(
 
         return merged_config
 
+    if credential_type == CredentialType.jira:
+        merged_config = dict(existing_config)
+        for key in ("email", "api_token", "base_url", "api_version"):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
+        return merged_config
+
     if credential_type != CredentialType.github:
         return incoming_config
 
@@ -181,6 +189,9 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     ):
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
+    elif credential_type == CredentialType.jira:
+        api_token = str(config.get("api_token", "")).strip()
+        return mask_api_key(api_token)
     elif credential_type == CredentialType.qdrant:
         openai_api_key = config.get("openai_api_key", "")
         return mask_api_key(openai_api_key)
@@ -274,6 +285,11 @@ def get_public_credential_fields(
     if credential_type == CredentialType.linear:
         auth_mode = str(config.get("auth_mode", "api_key")).strip() or "api_key"
         return {"auth_mode": auth_mode}
+    if credential_type == CredentialType.jira:
+        base_url = str(config.get("base_url", "")).strip() or None
+        email = str(config.get("email", "")).strip() or None
+        api_version = str(config.get("api_version", "") or "").strip() or None
+        return {"base_url": base_url, "email": email, "api_version": api_version}
     if credential_type == CredentialType.codex:
         auth_mode = str(config.get("auth_mode", "access_token")).strip() or "access_token"
         fields: dict[str, str | None] = {"auth_mode": auth_mode}
@@ -799,6 +815,7 @@ async def run_credential_connection_test(
     """Test whether a credential configuration can reach the external service."""
     if test_data.type not in {
         CredentialType.supabase,
+        CredentialType.jira,
         CredentialType.linear,
         CredentialType.notion,
         CredentialType.clickhouse,
@@ -827,6 +844,8 @@ async def run_credential_connection_test(
             config = _merge_supabase_test_config(config, stored_config)
         elif test_data.type == CredentialType.linear:
             config = _merge_linear_test_config(config, stored_config)
+        elif test_data.type == CredentialType.jira:
+            config = {**stored_config, **{k: v for k, v in config.items() if v}}
         elif test_data.type == CredentialType.clickhouse:
             config = _merge_clickhouse_test_config(config, stored_config)
         elif test_data.type == CredentialType.sentry:
@@ -859,6 +878,21 @@ async def run_credential_connection_test(
                     success=True,
                     message=f"Connected as {viewer_name}",
                 )
+            return CredentialTestResponse(success=True, message="Connection successful")
+
+        if test_data.type == CredentialType.jira:
+            from app.services.jira_service import JiraService
+
+            service = JiraService(config)
+            try:
+                user = service.test_connection()
+            finally:
+                service.close()
+            user_name = str(
+                user.get("displayName") or user.get("emailAddress") or user.get("accountId") or ""
+            )
+            if user_name:
+                return CredentialTestResponse(success=True, message=f"Connected as {user_name}")
             return CredentialTestResponse(success=True, message="Connection successful")
 
         if test_data.type == CredentialType.clickhouse:
@@ -1332,6 +1366,29 @@ def validate_credential_config(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="GitHub credential base_url must be a valid http(s) URL",
                 )
+    elif credential_type == CredentialType.jira:
+        if "email" not in config or not str(config["email"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential requires email",
+            )
+        if "api_token" not in config or not str(config["api_token"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential requires api_token",
+            )
+        jira_base_url = str(config.get("base_url", "") or "").strip()
+        if not jira_base_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential requires base_url",
+            )
+        parsed = urlparse(jira_base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential base_url must be a valid http(s) URL",
+            )
     elif credential_type == CredentialType.sentry:
         if "api_token" not in config or not str(config["api_token"]).strip():
             raise HTTPException(

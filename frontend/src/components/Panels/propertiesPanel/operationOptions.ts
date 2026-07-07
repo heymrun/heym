@@ -64,6 +64,96 @@ export const linearOperationGroups: OperationOptionGroup[] = [
 export const linearOperationOptions: OperationOption[] =
   flattenOperationGroups(linearOperationGroups);
 
+export const jiraOperationGroups: OperationOptionGroup[] = [
+  {
+    label: "Account and Projects",
+    options: [
+      { value: "getMyself", label: "Get Myself" },
+      { value: "listProjects", label: "List Projects" },
+    ],
+  },
+  {
+    label: "Attachments",
+    options: [
+      { value: "addAttachment", label: "Add Attachment" },
+      { value: "deleteAttachment", label: "Delete Attachment" },
+      { value: "getAttachment", label: "Get Attachment" },
+      { value: "listAttachments", label: "List Attachments" },
+    ],
+  },
+  {
+    label: "Comments",
+    options: [
+      { value: "createComment", label: "Create Comment" },
+      { value: "deleteComment", label: "Delete Comment" },
+      { value: "getComment", label: "Get Comment" },
+      { value: "listComments", label: "List Comments" },
+      { value: "updateComment", label: "Update Comment" },
+    ],
+  },
+  {
+    label: "Issues",
+    options: [
+      { value: "createIssue", label: "Create Issue" },
+      { value: "deleteIssue", label: "Delete Issue" },
+      { value: "getIssue", label: "Get Issue" },
+      { value: "getIssueChangelog", label: "Get Issue Changelog" },
+      { value: "listTransitions", label: "List Transitions" },
+      { value: "notifyIssue", label: "Notify Issue" },
+      { value: "searchIssues", label: "Search Issues" },
+      { value: "transitionIssue", label: "Transition Issue" },
+      { value: "updateIssue", label: "Update Issue" },
+    ],
+  },
+  {
+    label: "Users",
+    options: [
+      { value: "createUser", label: "Create User" },
+      { value: "deleteUser", label: "Delete User" },
+      { value: "getUser", label: "Get User" },
+    ],
+  },
+];
+
+export const jiraOperationOptions: OperationOption[] =
+  flattenOperationGroups(jiraOperationGroups);
+
+export const jiraPaginatedOperations = new Set([
+  "listProjects",
+  "searchIssues",
+  "getIssueChangelog",
+  "listComments",
+  "listAttachments",
+]);
+
+export const jiraStartAtPaginatedOperations = new Set([
+  "listProjects",
+  "getIssueChangelog",
+  "listComments",
+  "listAttachments",
+]);
+
+export const jiraIssueKeyOperations = new Set([
+  "getIssue",
+  "updateIssue",
+  "deleteIssue",
+  "getIssueChangelog",
+  "notifyIssue",
+  "listComments",
+  "createComment",
+  "getComment",
+  "updateComment",
+  "deleteComment",
+  "listTransitions",
+  "transitionIssue",
+  "addAttachment",
+  "listAttachments",
+]);
+
+export const jiraCommentIdOperations = new Set(["getComment", "updateComment", "deleteComment"]);
+export const jiraAttachmentIdOperations = new Set(["getAttachment", "deleteAttachment"]);
+export const jiraAccountIdOperations = new Set(["getUser", "deleteUser"]);
+
 export const githubOperationGroups: OperationOptionGroup[] = [
   {
     label: "Repository",

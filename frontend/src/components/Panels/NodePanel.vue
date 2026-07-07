@@ -246,6 +246,7 @@ const icons = {
   rag: Search,
   grist: Table2,
   github: Github,
+  jira: ListTodo,
   linear: ListTodo,
   googleSheets: Sheet,
   bigquery: Database,

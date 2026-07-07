@@ -32,6 +32,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "http": "http_node",
     "imapTrigger": "imap_trigger_node",
     "jsonOutputMapper": "json_output_mapper_node",
+    "jira": "jira_node",
     "linear": "linear_node",
     "llm": "llm_node",
     "loop": "loop_node",

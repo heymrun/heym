@@ -32,6 +32,7 @@ import DisableNodeNodeProperties from "./DisableNodeNodeProperties.vue";
 import RedisNodeProperties from "./RedisNodeProperties.vue";
 import RagNodeProperties from "./RagNodeProperties.vue";
 import GristNodeProperties from "./GristNodeProperties.vue";
+import JiraNodeProperties from "./JiraNodeProperties.vue";
 import LinearNodeProperties from "./LinearNodeProperties.vue";
 import GithubNodeProperties from "./GithubNodeProperties.vue";
 import GoogleSheetsNodeProperties from "./GoogleSheetsNodeProperties.vue";
@@ -89,6 +90,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <RedisNodeProperties v-else-if="selectedNode?.type === 'redis'" />
   <RagNodeProperties v-else-if="selectedNode?.type === 'rag'" />
   <GristNodeProperties v-else-if="selectedNode?.type === 'grist'" />
+  <JiraNodeProperties v-else-if="selectedNode?.type === 'jira'" />
   <LinearNodeProperties v-else-if="selectedNode?.type === 'linear'" />
   <GithubNodeProperties v-else-if="selectedNode?.type === 'github'" />
   <GoogleSheetsNodeProperties v-else-if="selectedNode?.type === 'googleSheets'" />

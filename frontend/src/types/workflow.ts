@@ -159,6 +159,7 @@ export type NodeType =
   | "rag"
   | "grist"
   | "github"
+  | "jira"
   | "linear"
   | "googleSheets"
   | "bigquery"
@@ -621,6 +622,59 @@ export interface NodeData {
   linearLimit?: string;
   linearAfter?: string;
   linearReturnAll?: boolean;
+  jiraOperation?:
+    | "getMyself"
+    | "listProjects"
+    | "searchIssues"
+    | "getIssue"
+    | "createIssue"
+    | "updateIssue"
+    | "deleteIssue"
+    | "getIssueChangelog"
+    | "notifyIssue"
+    | "listComments"
+    | "createComment"
+    | "getComment"
+    | "updateComment"
+    | "deleteComment"
+    | "listTransitions"
+    | "transitionIssue"
+    | "addAttachment"
+    | "getAttachment"
+    | "listAttachments"
+    | "deleteAttachment"
+    | "getUser"
+    | "createUser"
+    | "deleteUser";
+  jiraProjectKey?: string;
+  jiraIssueKey?: string;
+  jiraIssueType?: string;
+  jiraIssueTypeId?: string;
+  jiraSummary?: string;
+  jiraDescription?: string;
+  jiraJql?: string;
+  jiraFields?: string;
+  jiraAssigneeAccountId?: string;
+  jiraLabels?: string;
+  jiraCommentBody?: string;
+  jiraCommentId?: string;
+  jiraTransitionId?: string;
+  jiraAttachmentId?: string;
+  jiraAttachmentFilename?: string;
+  jiraAttachmentBase64?: string;
+  jiraAttachmentMimeType?: string;
+  jiraIncludeBinary?: boolean;
+  jiraNotifySubject?: string;
+  jiraNotifyTextBody?: string;
+  jiraNotifyHtmlBody?: string;
+  jiraNotifyTo?: string;
+  jiraAccountId?: string;
+  jiraUserEmail?: string;
+  jiraUserDisplayName?: string;
+  jiraUserProducts?: string;
+  jiraLimit?: string;
+  jiraStartAt?: string;
+  jiraNextPageToken?: string;
   errorMessage?: string;
   httpStatusCode?: number;
   retryEnabled?: boolean;
