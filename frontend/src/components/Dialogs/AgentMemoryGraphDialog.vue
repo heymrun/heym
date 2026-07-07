@@ -7,6 +7,7 @@ import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowP
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { useToast } from "@/composables/useToast";
 import { workflowApi } from "@/services/api";
@@ -613,8 +614,8 @@ function removeEditPropertyRow(index: number): void {
 
 const newName = ref("");
 const newType = ref("topic");
-const edgeSource = ref("");
-const edgeTarget = ref("");
+const edgeSource = ref<string | undefined>("");
+const edgeTarget = ref<string | undefined>("");
 const edgeRel = ref("related");
 
 interface LoadGraphOptions {
@@ -987,8 +988,8 @@ async function addEdge(): Promise<void> {
   if (!props.workflowId || !props.canvasNodeId) {
     return;
   }
-  const s = edgeSource.value.trim();
-  const t = edgeTarget.value.trim();
+  const s = (edgeSource.value ?? "").trim();
+  const t = (edgeTarget.value ?? "").trim();
   const r = edgeRel.value.trim() || "related";
   if (!s || !t) {
     showToast("Source and target names are required", "error");
@@ -1017,6 +1018,10 @@ async function deleteEdge(edgeId: string): Promise<void> {
 }
 
 const entityNames = computed(() => graph.value?.nodes.map((n) => n.entity_name) ?? []);
+
+const entityNameOptions = computed(() =>
+  entityNames.value.map((name) => ({ value: name, label: name })),
+);
 
 const workflowListForPicker = ref<WorkflowListItem[]>([]);
 const agentsByWorkflowId = ref<Map<string, Array<{ id: string; label: string }>>>(new Map());
@@ -1670,36 +1675,20 @@ function handleDialogEscape(event: KeyboardEvent): void {
               <div class="font-medium text-xs uppercase text-muted-foreground tracking-wide">
                 New relationship
               </div>
-              <select
+              <SearchableSelect
                 v-model="edgeSource"
-                class="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">
-                  Source…
-                </option>
-                <option
-                  v-for="name in entityNames"
-                  :key="`s-${name}`"
-                  :value="name"
-                >
-                  {{ name }}
-                </option>
-              </select>
-              <select
+                placeholder="Source…"
+                search-placeholder="Search entities…"
+                :options="entityNameOptions"
+                clearable
+              />
+              <SearchableSelect
                 v-model="edgeTarget"
-                class="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">
-                  Target…
-                </option>
-                <option
-                  v-for="name in entityNames"
-                  :key="`t-${name}`"
-                  :value="name"
-                >
-                  {{ name }}
-                </option>
-              </select>
+                placeholder="Target…"
+                search-placeholder="Search entities…"
+                :options="entityNameOptions"
+                clearable
+              />
               <Input
                 v-model="edgeRel"
                 placeholder="Relationship (e.g. works for)"
