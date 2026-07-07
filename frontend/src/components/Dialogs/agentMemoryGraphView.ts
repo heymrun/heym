@@ -25,8 +25,8 @@ export function computeDegrees(
   return degree;
 }
 
-const MIN_RADIUS = 16;
-const MAX_RADIUS = 34;
+const MIN_RADIUS = 11;
+const MAX_RADIUS = 22;
 const MAX_DEGREE_FOR_SCALE = 8;
 
 /** Circle radius in px, scaled by connection count (capped so hub nodes don't dominate). */

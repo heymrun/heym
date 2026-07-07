@@ -10,13 +10,13 @@ const { findNode } = useVueFlow();
 function pathCurvatureFromData(): number {
   const d = props.data;
   if (!d || typeof d !== "object") {
-    return 0.25;
+    return 0.06;
   }
   const v = (d as Record<string, unknown>).pathCurvature;
   if (typeof v === "number" && Number.isFinite(v)) {
-    return Math.min(0.4, Math.max(0.12, v));
+    return Math.min(0.15, Math.max(0.02, v));
   }
-  return 0.25;
+  return 0.06;
 }
 
 function radiusOf(id: string): number {
@@ -79,13 +79,22 @@ function isDimmed(): boolean {
   return Boolean(d && typeof d === "object" && (d as { dimmed?: unknown }).dimmed === true);
 }
 
+/** True when this edge is directly incident to the selected node — gets the flowing
+ * highlight and is the only state in which its relationship label is shown. */
+function isActive(): boolean {
+  const d = props.data;
+  return Boolean(d && typeof d === "object" && (d as { active?: unknown }).active === true);
+}
+
+const edgeClass = computed(() => (isActive() ? "agent-memory-edge-active" : ""));
+
 const dashedPathStyle = computed(() => ({
   ...((props.style as Record<string, string> | undefined) ?? {}),
   strokeDasharray: "6 4",
-  stroke: "hsl(217 91% 60% / 0.45)",
-  strokeWidth: 1.25,
+  stroke: isActive() ? "hsl(var(--primary))" : "hsl(217 91% 60% / 0.45)",
+  strokeWidth: isActive() ? 2 : 1.25,
   opacity: isDimmed() ? 0.15 : 1,
-  transition: "opacity 0.15s ease",
+  transition: "opacity 0.15s ease, stroke 0.15s ease, stroke-width 0.15s ease",
 }));
 
 function relationshipTypeLabel(): string {
@@ -103,12 +112,14 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
   <BaseEdge
     :id="id"
     :style="dashedPathStyle"
+    :class="edgeClass"
     :path="path.edgePath"
     :marker-end="markerEnd"
     :interaction-width="16"
   />
   <EdgeLabelRenderer>
     <div
+      v-if="relationshipLabel && isActive()"
       class="agent-memory-edge-label nodrag nopan pointer-events-none max-w-[220px] text-center"
       :style="{
         position: 'absolute',
@@ -118,12 +129,22 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
       }"
     >
       <span
-        v-if="relationshipLabel"
-        class="rounded border border-border bg-card/70 px-1.5 py-0.5 text-[9px] font-medium text-foreground shadow-sm backdrop-blur-sm transition-opacity duration-150"
-        :style="{ opacity: isDimmed() ? 0.15 : 1 }"
+        class="rounded border border-primary/40 bg-card/70 px-1.5 py-0.5 text-[9px] font-medium text-foreground shadow-sm backdrop-blur-sm"
       >
         {{ relationshipLabel }}
       </span>
     </div>
   </EdgeLabelRenderer>
 </template>
+
+<style scoped>
+@keyframes agent-memory-edge-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.agent-memory-edge-active {
+  animation: agent-memory-edge-flow 0.6s linear infinite;
+}
+</style>

@@ -180,24 +180,21 @@ function captureLivePositions(): void {
   }
 }
 
-const hoveredNodeId = ref<string | null>(null);
-
-/** Hovering takes precedence; falls back to the selected node so clicking a node also focuses
- * its neighborhood (fades out everything else), not just hovering it. */
-const focusNodeId = computed<string | null>(() => hoveredNodeId.value ?? selectedNodeId.value);
-
-const focusNeighborIds = computed<Set<string>>(() => {
-  const focus = focusNodeId.value;
+/** Selecting a node focuses its neighborhood: connected edges get the animated chain
+ * highlight, everything else fades out. Hover is intentionally inert (no dim, no tooltip) —
+ * clicking a node already opens the full detail panel. */
+const selectedNeighborIds = computed<Set<string>>(() => {
+  const selected = selectedNodeId.value;
   const g = graph.value;
-  if (!focus || !g) {
+  if (!selected || !g) {
     return new Set();
   }
-  const out = new Set<string>([focus]);
+  const out = new Set<string>([selected]);
   for (const e of g.edges) {
-    if (e.source_node_id === focus) {
+    if (e.source_node_id === selected) {
       out.add(e.target_node_id);
     }
-    if (e.target_node_id === focus) {
+    if (e.target_node_id === selected) {
       out.add(e.source_node_id);
     }
   }
@@ -205,13 +202,12 @@ const focusNeighborIds = computed<Set<string>>(() => {
 });
 
 function isNodeDimmed(id: string): boolean {
-  return focusNodeId.value !== null && !focusNeighborIds.value.has(id);
+  return selectedNodeId.value !== null && !selectedNeighborIds.value.has(id);
 }
 
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
-const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
 const COMPACT_MODE_ANIMATION_MS = 1000;
 let compactModeAnimationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -251,7 +247,6 @@ function toggleLabels(): void {
   const enteringCompactMode = !labelsHidden.value;
   clearCompactModeAnimationTimer();
   labelsHidden.value = enteringCompactMode;
-  tooltipState.value = null;
 
   if (!enteringCompactMode) {
     needleAnimating.value = false;
@@ -267,23 +262,6 @@ function toggleLabels(): void {
   }, COMPACT_MODE_ANIMATION_MS);
 }
 
-function nodeTooltipText(data: Record<string, unknown> | undefined): string {
-  const title = flowNodeTitle(data);
-  const rows = flowNodePropertyRows(data);
-  if (!rows.length) return title;
-  return [title, ...rows.map((r) => `${r.key}: ${r.value}`)].join("\n");
-}
-
-function onNodePinEnter(data: Record<string, unknown> | undefined, e: MouseEvent): void {
-  const text = nodeTooltipText(data);
-  if (!text) return;
-  tooltipState.value = { text, x: e.clientX + 14, y: e.clientY - 8 };
-}
-
-function onNodePinLeave(): void {
-  tooltipState.value = null;
-}
-
 function flowNodeRadius(data: Record<string, unknown> | undefined): number {
   const r = data?.radius;
   return typeof r === "number" ? r : 20;
@@ -292,16 +270,6 @@ function flowNodeRadius(data: Record<string, unknown> | undefined): number {
 function flowNodeColor(data: Record<string, unknown> | undefined): string {
   const c = data?.color;
   return typeof c === "string" ? c : "#60a5fa";
-}
-
-function onNodeHoverEnter(id: string, data: Record<string, unknown> | undefined, e: MouseEvent): void {
-  hoveredNodeId.value = id;
-  onNodePinEnter(data, e);
-}
-
-function onNodeHoverLeave(): void {
-  hoveredNodeId.value = null;
-  onNodePinLeave();
 }
 
 function propertyRowsFromRecord(
@@ -403,32 +371,15 @@ function flowNodeTitle(data: Record<string, unknown> | undefined): string {
   return typeof t === "string" ? t : "";
 }
 
-function flowNodePropertyRows(
-  data: Record<string, unknown> | undefined,
-): Array<{ key: string; value: string }> {
-  const rows = data?.propertyRows;
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-  return rows.filter(
-    (item): item is { key: string; value: string } =>
-      typeof item === "object" &&
-      item !== null &&
-      "key" in item &&
-      "value" in item &&
-      typeof (item as { key: unknown }).key === "string" &&
-      typeof (item as { value: unknown }).value === "string",
-  );
-}
-
-/** Stable slight Bezier curvature per edge so similar routes do not stack (labels stay on-path). */
+/** Slight per-edge bow so overlapping routes don't stack exactly; kept small so lines read as
+ * straight rather than spiraling. */
 function edgePathCurvature(edgeId: string): number {
   let h = 0;
   for (let i = 0; i < edgeId.length; i++) {
     h = (h * 31 + edgeId.charCodeAt(i)) | 0;
   }
-  const steps = [0.2, 0.22, 0.24, 0.26, 0.28, 0.3];
-  return steps[Math.abs(h) % steps.length] ?? 0.25;
+  const steps = [0.03, 0.045, 0.06, 0.075, 0.09, 0.105];
+  return steps[Math.abs(h) % steps.length] ?? 0.06;
 }
 
 const flowNodes = computed<Node[]>(() => {
@@ -448,7 +399,6 @@ const flowNodes = computed<Node[]>(() => {
       data: {
         title: `${node.entity_name} (${node.entity_type})`,
         entityType: node.entity_type,
-        propertyRows: propertyRowsFromRecord(node.properties),
         radius: nodeRadius(degree),
         color: clusterColorForType(node.entity_type),
         degree,
@@ -462,19 +412,24 @@ const flowEdges = computed<Edge[]>(() => {
   if (!g) {
     return [];
   }
-  const focus = focusNodeId.value;
-  return g.edges.map((e) => ({
-    id: e.id,
-    type: "agentMemory",
-    source: e.source_node_id,
-    target: e.target_node_id,
-    data: {
-      relationshipType: e.relationship_type,
-      pathCurvature: edgePathCurvature(e.id),
-      dimmed: focus !== null && focus !== e.source_node_id && focus !== e.target_node_id,
-    },
-    animated: true,
-  }));
+  const selected = selectedNodeId.value;
+  return g.edges.map((e) => {
+    const touchesSelection =
+      selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
+    return {
+      id: e.id,
+      type: "agentMemory",
+      source: e.source_node_id,
+      target: e.target_node_id,
+      data: {
+        relationshipType: e.relationship_type,
+        pathCurvature: edgePathCurvature(e.id),
+        dimmed: selected !== null && !touchesSelection,
+        active: touchesSelection,
+      },
+      animated: true,
+    };
+  });
 });
 
 const clusterLegend = computed(() =>
@@ -741,7 +696,6 @@ watch(
       }
       graphCanvasFullscreen.value = false;
       needleAnimating.value = false;
-      tooltipState.value = null;
       undoStack.value = [];
     }
   },
@@ -1359,8 +1313,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
             <template #node-default="{ id, data }">
               <div
                 class="agent-memory-node-inner flex flex-col items-center gap-1 cursor-pointer select-none"
-                @mouseenter="onNodeHoverEnter(id, data, $event)"
-                @mouseleave="onNodeHoverLeave"
               >
                 <div
                   class="agent-memory-node-circle rounded-full shadow-sm"
@@ -1463,15 +1415,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
           >
             <Wand2 class="w-4 h-4" />
           </Button>
-          <!-- Tooltip: position:fixed escapes overflow:hidden AND stays inside the
-               browser-fullscreen element's subtree (unlike Teleport to body) -->
-          <div
-            v-if="tooltipState"
-            class="fixed z-[9999] pointer-events-none max-w-[240px] rounded-md border border-border/60 bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg whitespace-pre-wrap break-words leading-relaxed"
-            :style="{ left: `${tooltipState.x}px`, top: `${tooltipState.y}px` }"
-          >
-            {{ tooltipState.text }}
-          </div>
           <Button
             type="button"
             variant="secondary"
