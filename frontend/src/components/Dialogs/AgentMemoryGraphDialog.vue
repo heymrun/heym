@@ -4,6 +4,13 @@ import type { Edge, Node } from "@vue-flow/core";
 import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Trash2, Wand2 } from "lucide-vue-next";
 
 import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowPane.vue";
+import {
+  clusterColorForType,
+  computeDegrees,
+  distinctEntityTypes,
+  nodeRadius,
+  seedPositions,
+} from "@/components/Dialogs/agentMemoryGraphView";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -162,6 +169,42 @@ async function toggleGraphCanvasFullscreen(): Promise<void> {
 const loading = ref(false);
 const graph = ref<AgentMemoryGraphResponse | null>(null);
 const selectedNodeId = ref<string | null>(null);
+
+/** Last known live position per node id, captured before every reload so the force sim's
+ * settled/dragged layout survives graph refreshes (Vue Flow's node reconciliation would
+ * otherwise overwrite `position` from `flowNodes` on every prop change). */
+const knownPositions = ref<Map<string, { x: number; y: number }>>(new Map());
+
+function captureLivePositions(): void {
+  const live = flowPaneRef.value?.snapshotPositions();
+  if (live && live.size > 0) {
+    knownPositions.value = live;
+  }
+}
+
+const hoveredNodeId = ref<string | null>(null);
+
+const hoveredNeighborIds = computed<Set<string>>(() => {
+  const hovered = hoveredNodeId.value;
+  const g = graph.value;
+  if (!hovered || !g) {
+    return new Set();
+  }
+  const out = new Set<string>([hovered]);
+  for (const e of g.edges) {
+    if (e.source_node_id === hovered) {
+      out.add(e.target_node_id);
+    }
+    if (e.target_node_id === hovered) {
+      out.add(e.source_node_id);
+    }
+  }
+  return out;
+});
+
+function isNodeDimmed(id: string): boolean {
+  return hoveredNodeId.value !== null && !hoveredNeighborIds.value.has(id);
+}
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
@@ -241,6 +284,26 @@ function onNodePinEnter(data: Record<string, unknown> | undefined, e: MouseEvent
 
 function onNodePinLeave(): void {
   tooltipState.value = null;
+}
+
+function flowNodeRadius(data: Record<string, unknown> | undefined): number {
+  const r = data?.radius;
+  return typeof r === "number" ? r : 20;
+}
+
+function flowNodeColor(data: Record<string, unknown> | undefined): string {
+  const c = data?.color;
+  return typeof c === "string" ? c : "#60a5fa";
+}
+
+function onNodeHoverEnter(id: string, data: Record<string, unknown> | undefined, e: MouseEvent): void {
+  hoveredNodeId.value = id;
+  onNodePinEnter(data, e);
+}
+
+function onNodeHoverLeave(): void {
+  hoveredNodeId.value = null;
+  onNodePinLeave();
 }
 
 function propertyRowsFromRecord(
@@ -370,189 +433,30 @@ function edgePathCurvature(edgeId: string): number {
   return steps[Math.abs(h) % steps.length] ?? 0.25;
 }
 
-/** Longest-path layering from roots (incoming degree 0), tree-like top → down. */
-function layoutMemoryGraphDownward(
-  nodes: AgentMemoryNodeDTO[],
-  edges: AgentMemoryEdgeDTO[],
-  opts?: { hDist?: number; vGap?: number; cx?: number },
-): Map<string, { x: number; y: number }> {
-  const idSet = new Set(nodes.map((n) => n.id));
-  const inCount = new Map<string, number>();
-
-  for (const n of nodes) {
-    inCount.set(n.id, 0);
-  }
-  for (const e of edges) {
-    if (!idSet.has(e.source_node_id) || !idSet.has(e.target_node_id)) {
-      continue;
-    }
-    inCount.set(e.target_node_id, (inCount.get(e.target_node_id) ?? 0) + 1);
-  }
-
-  const rootIds = nodes.filter((n) => (inCount.get(n.id) ?? 0) === 0).map((n) => n.id);
-  const seeds =
-    rootIds.length > 0
-      ? rootIds
-      : [nodes.find((n) => n.entity_type.trim().toLowerCase() === "person")?.id ?? nodes[0]!.id];
-
-  const depth = new Map<string, number>();
-  for (const n of nodes) {
-    depth.set(n.id, seeds.includes(n.id) ? 0 : -1);
-  }
-
-  const validEdges = edges.filter(
-    (e) => idSet.has(e.source_node_id) && idSet.has(e.target_node_id),
-  );
-  const relaxIters = Math.max(nodes.length, 1);
-  for (let i = 0; i < relaxIters; i++) {
-    for (const e of validEdges) {
-      const du = depth.get(e.source_node_id) ?? -1;
-      if (du < 0) {
-        continue;
-      }
-      const dv = depth.get(e.target_node_id) ?? -1;
-      const next = du + 1;
-      if (next > dv) {
-        depth.set(e.target_node_id, next);
-      }
-    }
-  }
-
-  let maxD = 0;
-  for (const n of nodes) {
-    const d = depth.get(n.id) ?? -1;
-    if (d > maxD) {
-      maxD = d;
-    }
-  }
-  const orphanLayer = maxD + 1;
-  for (const n of nodes) {
-    if ((depth.get(n.id) ?? -1) < 0) {
-      depth.set(n.id, orphanLayer);
-    }
-  }
-
-  const byLayer = new Map<number, string[]>();
-  for (const n of nodes) {
-    const d = depth.get(n.id) ?? 0;
-    if (!byLayer.has(d)) {
-      byLayer.set(d, []);
-    }
-    byLayer.get(d)!.push(n.id);
-  }
-  for (const ids of byLayer.values()) {
-    ids.sort((a, b) => a.localeCompare(b));
-  }
-
-  // max-w ~220px nodes: center distance must exceed box width + margin
-  const hCenterDist = opts?.hDist ?? 280;
-  const vGap = opts?.vGap ?? 205;
-  const topPad = 28;
-  const centerX = opts?.cx ?? 440;
-  const pos = new Map<string, { x: number; y: number }>();
-
-  const sortedLayers = [...byLayer.keys()].sort((a, b) => a - b);
-
-  for (const layer of sortedLayers) {
-    const ids = [...byLayer.get(layer)!];
-    const y = topPad + layer * vGap;
-
-    if (layer === 0) {
-      const count = ids.length;
-      for (let i = 0; i < count; i++) {
-        const x = centerX + (i - (count - 1) / 2) * hCenterDist;
-        pos.set(ids[i]!, { x, y });
-      }
-      continue;
-    }
-
-    const idealX = new Map<string, number>();
-    for (const id of ids) {
-      const xsImmediate: number[] = [];
-      const xsAnyLower: number[] = [];
-      for (const e of validEdges) {
-        if (e.target_node_id !== id) {
-          continue;
-        }
-        const ps = depth.get(e.source_node_id) ?? -1;
-        const pp = pos.get(e.source_node_id);
-        if (pp === undefined || ps < 0 || ps >= layer) {
-          continue;
-        }
-        if (ps === layer - 1) {
-          xsImmediate.push(pp.x);
-        }
-        xsAnyLower.push(pp.x);
-      }
-      let ix: number;
-      if (xsImmediate.length > 0) {
-        ix = xsImmediate.reduce((s, x) => s + x, 0) / xsImmediate.length;
-      } else if (xsAnyLower.length > 0) {
-        ix = xsAnyLower.reduce((s, x) => s + x, 0) / xsAnyLower.length;
-      } else {
-        ix = centerX;
-      }
-      idealX.set(id, ix);
-    }
-
-    const order = ids.sort((a, b) => {
-      const da = idealX.get(a) ?? 0;
-      const db = idealX.get(b) ?? 0;
-      if (da !== db) {
-        return da - db;
-      }
-      return a.localeCompare(b);
-    });
-
-    const ideals = order.map((id) => idealX.get(id)!);
-    const packed: number[] = [];
-    if (order.length === 1) {
-      packed.push(ideals[0]!);
-    } else {
-      const allSame = ideals.every((v) => Math.abs(v - ideals[0]!) < 0.01);
-      if (allSame) {
-        const ref = ideals[0]!;
-        for (let i = 0; i < order.length; i++) {
-          packed.push(ref + (i - (order.length - 1) / 2) * hCenterDist);
-        }
-      } else {
-        packed.push(ideals[0]!);
-        for (let i = 1; i < order.length; i++) {
-          packed.push(Math.max(ideals[i]!, packed[i - 1]! + hCenterDist));
-        }
-      }
-    }
-
-    const mid = (Math.min(...packed) + Math.max(...packed)) / 2;
-    // Single-node rows: do not recenter on centerX — shift would erase barycentric x and
-    // stack the node under the root column (edges cut through siblings on the row above).
-    const shift = order.length === 1 ? 0 : centerX - mid;
-    for (let i = 0; i < order.length; i++) {
-      pos.set(order[i]!, { x: packed[i]! + shift, y });
-    }
-  }
-
-  return pos;
-}
-
 const flowNodes = computed<Node[]>(() => {
   const g = graph.value;
   if (!g?.nodes.length) {
     return [];
   }
-  const compactOpts = labelsHidden.value
-    ? { hDist: 90, vGap: 60, cx: 160 }
-    : undefined;
-  const positions = layoutMemoryGraphDownward(g.nodes, g.edges, compactOpts);
-  return g.nodes.map((node) => ({
-    id: node.id,
-    type: "default",
-    position: positions.get(node.id) ?? { x: 40, y: 40 },
-    data: {
-      title: `${node.entity_name} (${node.entity_type})`,
-      propertyRows: propertyRowsFromRecord(node.properties),
-    },
-  }));
+  const seeds = seedPositions(g.nodes);
+  const degrees = computeDegrees(g.nodes, g.edges);
+  return g.nodes.map((node) => {
+    const degree = degrees.get(node.id) ?? 0;
+    return {
+      id: node.id,
+      type: "default",
+      position: knownPositions.value.get(node.id) ??
+        seeds.get(node.id) ?? { x: 480, y: 320 },
+      data: {
+        title: `${node.entity_name} (${node.entity_type})`,
+        entityType: node.entity_type,
+        propertyRows: propertyRowsFromRecord(node.properties),
+        radius: nodeRadius(degree),
+        color: clusterColorForType(node.entity_type),
+        degree,
+      },
+    };
+  });
 });
 
 const flowEdges = computed<Edge[]>(() => {
@@ -560,6 +464,7 @@ const flowEdges = computed<Edge[]>(() => {
   if (!g) {
     return [];
   }
+  const hovered = hoveredNodeId.value;
   return g.edges.map((e) => ({
     id: e.id,
     type: "agentMemory",
@@ -568,10 +473,18 @@ const flowEdges = computed<Edge[]>(() => {
     data: {
       relationshipType: e.relationship_type,
       pathCurvature: edgePathCurvature(e.id),
+      dimmed: hovered !== null && hovered !== e.source_node_id && hovered !== e.target_node_id,
     },
     animated: true,
   }));
 });
+
+const clusterLegend = computed(() =>
+  distinctEntityTypes(graph.value?.nodes ?? []).map((type) => ({
+    type,
+    color: clusterColorForType(type),
+  })),
+);
 
 const edgesForSidebarList = computed(() => {
   const g = graph.value;
@@ -632,6 +545,7 @@ async function loadGraph(opts?: LoadGraphOptions): Promise<void> {
   if (!props.workflowId || !props.canvasNodeId) {
     return;
   }
+  captureLivePositions();
   const silent = Boolean(opts?.silent);
   if (!silent) {
     loading.value = true;
@@ -652,6 +566,7 @@ async function loadGraph(opts?: LoadGraphOptions): Promise<void> {
     if (shouldRefit && graph.value.nodes.length > 0) {
       await tryFitView();
     }
+    flowPaneRef.value?.reheat();
   } catch {
     showToast("Failed to load memory graph", "error");
     if (!silent) {
@@ -1401,37 +1316,30 @@ function handleDialogEscape(event: KeyboardEvent): void {
             @delete-selection="onFlowDeleteSelection"
           >
             <template #node-default="{ id, data }">
-              <!-- Normal label mode -->
               <div
-                v-if="!labelsHidden"
-                class="agent-memory-node-inner px-2 py-1.5 rounded-md border border-border bg-card text-foreground text-[11px] leading-tight max-w-[220px] min-w-0 cursor-pointer shadow-sm"
-                :class="selectedNodeId === id ? 'ring-2 ring-pink-500 ring-offset-2 ring-offset-background' : ''"
+                class="agent-memory-node-inner flex flex-col items-center gap-1 cursor-pointer select-none"
+                @mouseenter="onNodeHoverEnter(id, data, $event)"
+                @mouseleave="onNodeHoverLeave"
               >
-                <div class="whitespace-pre-wrap font-medium">
+                <div
+                  class="agent-memory-node-circle rounded-full shadow-sm"
+                  :class="[
+                    selectedNodeId === id ? 'ring-2 ring-pink-500 ring-offset-2 ring-offset-background' : '',
+                    isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
+                  ]"
+                  :style="{
+                    width: `${flowNodeRadius(data) * 2}px`,
+                    height: `${flowNodeRadius(data) * 2}px`,
+                    background: flowNodeColor(data),
+                  }"
+                />
+                <div
+                  v-if="!labelsHidden"
+                  class="agent-memory-node-caption max-w-[110px] truncate text-center text-[10px] font-medium text-foreground"
+                  :class="isNodeDimmed(id) ? 'agent-memory-node-dimmed' : ''"
+                >
                   {{ flowNodeTitle(data) }}
                 </div>
-                <ul
-                  v-if="flowNodePropertyRows(data).length"
-                  class="mt-1.5 pt-1.5 border-t border-border/60 text-[10px] text-muted-foreground space-y-0.5 list-none m-0 p-0"
-                >
-                  <li
-                    v-for="row in flowNodePropertyRows(data)"
-                    :key="row.key"
-                    class="break-words"
-                  >
-                    <span class="text-foreground/70">{{ row.key }}</span>: {{ row.value }}
-                  </li>
-                </ul>
-              </div>
-              <!-- Compact needle/pin mode -->
-              <div
-                v-else
-                class="agent-memory-node-inner needle-pin-compact cursor-pointer"
-                :class="selectedNodeId === id ? 'needle-selected' : ''"
-                @mouseenter="onNodePinEnter(data, $event)"
-                @mouseleave="onNodePinLeave"
-              >
-                <div class="needle-pin-head" />
               </div>
             </template>
           </AgentMemoryGraphFlowPane>
@@ -1541,6 +1449,24 @@ function handleDialogEscape(event: KeyboardEvent): void {
               class="w-4 h-4"
             />
           </Button>
+          <div
+            v-if="clusterLegend.length > 1"
+            class="absolute top-2 right-2 z-[5] max-w-[55%] rounded-lg border border-border bg-card/90 backdrop-blur-sm p-2 shadow-sm"
+          >
+            <div class="flex flex-wrap gap-x-3 gap-y-1">
+              <div
+                v-for="item in clusterLegend"
+                :key="item.type"
+                class="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+              >
+                <span
+                  class="inline-block h-2 w-2 rounded-full shrink-0"
+                  :style="{ background: item.color }"
+                />
+                <span class="truncate">{{ item.type }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
@@ -1894,29 +1820,19 @@ function handleDialogEscape(event: KeyboardEvent): void {
   pointer-events: none;
 }
 
-/* Compact dot node */
-.needle-pin-compact {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 3px;
+.agent-memory-node-circle {
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.needle-pin-head {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: hsl(var(--primary));
-  border: 1.5px solid hsl(var(--primary) / 0.55);
-  box-shadow: 0 0 7px hsl(var(--primary) / 0.35);
-  flex-shrink: 0;
+.agent-memory-node-caption {
+  transition: opacity 0.15s ease;
 }
 
-.needle-selected .needle-pin-head {
-  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--primary));
+.agent-memory-node-dimmed {
+  opacity: 0.25;
 }
 
-.needles-spinning.compact-mode .needle-pin-compact {
+.needles-spinning.compact-mode .agent-memory-node-inner {
   opacity: 0;
   pointer-events: none;
 }
