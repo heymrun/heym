@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { BaseEdge, EdgeLabelRenderer, useVueFlow } from "@vue-flow/core";
 import type { EdgeProps } from "@vue-flow/core";
 
@@ -79,23 +79,84 @@ function isDimmed(): boolean {
   return Boolean(d && typeof d === "object" && (d as { dimmed?: unknown }).dimmed === true);
 }
 
-/** True when this edge is directly incident to the selected node — gets the flowing
- * highlight and is the only state in which its relationship label is shown. */
+/** True when this edge is directly incident to the selected node — the only state in which its
+ * relationship label is shown and its chain-fill overlay is revealed. */
 function isActive(): boolean {
   const d = props.data;
   return Boolean(d && typeof d === "object" && (d as { active?: unknown }).active === true);
 }
 
-const edgeClass = computed(() => (isActive() ? "agent-memory-edge-active" : ""));
+function growsFromEnd(): boolean {
+  const d = props.data;
+  return Boolean(d && typeof d === "object" && (d as { growFromEnd?: unknown }).growFromEnd === true);
+}
 
-const dashedPathStyle = computed(() => ({
+/** Always-visible base line: thin, solid, subtle — a plain network hairline rather than a
+ * dashed/colored one, so an unfocused graph reads as a coherent web instead of a scatter of
+ * disconnected dashes. */
+const basePathStyle = computed(() => ({
   ...((props.style as Record<string, string> | undefined) ?? {}),
-  strokeDasharray: "6 4",
-  stroke: isActive() ? "hsl(var(--primary))" : "hsl(217 91% 60% / 0.45)",
-  strokeWidth: isActive() ? 2 : 1.25,
+  stroke: "hsl(215 20% 70% / 0.35)",
+  strokeWidth: 1,
   opacity: isDimmed() ? 0.15 : 1,
-  transition: "opacity 0.15s ease, stroke 0.15s ease, stroke-width 0.15s ease",
+  transition: "opacity 0.2s ease",
 }));
+
+// --- Chain-fill overlay: a purple line that draws itself in (from the selected node outward)
+// when this edge becomes active, and drains back out the same way on deselect. ---
+const revealPathEl = ref<SVGPathElement | null>(null);
+const revealProgress = ref(0); // 0 = fully drained, 1 = fully drawn
+const REVEAL_DURATION_MS = 450;
+let revealRafId: number | null = null;
+
+function animateReveal(target: number): void {
+  if (revealRafId !== null) {
+    cancelAnimationFrame(revealRafId);
+  }
+  const start = revealProgress.value;
+  if (start === target) {
+    return;
+  }
+  const startTime = performance.now();
+  function tick(now: number): void {
+    const t = Math.min(1, (now - startTime) / REVEAL_DURATION_MS);
+    const eased = 1 - (1 - t) * (1 - t);
+    revealProgress.value = start + (target - start) * eased;
+    revealRafId = t < 1 ? requestAnimationFrame(tick) : null;
+  }
+  revealRafId = requestAnimationFrame(tick);
+}
+
+watch(
+  () => isActive(),
+  (active) => animateReveal(active ? 1 : 0),
+  { immediate: true },
+);
+
+onUnmounted(() => {
+  if (revealRafId !== null) {
+    cancelAnimationFrame(revealRafId);
+  }
+});
+
+const revealPathLength = computed(() => {
+  void path.value.edgePath;
+  return revealPathEl.value?.getTotalLength() ?? 0;
+});
+
+const revealStyle = computed(() => {
+  const len = revealPathLength.value;
+  if (!len || revealProgress.value <= 0.001) {
+    return { opacity: 0 };
+  }
+  const magnitude = len * (1 - revealProgress.value);
+  const offset = growsFromEnd() ? -magnitude : magnitude;
+  return {
+    strokeDasharray: `${len} ${len}`,
+    strokeDashoffset: offset,
+    opacity: 1,
+  };
+});
 
 function relationshipTypeLabel(): string {
   const d = props.data;
@@ -111,11 +172,17 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
 <template>
   <BaseEdge
     :id="id"
-    :style="dashedPathStyle"
-    :class="edgeClass"
+    :style="basePathStyle"
     :path="path.edgePath"
     :marker-end="markerEnd"
     :interaction-width="16"
+  />
+  <path
+    ref="revealPathEl"
+    :d="path.edgePath"
+    fill="none"
+    class="agent-memory-edge-reveal"
+    :style="revealStyle"
   />
   <EdgeLabelRenderer>
     <div
@@ -138,13 +205,9 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
 </template>
 
 <style scoped>
-@keyframes agent-memory-edge-flow {
-  to {
-    stroke-dashoffset: -20;
-  }
-}
-
-.agent-memory-edge-active {
-  animation: agent-memory-edge-flow 0.6s linear infinite;
+.agent-memory-edge-reveal {
+  stroke: hsl(var(--primary));
+  stroke-width: 2;
+  pointer-events: none;
 }
 </style>

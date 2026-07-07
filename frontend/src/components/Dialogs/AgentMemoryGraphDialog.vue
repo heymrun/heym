@@ -426,8 +426,10 @@ const flowEdges = computed<Edge[]>(() => {
         pathCurvature: edgePathCurvature(e.id),
         dimmed: selected !== null && !touchesSelection,
         active: touchesSelection,
+        // The fill animation should always grow outward from the selected node, regardless of
+        // which end of the edge it is.
+        growFromEnd: touchesSelection && selected === e.target_node_id,
       },
-      animated: true,
     };
   });
 });
