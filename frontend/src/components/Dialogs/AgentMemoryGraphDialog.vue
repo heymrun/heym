@@ -230,10 +230,12 @@ function isNodeDimmed(id: string): boolean {
 }
 
 /** While a node is selected, hovering one of its now-highlighted relationship edges hides the
- * other highlighted edges (and their labels) so the hovered one can be read on its own — the
- * same crowded-hub problem the caption flip and focus spacing address, but for edges that are
- * still crossing each other once revealed. Cleared on any selection change so it can't outlive
- * the chain it belonged to. */
+ * other highlighted edges' label chips (not the lines themselves) so the hovered one's label can
+ * be read on its own — the same crowded-hub problem the caption flip and focus spacing address,
+ * but for labels that are still overlapping once revealed. Only set when there IS a selection and
+ * the hovered edge itself belongs to that selection's chain — hovering an unrelated background
+ * edge (or hovering anything with nothing selected) must have no effect. Cleared on any selection
+ * change so it can't outlive the chain it belonged to. */
 const hoveredEdgeId = ref<string | null>(null);
 
 watch(selectedNodeId, () => {
@@ -241,7 +243,10 @@ watch(selectedNodeId, () => {
 });
 
 function onEdgeMouseEnter(ev: { edge: Edge }): void {
-  hoveredEdgeId.value = ev.edge.id;
+  const selected = selectedNodeId.value;
+  const hoveredEdgeTouchesSelection =
+    selected !== null && (selected === ev.edge.source || selected === ev.edge.target);
+  hoveredEdgeId.value = hoveredEdgeTouchesSelection ? ev.edge.id : null;
 }
 
 function onEdgeMouseLeave(): void {
@@ -526,8 +531,9 @@ const flowEdges = computed<Edge[]>(() => {
         // The fill animation should always grow outward from the selected node, regardless of
         // which end of the edge it is.
         growFromEnd: touchesSelection && selected === e.target_node_id,
-        // Hovering one active edge hides its active siblings so overlapping labels near a hub
-        // can be read one at a time (see hoveredEdgeId).
+        // Hovering one active edge hides its active siblings' label chips (not their lines) so
+        // overlapping labels near a hub can be read one at a time (see hoveredEdgeId — already
+        // gated there to only ever be an active edge's id, so this only fires within one chain).
         hoveredOut: hovered !== null && touchesSelection && hovered !== e.id,
       },
     };

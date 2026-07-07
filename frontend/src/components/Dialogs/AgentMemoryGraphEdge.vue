@@ -104,7 +104,8 @@ function isDimmed(): boolean {
 }
 
 /** True when a sibling active edge (same selected hub) is hovered instead of this one — hides
- * this edge's line, fill, and label so the hovered relation can be read without overlap. */
+ * only this edge's relationship-label chip (the lines themselves stay put) so the hovered
+ * relation's label can be read without overlapping text from its siblings. */
 function isHoveredOut(): boolean {
   const d = props.data;
   return Boolean(d && typeof d === "object" && (d as { hoveredOut?: unknown }).hoveredOut === true);
@@ -129,7 +130,7 @@ const basePathStyle = computed(() => ({
   ...((props.style as Record<string, string> | undefined) ?? {}),
   stroke: "hsl(215 20% 70% / 0.35)",
   strokeWidth: 1,
-  opacity: isDimmed() || isHoveredOut() ? 0.06 : 1,
+  opacity: isDimmed() ? 0.06 : 1,
   transition: "opacity 0.2s ease",
 }));
 
@@ -189,7 +190,7 @@ const revealPathLength = computed(() => {
 
 const revealStyle = computed(() => {
   const len = revealPathLength.value;
-  if (!len || revealProgress.value <= 0.001 || isHoveredOut()) {
+  if (!len || revealProgress.value <= 0.001) {
     return { opacity: 0 };
   }
   const magnitude = len * (1 - revealProgress.value);
