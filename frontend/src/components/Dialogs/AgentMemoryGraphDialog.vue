@@ -252,7 +252,6 @@ const hoveredEdgeId = ref<string | null>(null);
 
 watch(selectedNodeId, () => {
   hoveredEdgeId.value = null;
-  hoveredLeafId.value = null;
   // A tooltip already open from hovering the node that's about to be clicked wouldn't get a
   // mouseleave out of the click itself — clear it explicitly so it can't linger over a now-
   // selected chain.
@@ -270,22 +269,32 @@ function onEdgeMouseLeave(): void {
   hoveredEdgeId.value = null;
 }
 
+/** The edge id connecting two nodes, if any — used so hovering a selected hub's leaf can isolate
+ * its relationship label exactly like hovering that same edge directly would (see hoveredEdgeId). */
+function edgeIdBetween(aId: string, bId: string): string | null {
+  const g = graph.value;
+  if (!g) {
+    return null;
+  }
+  const edge = g.edges.find(
+    (e) =>
+      (e.source_node_id === aId && e.target_node_id === bId) ||
+      (e.source_node_id === bId && e.target_node_id === aId),
+  );
+  return edge?.id ?? null;
+}
+
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
 /** Compact mode hides captions entirely, so hover is the only way to identify a plain pin —
  * shows a name/type/attributes popover there for any node. In normal mode, a caption already
  * names every node, so the popover only earns its keep for a selected hub's leaves (its
- * neighbors): hovering one shows its attributes AND hides the other leaves' captions (see
- * hoveredLeafId), the same crowded-hub decluttering the edge hover-isolate does for relationship
- * labels. With nothing selected in normal mode, hover stays inert — there's no leaf to hover and
- * the caption already says enough. */
+ * neighbors): hovering one shows its attributes AND isolates its relationship label exactly like
+ * hovering its edge would (see hoveredEdgeId/edgeIdBetween) — not by hiding sibling captions. With
+ * nothing selected in normal mode, hover stays inert — there's no leaf to hover and the caption
+ * already says enough. */
 const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
-
-/** Set only when hovering a leaf (neighbor) of the currently selected hub in normal mode — drives
- * hiding the other leaves' captions. Cleared on any selection change (see the watcher above) so
- * it can't outlive the chain it belonged to. */
-const hoveredLeafId = ref<string | null>(null);
 
 function nodeHoverTooltipText(nodeId: string): string {
   const node = graph.value?.nodes.find((n) => n.id === nodeId);
@@ -305,8 +314,9 @@ function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
   if (!labelsHidden.value && !isLeafOfSelection) {
     return;
   }
-  if (isLeafOfSelection) {
-    hoveredLeafId.value = nodeId;
+  const hub = selectedNodeId.value;
+  if (isLeafOfSelection && hub !== null) {
+    hoveredEdgeId.value = edgeIdBetween(hub, nodeId);
   }
   const text = nodeHoverTooltipText(nodeId);
   if (!text) {
@@ -316,15 +326,8 @@ function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
 }
 
 function onNodeHoverLeave(): void {
-  hoveredLeafId.value = null;
+  hoveredEdgeId.value = null;
   tooltipState.value = null;
-}
-
-/** True for a selected hub's leaf (neighbor) other than the one currently hovered — hides its
- * name caption while a sibling leaf is hovered, mirroring the edge hover-isolate treatment of
- * relationship labels. */
-function isCaptionHiddenByLeafHover(id: string): boolean {
-  return hoveredLeafId.value !== null && id !== hoveredLeafId.value && selectedLeafIds.value.has(id);
 }
 const COMPACT_MODE_ANIMATION_MS = 1000;
 let compactModeAnimationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1536,7 +1539,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
                   :style="{ background: flowNodeColor(data) }"
                 />
                 <div
-                  v-if="!labelsHidden && !isCaptionHiddenByLeafHover(id)"
+                  v-if="!labelsHidden"
                   class="agent-memory-node-caption pointer-events-none absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
                   :class="[
                     captionAboveIds.has(id) ? 'bottom-full mb-1' : 'top-full mt-1',
