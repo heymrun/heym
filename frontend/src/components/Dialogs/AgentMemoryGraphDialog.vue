@@ -1499,7 +1499,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
                 />
                 <div
                   v-if="!labelsHidden"
-                  class="agent-memory-node-caption absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
+                  class="agent-memory-node-caption pointer-events-none absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
                   :class="[
                     captionAboveIds.has(id) ? 'bottom-full mb-1' : 'top-full mt-1',
                     isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
