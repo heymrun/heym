@@ -23,7 +23,8 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     self.nodes[target_node_id]["data"]["active"] = False
     self.inactive_nodes.add(target_node_id)
-    self.skipped_nodes.add(target_node_id)
+    with self.lock:
+        self.skipped_nodes.add(target_node_id)
 
     if self.workflow_id:
         from sqlalchemy.orm.attributes import flag_modified

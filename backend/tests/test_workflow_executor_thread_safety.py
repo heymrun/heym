@@ -75,9 +75,7 @@ class LlmJsonParseErrorTests(unittest.TestCase):
 
     def test_non_batch_json_parse_error_raises_value_error_without_trace_id(self) -> None:
         executor = WorkflowExecutor(nodes=[], edges=[])
-        executor._execute_llm_node = MagicMock(
-            return_value={"text": "not valid json {{{"}
-        )
+        executor._execute_llm_node = MagicMock(return_value={"text": "not valid json {{{"})
         executor._parse_json_output = MagicMock(side_effect=ValueError("malformed JSON"))
         executor._pop_internal_trace_id = MagicMock(return_value=None)
         executor._restore_internal_trace_id = MagicMock()
@@ -143,9 +141,7 @@ class AgentJsonParseErrorTests(unittest.TestCase):
 
     def test_json_parse_error_raises_value_error_without_trace_id(self) -> None:
         executor = WorkflowExecutor(nodes=[], edges=[])
-        executor._execute_agent_node = MagicMock(
-            return_value={"text": "not valid json {{{"}
-        )
+        executor._execute_agent_node = MagicMock(return_value={"text": "not valid json {{{"})
         executor._parse_json_output = MagicMock(side_effect=ValueError("malformed JSON"))
         executor._pop_internal_trace_id = MagicMock(return_value=None)
         executor._restore_internal_trace_id = MagicMock()
@@ -382,14 +378,10 @@ class OutputAllowDownstreamTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
 
         # The background wait node should be recorded
-        wait_results = [
-            row for row in result.node_results if row["node_label"] == "backgroundTask"
-        ]
+        wait_results = [row for row in result.node_results if row["node_label"] == "backgroundTask"]
         self.assertTrue(len(wait_results) > 0)
         self.assertEqual(wait_results[0]["status"], "success")
 
         # Downstream nodes should have results
-        downstream = [
-            row for row in result.node_results if row["node_label"] == "afterWait"
-        ]
+        downstream = [row for row in result.node_results if row["node_label"] == "afterWait"]
         self.assertTrue(len(downstream) > 0)
