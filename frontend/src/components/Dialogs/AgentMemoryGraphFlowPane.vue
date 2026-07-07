@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Background } from "@vue-flow/background";
 import { VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 
 import AgentMemoryGraphEdge from "@/components/Dialogs/AgentMemoryGraphEdge.vue";
+import AgentMemoryGraphForceSim from "./AgentMemoryGraphForceSim.vue";
 import AgentMemoryGraphFlowHotkeys from "./AgentMemoryGraphFlowHotkeys.vue";
 import AgentMemoryFlowViewportFitter from "./AgentMemoryFlowViewportFitter.vue";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     flowId: string;
     nodes: Node[];
@@ -25,12 +26,31 @@ const emit = defineEmits<{
 }>();
 
 const fitterRef = ref<InstanceType<typeof AgentMemoryFlowViewportFitter> | null>(null);
+const simRef = ref<InstanceType<typeof AgentMemoryGraphForceSim> | null>(null);
+
+const simLinks = computed(() => props.edges.map((e) => ({ source: e.source, target: e.target })));
 
 async function fitViewAfterLoad(opts?: { padding?: number; duration?: number }): Promise<void> {
   await fitterRef.value?.fitViewAfterLoad(opts);
 }
 
-defineExpose({ fitViewAfterLoad });
+async function focusNode(id: string): Promise<void> {
+  await fitterRef.value?.focusOnNode(id);
+}
+
+function reheat(): void {
+  simRef.value?.reheat();
+}
+
+function snapshotPositions(): Map<string, { x: number; y: number }> {
+  return simRef.value?.snapshotPositions() ?? new Map();
+}
+
+function handleNodeDragStop(): void {
+  simRef.value?.reheat();
+}
+
+defineExpose({ fitViewAfterLoad, focusNode, reheat, snapshotPositions });
 </script>
 
 <template>
@@ -45,8 +65,14 @@ defineExpose({ fitViewAfterLoad });
     :max-zoom="1.5"
     @node-click="emit('nodeClick', $event)"
     @pane-click="emit('paneClick')"
+    @node-drag-stop="handleNodeDragStop"
   >
     <AgentMemoryFlowViewportFitter ref="fitterRef" />
+    <AgentMemoryGraphForceSim
+      ref="simRef"
+      :links="simLinks"
+      :active="nodes.length > 0"
+    />
     <AgentMemoryGraphFlowHotkeys
       :enabled="hotkeysEnabled"
       @delete-selection="emit('deleteSelection', $event)"

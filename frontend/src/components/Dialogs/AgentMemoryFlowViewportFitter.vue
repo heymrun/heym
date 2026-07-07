@@ -52,7 +52,16 @@ async function fitViewAfterLoad(opts?: { padding?: number; duration?: number }):
   }
 }
 
-defineExpose({ fitViewAfterLoad });
+async function focusOnNode(id: string): Promise<void> {
+  await nextTick();
+  try {
+    await fitView({ nodes: [id], padding: 0.35, duration: 300 });
+  } catch {
+    /* Flow not ready */
+  }
+}
+
+defineExpose({ fitViewAfterLoad, focusOnNode });
 </script>
 
 <template>
