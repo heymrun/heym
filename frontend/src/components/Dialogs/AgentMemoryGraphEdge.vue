@@ -1,3 +1,11 @@
+<script lang="ts">
+// Genuine module scope (unlike anything declared inside <script setup>, which runs fresh
+// inside setup() on every component instantiation) — this must survive Vue Flow remounting
+// this component on every selection change, so a deselect can still find where the fill
+// animation left off instead of restarting from a fresh, always-zero ref.
+export const revealProgressByEdgeId = new Map<string, number>();
+</script>
+
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
 import { BaseEdge, EdgeLabelRenderer, useVueFlow } from "@vue-flow/core";
@@ -110,16 +118,29 @@ const basePathStyle = computed(() => ({
   ...((props.style as Record<string, string> | undefined) ?? {}),
   stroke: "hsl(215 20% 70% / 0.35)",
   strokeWidth: 1,
-  opacity: isDimmed() ? 0.15 : 1,
+  opacity: isDimmed() ? 0.06 : 1,
   transition: "opacity 0.2s ease",
 }));
 
 // --- Chain-fill overlay: a purple line that draws itself in (from the selected node outward)
 // when this edge becomes active, and drains back out the same way on deselect. ---
+//
+// Vue Flow remounts this component (confirmed via instrumentation: onUnmounted immediately
+// followed by a fresh onMounted with a new instance) on every selection change, since its
+// slot-based custom-edge render path has early `return null` branches that transiently produce
+// a null render. A plain component-local `ref(0)` would therefore always restart from 0 on
+// both select AND deselect, animating the fill-in (0 -> 1, so it looked correct by accident)
+// but never the drain (0 -> 0 is a no-op, which read as an instant snap with no animation).
+// revealProgressByEdgeId (module-level, declared in the sibling plain <script> block above)
+// survives the remount so a deselect still finds start=1 and animates down to 0.
 const revealPathEl = ref<SVGPathElement | null>(null);
-const revealProgress = ref(0); // 0 = fully drained, 1 = fully drawn
+const revealProgress = ref(revealProgressByEdgeId.get(props.id) ?? 0); // 0 = drained, 1 = drawn
 const REVEAL_DURATION_MS = 450;
 let revealRafId: number | null = null;
+
+watch(revealProgress, (v) => {
+  revealProgressByEdgeId.set(props.id, v);
+});
 
 function animateReveal(target: number): void {
   if (revealRafId !== null) {
@@ -209,7 +230,7 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
       }"
     >
       <span
-        class="rounded border border-primary/40 bg-card/70 px-1.5 py-0.5 text-[9px] font-medium text-foreground shadow-sm backdrop-blur-sm"
+        class="rounded border border-primary/40 bg-card/90 px-1.5 py-0.5 text-[11px] font-semibold text-foreground shadow-sm backdrop-blur-sm"
       >
         {{ relationshipLabel }}
       </span>

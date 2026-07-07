@@ -1394,7 +1394,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
                 />
                 <div
                   v-if="!labelsHidden"
-                  class="agent-memory-node-caption absolute left-1/2 top-full mt-1 max-w-[110px] -translate-x-1/2 truncate text-center text-[10px] font-medium text-foreground"
+                  class="agent-memory-node-caption absolute left-1/2 top-full mt-1 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
                   :class="isNodeDimmed(id) ? 'agent-memory-node-dimmed' : ''"
                 >
                   {{ flowNodeTitle(data) }}
@@ -1912,10 +1912,13 @@ function handleDialogEscape(event: KeyboardEvent): void {
 
 .agent-memory-node-caption {
   transition: opacity 0.15s ease;
+  text-shadow:
+    0 1px 3px hsl(var(--background) / 0.9),
+    0 0 6px hsl(var(--background) / 0.9);
 }
 
 .agent-memory-node-dimmed {
-  opacity: 0.25;
+  opacity: 0.1;
 }
 
 .needles-spinning.compact-mode .agent-memory-node-inner {
