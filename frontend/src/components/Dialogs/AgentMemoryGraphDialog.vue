@@ -182,18 +182,22 @@ function captureLivePositions(): void {
 
 const hoveredNodeId = ref<string | null>(null);
 
-const hoveredNeighborIds = computed<Set<string>>(() => {
-  const hovered = hoveredNodeId.value;
+/** Hovering takes precedence; falls back to the selected node so clicking a node also focuses
+ * its neighborhood (fades out everything else), not just hovering it. */
+const focusNodeId = computed<string | null>(() => hoveredNodeId.value ?? selectedNodeId.value);
+
+const focusNeighborIds = computed<Set<string>>(() => {
+  const focus = focusNodeId.value;
   const g = graph.value;
-  if (!hovered || !g) {
+  if (!focus || !g) {
     return new Set();
   }
-  const out = new Set<string>([hovered]);
+  const out = new Set<string>([focus]);
   for (const e of g.edges) {
-    if (e.source_node_id === hovered) {
+    if (e.source_node_id === focus) {
       out.add(e.target_node_id);
     }
-    if (e.target_node_id === hovered) {
+    if (e.target_node_id === focus) {
       out.add(e.source_node_id);
     }
   }
@@ -201,7 +205,7 @@ const hoveredNeighborIds = computed<Set<string>>(() => {
 });
 
 function isNodeDimmed(id: string): boolean {
-  return hoveredNodeId.value !== null && !hoveredNeighborIds.value.has(id);
+  return focusNodeId.value !== null && !focusNeighborIds.value.has(id);
 }
 
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
@@ -458,7 +462,7 @@ const flowEdges = computed<Edge[]>(() => {
   if (!g) {
     return [];
   }
-  const hovered = hoveredNodeId.value;
+  const focus = focusNodeId.value;
   return g.edges.map((e) => ({
     id: e.id,
     type: "agentMemory",
@@ -467,7 +471,7 @@ const flowEdges = computed<Edge[]>(() => {
     data: {
       relationshipType: e.relationship_type,
       pathCurvature: edgePathCurvature(e.id),
-      dimmed: hovered !== null && hovered !== e.source_node_id && hovered !== e.target_node_id,
+      dimmed: focus !== null && focus !== e.source_node_id && focus !== e.target_node_id,
     },
     animated: true,
   }));
