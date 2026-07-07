@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { AlertTriangle, ChevronDown, Clock, RotateCcw, Settings, Sparkles } from "lucide-vue-next";
+import { computed } from "vue";
+import { AlertTriangle, Clock, RotateCcw, Settings, Sparkles } from "lucide-vue-next";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
 
 const {
@@ -18,6 +20,13 @@ const {
   openAnalyzer,
   selectedNode,
 } = usePropertiesPanelContext();
+
+const errorWorkflowOptions = computed(() =>
+  otherWorkflows.value.map((workflow) => ({
+    value: workflow.id,
+    label: workflow.name,
+  })),
+);
 </script>
 
 <template>
@@ -41,28 +50,14 @@ const {
           <AlertTriangle class="w-4 h-4 text-muted-foreground shrink-0" />
           <span class="text-sm font-medium">On error, run workflow</span>
         </div>
-        <div class="relative">
-          <select
-            class="w-full appearance-none text-sm rounded-md border border-border bg-background pl-2 pr-9 py-1.5 disabled:opacity-50"
-            :value="errorWorkflowId"
-            :disabled="!isWorkflowOwner"
-            @change="onChangeErrorWorkflow(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              None
-            </option>
-            <option
-              v-for="w in otherWorkflows"
-              :key="w.id"
-              :value="w.id"
-            >
-              {{ w.name }}
-            </option>
-          </select>
-          <ChevronDown
-            class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-          />
-        </div>
+        <SearchableSelect
+          :model-value="errorWorkflowId"
+          :options="[{ value: '', label: 'None' }, ...errorWorkflowOptions]"
+          placeholder="None"
+          search-placeholder="Search workflows..."
+          :disabled="!isWorkflowOwner"
+          @update:model-value="onChangeErrorWorkflow"
+        />
         <p class="text-xs text-muted-foreground mt-2 leading-relaxed">
           Runs the selected workflow if this one fails — unless the canvas
           already has an Error Handler node. Not triggered on manual test

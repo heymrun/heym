@@ -25,20 +25,22 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         if result:
             loop_back_targets = self._loop_back_targets_for_source_handle(node_id, "true")
-            self.skip_branch_targets_preserving_shared_downstream(
-                node_id,
-                active_targets=true_targets,
-                inactive_targets=false_targets,
-                active_exclude_node_ids=loop_back_targets,
-                inactive_stop_node_ids=loop_back_targets,
-            )
+            with self.lock:
+                self.skip_branch_targets_preserving_shared_downstream(
+                    node_id,
+                    active_targets=true_targets,
+                    inactive_targets=false_targets,
+                    active_exclude_node_ids=loop_back_targets,
+                    inactive_stop_node_ids=loop_back_targets,
+                )
         else:
             loop_back_targets = self._loop_back_targets_for_source_handle(node_id, "false")
-            self.skip_branch_targets_preserving_shared_downstream(
-                node_id,
-                active_targets=false_targets,
-                inactive_targets=true_targets,
-                active_exclude_node_ids=loop_back_targets,
-                inactive_stop_node_ids=loop_back_targets,
-            )
+            with self.lock:
+                self.skip_branch_targets_preserving_shared_downstream(
+                    node_id,
+                    active_targets=false_targets,
+                    inactive_targets=true_targets,
+                    active_exclude_node_ids=loop_back_targets,
+                    inactive_stop_node_ids=loop_back_targets,
+                )
     return output

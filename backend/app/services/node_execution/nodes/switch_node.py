@@ -43,11 +43,12 @@ def execute(ctx: NodeExecutionContext) -> object:
             if handle_id != selected_handle:
                 inactive_targets.extend(self.get_downstream_nodes(node_id, handle_id))
         loop_back_targets = self._loop_back_targets_for_source_handle(node_id, selected_handle)
-        self.skip_branch_targets_preserving_shared_downstream(
-            node_id,
-            active_targets=active_targets,
-            inactive_targets=inactive_targets,
-            active_exclude_node_ids=loop_back_targets,
-            inactive_stop_node_ids=loop_back_targets,
-        )
+        with self.lock:
+            self.skip_branch_targets_preserving_shared_downstream(
+                node_id,
+                active_targets=active_targets,
+                inactive_targets=inactive_targets,
+                active_exclude_node_ids=loop_back_targets,
+                inactive_stop_node_ids=loop_back_targets,
+            )
     return output

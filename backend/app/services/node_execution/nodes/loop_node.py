@@ -78,18 +78,20 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     if allow_branch_skip:
         if current_index >= total:
-            self.skip_branch_targets_preserving_shared_downstream(
-                node_id,
-                active_targets=self.get_downstream_nodes(node_id, "done"),
-                inactive_targets=self.get_downstream_nodes(node_id, "loop"),
-                inactive_stop_node_ids={node_id},
-            )
+            with self.lock:
+                self.skip_branch_targets_preserving_shared_downstream(
+                    node_id,
+                    active_targets=self.get_downstream_nodes(node_id, "done"),
+                    inactive_targets=self.get_downstream_nodes(node_id, "loop"),
+                    inactive_stop_node_ids={node_id},
+                )
         else:
-            self.skip_branch_targets_preserving_shared_downstream(
-                node_id,
-                active_targets=self.get_downstream_nodes(node_id, "loop"),
-                inactive_targets=self.get_downstream_nodes(node_id, "done"),
-                active_exclude_node_ids={node_id},
-                inactive_stop_node_ids={node_id},
-            )
+            with self.lock:
+                self.skip_branch_targets_preserving_shared_downstream(
+                    node_id,
+                    active_targets=self.get_downstream_nodes(node_id, "loop"),
+                    inactive_targets=self.get_downstream_nodes(node_id, "done"),
+                    active_exclude_node_ids={node_id},
+                    inactive_stop_node_ids={node_id},
+                )
     return output

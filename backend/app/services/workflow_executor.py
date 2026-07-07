@@ -2367,13 +2367,17 @@ class WorkflowExecutor:
     def get_node_inputs_for_edges(self, node_id: str, edges: list[dict]) -> dict:
         inputs = {}
         execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
         for edge in edges:
             if edge["target"] == node_id:
                 source_id = edge["source"]
-                if source_id in self.node_outputs and source_id not in self.skipped_nodes:
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
                     source_label = self.get_node_label(source_id)
-                    source_output = self.node_outputs[source_id]
-                    execution_context.update(self.node_execution_contexts.get(source_id, {}))
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
                     execution_context[source_label] = source_output
                     inputs[source_label] = source_output
         if execution_context:
@@ -2383,13 +2387,17 @@ class WorkflowExecutor:
     def get_node_inputs(self, node_id: str) -> dict:
         inputs = {}
         execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
         for edge in self.edges:
             if edge["target"] == node_id:
                 source_id = edge["source"]
-                if source_id in self.node_outputs and source_id not in self.skipped_nodes:
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
                     source_label = self.get_node_label(source_id)
-                    source_output = self.node_outputs[source_id]
-                    execution_context.update(self.node_execution_contexts.get(source_id, {}))
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
                     execution_context[source_label] = source_output
                     inputs[source_label] = source_output
         if execution_context:
@@ -2618,7 +2626,8 @@ class WorkflowExecutor:
         for branch_node in node_ids:
             completed_nodes.discard(branch_node)
             if branch_node not in self.inactive_nodes:
-                self.skipped_nodes.discard(branch_node)
+                with self.lock:
+                    self.skipped_nodes.discard(branch_node)
             pending_count[branch_node] = self.get_incoming_edge_count_for_execution(
                 branch_node, active_edges
             )
@@ -2650,7 +2659,8 @@ class WorkflowExecutor:
             return False
 
         completed_nodes.discard(loop_node_id)
-        self.skipped_nodes.discard(loop_node_id)
+        with self.lock:
+            self.skipped_nodes.discard(loop_node_id)
         self.reset_nodes_for_execution(
             self.get_loop_body_node_ids(loop_node_id, active_edges),
             active_edges,
@@ -2956,10 +2966,11 @@ class WorkflowExecutor:
         result = self._stamp_node_result(result)
         if result.status == "success":
             self.store_node_output(node_id, result.node_label, result.output, inputs)
-            if result.output.get("_errorBranch"):
-                self._handle_error_branch_routing(node_id)
-            else:
-                self._handle_success_branch_routing(node_id)
+            with self.lock:
+                if result.output.get("_errorBranch"):
+                    self._handle_error_branch_routing(node_id)
+                else:
+                    self._handle_success_branch_routing(node_id)
         return result
 
     def _handle_success_branch_routing(self, node_id: str) -> None:
@@ -6950,25 +6961,27 @@ class WorkflowExecutor:
                         loop_back_targets = self._loop_back_targets_for_source_handle(
                             node_id, "true"
                         )
-                        self.skip_branch_targets_preserving_shared_downstream(
-                            node_id,
-                            active_targets=true_targets,
-                            inactive_targets=false_targets,
-                            active_exclude_node_ids=loop_back_targets,
-                            inactive_stop_node_ids=loop_back_targets,
-                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=true_targets,
+                                inactive_targets=false_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
                     elif branch == "false":
                         output["_skip_loop_source_handles"] = ["true"]
                         loop_back_targets = self._loop_back_targets_for_source_handle(
                             node_id, "false"
                         )
-                        self.skip_branch_targets_preserving_shared_downstream(
-                            node_id,
-                            active_targets=false_targets,
-                            inactive_targets=true_targets,
-                            active_exclude_node_ids=loop_back_targets,
-                            inactive_stop_node_ids=loop_back_targets,
-                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=false_targets,
+                                inactive_targets=true_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
                 if allow_branch_skip and node_type == "switch":
                     branch = output.get("branch")
                     cases = node_data.get("cases", [])
@@ -6991,13 +7004,14 @@ class WorkflowExecutor:
                         loop_back_targets = self._loop_back_targets_for_source_handle(
                             node_id, branch
                         )
-                        self.skip_branch_targets_preserving_shared_downstream(
-                            node_id,
-                            active_targets=active_targets,
-                            inactive_targets=inactive_targets,
-                            active_exclude_node_ids=loop_back_targets,
-                            inactive_stop_node_ids=loop_back_targets,
-                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=active_targets,
+                                inactive_targets=inactive_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
                 execution_time_ms = (time.time() - start_time) * 1000
                 return NodeResult(
                     node_id=node_id,

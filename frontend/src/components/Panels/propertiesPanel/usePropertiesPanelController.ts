@@ -305,11 +305,11 @@ export function usePropertiesPanelController() {
 
   const EMPTY_UUID = "00000000-0000-0000-0000-000000000000";
 
-  async function onChangeErrorWorkflow(value: string): Promise<void> {
+  async function onChangeErrorWorkflow(value: string | undefined): Promise<void> {
     const wf = workflowStore.currentWorkflow;
     if (!wf || !isWorkflowOwner.value) return;
     const previous = wf.error_workflow_id;
-    const next = value === "" ? null : value;
+    const next = !value || value === "" ? null : value;
     wf.error_workflow_id = next;
     try {
       await workflowApi.update(wf.id, {
