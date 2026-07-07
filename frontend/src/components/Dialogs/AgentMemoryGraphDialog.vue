@@ -288,13 +288,25 @@ const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
 /** Compact mode hides captions entirely, so hover is the only way to identify a plain pin —
- * shows a name/type/attributes popover there for any node. In normal mode, a caption already
- * names every node, so the popover only earns its keep for a selected hub's leaves (its
- * neighbors): hovering one shows its attributes AND isolates its relationship label exactly like
- * hovering its edge would (see hoveredEdgeId/edgeIdBetween) — not by hiding sibling captions. With
- * nothing selected in normal mode, hover stays inert — there's no leaf to hover and the caption
- * already says enough. */
+ * shows a name/type/attributes popover there for any node, regardless of how many attributes it
+ * has. In normal mode, a caption already names every node, so the popover only earns its keep for
+ * a selected hub's leaves (its neighbors) that actually have enough attributes to be worth a
+ * popup (see MIN_ATTRIBUTES_FOR_LEAF_POPOVER) — hovering one shows its attributes AND isolates its
+ * relationship label exactly like hovering its edge would (see hoveredEdgeId/edgeIdBetween), even
+ * when the popover itself is skipped for having too little to show. With nothing selected in
+ * normal mode, hover stays inert — there's no leaf to hover and the caption already says enough. */
 const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
+
+/** Below this, a leaf's popover would show little beyond what the caption already says (its
+ * name/type), so it's not worth popping up over a normal-mode hover — 0 or 1 attributes reads as
+ * "nothing new," 2+ starts to justify it. Doesn't apply to compact mode, where the popover is the
+ * only way to identify a node at all. */
+const MIN_ATTRIBUTES_FOR_LEAF_POPOVER = 2;
+
+function nodeAttributeCount(nodeId: string): number {
+  const node = graph.value?.nodes.find((n) => n.id === nodeId);
+  return node ? propertyRowsFromRecord(node.properties).length : 0;
+}
 
 function nodeHoverTooltipText(nodeId: string): string {
   const node = graph.value?.nodes.find((n) => n.id === nodeId);
@@ -317,6 +329,9 @@ function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
   const hub = selectedNodeId.value;
   if (isLeafOfSelection && hub !== null) {
     hoveredEdgeId.value = edgeIdBetween(hub, nodeId);
+  }
+  if (isLeafOfSelection && nodeAttributeCount(nodeId) < MIN_ATTRIBUTES_FOR_LEAF_POPOVER) {
+    return;
   }
   const text = nodeHoverTooltipText(nodeId);
   if (!text) {
