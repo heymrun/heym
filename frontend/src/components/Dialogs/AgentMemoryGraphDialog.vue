@@ -229,6 +229,25 @@ function isNodeDimmed(id: string): boolean {
   return dimmingNodeId.value !== null && !dimmingNeighborIds.value.has(id);
 }
 
+/** While a node is selected, hovering one of its now-highlighted relationship edges hides the
+ * other highlighted edges (and their labels) so the hovered one can be read on its own — the
+ * same crowded-hub problem the caption flip and focus spacing address, but for edges that are
+ * still crossing each other once revealed. Cleared on any selection change so it can't outlive
+ * the chain it belonged to. */
+const hoveredEdgeId = ref<string | null>(null);
+
+watch(selectedNodeId, () => {
+  hoveredEdgeId.value = null;
+});
+
+function onEdgeMouseEnter(ev: { edge: Edge }): void {
+  hoveredEdgeId.value = ev.edge.id;
+}
+
+function onEdgeMouseLeave(): void {
+  hoveredEdgeId.value = null;
+}
+
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
@@ -486,6 +505,7 @@ const flowEdges = computed<Edge[]>(() => {
   }
   const selected = selectedNodeId.value;
   const dimming = dimmingNodeId.value;
+  const hovered = hoveredEdgeId.value;
   return g.edges.map((e) => {
     const touchesSelection =
       selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
@@ -506,9 +526,51 @@ const flowEdges = computed<Edge[]>(() => {
         // The fill animation should always grow outward from the selected node, regardless of
         // which end of the edge it is.
         growFromEnd: touchesSelection && selected === e.target_node_id,
+        // Hovering one active edge hides its active siblings so overlapping labels near a hub
+        // can be read one at a time (see hoveredEdgeId).
+        hoveredOut: hovered !== null && touchesSelection && hovered !== e.id,
       },
     };
   });
+});
+
+/**
+ * Captions default to below the circle, which is where the active-edge relationship label
+ * lands for a neighbor sitting below the selected node (the label is drawn near the edge's
+ * midpoint, on the hub side of the neighbor, i.e. above it) — so it only collides with the
+ * default caption position for a neighbor sitting *above* the hub (there the label falls below
+ * the neighbor, same side as its caption). Flip those, plus the hub's own caption if most of its
+ * active labels land below it, up above the circle instead.
+ */
+const captionAboveIds = computed<Set<string>>(() => {
+  const result = new Set<string>();
+  const selected = selectedNodeId.value;
+  if (!selected) {
+    return result;
+  }
+  const positions = new Map(flowNodes.value.map((n) => [n.id, n.position]));
+  const hubPos = positions.get(selected);
+  if (!hubPos) {
+    return result;
+  }
+  let neighborCount = 0;
+  let labelsBelowHubCount = 0;
+  for (const neighborId of selectedNeighborIds.value) {
+    const neighborPos = positions.get(neighborId);
+    if (!neighborPos) {
+      continue;
+    }
+    neighborCount += 1;
+    if (neighborPos.y < hubPos.y) {
+      result.add(neighborId);
+    } else {
+      labelsBelowHubCount += 1;
+    }
+  }
+  if (neighborCount > 0 && labelsBelowHubCount > neighborCount / 2) {
+    result.add(selected);
+  }
+  return result;
 });
 
 const edgesForSidebarList = computed(() => {
@@ -1403,8 +1465,11 @@ function handleDialogEscape(event: KeyboardEvent): void {
             :nodes="flowNodes"
             :edges="flowEdges"
             :hotkeys-enabled="open"
+            :selected-node-id="selectedNodeId"
             @node-click="onNodeClick"
             @edge-click="onEdgeClick"
+            @edge-mouse-enter="onEdgeMouseEnter"
+            @edge-mouse-leave="onEdgeMouseLeave"
             @pane-click="onPaneClick"
             @delete-selection="onFlowDeleteSelection"
           >
@@ -1428,8 +1493,11 @@ function handleDialogEscape(event: KeyboardEvent): void {
                 />
                 <div
                   v-if="!labelsHidden"
-                  class="agent-memory-node-caption absolute left-1/2 top-full mt-1 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
-                  :class="isNodeDimmed(id) ? 'agent-memory-node-dimmed' : ''"
+                  class="agent-memory-node-caption absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
+                  :class="[
+                    captionAboveIds.has(id) ? 'bottom-full mb-1' : 'top-full mt-1',
+                    isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
+                  ]"
                 >
                   {{ flowNodeTitle(data) }}
                 </div>

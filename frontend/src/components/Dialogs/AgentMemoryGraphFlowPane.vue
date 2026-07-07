@@ -15,13 +15,16 @@ const props = withDefaults(
     nodes: Node[];
     edges: Edge[];
     hotkeysEnabled?: boolean;
+    selectedNodeId?: string | null;
   }>(),
-  { hotkeysEnabled: true },
+  { hotkeysEnabled: true, selectedNodeId: null },
 );
 
 const emit = defineEmits<{
   nodeClick: [payload: { node: Node }];
   edgeClick: [payload: { edge: Edge }];
+  edgeMouseEnter: [payload: { edge: Edge }];
+  edgeMouseLeave: [payload: { edge: Edge }];
   paneClick: [];
   deleteSelection: [payload: { nodeIds: string[]; edgeIds: string[] }];
 }>();
@@ -66,6 +69,8 @@ defineExpose({ fitViewAfterLoad, focusNodes, reheat, snapshotPositions });
     :max-zoom="1.5"
     @node-click="emit('nodeClick', $event)"
     @edge-click="emit('edgeClick', $event)"
+    @edge-mouse-enter="emit('edgeMouseEnter', $event)"
+    @edge-mouse-leave="emit('edgeMouseLeave', $event)"
     @pane-click="emit('paneClick')"
     @node-drag-stop="handleNodeDragStop"
   >
@@ -74,6 +79,7 @@ defineExpose({ fitViewAfterLoad, focusNodes, reheat, snapshotPositions });
       ref="simRef"
       :links="simLinks"
       :active="nodes.length > 0"
+      :focus-node-id="selectedNodeId"
     />
     <AgentMemoryGraphFlowHotkeys
       :enabled="hotkeysEnabled"

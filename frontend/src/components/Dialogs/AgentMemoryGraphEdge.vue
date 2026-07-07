@@ -103,6 +103,13 @@ function isDimmed(): boolean {
   return Boolean(d && typeof d === "object" && (d as { dimmed?: unknown }).dimmed === true);
 }
 
+/** True when a sibling active edge (same selected hub) is hovered instead of this one — hides
+ * this edge's line, fill, and label so the hovered relation can be read without overlap. */
+function isHoveredOut(): boolean {
+  const d = props.data;
+  return Boolean(d && typeof d === "object" && (d as { hoveredOut?: unknown }).hoveredOut === true);
+}
+
 /** True when this edge is directly incident to the selected node — the only state in which its
  * relationship label is shown and its chain-fill overlay is revealed. */
 function isActive(): boolean {
@@ -122,7 +129,7 @@ const basePathStyle = computed(() => ({
   ...((props.style as Record<string, string> | undefined) ?? {}),
   stroke: "hsl(215 20% 70% / 0.35)",
   strokeWidth: 1,
-  opacity: isDimmed() ? 0.06 : 1,
+  opacity: isDimmed() || isHoveredOut() ? 0.06 : 1,
   transition: "opacity 0.2s ease",
 }));
 
@@ -182,7 +189,7 @@ const revealPathLength = computed(() => {
 
 const revealStyle = computed(() => {
   const len = revealPathLength.value;
-  if (!len || revealProgress.value <= 0.001) {
+  if (!len || revealProgress.value <= 0.001 || isHoveredOut()) {
     return { opacity: 0 };
   }
   const magnitude = len * (1 - revealProgress.value);
@@ -222,7 +229,7 @@ const relationshipLabel = computed(() => relationshipTypeLabel());
   />
   <EdgeLabelRenderer>
     <div
-      v-if="relationshipLabel && isActive()"
+      v-if="relationshipLabel && isActive() && !isHoveredOut()"
       class="agent-memory-edge-label nodrag nopan pointer-events-none max-w-[220px] text-center transition-opacity duration-150"
       :style="{
         position: 'absolute',
