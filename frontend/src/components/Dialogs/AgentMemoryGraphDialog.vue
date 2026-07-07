@@ -140,8 +140,6 @@ const dialogContentRef = ref<HTMLElement | null>(null);
 /** Vue Flow canvas subtree (layout ref only; undo uses document capture scoped to dialog body). */
 const graphAreaRef = ref<HTMLElement | null>(null);
 const graphCanvasFullscreen = ref(false);
-/** Bumps to remount Vue Flow so node positions snap back to the auto layout. */
-const flowLayoutEpoch = ref(0);
 
 function syncGraphCanvasFullscreen(): void {
   const el = graphAreaRef.value;
@@ -205,6 +203,7 @@ const hoveredNeighborIds = computed<Set<string>>(() => {
 function isNodeDimmed(id: string): boolean {
   return hoveredNodeId.value !== null && !hoveredNeighborIds.value.has(id);
 }
+
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
@@ -241,11 +240,7 @@ async function fitGraphViewportAfterLayoutChange(): Promise<void> {
 }
 
 function tidyMemoryGraphLayout(): void {
-  if (!flowNodes.value.length) {
-    return;
-  }
-  flowLayoutEpoch.value += 1;
-  void fitGraphViewportAfterLayoutChange();
+  flowPaneRef.value?.reheat();
 }
 
 function toggleLabels(): void {
@@ -253,7 +248,6 @@ function toggleLabels(): void {
   clearCompactModeAnimationTimer();
   labelsHidden.value = enteringCompactMode;
   tooltipState.value = null;
-  flowLayoutEpoch.value += 1;
 
   if (!enteringCompactMode) {
     needleAnimating.value = false;
@@ -500,6 +494,50 @@ const selectedNode = computed<AgentMemoryNodeDTO | null>(() => {
   }
   return graph.value.nodes.find((n) => n.id === selectedNodeId.value) ?? null;
 });
+
+interface ConnectionRow {
+  edgeId: string;
+  otherNodeId: string;
+  otherName: string;
+  relationship: string;
+}
+
+const outgoingConnections = computed<ConnectionRow[]>(() => {
+  const node = selectedNode.value;
+  const g = graph.value;
+  if (!node || !g) {
+    return [];
+  }
+  return g.edges
+    .filter((e) => e.source_node_id === node.id)
+    .map((e) => ({
+      edgeId: e.id,
+      otherNodeId: e.target_node_id,
+      otherName: g.nodes.find((n) => n.id === e.target_node_id)?.entity_name ?? "?",
+      relationship: e.relationship_type,
+    }));
+});
+
+const incomingConnections = computed<ConnectionRow[]>(() => {
+  const node = selectedNode.value;
+  const g = graph.value;
+  if (!node || !g) {
+    return [];
+  }
+  return g.edges
+    .filter((e) => e.target_node_id === node.id)
+    .map((e) => ({
+      edgeId: e.id,
+      otherNodeId: e.source_node_id,
+      otherName: g.nodes.find((n) => n.id === e.source_node_id)?.entity_name ?? "?",
+      relationship: e.relationship_type,
+    }));
+});
+
+async function focusOnConnection(nodeId: string): Promise<void> {
+  selectedNodeId.value = nodeId;
+  await flowPaneRef.value?.focusNode(nodeId);
+}
 
 const editName = ref("");
 const editType = ref("");
@@ -1305,7 +1343,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
         >
           <AgentMemoryGraphFlowPane
             v-if="flowNodes.length"
-            :key="flowLayoutEpoch"
             ref="flowPaneRef"
             :flow-id="AGENT_MEMORY_FLOW_ID"
             :nodes="flowNodes"
@@ -1551,6 +1588,34 @@ function handleDialogEscape(event: KeyboardEvent): void {
                   >
                     Add attribute
                   </Button>
+                </div>
+                <div
+                  v-if="outgoingConnections.length || incomingConnections.length"
+                  class="space-y-2 pt-1"
+                >
+                  <div class="font-medium text-[10px] uppercase text-muted-foreground tracking-wide">
+                    Connections
+                  </div>
+                  <button
+                    v-for="row in outgoingConnections"
+                    :key="`out-${row.edgeId}`"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    @click="focusOnConnection(row.otherNodeId)"
+                  >
+                    <span class="truncate">{{ row.otherName }}</span>
+                    <span class="shrink-0 text-muted-foreground">{{ row.relationship }} →</span>
+                  </button>
+                  <button
+                    v-for="row in incomingConnections"
+                    :key="`in-${row.edgeId}`"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    @click="focusOnConnection(row.otherNodeId)"
+                  >
+                    <span class="shrink-0 text-muted-foreground">← {{ row.relationship }}</span>
+                    <span class="truncate">{{ row.otherName }}</span>
+                  </button>
                 </div>
                 <div class="flex gap-2 pt-1">
                   <Button
