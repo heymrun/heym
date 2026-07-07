@@ -208,6 +208,38 @@ function isNodeDimmed(id: string): boolean {
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
+/** Compact mode hides captions, so there is no other way to tell what a plain pin represents —
+ * hover shows a name/type/attributes popover in that mode only. Normal mode already reveals
+ * this via the caption + click-to-open detail panel, so hover stays inert there. */
+const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
+
+function nodeHoverTooltipText(nodeId: string): string {
+  const node = graph.value?.nodes.find((n) => n.id === nodeId);
+  if (!node) {
+    return "";
+  }
+  const title = `${node.entity_name} (${node.entity_type})`;
+  const rows = propertyRowsFromRecord(node.properties);
+  if (!rows.length) {
+    return title;
+  }
+  return [title, ...rows.map((r) => `${r.key}: ${r.value}`)].join("\n");
+}
+
+function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
+  if (!labelsHidden.value) {
+    return;
+  }
+  const text = nodeHoverTooltipText(nodeId);
+  if (!text) {
+    return;
+  }
+  tooltipState.value = { text, x: e.clientX + 14, y: e.clientY - 8 };
+}
+
+function onNodeHoverLeave(): void {
+  tooltipState.value = null;
+}
 const COMPACT_MODE_ANIMATION_MS = 1000;
 let compactModeAnimationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -244,6 +276,10 @@ function tidyMemoryGraphLayout(): void {
 }
 
 function toggleLabels(): void {
+  // flowNodes depends on labelsHidden (compact circles use a smaller radius), so it's about to
+  // recompute — capture live positions first or nodes would snap back to the last loadGraph()
+  // snapshot instead of keeping their current settled/dragged spots.
+  captureLivePositions();
   const enteringCompactMode = !labelsHidden.value;
   clearCompactModeAnimationTimer();
   labelsHidden.value = enteringCompactMode;
@@ -377,6 +413,10 @@ function edgePathCurvature(edgeId: string): number {
   return steps[Math.abs(h) % steps.length] ?? 0.06;
 }
 
+/** Compact ("pin") mode hides captions, so there's no reason for the circles themselves to
+ * stay full-size — shrinking them keeps the pin-head reading as a small marker. */
+const COMPACT_RADIUS_SCALE = 0.55;
+
 const flowNodes = computed<Node[]>(() => {
   const g = graph.value;
   if (!g?.nodes.length) {
@@ -384,9 +424,13 @@ const flowNodes = computed<Node[]>(() => {
   }
   const seeds = seedPositions(g.nodes);
   const degrees = computeDegrees(g.nodes, g.edges);
+  const compact = labelsHidden.value;
   return g.nodes.map((node) => {
     const degree = degrees.get(node.id) ?? 0;
-    const diameter = nodeRadius(degree) * 2;
+    const radius = compact
+      ? Math.max(4, Math.round(nodeRadius(degree) * COMPACT_RADIUS_SCALE))
+      : nodeRadius(degree);
+    const diameter = radius * 2;
     return {
       id: node.id,
       type: "default",
@@ -403,7 +447,7 @@ const flowNodes = computed<Node[]>(() => {
       data: {
         title: `${node.entity_name} (${node.entity_type})`,
         entityType: node.entity_type,
-        radius: nodeRadius(degree),
+        radius,
         color: clusterColorForType(node.entity_type),
         degree,
       },
@@ -702,6 +746,7 @@ watch(
       }
       graphCanvasFullscreen.value = false;
       needleAnimating.value = false;
+      tooltipState.value = null;
       undoStack.value = [];
     }
   },
@@ -730,6 +775,18 @@ function onNodeClick(ev: { node: Node }): void {
 
 function onPaneClick(): void {
   selectedNodeId.value = null;
+}
+
+/** Clicking an edge that's already part of the selected node's highlighted chain deselects it
+ * (playing the drain animation in reverse), mirroring clicking the selected node again. */
+function onEdgeClick(ev: { edge: Edge }): void {
+  const selected = selectedNodeId.value;
+  if (selected === null) {
+    return;
+  }
+  if (ev.edge.source === selected || ev.edge.target === selected) {
+    selectedNodeId.value = null;
+  }
 }
 
 async function saveNodeEdit(): Promise<void> {
@@ -1313,6 +1370,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
             :edges="flowEdges"
             :hotkeys-enabled="open"
             @node-click="onNodeClick"
+            @edge-click="onEdgeClick"
             @pane-click="onPaneClick"
             @delete-selection="onFlowDeleteSelection"
           >
@@ -1321,7 +1379,11 @@ function handleDialogEscape(event: KeyboardEvent): void {
                    flowNodes) so computedPosition + radius reliably lands on the circle's true
                    center — the caption is an absolutely-positioned overlay precisely so it
                    cannot widen/heighten this box the way a normal flex sibling would. -->
-              <div class="agent-memory-node-inner relative w-full h-full cursor-pointer select-none">
+              <div
+                class="agent-memory-node-inner relative w-full h-full cursor-pointer select-none"
+                @mouseenter="onNodeHoverEnter(id, $event)"
+                @mouseleave="onNodeHoverLeave"
+              >
                 <div
                   class="agent-memory-node-circle absolute inset-0 rounded-full shadow-sm"
                   :class="[
@@ -1419,6 +1481,15 @@ function handleDialogEscape(event: KeyboardEvent): void {
           >
             <Wand2 class="w-4 h-4" />
           </Button>
+          <!-- Compact-mode-only hover popover: position:fixed escapes overflow:hidden AND stays
+               inside the browser-fullscreen element's subtree (unlike Teleport to body). -->
+          <div
+            v-if="tooltipState"
+            class="fixed z-[9999] pointer-events-none max-w-[240px] rounded-md border border-border/60 bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg whitespace-pre-wrap break-words leading-relaxed"
+            :style="{ left: `${tooltipState.x}px`, top: `${tooltipState.y}px` }"
+          >
+            {{ tooltipState.text }}
+          </div>
           <Button
             type="button"
             variant="secondary"

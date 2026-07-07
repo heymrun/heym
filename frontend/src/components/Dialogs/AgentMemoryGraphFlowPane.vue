@@ -21,6 +21,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   nodeClick: [payload: { node: Node }];
+  edgeClick: [payload: { edge: Edge }];
   paneClick: [];
   deleteSelection: [payload: { nodeIds: string[]; edgeIds: string[] }];
 }>();
@@ -64,6 +65,7 @@ defineExpose({ fitViewAfterLoad, focusNode, reheat, snapshotPositions });
     :min-zoom="0.2"
     :max-zoom="1.5"
     @node-click="emit('nodeClick', $event)"
+    @edge-click="emit('edgeClick', $event)"
     @pane-click="emit('paneClick')"
     @node-drag-stop="handleNodeDragStop"
   >
