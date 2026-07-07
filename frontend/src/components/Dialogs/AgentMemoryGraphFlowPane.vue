@@ -35,8 +35,8 @@ async function fitViewAfterLoad(opts?: { padding?: number; duration?: number }):
   await fitterRef.value?.fitViewAfterLoad(opts);
 }
 
-async function focusNode(id: string): Promise<void> {
-  await fitterRef.value?.focusOnNode(id);
+async function focusNodes(ids: string[]): Promise<void> {
+  await fitterRef.value?.focusOnNodes(ids);
 }
 
 function reheat(): void {
@@ -51,7 +51,7 @@ function handleNodeDragStop(): void {
   simRef.value?.reheat();
 }
 
-defineExpose({ fitViewAfterLoad, focusNode, reheat, snapshotPositions });
+defineExpose({ fitViewAfterLoad, focusNodes, reheat, snapshotPositions });
 </script>
 
 <template>

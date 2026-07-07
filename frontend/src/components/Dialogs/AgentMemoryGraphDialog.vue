@@ -3,11 +3,11 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { Edge, Node } from "@vue-flow/core";
 import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Trash2, Wand2 } from "lucide-vue-next";
 
+import { REVEAL_DURATION_MS } from "@/components/Dialogs/AgentMemoryGraphEdge.vue";
 import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowPane.vue";
 import {
   clusterColorForType,
   computeDegrees,
-  distinctEntityTypes,
   nodeRadius,
   seedPositions,
 } from "@/components/Dialogs/agentMemoryGraphView";
@@ -180,29 +180,53 @@ function captureLivePositions(): void {
   }
 }
 
-/** Selecting a node focuses its neighborhood: connected edges get the animated chain
- * highlight, everything else fades out. Hover is intentionally inert (no dim, no tooltip) —
- * clicking a node already opens the full detail panel. */
-const selectedNeighborIds = computed<Set<string>>(() => {
-  const selected = selectedNodeId.value;
-  const g = graph.value;
-  if (!selected || !g) {
+function neighborIdsOf(nodeId: string | null, g: AgentMemoryGraphResponse | null): Set<string> {
+  if (!nodeId || !g) {
     return new Set();
   }
-  const out = new Set<string>([selected]);
+  const out = new Set<string>([nodeId]);
   for (const e of g.edges) {
-    if (e.source_node_id === selected) {
+    if (e.source_node_id === nodeId) {
       out.add(e.target_node_id);
     }
-    if (e.target_node_id === selected) {
+    if (e.target_node_id === nodeId) {
       out.add(e.source_node_id);
     }
   }
   return out;
+}
+
+/** Selecting a node focuses its neighborhood: connected edges get the animated chain
+ * highlight, everything else fades out. Hover is intentionally inert (no dim, no tooltip) —
+ * clicking a node already opens the full detail panel. */
+const selectedNeighborIds = computed<Set<string>>(() => neighborIdsOf(selectedNodeId.value, graph.value));
+
+/** Lags behind selectedNodeId on deselect only: dims immediately on select (in step with the
+ * chain-fill animation starting), but on deselect it keeps everyone else faded for the same
+ * REVEAL_DURATION_MS the drain animation takes, so "other entities' color comes back" only
+ * once that animation has actually finished instead of snapping back instantly underneath it. */
+const dimmingNodeId = ref<string | null>(null);
+let dimmingClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(selectedNodeId, (next) => {
+  if (dimmingClearTimer !== null) {
+    clearTimeout(dimmingClearTimer);
+    dimmingClearTimer = null;
+  }
+  if (next !== null) {
+    dimmingNodeId.value = next;
+    return;
+  }
+  dimmingClearTimer = setTimeout(() => {
+    dimmingNodeId.value = null;
+    dimmingClearTimer = null;
+  }, REVEAL_DURATION_MS);
 });
 
+const dimmingNeighborIds = computed<Set<string>>(() => neighborIdsOf(dimmingNodeId.value, graph.value));
+
 function isNodeDimmed(id: string): boolean {
-  return selectedNodeId.value !== null && !selectedNeighborIds.value.has(id);
+  return dimmingNodeId.value !== null && !dimmingNeighborIds.value.has(id);
 }
 
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
@@ -461,9 +485,12 @@ const flowEdges = computed<Edge[]>(() => {
     return [];
   }
   const selected = selectedNodeId.value;
+  const dimming = dimmingNodeId.value;
   return g.edges.map((e) => {
     const touchesSelection =
       selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
+    const touchesDimming =
+      dimming !== null && (dimming === e.source_node_id || dimming === e.target_node_id);
     return {
       id: e.id,
       type: "agentMemory",
@@ -472,7 +499,9 @@ const flowEdges = computed<Edge[]>(() => {
       data: {
         relationshipType: e.relationship_type,
         pathCurvature: edgePathCurvature(e.id),
-        dimmed: selected !== null && !touchesSelection,
+        // dimmed lags behind on deselect (see dimmingNodeId); active/growFromEnd track the
+        // real selection immediately so the fill/drain animation itself is not delayed.
+        dimmed: dimming !== null && !touchesDimming,
         active: touchesSelection,
         // The fill animation should always grow outward from the selected node, regardless of
         // which end of the edge it is.
@@ -481,13 +510,6 @@ const flowEdges = computed<Edge[]>(() => {
     };
   });
 });
-
-const clusterLegend = computed(() =>
-  distinctEntityTypes(graph.value?.nodes ?? []).map((type) => ({
-    type,
-    color: clusterColorForType(type),
-  })),
-);
 
 const edgesForSidebarList = computed(() => {
   const g = graph.value;
@@ -545,7 +567,7 @@ const incomingConnections = computed<ConnectionRow[]>(() => {
 
 async function focusOnConnection(nodeId: string): Promise<void> {
   selectedNodeId.value = nodeId;
-  await flowPaneRef.value?.focusNode(nodeId);
+  await flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
 }
 
 const editName = ref("");
@@ -747,6 +769,11 @@ watch(
       graphCanvasFullscreen.value = false;
       needleAnimating.value = false;
       tooltipState.value = null;
+      if (dimmingClearTimer !== null) {
+        clearTimeout(dimmingClearTimer);
+        dimmingClearTimer = null;
+      }
+      dimmingNodeId.value = null;
       undoStack.value = [];
     }
   },
@@ -755,6 +782,9 @@ watch(
 
 onUnmounted(() => {
   clearCompactModeAnimationTimer();
+  if (dimmingClearTimer !== null) {
+    clearTimeout(dimmingClearTimer);
+  }
   document.removeEventListener("keydown", onDocumentUndoCapture, true);
   document.removeEventListener("fullscreenchange", syncGraphCanvasFullscreen);
 });
@@ -770,7 +800,11 @@ watch(graphCanvasFullscreen, (fs, wasFs) => {
 });
 
 function onNodeClick(ev: { node: Node }): void {
-  selectedNodeId.value = selectedNodeId.value === ev.node.id ? null : ev.node.id;
+  const wasSelected = selectedNodeId.value === ev.node.id;
+  selectedNodeId.value = wasSelected ? null : ev.node.id;
+  if (!wasSelected) {
+    void flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
+  }
 }
 
 function onPaneClick(): void {
@@ -1508,24 +1542,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
               class="w-4 h-4"
             />
           </Button>
-          <div
-            v-if="clusterLegend.length > 1"
-            class="absolute top-2 right-2 z-[5] max-w-[55%] rounded-lg border border-border bg-card/90 backdrop-blur-sm p-2 shadow-sm"
-          >
-            <div class="flex flex-wrap gap-x-3 gap-y-1">
-              <div
-                v-for="item in clusterLegend"
-                :key="item.type"
-                class="flex items-center gap-1.5 text-[10px] text-muted-foreground"
-              >
-                <span
-                  class="inline-block h-2 w-2 rounded-full shrink-0"
-                  :style="{ background: item.color }"
-                />
-                <span class="truncate">{{ item.type }}</span>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div

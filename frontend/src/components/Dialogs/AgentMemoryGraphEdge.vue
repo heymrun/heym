@@ -4,6 +4,10 @@
 // this component on every selection change, so a deselect can still find where the fill
 // animation left off instead of restarting from a fresh, always-zero ref.
 export const revealProgressByEdgeId = new Map<string, number>();
+
+/** Exported so AgentMemoryGraphDialog.vue can keep the "restore other entities' color" delay
+ * on deselect in sync with how long this component's own drain animation actually takes. */
+export const REVEAL_DURATION_MS = 450;
 </script>
 
 <script setup lang="ts">
@@ -135,7 +139,6 @@ const basePathStyle = computed(() => ({
 // survives the remount so a deselect still finds start=1 and animates down to 0.
 const revealPathEl = ref<SVGPathElement | null>(null);
 const revealProgress = ref(revealProgressByEdgeId.get(props.id) ?? 0); // 0 = drained, 1 = drawn
-const REVEAL_DURATION_MS = 450;
 let revealRafId: number | null = null;
 
 watch(revealProgress, (v) => {
