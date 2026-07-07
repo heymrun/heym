@@ -197,9 +197,21 @@ function neighborIdsOf(nodeId: string | null, g: AgentMemoryGraphResponse | null
 }
 
 /** Selecting a node focuses its neighborhood: connected edges get the animated chain
- * highlight, everything else fades out. Hover is intentionally inert (no dim, no tooltip) —
- * clicking a node already opens the full detail panel. */
+ * highlight, everything else fades out. Includes the hub itself (see neighborIdsOf) — for the
+ * "leaves only" set used by the node hover popover below, see selectedLeafIds. */
 const selectedNeighborIds = computed<Set<string>>(() => neighborIdsOf(selectedNodeId.value, graph.value));
+
+/** selectedNeighborIds with the hub itself excluded — the hub is the tree's root, not one of its
+ * leaves, so it must never trigger (or be hidden by) the leaf-hover popover below. */
+const selectedLeafIds = computed<Set<string>>(() => {
+  const hub = selectedNodeId.value;
+  if (hub === null) {
+    return new Set();
+  }
+  const leaves = new Set(selectedNeighborIds.value);
+  leaves.delete(hub);
+  return leaves;
+});
 
 /** Lags behind selectedNodeId on deselect only: dims immediately on select (in step with the
  * chain-fill animation starting), but on deselect it keeps everyone else faded for the same
@@ -240,6 +252,7 @@ const hoveredEdgeId = ref<string | null>(null);
 
 watch(selectedNodeId, () => {
   hoveredEdgeId.value = null;
+  hoveredLeafId.value = null;
   // A tooltip already open from hovering the node that's about to be clicked wouldn't get a
   // mouseleave out of the click itself — clear it explicitly so it can't linger over a now-
   // selected chain.
@@ -260,12 +273,19 @@ function onEdgeMouseLeave(): void {
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
-/** Hovering a node's circle shows a name/type/attributes popover — the caption only ever shows
- * the name, and opening the edit panel requires a click, so this is the fastest way to check a
- * node's attributes without committing to a selection. Suppressed while a node is selected: the
- * selected chain (dimmed nodes, relation labels, hover-isolate) already owns the canvas's
- * attention then, and a competing popover would fight it instead of reading as a peek. */
+/** Compact mode hides captions entirely, so hover is the only way to identify a plain pin —
+ * shows a name/type/attributes popover there for any node. In normal mode, a caption already
+ * names every node, so the popover only earns its keep for a selected hub's leaves (its
+ * neighbors): hovering one shows its attributes AND hides the other leaves' captions (see
+ * hoveredLeafId), the same crowded-hub decluttering the edge hover-isolate does for relationship
+ * labels. With nothing selected in normal mode, hover stays inert — there's no leaf to hover and
+ * the caption already says enough. */
 const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
+
+/** Set only when hovering a leaf (neighbor) of the currently selected hub in normal mode — drives
+ * hiding the other leaves' captions. Cleared on any selection change (see the watcher above) so
+ * it can't outlive the chain it belonged to. */
+const hoveredLeafId = ref<string | null>(null);
 
 function nodeHoverTooltipText(nodeId: string): string {
   const node = graph.value?.nodes.find((n) => n.id === nodeId);
@@ -281,8 +301,12 @@ function nodeHoverTooltipText(nodeId: string): string {
 }
 
 function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
-  if (selectedNodeId.value !== null) {
+  const isLeafOfSelection = selectedLeafIds.value.has(nodeId);
+  if (!labelsHidden.value && !isLeafOfSelection) {
     return;
+  }
+  if (isLeafOfSelection) {
+    hoveredLeafId.value = nodeId;
   }
   const text = nodeHoverTooltipText(nodeId);
   if (!text) {
@@ -292,7 +316,15 @@ function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
 }
 
 function onNodeHoverLeave(): void {
+  hoveredLeafId.value = null;
   tooltipState.value = null;
+}
+
+/** True for a selected hub's leaf (neighbor) other than the one currently hovered — hides its
+ * name caption while a sibling leaf is hovered, mirroring the edge hover-isolate treatment of
+ * relationship labels. */
+function isCaptionHiddenByLeafHover(id: string): boolean {
+  return hoveredLeafId.value !== null && id !== hoveredLeafId.value && selectedLeafIds.value.has(id);
 }
 const COMPACT_MODE_ANIMATION_MS = 1000;
 let compactModeAnimationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1504,7 +1536,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
                   :style="{ background: flowNodeColor(data) }"
                 />
                 <div
-                  v-if="!labelsHidden"
+                  v-if="!labelsHidden && !isCaptionHiddenByLeafHover(id)"
                   class="agent-memory-node-caption pointer-events-none absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
                   :class="[
                     captionAboveIds.has(id) ? 'bottom-full mb-1' : 'top-full mt-1',
