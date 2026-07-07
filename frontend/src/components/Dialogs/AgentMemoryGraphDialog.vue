@@ -240,6 +240,10 @@ const hoveredEdgeId = ref<string | null>(null);
 
 watch(selectedNodeId, () => {
   hoveredEdgeId.value = null;
+  // A tooltip already open from hovering the node that's about to be clicked wouldn't get a
+  // mouseleave out of the click itself — clear it explicitly so it can't linger over a now-
+  // selected chain.
+  tooltipState.value = null;
 });
 
 function onEdgeMouseEnter(ev: { edge: Edge }): void {
@@ -256,9 +260,11 @@ function onEdgeMouseLeave(): void {
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
-/** Compact mode hides captions, so there is no other way to tell what a plain pin represents —
- * hover shows a name/type/attributes popover in that mode only. Normal mode already reveals
- * this via the caption + click-to-open detail panel, so hover stays inert there. */
+/** Hovering a node's circle shows a name/type/attributes popover — the caption only ever shows
+ * the name, and opening the edit panel requires a click, so this is the fastest way to check a
+ * node's attributes without committing to a selection. Suppressed while a node is selected: the
+ * selected chain (dimmed nodes, relation labels, hover-isolate) already owns the canvas's
+ * attention then, and a competing popover would fight it instead of reading as a peek. */
 const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
 
 function nodeHoverTooltipText(nodeId: string): string {
@@ -275,7 +281,7 @@ function nodeHoverTooltipText(nodeId: string): string {
 }
 
 function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
-  if (!labelsHidden.value) {
+  if (selectedNodeId.value !== null) {
     return;
   }
   const text = nodeHoverTooltipText(nodeId);
