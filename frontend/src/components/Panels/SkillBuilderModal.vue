@@ -27,6 +27,10 @@ interface CustomScrollbarState {
   thumbTop: number;
 }
 
+interface SkillBuilderPreviewFile extends SkillBuilderFile {
+  previewable: boolean;
+}
+
 const props = defineProps<Props>();
 
 const emit = defineEmits<{
@@ -73,8 +77,20 @@ function getFileExtension(path: string): string {
   return lastDot >= 0 ? normalizedPath.slice(lastDot + 1) : "";
 }
 
-function getFileSizeBytes(content: string): number {
+function getTextSizeBytes(content: string): number {
   return new TextEncoder().encode(content).length;
+}
+
+function getBase64SizeBytes(content: string): number {
+  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+  return Math.max(Math.floor((content.length * 3) / 4) - padding, 0);
+}
+
+function getSkillFileSizeBytes(file: AgentSkillFile): number {
+  if ((file.encoding ?? "text") === "base64") {
+    return getBase64SizeBytes(file.content);
+  }
+  return getTextSizeBytes(file.content);
 }
 
 function canSendFileToSkillBuilder(file: AgentSkillFile): boolean {
@@ -86,7 +102,7 @@ function canSendFileToSkillBuilder(file: AgentSkillFile): boolean {
     return false;
   }
 
-  return getFileSizeBytes(file.content) <= SKILL_BUILDER_MAX_FILE_BYTES;
+  return getTextSizeBytes(file.content) <= SKILL_BUILDER_MAX_FILE_BYTES;
 }
 
 const existingSkillFiles = computed<AgentSkillFile[]>(() => {
@@ -120,6 +136,12 @@ const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() =
   return {
     name: props.existingSkill.name,
     files: editableFiles,
+    attachments: preservedSkillFiles.value.map((file) => ({
+      path: file.path,
+      encoding: file.encoding ?? "text",
+      mime_type: file.mimeType,
+      size_bytes: getSkillFileSizeBytes(file),
+    })),
   };
 });
 
@@ -127,18 +149,15 @@ const preservedSkillFiles = computed<AgentSkillFile[]>(() =>
   existingSkillFiles.value.filter((file) => !canSendFileToSkillBuilder(file)),
 );
 
-const previewFiles = computed<SkillBuilderFile[]>(() => {
-  const mergedFiles = new Map<string, SkillBuilderFile>();
+const previewFiles = computed<SkillBuilderPreviewFile[]>(() => {
+  const mergedFiles = new Map<string, SkillBuilderPreviewFile>();
 
   preservedSkillFiles.value.forEach((file) => {
-    if ((file.encoding ?? "text") !== "text") {
-      return;
-    }
-    mergedFiles.set(file.path, { path: file.path, content: file.content });
+    mergedFiles.set(file.path, { path: file.path, content: "", previewable: false });
   });
 
   currentFiles.value.forEach((file) => {
-    mergedFiles.set(file.path, file);
+    mergedFiles.set(file.path, { ...file, previewable: true });
   });
 
   return Array.from(mergedFiles.values());
@@ -158,9 +177,16 @@ const modalTitle = computed(() => {
   return generatedName || props.existingSkill?.name || "New Skill";
 });
 
-const activeFile = computed<SkillBuilderFile | null>(
+const activeFile = computed<SkillBuilderPreviewFile | null>(
   () => previewFiles.value[activeFileIndex.value] ?? null,
 );
+
+const activeFileContent = computed(() => {
+  if (!activeFile.value?.previewable) {
+    return null;
+  }
+  return activeFile.value.content;
+});
 
 const canPrompt = computed(
   () =>
@@ -589,7 +615,7 @@ onUnmounted(() => {
                 Files
               </p>
               <p class="text-xs text-muted-foreground">
-                Read-only preview of generated skill files
+                Generated and attached skill files
               </p>
             </div>
 
@@ -608,7 +634,7 @@ onUnmounted(() => {
                       :class="[
                         'flex w-full min-w-0 items-center justify-start gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs transition-colors',
                         index === activeFileIndex
-                          ? 'border-primary/40 bg-primary/10 text-primary'
+                          ? 'border-violet-500/70 bg-violet-50 text-violet-700 shadow-[0_0_0_1px_rgba(139,92,246,0.18)] dark:border-violet-500/80 dark:bg-violet-950/45 dark:text-violet-300 dark:shadow-[0_0_18px_rgba(124,58,237,0.18)]'
                           : 'border-border/60 bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
                       ]"
                       @click="activeFileIndex = index"
@@ -639,9 +665,15 @@ onUnmounted(() => {
                   @scroll="scheduleCustomScrollbarUpdate"
                 >
                   <pre
-                    v-if="activeFile"
+                    v-if="activeFileContent !== null"
                     class="whitespace-pre-wrap break-words text-xs leading-5 text-foreground"
-                  >{{ activeFile.content }}</pre>
+                  >{{ activeFileContent }}</pre>
+                  <p
+                    v-else-if="activeFile"
+                    class="text-xs text-muted-foreground"
+                  >
+                    {{ activeFile.path }} is attached to the skill but is not editable in Skill Builder.
+                  </p>
                   <p
                     v-else
                     class="text-xs text-muted-foreground"

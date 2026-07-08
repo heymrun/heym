@@ -4,6 +4,8 @@ import type { AgentSkill, AgentSkillFile } from "@/types/workflow";
 
 const SKILL_MD_PATTERN = /SKILL\.md$/i;
 const ROOT_SKILL_FILE = "SKILL.md";
+const MACOSX_METADATA_DIR = "__MACOSX";
+const MACOS_METADATA_FILE_NAMES = new Set([".DS_Store"]);
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   gif: "image/gif",
   jpeg: "image/jpeg",
@@ -11,6 +13,17 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   png: "image/png",
   svg: "image/svg+xml",
   webp: "image/webp",
+};
+const ASSET_MIME_BY_EXTENSION: Record<string, string> = {
+  ...IMAGE_MIME_BY_EXTENSION,
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  epub: "application/epub+zip",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  zip: "application/zip",
 };
 const TEXT_FILE_EXTENSIONS = new Set([
   "c",
@@ -56,7 +69,7 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
-function normalizeArchivePath(path: string): string {
+export function normalizeSkillArchivePath(path: string): string {
   const normalized = normalizePath(path).replace(/^\/+/, "");
   const parts = normalized
     .split("/")
@@ -64,9 +77,22 @@ function normalizeArchivePath(path: string): string {
   return parts.join("/");
 }
 
+export function shouldIgnoreSkillArchivePath(path: string): boolean {
+  const normalized = normalizeSkillArchivePath(path);
+  if (!normalized) return true;
+
+  const parts = normalized.split("/");
+  return parts.some(
+    (part) =>
+      part === MACOSX_METADATA_DIR ||
+      MACOS_METADATA_FILE_NAMES.has(part) ||
+      part.startsWith("._"),
+  );
+}
+
 function addSkillFileToZip(zip: JSZip, file: AgentSkillFile): void {
-  const path = normalizeArchivePath(file.path);
-  if (!path) return;
+  const path = normalizeSkillArchivePath(file.path);
+  if (!path || shouldIgnoreSkillArchivePath(path)) return;
 
   if ((file.encoding ?? "text") === "base64") {
     zip.file(path, file.content, { base64: true });
@@ -96,7 +122,7 @@ export async function createAgentSkillZipBlob(skill: AgentSkill): Promise<Blob> 
   zip.file(ROOT_SKILL_FILE, skill.content);
 
   (skill.files ?? []).forEach((file) => {
-    if (normalizeArchivePath(file.path).toLowerCase() === ROOT_SKILL_FILE.toLowerCase()) {
+    if (normalizeSkillArchivePath(file.path).toLowerCase() === ROOT_SKILL_FILE.toLowerCase()) {
       return;
     }
 
@@ -127,8 +153,9 @@ function getExtension(path: string): string {
 
 function inferMimeType(path: string): string {
   const extension = getExtension(path);
-  if (extension in IMAGE_MIME_BY_EXTENSION) {
-    return IMAGE_MIME_BY_EXTENSION[extension];
+  const assetMimeType = ASSET_MIME_BY_EXTENSION[extension];
+  if (assetMimeType) {
+    return assetMimeType;
   }
   if (extension === "md") return "text/markdown";
   if (extension === "json") return "application/json";
@@ -203,6 +230,30 @@ function parseZipFile(path: string, bytes: Uint8Array): ParsedSkillZipFile {
   };
 }
 
+function getBrowserFilePath(file: File): string {
+  const webkitRelativePath = "webkitRelativePath" in file ? file.webkitRelativePath : "";
+  return webkitRelativePath || file.name;
+}
+
+export async function parseSkillAssetFile(
+  file: File,
+  path = getBrowserFilePath(file),
+): Promise<AgentSkillFile | null> {
+  const archivePath = normalizeSkillArchivePath(path);
+  if (!archivePath || shouldIgnoreSkillArchivePath(archivePath)) {
+    return null;
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const parsed = parseZipFile(archivePath, bytes);
+  return {
+    path: parsed.path,
+    content: parsed.content,
+    encoding: parsed.encoding,
+    mimeType: parsed.mimeType,
+  };
+}
+
 /**
  * Assign each file to the skill with the longest matching directory prefix.
  */
@@ -255,14 +306,16 @@ export async function parseSkillZip(file: File): Promise<AgentSkill[]> {
 
   const fileEntries: ParsedSkillZipFile[] = [];
 
-  const fileNames = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+  const fileNames = Object.keys(zip.files).filter(
+    (n) => !zip.files[n].dir && !shouldIgnoreSkillArchivePath(n),
+  );
 
   for (const path of fileNames) {
     const entry = zip.files[path];
     if (!entry || entry.dir) continue;
     try {
       const bytes = await entry.async("uint8array");
-      fileEntries.push(parseZipFile(path, bytes));
+      fileEntries.push(parseZipFile(normalizeSkillArchivePath(path), bytes));
     } catch {
       // Skip unreadable files
     }

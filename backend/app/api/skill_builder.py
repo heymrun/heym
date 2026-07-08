@@ -31,11 +31,21 @@ class SkillBuilderFile(BaseModel):
     encoding: Literal["text"] = "text"
 
 
+class SkillBuilderAttachment(BaseModel):
+    """A non-editable file attached to the skill bundle."""
+
+    path: str
+    encoding: Literal["text", "base64"] = "text"
+    mime_type: str | None = None
+    size_bytes: int | None = None
+
+
 class SkillBuilderSkill(BaseModel):
     """Existing skill context passed to the assistant when editing."""
 
     name: str
     files: list[SkillBuilderFile] = Field(default_factory=list)
+    attachments: list[SkillBuilderAttachment] = Field(default_factory=list)
 
 
 class SkillBuilderConversationMessage(BaseModel):
@@ -60,16 +70,16 @@ SET_SKILL_FILES_TOOL: dict[str, Any] = {
     "function": {
         "name": "set_skill_files",
         "description": (
-            "Set the complete current skill file contents. "
-            "Call this whenever you create or update any file. "
-            "Always include ALL files in a single call."
+            "Set the complete current editable skill file contents. "
+            "Call this whenever you create or update any Markdown or Python file. "
+            "Always include ALL editable .md and .py files in a single call."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "files": {
                     "type": "array",
-                    "description": "All files that currently make up the skill.",
+                    "description": "All editable .md and .py files that currently make up the skill.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -92,7 +102,8 @@ A Heym skill is a ZIP bundle containing:
 - `SKILL.md` describing when and how the skill should be used
 - `main.py` implementing `execute(params, files) -> dict`
 - Optional extra `.py` or `.md` helper files
-- No binary files in the generated output
+- Optional bundled asset files that existing skills may reference
+- No binary files in generated Skill Builder output
 
 ### Required SKILL.md format
 
@@ -239,21 +250,50 @@ def execute(params: dict, files: dict) -> dict:
 2. Every `main.py` MUST import `json` and `sys` and include the `if __name__ == "__main__":` block shown above. Without it the script produces no output and the skill silently fails.
 3. NEVER embed fonts as Python strings or base64. Use reportlab built-in fonts: `Helvetica`, `Times-Roman`, `Courier`, and their bold/italic variants.
 4. NEVER embed image bytes as Python constants or base64. Ask the user to pass images as input files.
-5. Always call `set_skill_files` with the COMPLETE file set every time you create or modify files.
+5. Always call `set_skill_files` with the COMPLETE editable `.md`/`.py` file set every time you create or modify files.
 6. Keep `SKILL.md` accurate because the LLM reads it to decide when to call the skill.
 7. `execute()` must remain a top-level function in `main.py`.
 8. Only generate or update `.md` and `.py` files.
 9. Use English only for all natural language content, parameter names, descriptions, comments, docstrings, and user-facing strings.
+10. Preserve existing file paths unless the user explicitly asks to reorganize them. If you rename or move a Python file, update imports, relative file reads/writes, and `SKILL.md` so the final ZIP layout still works.
+11. When reading bundled assets, prefer paths based on `pathlib.Path(__file__).resolve().parent` so the code remains correct when the script lives in a subdirectory.
 """
 
 MAX_SKILL_BUILDER_ROUNDS = 6
 ALLOWED_SKILL_BUILDER_EXTENSIONS = (".md", ".py")
+MACOS_METADATA_DIR = "__MACOSX"
+MACOS_METADATA_FILENAMES = {".DS_Store"}
+
+
+def _normalize_skill_builder_path(path: str) -> str:
+    """Normalize a skill file path for prompt and tool use."""
+
+    normalized = path.replace("\\", "/").lstrip("/")
+    parts = [part for part in normalized.split("/") if part and part not in {".", ".."}]
+    return "/".join(parts)
+
+
+def _is_ignored_skill_builder_path(path: str) -> bool:
+    """Return whether a path is generated OS metadata that should be skipped."""
+
+    normalized = _normalize_skill_builder_path(path)
+    if not normalized:
+        return True
+
+    parts = normalized.split("/")
+    return any(
+        part == MACOS_METADATA_DIR or part in MACOS_METADATA_FILENAMES or part.startswith("._")
+        for part in parts
+    )
 
 
 def _is_allowed_skill_builder_file(path: str) -> bool:
     """Return whether the skill builder may generate or edit the given file path."""
 
-    normalized_path = path.lower()
+    if _is_ignored_skill_builder_path(path):
+        return False
+
+    normalized_path = _normalize_skill_builder_path(path).lower()
     return normalized_path.endswith(ALLOWED_SKILL_BUILDER_EXTENSIONS)
 
 
@@ -265,6 +305,8 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
         "You help users create and edit skills for the Heym AI workflow platform. "
         "A skill is a Python-backed tool bundle for Agent nodes. "
         "Generate and edit only `.md` and `.py` files. "
+        "Existing non-editable attachments may be referenced by path, but you must not "
+        "generate placeholders for them. "
         "All natural language content must be English only, including parameter names, "
         "descriptions, output names, output descriptions, comments, docstrings, "
         "and user-facing strings.\n\n"
@@ -278,7 +320,8 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
             file for file in existing_skill.files if _is_allowed_skill_builder_file(file.path)
         ]
         for file in editable_files:
-            base += f"### {file.path}\n\n```\n{file.content}\n```\n\n"
+            normalized_path = _normalize_skill_builder_path(file.path)
+            base += f"### {normalized_path}\n\n```\n{file.content}\n```\n\n"
         skipped_files_count = len(existing_skill.files) - len(editable_files)
         if skipped_files_count > 0:
             base += (
@@ -286,9 +329,33 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
                 "context because only `.md` and `.py` files are editable here. "
                 "Those excluded files must remain untouched.\n\n"
             )
+        attachments = [
+            (_normalize_skill_builder_path(attachment.path), attachment)
+            for attachment in existing_skill.attachments
+            if _normalize_skill_builder_path(attachment.path)
+            and not _is_ignored_skill_builder_path(attachment.path)
+        ]
+        if attachments:
+            base += (
+                "Non-editable files attached to the final ZIP bundle. Their contents are "
+                "not shown, but their paths are real and must stay valid:\n"
+            )
+            for normalized_path, attachment in attachments:
+                details = [attachment.encoding]
+                if attachment.mime_type:
+                    details.append(attachment.mime_type)
+                if attachment.size_bytes is not None:
+                    details.append(f"{attachment.size_bytes} bytes")
+                base += f"- `{normalized_path}` ({', '.join(details)})\n"
+            base += (
+                "\nDo not include these non-editable files in `set_skill_files`. "
+                "If you move a Python file that reads one of these paths, update the "
+                "code and `SKILL.md` so the relative path still points to the asset in "
+                "the final ZIP layout.\n\n"
+            )
         base += (
-            "When you update files, always call `set_skill_files` with ALL files, "
-            "including unchanged ones.\n"
+            "When you update files, always call `set_skill_files` with ALL editable "
+            "`.md`/`.py` files, including unchanged editable files.\n"
         )
     else:
         base += (
@@ -332,10 +399,11 @@ def _normalize_skill_files(raw_files: list[Any]) -> tuple[list[dict[str, str]], 
         content = raw_file.get("content")
         if not isinstance(path, str) or not isinstance(content, str):
             continue
-        if not _is_allowed_skill_builder_file(path):
+        normalized_path = _normalize_skill_builder_path(path)
+        if not _is_allowed_skill_builder_file(normalized_path):
             rejected_paths.append(path)
             continue
-        files.append({"path": path, "content": content})
+        files.append({"path": normalized_path, "content": content})
     return files, rejected_paths
 
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
@@ -7,6 +8,7 @@ import {
   Loader2,
   Sparkles,
   Trash2,
+  Upload,
 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
@@ -35,8 +37,12 @@ const emit = defineEmits<{
   (e: "update:timeout-seconds", value: number): void;
   (e: "update:content", value: string): void;
   (e: "update:file-content", fileIndex: number, value: string): void;
+  (e: "add-files", files: File[]): void;
   (e: "remove-file", fileIndex: number): void;
 }>();
+
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const isFileDragActive = ref(false);
 
 function isTextSkillFile(file: AgentSkillFile): boolean {
   return !file.encoding || file.encoding === "text";
@@ -52,6 +58,53 @@ function getSkillFilePreviewSrc(file: AgentSkillFile): string {
   }
   const mimeType = file.mimeType || "image/png";
   return `data:${mimeType};base64,${file.content}`;
+}
+
+function openFilePicker(): void {
+  fileInputRef.value?.click();
+}
+
+function emitFiles(fileList: FileList | null | undefined): void {
+  const files = Array.from(fileList ?? []);
+  if (files.length === 0) {
+    return;
+  }
+  emit("add-files", files);
+}
+
+function handleFileInputChange(event: Event): void {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  emitFiles(input.files);
+  input.value = "";
+}
+
+function handleFileDragOver(event: DragEvent): void {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  isFileDragActive.value = true;
+}
+
+function handleFileDragLeave(event: DragEvent): void {
+  const currentTarget = event.currentTarget;
+  const relatedTarget = event.relatedTarget;
+  if (
+    currentTarget instanceof HTMLElement &&
+    relatedTarget instanceof Node &&
+    currentTarget.contains(relatedTarget)
+  ) {
+    return;
+  }
+  isFileDragActive.value = false;
+}
+
+function handleFileDrop(event: DragEvent): void {
+  isFileDragActive.value = false;
+  emitFiles(event.dataTransfer?.files);
 }
 </script>
 
@@ -156,6 +209,40 @@ function getSkillFilePreviewSrc(file: AgentSkillFile): string {
           class="font-mono text-xs"
           @update:model-value="emit('update:content', $event)"
         />
+      </div>
+      <div class="py-2">
+        <div
+          :class="[
+            'rounded border border-dashed p-3 text-xs transition-colors',
+            isFileDragActive ? 'border-primary bg-primary/5' : 'border-border bg-muted/10',
+          ]"
+          @dragenter.stop.prevent="isFileDragActive = true"
+          @dragover.stop.prevent="handleFileDragOver"
+          @dragleave.stop.prevent="handleFileDragLeave"
+          @drop.stop.prevent="handleFileDrop"
+        >
+          <input
+            ref="fileInputRef"
+            type="file"
+            class="sr-only"
+            multiple
+            @change="handleFileInputChange"
+          >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-muted-foreground">
+              Drop files here to attach them to this skill.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              class="gap-1"
+              @click="openFilePicker"
+            >
+              <Upload class="w-3.5 h-3.5" />
+              Add files
+            </Button>
+          </div>
+        </div>
       </div>
       <div
         v-if="skill.files?.length"

@@ -14,7 +14,12 @@ import { useRouter } from "vue-router";
 import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
-import { createAgentSkillZipBlob, getSkillZipFileName, parseSkillZip } from "@/lib/skillZipParser";
+import {
+  createAgentSkillZipBlob,
+  getSkillZipFileName,
+  parseSkillAssetFile,
+  parseSkillZip,
+} from "@/lib/skillZipParser";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
@@ -7042,6 +7047,62 @@ export function usePropertiesPanelController() {
     );
   }
 
+  async function addAgentSkillFiles(skillIndex: number, files: File[]): Promise<void> {
+    if (!selectedNode.value || files.length === 0) return;
+
+    const skills = [...(selectedNode.value.data.skills || [])];
+    const skill = skills[skillIndex];
+    if (!skill) return;
+
+    const parsedFiles: AgentSkillFile[] = [];
+    for (const file of files) {
+      const parsedFile = await parseSkillAssetFile(file);
+      if (parsedFile) {
+        parsedFiles.push(parsedFile);
+      }
+    }
+
+    if (parsedFiles.length === 0) {
+      showToast("No usable skill files found", "error");
+      return;
+    }
+
+    let nextContent = skill.content;
+    let skillContentUpdated = false;
+    const filesByPath = new Map<string, AgentSkillFile>();
+    (skill.files ?? []).forEach((file) => {
+      filesByPath.set(file.path, file);
+    });
+
+    parsedFiles.forEach((file) => {
+      if (file.path.toLowerCase() === "skill.md" && (file.encoding ?? "text") === "text") {
+        nextContent = file.content;
+        skillContentUpdated = true;
+        return;
+      }
+      filesByPath.set(file.path, file);
+    });
+
+    const nextFiles = Array.from(filesByPath.values());
+    skills[skillIndex] = {
+      ...skill,
+      content: nextContent,
+      files: nextFiles,
+    };
+    updateNodeData("skills", skills);
+
+    const attachedCount = parsedFiles.length - (skillContentUpdated ? 1 : 0);
+    if (skillContentUpdated && attachedCount === 0) {
+      showToast("SKILL.md updated", "success");
+      return;
+    }
+    if (skillContentUpdated) {
+      showToast(`SKILL.md updated and ${attachedCount} file(s) attached`, "success");
+      return;
+    }
+    showToast(`${attachedCount} file(s) attached`, "success");
+  }
+
   const skillZipLoading = ref(false);
   const skillZipError = ref("");
   const skillDownloadLoadingId = ref<string | null>(null);
@@ -8546,6 +8607,7 @@ export function usePropertiesPanelController() {
     updateAgentSkill,
     updateAgentSkillFile,
     removeAgentSkillFile,
+    addAgentSkillFiles,
     skillZipLoading,
     skillZipError,
     skillDownloadLoadingId,

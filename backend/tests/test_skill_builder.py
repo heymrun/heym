@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.api.skill_builder import (
+    SkillBuilderAttachment,
     SkillBuilderFile,
     SkillBuilderRequest,
     SkillBuilderSkill,
@@ -70,6 +71,38 @@ class BuildSkillBuilderPromptTests(unittest.TestCase):
         self.assertIn("main.py", prompt)
         self.assertNotIn("notes.txt", prompt)
         self.assertIn("excluded from the AI editing context", prompt)
+
+    def test_edit_skill_prompt_lists_non_editable_attachment_paths(self) -> None:
+        skill = SkillBuilderSkill(
+            name="pdf-reader",
+            files=[
+                SkillBuilderFile(path="SKILL.md", content="---\nname: pdf-reader\n---"),
+                SkillBuilderFile(
+                    path="assets/main.py",
+                    content=(
+                        "from pathlib import Path\n"
+                        "def execute(params, files):\n"
+                        "    return {'size': (Path(__file__).parent / 'hello.pdf').stat().st_size}\n"
+                    ),
+                ),
+            ],
+            attachments=[
+                SkillBuilderAttachment(
+                    path="assets/hello.pdf",
+                    encoding="base64",
+                    mime_type="application/pdf",
+                    size_bytes=128,
+                )
+            ],
+        )
+
+        prompt = build_skill_builder_prompt(skill)
+
+        self.assertIn("assets/main.py", prompt)
+        self.assertIn("assets/hello.pdf", prompt)
+        self.assertIn("application/pdf", prompt)
+        self.assertIn("Do not include these non-editable files", prompt)
+        self.assertIn("If you move a Python file", prompt)
 
 
 class RunSkillBuilderTests(unittest.IsolatedAsyncioTestCase):
@@ -250,3 +283,56 @@ class RunSkillBuilderTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(second_call_messages[-1]["role"], "tool")
         self.assertIn("only accepts `.md` and `.py` files", second_call_messages[-1]["content"])
+
+    async def test_ignores_macos_metadata_tool_files(self) -> None:
+        files_payload = [
+            {"path": "SKILL.md", "content": "---\nname: hello-skill\n---"},
+            {"path": "__MACOSX/._main.py", "content": "ignore me"},
+            {"path": ".DS_Store", "content": "ignore me"},
+            {
+                "path": "nested/../main.py",
+                "content": "def execute(params, files):\n    return {'msg': 'hi'}\n",
+            },
+        ]
+        tool_call = SimpleNamespace(
+            id="tool-call-1",
+            function=SimpleNamespace(
+                name="set_skill_files",
+                arguments=json.dumps({"files": files_payload}),
+            ),
+        )
+        first_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tool_call]))
+            ],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=5, total_tokens=10),
+        )
+        second_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Done.", tool_calls=None))],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=5, total_tokens=10),
+        )
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = [first_response, second_response]
+
+        request = SkillBuilderRequest(
+            credential_id=uuid.uuid4(),
+            model="gpt-4o",
+            message="Build a hello skill.",
+        )
+
+        with patch("app.api.skill_builder.record_llm_trace"):
+            events = await self._collect_events(
+                run_skill_builder(fake_client, request, self._make_trace_context(), "OpenAI")
+            )
+
+        update_event = next(event for event in events if event["type"] == "skill_files_update")
+        self.assertEqual(
+            update_event["files"],
+            [
+                {"path": "SKILL.md", "content": "---\nname: hello-skill\n---"},
+                {
+                    "path": "nested/main.py",
+                    "content": "def execute(params, files):\n    return {'msg': 'hi'}\n",
+                },
+            ],
+        )

@@ -64,6 +64,7 @@ const {
   updateAgentSkill,
   updateAgentSkillFile,
   removeAgentSkillFile,
+  addAgentSkillFiles,
   skillZipLoading,
   skillZipError,
   skillDownloadLoadingId,
@@ -737,6 +738,7 @@ const {
         @update:timeout-seconds="updateAgentSkill(idx, 'timeoutSeconds', $event)"
         @update:content="updateAgentSkill(idx, 'content', $event)"
         @update:file-content="(fileIndex, value) => updateAgentSkillFile(idx, fileIndex, 'content', value)"
+        @add-files="addAgentSkillFiles(idx, $event)"
         @remove-file="removeAgentSkillFile(idx, $event)"
       />
       <p class="text-xs text-muted-foreground">
