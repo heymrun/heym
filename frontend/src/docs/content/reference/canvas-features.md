@@ -74,7 +74,7 @@ Nodes with `active: false` are skipped. Downstream nodes receive no data from sk
 
 ## Agent memory graph
 
-[Agent](../nodes/agent-node.md) nodes with **[persistent memory](./agent-persistent-memory.md)** enabled show a pink **brain** control on the node. Click it to open the memory graph editor: view entities and relationships, add or edit nodes and edges, and use graph-specific shortcuts. The same dialog includes **Share memory with other agents** (workflow → agent → read or read/write) for [cross-agent memory sharing](./agent-persistent-memory.md#sharing-with-other-agents). While the dialog is open, main canvas undo/redo is deferred so graph editing keeps its own history.
+[Agent](../nodes/agent-node.md) nodes with **[persistent memory](./agent-persistent-memory.md)** enabled show a pink **brain** control on the node. Click it to open the memory graph editor: entities render as an animated, force-directed graph clustered by entity type, with searchable Source/Target pickers for adding relationships and a connections panel for jumping between linked entities. The same dialog includes **Share memory with other agents** (workflow → agent → read or read/write) for [cross-agent memory sharing](./agent-persistent-memory.md#sharing-with-other-agents). While the dialog is open, main canvas undo/redo is deferred so graph editing keeps its own history.
 
 ## Extract to Sub-Workflow
 

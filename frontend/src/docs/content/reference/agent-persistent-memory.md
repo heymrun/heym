@@ -15,7 +15,7 @@ Turn it on in the Agent node properties (**Persistent memory (graph)**). A pink 
 
 ## Graph editor
 
-The dialog provides a visual graph of entities and edges, plus editing and navigation (fit view, keyboard shortcuts). You can **add, edit, or delete** nodes and edges manually; changes apply to **this** agent’s graph only (the graph for the canvas node whose brain you opened).
+The dialog renders entities as an animated, force-directed graph — colored circles sized by connection count and clustered by entity type — plus editing and navigation (fit view, tidy layout, keyboard shortcuts). You can **add, edit, or delete** nodes and edges manually; the Source/Target relationship pickers are searchable for graphs with many entities. Selecting a node shows its outgoing and incoming connections, each clickable to jump to that node. Changes apply to **this** agent’s graph only (the graph for the canvas node whose brain you opened).
 
 ## Sharing with other agents
 

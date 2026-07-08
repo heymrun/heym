@@ -3,10 +3,18 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { Edge, Node } from "@vue-flow/core";
 import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Trash2, Wand2 } from "lucide-vue-next";
 
+import { REVEAL_DURATION_MS } from "@/components/Dialogs/AgentMemoryGraphEdge.vue";
 import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowPane.vue";
+import {
+  clusterColorForType,
+  computeDegrees,
+  nodeRadius,
+  seedPositions,
+} from "@/components/Dialogs/agentMemoryGraphView";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { useToast } from "@/composables/useToast";
 import { workflowApi } from "@/services/api";
@@ -132,8 +140,6 @@ const dialogContentRef = ref<HTMLElement | null>(null);
 /** Vue Flow canvas subtree (layout ref only; undo uses document capture scoped to dialog body). */
 const graphAreaRef = ref<HTMLElement | null>(null);
 const graphCanvasFullscreen = ref(false);
-/** Bumps to remount Vue Flow so node positions snap back to the auto layout. */
-const flowLayoutEpoch = ref(0);
 
 function syncGraphCanvasFullscreen(): void {
   const el = graphAreaRef.value;
@@ -161,10 +167,183 @@ async function toggleGraphCanvasFullscreen(): Promise<void> {
 const loading = ref(false);
 const graph = ref<AgentMemoryGraphResponse | null>(null);
 const selectedNodeId = ref<string | null>(null);
+
+/** Last known live position per node id, captured before every reload so the force sim's
+ * settled/dragged layout survives graph refreshes (Vue Flow's node reconciliation would
+ * otherwise overwrite `position` from `flowNodes` on every prop change). */
+const knownPositions = ref<Map<string, { x: number; y: number }>>(new Map());
+
+function captureLivePositions(): void {
+  const live = flowPaneRef.value?.snapshotPositions();
+  if (live && live.size > 0) {
+    knownPositions.value = live;
+  }
+}
+
+function neighborIdsOf(nodeId: string | null, g: AgentMemoryGraphResponse | null): Set<string> {
+  if (!nodeId || !g) {
+    return new Set();
+  }
+  const out = new Set<string>([nodeId]);
+  for (const e of g.edges) {
+    if (e.source_node_id === nodeId) {
+      out.add(e.target_node_id);
+    }
+    if (e.target_node_id === nodeId) {
+      out.add(e.source_node_id);
+    }
+  }
+  return out;
+}
+
+/** Selecting a node focuses its neighborhood: connected edges get the animated chain
+ * highlight, everything else fades out. Includes the hub itself (see neighborIdsOf) — for the
+ * "leaves only" set used by the node hover popover below, see selectedLeafIds. */
+const selectedNeighborIds = computed<Set<string>>(() => neighborIdsOf(selectedNodeId.value, graph.value));
+
+/** selectedNeighborIds with the hub itself excluded — the hub is the tree's root, not one of its
+ * leaves, so it must never trigger (or be hidden by) the leaf-hover popover below. */
+const selectedLeafIds = computed<Set<string>>(() => {
+  const hub = selectedNodeId.value;
+  if (hub === null) {
+    return new Set();
+  }
+  const leaves = new Set(selectedNeighborIds.value);
+  leaves.delete(hub);
+  return leaves;
+});
+
+/** Lags behind selectedNodeId on deselect only: dims immediately on select (in step with the
+ * chain-fill animation starting), but on deselect it keeps everyone else faded for the same
+ * REVEAL_DURATION_MS the drain animation takes, so "other entities' color comes back" only
+ * once that animation has actually finished instead of snapping back instantly underneath it. */
+const dimmingNodeId = ref<string | null>(null);
+let dimmingClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(selectedNodeId, (next) => {
+  if (dimmingClearTimer !== null) {
+    clearTimeout(dimmingClearTimer);
+    dimmingClearTimer = null;
+  }
+  if (next !== null) {
+    dimmingNodeId.value = next;
+    return;
+  }
+  dimmingClearTimer = setTimeout(() => {
+    dimmingNodeId.value = null;
+    dimmingClearTimer = null;
+  }, REVEAL_DURATION_MS);
+});
+
+const dimmingNeighborIds = computed<Set<string>>(() => neighborIdsOf(dimmingNodeId.value, graph.value));
+
+function isNodeDimmed(id: string): boolean {
+  return dimmingNodeId.value !== null && !dimmingNeighborIds.value.has(id);
+}
+
+/** While a node is selected, hovering one of its now-highlighted relationship edges hides the
+ * other highlighted edges' label chips (not the lines themselves) so the hovered one's label can
+ * be read on its own — the same crowded-hub problem the caption flip and focus spacing address,
+ * but for labels that are still overlapping once revealed. Only set when there IS a selection and
+ * the hovered edge itself belongs to that selection's chain — hovering an unrelated background
+ * edge (or hovering anything with nothing selected) must have no effect. Cleared on any selection
+ * change so it can't outlive the chain it belonged to. */
+const hoveredEdgeId = ref<string | null>(null);
+
+watch(selectedNodeId, () => {
+  hoveredEdgeId.value = null;
+  // A tooltip already open from hovering the node that's about to be clicked wouldn't get a
+  // mouseleave out of the click itself — clear it explicitly so it can't linger over a now-
+  // selected chain.
+  tooltipState.value = null;
+});
+
+function onEdgeMouseEnter(ev: { edge: Edge }): void {
+  const selected = selectedNodeId.value;
+  const hoveredEdgeTouchesSelection =
+    selected !== null && (selected === ev.edge.source || selected === ev.edge.target);
+  hoveredEdgeId.value = hoveredEdgeTouchesSelection ? ev.edge.id : null;
+}
+
+function onEdgeMouseLeave(): void {
+  hoveredEdgeId.value = null;
+}
+
+/** The edge id connecting two nodes, if any — used so hovering a selected hub's leaf can isolate
+ * its relationship label exactly like hovering that same edge directly would (see hoveredEdgeId). */
+function edgeIdBetween(aId: string, bId: string): string | null {
+  const g = graph.value;
+  if (!g) {
+    return null;
+  }
+  const edge = g.edges.find(
+    (e) =>
+      (e.source_node_id === aId && e.target_node_id === bId) ||
+      (e.source_node_id === bId && e.target_node_id === aId),
+  );
+  return edge?.id ?? null;
+}
+
 const undoStack = ref<AgentMemoryUndoOp[]>([]);
 const labelsHidden = ref(false);
 const needleAnimating = ref(false);
+/** Compact mode hides captions entirely, so hover is the only way to identify a plain pin —
+ * shows a name/type/attributes popover there for any node, regardless of how many attributes it
+ * has. In normal mode, a caption already names every node, so the popover only earns its keep for
+ * a selected hub's leaves (its neighbors) that actually have enough attributes to be worth a
+ * popup (see MIN_ATTRIBUTES_FOR_LEAF_POPOVER) — hovering one shows its attributes AND isolates its
+ * relationship label exactly like hovering its edge would (see hoveredEdgeId/edgeIdBetween), even
+ * when the popover itself is skipped for having too little to show. With nothing selected in
+ * normal mode, hover stays inert — there's no leaf to hover and the caption already says enough. */
 const tooltipState = ref<{ text: string; x: number; y: number } | null>(null);
+
+/** Below this, a leaf's popover would show little beyond what the caption already says (its
+ * name/type), so it's not worth popping up over a normal-mode hover — 0 or 1 attributes reads as
+ * "nothing new," 2+ starts to justify it. Doesn't apply to compact mode, where the popover is the
+ * only way to identify a node at all. */
+const MIN_ATTRIBUTES_FOR_LEAF_POPOVER = 2;
+
+function nodeAttributeCount(nodeId: string): number {
+  const node = graph.value?.nodes.find((n) => n.id === nodeId);
+  return node ? propertyRowsFromRecord(node.properties).length : 0;
+}
+
+function nodeHoverTooltipText(nodeId: string): string {
+  const node = graph.value?.nodes.find((n) => n.id === nodeId);
+  if (!node) {
+    return "";
+  }
+  const title = `${node.entity_name} (${node.entity_type})`;
+  const rows = propertyRowsFromRecord(node.properties);
+  if (!rows.length) {
+    return title;
+  }
+  return [title, ...rows.map((r) => `${r.key}: ${r.value}`)].join("\n");
+}
+
+function onNodeHoverEnter(nodeId: string, e: MouseEvent): void {
+  const isLeafOfSelection = selectedLeafIds.value.has(nodeId);
+  if (!labelsHidden.value && !isLeafOfSelection) {
+    return;
+  }
+  const hub = selectedNodeId.value;
+  if (isLeafOfSelection && hub !== null) {
+    hoveredEdgeId.value = edgeIdBetween(hub, nodeId);
+  }
+  if (isLeafOfSelection && nodeAttributeCount(nodeId) < MIN_ATTRIBUTES_FOR_LEAF_POPOVER) {
+    return;
+  }
+  const text = nodeHoverTooltipText(nodeId);
+  if (!text) {
+    return;
+  }
+  tooltipState.value = { text, x: e.clientX + 14, y: e.clientY - 8 };
+}
+
+function onNodeHoverLeave(): void {
+  hoveredEdgeId.value = null;
+  tooltipState.value = null;
+}
 const COMPACT_MODE_ANIMATION_MS = 1000;
 let compactModeAnimationTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -197,19 +376,17 @@ async function fitGraphViewportAfterLayoutChange(): Promise<void> {
 }
 
 function tidyMemoryGraphLayout(): void {
-  if (!flowNodes.value.length) {
-    return;
-  }
-  flowLayoutEpoch.value += 1;
-  void fitGraphViewportAfterLayoutChange();
+  flowPaneRef.value?.reheat();
 }
 
 function toggleLabels(): void {
+  // flowNodes depends on labelsHidden (compact circles use a smaller radius), so it's about to
+  // recompute — capture live positions first or nodes would snap back to the last loadGraph()
+  // snapshot instead of keeping their current settled/dragged spots.
+  captureLivePositions();
   const enteringCompactMode = !labelsHidden.value;
   clearCompactModeAnimationTimer();
   labelsHidden.value = enteringCompactMode;
-  tooltipState.value = null;
-  flowLayoutEpoch.value += 1;
 
   if (!enteringCompactMode) {
     needleAnimating.value = false;
@@ -225,21 +402,9 @@ function toggleLabels(): void {
   }, COMPACT_MODE_ANIMATION_MS);
 }
 
-function nodeTooltipText(data: Record<string, unknown> | undefined): string {
-  const title = flowNodeTitle(data);
-  const rows = flowNodePropertyRows(data);
-  if (!rows.length) return title;
-  return [title, ...rows.map((r) => `${r.key}: ${r.value}`)].join("\n");
-}
-
-function onNodePinEnter(data: Record<string, unknown> | undefined, e: MouseEvent): void {
-  const text = nodeTooltipText(data);
-  if (!text) return;
-  tooltipState.value = { text, x: e.clientX + 14, y: e.clientY - 8 };
-}
-
-function onNodePinLeave(): void {
-  tooltipState.value = null;
+function flowNodeColor(data: Record<string, unknown> | undefined): string {
+  const c = data?.color;
+  return typeof c === "string" ? c : "#60a5fa";
 }
 
 function propertyRowsFromRecord(
@@ -341,217 +506,57 @@ function flowNodeTitle(data: Record<string, unknown> | undefined): string {
   return typeof t === "string" ? t : "";
 }
 
-function flowNodePropertyRows(
-  data: Record<string, unknown> | undefined,
-): Array<{ key: string; value: string }> {
-  const rows = data?.propertyRows;
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-  return rows.filter(
-    (item): item is { key: string; value: string } =>
-      typeof item === "object" &&
-      item !== null &&
-      "key" in item &&
-      "value" in item &&
-      typeof (item as { key: unknown }).key === "string" &&
-      typeof (item as { value: unknown }).value === "string",
-  );
-}
-
-/** Stable slight Bezier curvature per edge so similar routes do not stack (labels stay on-path). */
+/** Slight per-edge bow so overlapping routes don't stack exactly; kept small so lines read as
+ * straight rather than spiraling. */
 function edgePathCurvature(edgeId: string): number {
   let h = 0;
   for (let i = 0; i < edgeId.length; i++) {
     h = (h * 31 + edgeId.charCodeAt(i)) | 0;
   }
-  const steps = [0.2, 0.22, 0.24, 0.26, 0.28, 0.3];
-  return steps[Math.abs(h) % steps.length] ?? 0.25;
+  const steps = [0.03, 0.045, 0.06, 0.075, 0.09, 0.105];
+  return steps[Math.abs(h) % steps.length] ?? 0.06;
 }
 
-/** Longest-path layering from roots (incoming degree 0), tree-like top → down. */
-function layoutMemoryGraphDownward(
-  nodes: AgentMemoryNodeDTO[],
-  edges: AgentMemoryEdgeDTO[],
-  opts?: { hDist?: number; vGap?: number; cx?: number },
-): Map<string, { x: number; y: number }> {
-  const idSet = new Set(nodes.map((n) => n.id));
-  const inCount = new Map<string, number>();
-
-  for (const n of nodes) {
-    inCount.set(n.id, 0);
-  }
-  for (const e of edges) {
-    if (!idSet.has(e.source_node_id) || !idSet.has(e.target_node_id)) {
-      continue;
-    }
-    inCount.set(e.target_node_id, (inCount.get(e.target_node_id) ?? 0) + 1);
-  }
-
-  const rootIds = nodes.filter((n) => (inCount.get(n.id) ?? 0) === 0).map((n) => n.id);
-  const seeds =
-    rootIds.length > 0
-      ? rootIds
-      : [nodes.find((n) => n.entity_type.trim().toLowerCase() === "person")?.id ?? nodes[0]!.id];
-
-  const depth = new Map<string, number>();
-  for (const n of nodes) {
-    depth.set(n.id, seeds.includes(n.id) ? 0 : -1);
-  }
-
-  const validEdges = edges.filter(
-    (e) => idSet.has(e.source_node_id) && idSet.has(e.target_node_id),
-  );
-  const relaxIters = Math.max(nodes.length, 1);
-  for (let i = 0; i < relaxIters; i++) {
-    for (const e of validEdges) {
-      const du = depth.get(e.source_node_id) ?? -1;
-      if (du < 0) {
-        continue;
-      }
-      const dv = depth.get(e.target_node_id) ?? -1;
-      const next = du + 1;
-      if (next > dv) {
-        depth.set(e.target_node_id, next);
-      }
-    }
-  }
-
-  let maxD = 0;
-  for (const n of nodes) {
-    const d = depth.get(n.id) ?? -1;
-    if (d > maxD) {
-      maxD = d;
-    }
-  }
-  const orphanLayer = maxD + 1;
-  for (const n of nodes) {
-    if ((depth.get(n.id) ?? -1) < 0) {
-      depth.set(n.id, orphanLayer);
-    }
-  }
-
-  const byLayer = new Map<number, string[]>();
-  for (const n of nodes) {
-    const d = depth.get(n.id) ?? 0;
-    if (!byLayer.has(d)) {
-      byLayer.set(d, []);
-    }
-    byLayer.get(d)!.push(n.id);
-  }
-  for (const ids of byLayer.values()) {
-    ids.sort((a, b) => a.localeCompare(b));
-  }
-
-  // max-w ~220px nodes: center distance must exceed box width + margin
-  const hCenterDist = opts?.hDist ?? 280;
-  const vGap = opts?.vGap ?? 205;
-  const topPad = 28;
-  const centerX = opts?.cx ?? 440;
-  const pos = new Map<string, { x: number; y: number }>();
-
-  const sortedLayers = [...byLayer.keys()].sort((a, b) => a - b);
-
-  for (const layer of sortedLayers) {
-    const ids = [...byLayer.get(layer)!];
-    const y = topPad + layer * vGap;
-
-    if (layer === 0) {
-      const count = ids.length;
-      for (let i = 0; i < count; i++) {
-        const x = centerX + (i - (count - 1) / 2) * hCenterDist;
-        pos.set(ids[i]!, { x, y });
-      }
-      continue;
-    }
-
-    const idealX = new Map<string, number>();
-    for (const id of ids) {
-      const xsImmediate: number[] = [];
-      const xsAnyLower: number[] = [];
-      for (const e of validEdges) {
-        if (e.target_node_id !== id) {
-          continue;
-        }
-        const ps = depth.get(e.source_node_id) ?? -1;
-        const pp = pos.get(e.source_node_id);
-        if (pp === undefined || ps < 0 || ps >= layer) {
-          continue;
-        }
-        if (ps === layer - 1) {
-          xsImmediate.push(pp.x);
-        }
-        xsAnyLower.push(pp.x);
-      }
-      let ix: number;
-      if (xsImmediate.length > 0) {
-        ix = xsImmediate.reduce((s, x) => s + x, 0) / xsImmediate.length;
-      } else if (xsAnyLower.length > 0) {
-        ix = xsAnyLower.reduce((s, x) => s + x, 0) / xsAnyLower.length;
-      } else {
-        ix = centerX;
-      }
-      idealX.set(id, ix);
-    }
-
-    const order = ids.sort((a, b) => {
-      const da = idealX.get(a) ?? 0;
-      const db = idealX.get(b) ?? 0;
-      if (da !== db) {
-        return da - db;
-      }
-      return a.localeCompare(b);
-    });
-
-    const ideals = order.map((id) => idealX.get(id)!);
-    const packed: number[] = [];
-    if (order.length === 1) {
-      packed.push(ideals[0]!);
-    } else {
-      const allSame = ideals.every((v) => Math.abs(v - ideals[0]!) < 0.01);
-      if (allSame) {
-        const ref = ideals[0]!;
-        for (let i = 0; i < order.length; i++) {
-          packed.push(ref + (i - (order.length - 1) / 2) * hCenterDist);
-        }
-      } else {
-        packed.push(ideals[0]!);
-        for (let i = 1; i < order.length; i++) {
-          packed.push(Math.max(ideals[i]!, packed[i - 1]! + hCenterDist));
-        }
-      }
-    }
-
-    const mid = (Math.min(...packed) + Math.max(...packed)) / 2;
-    // Single-node rows: do not recenter on centerX — shift would erase barycentric x and
-    // stack the node under the root column (edges cut through siblings on the row above).
-    const shift = order.length === 1 ? 0 : centerX - mid;
-    for (let i = 0; i < order.length; i++) {
-      pos.set(order[i]!, { x: packed[i]! + shift, y });
-    }
-  }
-
-  return pos;
-}
+/** Compact ("pin") mode hides captions, so there's no reason for the circles themselves to
+ * stay full-size — shrinking them keeps the pin-head reading as a small marker. */
+const COMPACT_RADIUS_SCALE = 0.55;
 
 const flowNodes = computed<Node[]>(() => {
   const g = graph.value;
   if (!g?.nodes.length) {
     return [];
   }
-  const compactOpts = labelsHidden.value
-    ? { hDist: 90, vGap: 60, cx: 160 }
-    : undefined;
-  const positions = layoutMemoryGraphDownward(g.nodes, g.edges, compactOpts);
-  return g.nodes.map((node) => ({
-    id: node.id,
-    type: "default",
-    position: positions.get(node.id) ?? { x: 40, y: 40 },
-    data: {
-      title: `${node.entity_name} (${node.entity_type})`,
-      propertyRows: propertyRowsFromRecord(node.properties),
-    },
-  }));
+  const seeds = seedPositions(g.nodes);
+  const degrees = computeDegrees(g.nodes, g.edges);
+  const compact = labelsHidden.value;
+  return g.nodes.map((node) => {
+    const degree = degrees.get(node.id) ?? 0;
+    const radius = compact
+      ? Math.max(4, Math.round(nodeRadius(degree) * COMPACT_RADIUS_SCALE))
+      : nodeRadius(degree);
+    const diameter = radius * 2;
+    return {
+      id: node.id,
+      type: "default",
+      // Fix the node's own box to exactly the circle's size (not the wider/taller box a
+      // flex-centered caption would otherwise produce) so `computedPosition` + radius is a
+      // reliable, caption-independent way to find the circle's true center — see
+      // AgentMemoryGraphEdge.vue's circleToCirclePath, which depends on this invariant to draw
+      // edges to the actual rendered rim instead of drifting toward wherever a wide caption
+      // happened to push the node's hit-box.
+      width: diameter,
+      height: diameter,
+      position: knownPositions.value.get(node.id) ??
+        seeds.get(node.id) ?? { x: 480, y: 320 },
+      data: {
+        title: `${node.entity_name} (${node.entity_type})`,
+        entityType: node.entity_type,
+        radius,
+        color: clusterColorForType(node.entity_type),
+        degree,
+      },
+    };
+  });
 });
 
 const flowEdges = computed<Edge[]>(() => {
@@ -559,17 +564,75 @@ const flowEdges = computed<Edge[]>(() => {
   if (!g) {
     return [];
   }
-  return g.edges.map((e) => ({
-    id: e.id,
-    type: "agentMemory",
-    source: e.source_node_id,
-    target: e.target_node_id,
-    data: {
-      relationshipType: e.relationship_type,
-      pathCurvature: edgePathCurvature(e.id),
-    },
-    animated: true,
-  }));
+  const selected = selectedNodeId.value;
+  const dimming = dimmingNodeId.value;
+  const hovered = hoveredEdgeId.value;
+  return g.edges.map((e) => {
+    const touchesSelection =
+      selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
+    const touchesDimming =
+      dimming !== null && (dimming === e.source_node_id || dimming === e.target_node_id);
+    return {
+      id: e.id,
+      type: "agentMemory",
+      source: e.source_node_id,
+      target: e.target_node_id,
+      data: {
+        relationshipType: e.relationship_type,
+        pathCurvature: edgePathCurvature(e.id),
+        // dimmed lags behind on deselect (see dimmingNodeId); active/growFromEnd track the
+        // real selection immediately so the fill/drain animation itself is not delayed.
+        dimmed: dimming !== null && !touchesDimming,
+        active: touchesSelection,
+        // The fill animation should always grow outward from the selected node, regardless of
+        // which end of the edge it is.
+        growFromEnd: touchesSelection && selected === e.target_node_id,
+        // Hovering one active edge hides its active siblings' label chips (not their lines) so
+        // overlapping labels near a hub can be read one at a time (see hoveredEdgeId — already
+        // gated there to only ever be an active edge's id, so this only fires within one chain).
+        hoveredOut: hovered !== null && touchesSelection && hovered !== e.id,
+      },
+    };
+  });
+});
+
+/**
+ * Captions default to below the circle, which is where the active-edge relationship label
+ * lands for a neighbor sitting below the selected node (the label is drawn near the edge's
+ * midpoint, on the hub side of the neighbor, i.e. above it) — so it only collides with the
+ * default caption position for a neighbor sitting *above* the hub (there the label falls below
+ * the neighbor, same side as its caption). Flip those, plus the hub's own caption if most of its
+ * active labels land below it, up above the circle instead.
+ */
+const captionAboveIds = computed<Set<string>>(() => {
+  const result = new Set<string>();
+  const selected = selectedNodeId.value;
+  if (!selected) {
+    return result;
+  }
+  const positions = new Map(flowNodes.value.map((n) => [n.id, n.position]));
+  const hubPos = positions.get(selected);
+  if (!hubPos) {
+    return result;
+  }
+  let neighborCount = 0;
+  let labelsBelowHubCount = 0;
+  for (const neighborId of selectedNeighborIds.value) {
+    const neighborPos = positions.get(neighborId);
+    if (!neighborPos) {
+      continue;
+    }
+    neighborCount += 1;
+    if (neighborPos.y < hubPos.y) {
+      result.add(neighborId);
+    } else {
+      labelsBelowHubCount += 1;
+    }
+  }
+  if (neighborCount > 0 && labelsBelowHubCount > neighborCount / 2) {
+    result.add(selected);
+  }
+  return result;
 });
 
 const edgesForSidebarList = computed(() => {
@@ -586,6 +649,50 @@ const selectedNode = computed<AgentMemoryNodeDTO | null>(() => {
   }
   return graph.value.nodes.find((n) => n.id === selectedNodeId.value) ?? null;
 });
+
+interface ConnectionRow {
+  edgeId: string;
+  otherNodeId: string;
+  otherName: string;
+  relationship: string;
+}
+
+const outgoingConnections = computed<ConnectionRow[]>(() => {
+  const node = selectedNode.value;
+  const g = graph.value;
+  if (!node || !g) {
+    return [];
+  }
+  return g.edges
+    .filter((e) => e.source_node_id === node.id)
+    .map((e) => ({
+      edgeId: e.id,
+      otherNodeId: e.target_node_id,
+      otherName: g.nodes.find((n) => n.id === e.target_node_id)?.entity_name ?? "?",
+      relationship: e.relationship_type,
+    }));
+});
+
+const incomingConnections = computed<ConnectionRow[]>(() => {
+  const node = selectedNode.value;
+  const g = graph.value;
+  if (!node || !g) {
+    return [];
+  }
+  return g.edges
+    .filter((e) => e.target_node_id === node.id)
+    .map((e) => ({
+      edgeId: e.id,
+      otherNodeId: e.source_node_id,
+      otherName: g.nodes.find((n) => n.id === e.source_node_id)?.entity_name ?? "?",
+      relationship: e.relationship_type,
+    }));
+});
+
+async function focusOnConnection(nodeId: string): Promise<void> {
+  selectedNodeId.value = nodeId;
+  await flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
+}
 
 const editName = ref("");
 const editType = ref("");
@@ -613,8 +720,8 @@ function removeEditPropertyRow(index: number): void {
 
 const newName = ref("");
 const newType = ref("topic");
-const edgeSource = ref("");
-const edgeTarget = ref("");
+const edgeSource = ref<string | undefined>("");
+const edgeTarget = ref<string | undefined>("");
 const edgeRel = ref("related");
 
 interface LoadGraphOptions {
@@ -631,6 +738,7 @@ async function loadGraph(opts?: LoadGraphOptions): Promise<void> {
   if (!props.workflowId || !props.canvasNodeId) {
     return;
   }
+  captureLivePositions();
   const silent = Boolean(opts?.silent);
   if (!silent) {
     loading.value = true;
@@ -651,6 +759,7 @@ async function loadGraph(opts?: LoadGraphOptions): Promise<void> {
     if (shouldRefit && graph.value.nodes.length > 0) {
       await tryFitView();
     }
+    flowPaneRef.value?.reheat();
   } catch {
     showToast("Failed to load memory graph", "error");
     if (!silent) {
@@ -784,6 +893,11 @@ watch(
       graphCanvasFullscreen.value = false;
       needleAnimating.value = false;
       tooltipState.value = null;
+      if (dimmingClearTimer !== null) {
+        clearTimeout(dimmingClearTimer);
+        dimmingClearTimer = null;
+      }
+      dimmingNodeId.value = null;
       undoStack.value = [];
     }
   },
@@ -792,6 +906,9 @@ watch(
 
 onUnmounted(() => {
   clearCompactModeAnimationTimer();
+  if (dimmingClearTimer !== null) {
+    clearTimeout(dimmingClearTimer);
+  }
   document.removeEventListener("keydown", onDocumentUndoCapture, true);
   document.removeEventListener("fullscreenchange", syncGraphCanvasFullscreen);
 });
@@ -807,11 +924,27 @@ watch(graphCanvasFullscreen, (fs, wasFs) => {
 });
 
 function onNodeClick(ev: { node: Node }): void {
-  selectedNodeId.value = ev.node.id;
+  const wasSelected = selectedNodeId.value === ev.node.id;
+  selectedNodeId.value = wasSelected ? null : ev.node.id;
+  if (!wasSelected) {
+    void flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
+  }
 }
 
 function onPaneClick(): void {
   selectedNodeId.value = null;
+}
+
+/** Clicking an edge that's already part of the selected node's highlighted chain deselects it
+ * (playing the drain animation in reverse), mirroring clicking the selected node again. */
+function onEdgeClick(ev: { edge: Edge }): void {
+  const selected = selectedNodeId.value;
+  if (selected === null) {
+    return;
+  }
+  if (ev.edge.source === selected || ev.edge.target === selected) {
+    selectedNodeId.value = null;
+  }
 }
 
 async function saveNodeEdit(): Promise<void> {
@@ -987,8 +1120,8 @@ async function addEdge(): Promise<void> {
   if (!props.workflowId || !props.canvasNodeId) {
     return;
   }
-  const s = edgeSource.value.trim();
-  const t = edgeTarget.value.trim();
+  const s = (edgeSource.value ?? "").trim();
+  const t = (edgeTarget.value ?? "").trim();
   const r = edgeRel.value.trim() || "related";
   if (!s || !t) {
     showToast("Source and target names are required", "error");
@@ -1017,6 +1150,10 @@ async function deleteEdge(edgeId: string): Promise<void> {
 }
 
 const entityNames = computed(() => graph.value?.nodes.map((n) => n.entity_name) ?? []);
+
+const entityNameOptions = computed(() =>
+  entityNames.value.map((name) => ({ value: name, label: name })),
+);
 
 const workflowListForPicker = ref<WorkflowListItem[]>([]);
 const agentsByWorkflowId = ref<Map<string, Array<{ id: string; label: string }>>>(new Map());
@@ -1385,48 +1522,47 @@ function handleDialogEscape(event: KeyboardEvent): void {
         >
           <AgentMemoryGraphFlowPane
             v-if="flowNodes.length"
-            :key="flowLayoutEpoch"
             ref="flowPaneRef"
             :flow-id="AGENT_MEMORY_FLOW_ID"
             :nodes="flowNodes"
             :edges="flowEdges"
             :hotkeys-enabled="open"
+            :selected-node-id="selectedNodeId"
             @node-click="onNodeClick"
+            @edge-click="onEdgeClick"
+            @edge-mouse-enter="onEdgeMouseEnter"
+            @edge-mouse-leave="onEdgeMouseLeave"
             @pane-click="onPaneClick"
             @delete-selection="onFlowDeleteSelection"
           >
             <template #node-default="{ id, data }">
-              <!-- Normal label mode -->
+              <!-- Sized to exactly fill the node's own box (width/height = diameter, set in
+                   flowNodes) so computedPosition + radius reliably lands on the circle's true
+                   center — the caption is an absolutely-positioned overlay precisely so it
+                   cannot widen/heighten this box the way a normal flex sibling would. -->
               <div
-                v-if="!labelsHidden"
-                class="agent-memory-node-inner px-2 py-1.5 rounded-md border border-border bg-card text-foreground text-[11px] leading-tight max-w-[220px] min-w-0 cursor-pointer shadow-sm"
-                :class="selectedNodeId === id ? 'ring-2 ring-pink-500 ring-offset-2 ring-offset-background' : ''"
+                class="agent-memory-node-inner relative w-full h-full cursor-pointer select-none"
+                @mouseenter="onNodeHoverEnter(id, $event)"
+                @mouseleave="onNodeHoverLeave"
               >
-                <div class="whitespace-pre-wrap font-medium">
+                <div
+                  class="agent-memory-node-circle absolute inset-0 rounded-full shadow-sm"
+                  :class="[
+                    selectedNodeId === id ? 'ring-2 ring-pink-500 ring-offset-2 ring-offset-background' : '',
+                    isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
+                  ]"
+                  :style="{ background: flowNodeColor(data) }"
+                />
+                <div
+                  v-if="!labelsHidden"
+                  class="agent-memory-node-caption pointer-events-none absolute left-1/2 max-w-[130px] -translate-x-1/2 truncate text-center text-[12px] font-semibold text-foreground"
+                  :class="[
+                    captionAboveIds.has(id) ? 'bottom-full mb-1' : 'top-full mt-1',
+                    isNodeDimmed(id) ? 'agent-memory-node-dimmed' : '',
+                  ]"
+                >
                   {{ flowNodeTitle(data) }}
                 </div>
-                <ul
-                  v-if="flowNodePropertyRows(data).length"
-                  class="mt-1.5 pt-1.5 border-t border-border/60 text-[10px] text-muted-foreground space-y-0.5 list-none m-0 p-0"
-                >
-                  <li
-                    v-for="row in flowNodePropertyRows(data)"
-                    :key="row.key"
-                    class="break-words"
-                  >
-                    <span class="text-foreground/70">{{ row.key }}</span>: {{ row.value }}
-                  </li>
-                </ul>
-              </div>
-              <!-- Compact needle/pin mode -->
-              <div
-                v-else
-                class="agent-memory-node-inner needle-pin-compact cursor-pointer"
-                :class="selectedNodeId === id ? 'needle-selected' : ''"
-                @mouseenter="onNodePinEnter(data, $event)"
-                @mouseleave="onNodePinLeave"
-              >
-                <div class="needle-pin-head" />
               </div>
             </template>
           </AgentMemoryGraphFlowPane>
@@ -1509,8 +1645,8 @@ function handleDialogEscape(event: KeyboardEvent): void {
           >
             <Wand2 class="w-4 h-4" />
           </Button>
-          <!-- Tooltip: position:fixed escapes overflow:hidden AND stays inside the
-               browser-fullscreen element's subtree (unlike Teleport to body) -->
+          <!-- Compact-mode-only hover popover: position:fixed escapes overflow:hidden AND stays
+               inside the browser-fullscreen element's subtree (unlike Teleport to body). -->
           <div
             v-if="tooltipState"
             class="fixed z-[9999] pointer-events-none max-w-[240px] rounded-md border border-border/60 bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg whitespace-pre-wrap break-words leading-relaxed"
@@ -1621,6 +1757,34 @@ function handleDialogEscape(event: KeyboardEvent): void {
                     Add attribute
                   </Button>
                 </div>
+                <div
+                  v-if="outgoingConnections.length || incomingConnections.length"
+                  class="space-y-2 pt-1"
+                >
+                  <div class="font-medium text-[10px] uppercase text-muted-foreground tracking-wide">
+                    Connections
+                  </div>
+                  <button
+                    v-for="row in outgoingConnections"
+                    :key="`out-${row.edgeId}`"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    @click="focusOnConnection(row.otherNodeId)"
+                  >
+                    <span class="truncate">{{ row.otherName }}</span>
+                    <span class="shrink-0 text-muted-foreground">{{ row.relationship }} →</span>
+                  </button>
+                  <button
+                    v-for="row in incomingConnections"
+                    :key="`in-${row.edgeId}`"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    @click="focusOnConnection(row.otherNodeId)"
+                  >
+                    <span class="shrink-0 text-muted-foreground">← {{ row.relationship }}</span>
+                    <span class="truncate">{{ row.otherName }}</span>
+                  </button>
+                </div>
                 <div class="flex gap-2 pt-1">
                   <Button
                     size="sm"
@@ -1670,36 +1834,20 @@ function handleDialogEscape(event: KeyboardEvent): void {
               <div class="font-medium text-xs uppercase text-muted-foreground tracking-wide">
                 New relationship
               </div>
-              <select
+              <SearchableSelect
                 v-model="edgeSource"
-                class="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">
-                  Source…
-                </option>
-                <option
-                  v-for="name in entityNames"
-                  :key="`s-${name}`"
-                  :value="name"
-                >
-                  {{ name }}
-                </option>
-              </select>
-              <select
+                placeholder="Source…"
+                search-placeholder="Search entities…"
+                :options="entityNameOptions"
+                clearable
+              />
+              <SearchableSelect
                 v-model="edgeTarget"
-                class="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">
-                  Target…
-                </option>
-                <option
-                  v-for="name in entityNames"
-                  :key="`t-${name}`"
-                  :value="name"
-                >
-                  {{ name }}
-                </option>
-              </select>
+                placeholder="Target…"
+                search-placeholder="Search entities…"
+                :options="entityNameOptions"
+                clearable
+              />
               <Input
                 v-model="edgeRel"
                 placeholder="Relationship (e.g. works for)"
@@ -1807,7 +1955,6 @@ function handleDialogEscape(event: KeyboardEvent): void {
 
 .agent-memory-graph-flow :deep(.vue-flow__node-default) {
   padding: 0 !important;
-  width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
   background: transparent !important;
@@ -1827,6 +1974,16 @@ function handleDialogEscape(event: KeyboardEvent): void {
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
+}
+
+/* Vue Flow's own DOM order paints .vue-flow__nodes (node captions included) above
+   .vue-flow__edge-labels, and neither sets a z-index — so a dimmed background node's caption
+   that happens to land where a relationship label sits would otherwise paint over it instead of
+   behind it. Raise the labels layer above nodes; it's pointer-events:none already (both from Vue
+   Flow's own base style and our own label div), so this is purely visual and doesn't block
+   clicking/dragging the node underneath. */
+.agent-memory-graph-flow :deep(.vue-flow__edge-labels) {
+  z-index: 5;
 }
 
 .agent-memory-graph-flow :deep(.vue-flow__edge-textbg) {
@@ -1905,29 +2062,22 @@ function handleDialogEscape(event: KeyboardEvent): void {
   pointer-events: none;
 }
 
-/* Compact dot node */
-.needle-pin-compact {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 3px;
+.agent-memory-node-circle {
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.needle-pin-head {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: hsl(var(--primary));
-  border: 1.5px solid hsl(var(--primary) / 0.55);
-  box-shadow: 0 0 7px hsl(var(--primary) / 0.35);
-  flex-shrink: 0;
+.agent-memory-node-caption {
+  transition: opacity 0.15s ease;
+  text-shadow:
+    0 1px 3px hsl(var(--background) / 0.9),
+    0 0 6px hsl(var(--background) / 0.9);
 }
 
-.needle-selected .needle-pin-head {
-  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--primary));
+.agent-memory-node-dimmed {
+  opacity: 0.1;
 }
 
-.needles-spinning.compact-mode .needle-pin-compact {
+.needles-spinning.compact-mode .agent-memory-node-inner {
   opacity: 0;
   pointer-events: none;
 }

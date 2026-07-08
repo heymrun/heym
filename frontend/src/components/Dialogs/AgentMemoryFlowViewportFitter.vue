@@ -11,7 +11,7 @@ async function fitViewAfterLoad(opts?: { padding?: number; duration?: number }):
     requestAnimationFrame(() => resolve());
   });
 
-  const padding = opts?.padding ?? 0.18;
+  const padding = opts?.padding ?? 0.08;
   const duration = opts?.duration ?? 200;
 
   async function applyBoundsCenteredFit(): Promise<boolean> {
@@ -52,7 +52,16 @@ async function fitViewAfterLoad(opts?: { padding?: number; duration?: number }):
   }
 }
 
-defineExpose({ fitViewAfterLoad });
+async function focusOnNodes(ids: string[]): Promise<void> {
+  await nextTick();
+  try {
+    await fitView({ nodes: ids, padding: 0.35, duration: 300 });
+  } catch {
+    /* Flow not ready */
+  }
+}
+
+defineExpose({ fitViewAfterLoad, focusOnNodes });
 </script>
 
 <template>
