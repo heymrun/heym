@@ -770,7 +770,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   drive: {
     type: "drive",
     label: "Drive",
-    description: "List and manage Drive files: get, delete, password, TTL, max downloads, team sharing",
+    description: "List and manage Drive files: get, delete, password, TTL, max downloads, team share/unshare",
     color: "node-drive",
     icon: "HardDrive",
     inputs: 1,

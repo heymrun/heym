@@ -34,7 +34,7 @@ Both models are additive. A user gains access if they are either:
 | Credentials | Share dialog in Credentials tab |
 | Global Variables | Share dialog in Variables tab |
 | Vector Stores | Share dialog in Vectors tab |
-| Drive Files | Share dialog in Drive tab or Drive node `shareWithMyTeams` operation |
+| Drive Files | Share dialog in Drive tab or Drive node `shareWithMyTeams` / `unshareWithMyTeams` operations |
 
 For templates, when visibility is **Specific users**, you can also select teams. All members of selected teams gain access to the template.
 Drive file team shares are read-only for team members; the file owner keeps management permissions.

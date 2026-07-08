@@ -39,7 +39,7 @@ Set a password when creating the share. The download URL uses HTTP Basic Authent
 
 Enable **Share with my teams** to grant read-only access to all teams you currently belong to. Team members can see and download the file from Drive and use read-oriented Drive node operations, but only the file owner can delete the file, create or revoke public links, or change password/TTL/download limits.
 
-The setting is file-specific. If you join or create another team later, toggle sharing again or run the Drive node's `shareWithMyTeams` operation to add that team.
+The setting is file-specific. If you join or create another team later, toggle sharing again or run the Drive node's `shareWithMyTeams` operation to add that team. Use `unshareWithMyTeams` to remove team shares from the file in a workflow.
 
 ### Managing Shares
 
@@ -64,7 +64,7 @@ The [Drive node](../nodes/drive-node.md) lets you manage Drive files programmati
 - **List** your files and return metadata such as filename, MIME type, size, source, and download URL
 - **Convert** a file to a different format — documents via pandoc (docx, html, md, txt, pdf) or images via Pillow (jpg, png, bmp, webp)
 - **Delete** a file after it has been delivered to the user
-- **Share with your teams** so team members can read and download it
+- **Share or unshare with your teams** so team members can read and download it only while the team share exists
 - **Set a password** on the download link
 - **Set a TTL** so the link expires after N hours
 - **Set a max downloads** limit

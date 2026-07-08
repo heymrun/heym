@@ -77,6 +77,13 @@ def execute(ctx: NodeExecutionContext) -> object:
         db.flush()
         return _shared_team_count(db, file_id)
 
+    def _disable_team_sharing(db: object, file_id: uuid.UUID) -> int:
+        db.query(FileTeamShare).filter(FileTeamShare.file_id == file_id).delete(
+            synchronize_session=False
+        )
+        db.flush()
+        return 0
+
     def _coerce_shared_file_match(match: object) -> tuple[object, str | None, str | None] | None:
         if match is None:
             return None
@@ -408,6 +415,17 @@ def execute(ctx: NodeExecutionContext) -> object:
                 output = {
                     "status": "success",
                     "operation": "shareWithMyTeams",
+                    "file_id": str(file_uuid),
+                    "filename": file_row.filename,
+                    "shared_team_count": shared_team_count,
+                }
+
+            elif operation == "unshareWithMyTeams":
+                shared_team_count = _disable_team_sharing(db, file_uuid)
+                db.commit()
+                output = {
+                    "status": "success",
+                    "operation": "unshareWithMyTeams",
                     "file_id": str(file_uuid),
                     "filename": file_row.filename,
                     "shared_team_count": shared_team_count,

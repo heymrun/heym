@@ -134,9 +134,12 @@ const {
         />
       </div>
       <template v-if="selectedNode.data.driveOperation === 'get' || selectedNode.data.driveOperation === 'convertFile'">
-        <Select
+        <SearchableSelect
           :model-value="selectedNode.data.driveFileId || ''"
           :options="driveFileOptions"
+          placeholder="Select file..."
+          search-placeholder="Search files by name..."
+          empty-text="No files found."
           :disabled="isDriveFileIdAgentProvided"
           @update:model-value="updateNodeData('driveFileId', $event || undefined)"
         />
@@ -369,6 +372,11 @@ const {
           <div>${{ selectedNode.data.label }}.status - "success"</div>
           <div>${{ selectedNode.data.label }}.file_id - file ID</div>
           <div>${{ selectedNode.data.label }}.shared_team_count - number of teams shared with</div>
+        </template>
+        <template v-else-if="selectedNode.data.driveOperation === 'unshareWithMyTeams'">
+          <div>${{ selectedNode.data.label }}.status - "success"</div>
+          <div>${{ selectedNode.data.label }}.file_id - file ID</div>
+          <div>${{ selectedNode.data.label }}.shared_team_count - 0 after unsharing</div>
         </template>
         <template v-else-if="selectedNode.data.driveOperation === 'setPassword' || selectedNode.data.driveOperation === 'setTtl' || selectedNode.data.driveOperation === 'setMaxDownloads'">
           <div>${{ selectedNode.data.label }}.status - "updated"</div>

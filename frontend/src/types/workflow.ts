@@ -677,6 +677,7 @@ export interface NodeData {
     | "setTtl"
     | "setMaxDownloads"
     | "shareWithMyTeams"
+    | "unshareWithMyTeams"
     | "downloadUrl"
     | "save"
     | "convertFile";
