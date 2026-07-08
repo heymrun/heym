@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
                 <span class="truncate max-w-[200px] sm:max-w-[300px]">{{ file.filename }}</span>
                 <span
                   v-if="file.shared_with_my_teams && !file.is_shared"
-                  class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                  class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:bg-violet-400/15 dark:text-violet-200"
                 >
                   <Users class="w-3 h-3" />
                   Teams

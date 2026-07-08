@@ -28,7 +28,9 @@ const {
           class="flex items-center justify-center w-9 h-9 rounded-lg shrink-0"
           :style="{
             backgroundColor: `hsl(var(--${nodeColorMap[selectedNode.type]}) / 0.2)`,
-            color: `hsl(var(--${nodeColorMap[selectedNode.type]}))`,
+            color: selectedNode.type === 'agent'
+              ? 'hsl(var(--node-agent-header-foreground))'
+              : `hsl(var(--${nodeColorMap[selectedNode.type]}))`,
           }"
         >
           <component
@@ -43,7 +45,11 @@ const {
           <div class="flex items-center gap-1.5">
             <span
               class="text-xs text-muted-foreground"
-              :style="{ color: `hsl(var(--${nodeColorMap[selectedNode.type]}) / 0.8)` }"
+              :style="{
+                color: selectedNode.type === 'agent'
+                  ? 'hsl(var(--node-agent-header-foreground))'
+                  : `hsl(var(--${nodeColorMap[selectedNode.type]}) / 0.8)`,
+              }"
             >{{ selectedNodeTypeLabel
             }}</span>
             <span
