@@ -313,6 +313,7 @@ export const driveOperationOptions: OperationOption[] = [
   { value: "setPassword", label: "Set Password" },
   { value: "setTtl", label: "Set TTL (Expiry)" },
   { value: "setMaxDownloads", label: "Set Max Downloads" },
+  { value: "shareWithMyTeams", label: "Share with My Teams" },
 ];
 
 export const rabbitmqOperationOptions: OperationOption[] = [

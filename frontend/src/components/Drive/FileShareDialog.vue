@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from "vue";
-import { Check, Copy, Link, Trash2 } from "lucide-vue-next";
+import { Check, Copy, Link, Trash2, Users } from "lucide-vue-next";
 
 import type { FileAccessToken, CreateShareRequest } from "@/types/file";
 
@@ -16,10 +16,12 @@ const props = defineProps<{
   open: boolean;
   fileId: string;
   filename: string;
+  sharedWithMyTeams: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "close"): void;
+  (e: "updated"): void;
 }>();
 
 const shares = ref<FileAccessToken[]>([]);
@@ -31,6 +33,8 @@ const expiresHours = ref<string>("");
 const basicAuthPassword = ref("");
 const maxDownloads = ref<string>("");
 const creating = ref(false);
+const teamSharingEnabled = ref(false);
+const updatingTeamSharing = ref(false);
 
 let unsubDismiss: (() => void) | null = null;
 
@@ -38,6 +42,7 @@ watch(
   () => props.open,
   async (open) => {
     if (open) {
+      teamSharingEnabled.value = props.sharedWithMyTeams;
       pushOverlayState();
       unsubDismiss = onDismissOverlays(() => emit("close"));
       await loadShares();
@@ -94,6 +99,22 @@ async function revokeShare(tokenId: string) {
   }
 }
 
+async function updateTeamSharing(event: Event): Promise<void> {
+  const enabled = (event.target as HTMLInputElement).checked;
+  updatingTeamSharing.value = true;
+  error.value = "";
+  try {
+    const result = await filesApi.setTeamSharing(props.fileId, enabled);
+    teamSharingEnabled.value = result.enabled;
+    emit("updated");
+  } catch {
+    teamSharingEnabled.value = !enabled;
+    error.value = "Failed to update team sharing";
+  } finally {
+    updatingTeamSharing.value = false;
+  }
+}
+
 async function copyLink(url: string) {
   await navigator.clipboard.writeText(url);
   copied.value = true;
@@ -108,6 +129,27 @@ async function copyLink(url: string) {
     @close="emit('close')"
   >
     <div class="space-y-4">
+      <!-- Team sharing -->
+      <div class="space-y-2 p-3 rounded-lg border border-border bg-muted/30">
+        <p class="text-sm font-medium flex items-center gap-2">
+          <Users class="w-3.5 h-3.5" />
+          Team sharing
+        </p>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            class="h-4 w-4 rounded border-input bg-background"
+            :checked="teamSharingEnabled"
+            :disabled="updatingTeamSharing"
+            @change="updateTeamSharing"
+          >
+          Share with my teams
+        </label>
+        <p class="text-xs text-muted-foreground">
+          Members of your current teams can view and download this file, but cannot manage it.
+        </p>
+      </div>
+
       <!-- Create new share -->
       <div class="space-y-3 p-3 rounded-lg border border-border bg-muted/30">
         <p class="text-sm font-medium">

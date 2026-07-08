@@ -365,6 +365,11 @@ const {
           <div>${{ selectedNode.data.label }}.status - "deleted"</div>
           <div>${{ selectedNode.data.label }}.file_id - deleted file ID</div>
         </template>
+        <template v-else-if="selectedNode.data.driveOperation === 'shareWithMyTeams'">
+          <div>${{ selectedNode.data.label }}.status - "success"</div>
+          <div>${{ selectedNode.data.label }}.file_id - file ID</div>
+          <div>${{ selectedNode.data.label }}.shared_team_count - number of teams shared with</div>
+        </template>
         <template v-else-if="selectedNode.data.driveOperation === 'setPassword' || selectedNode.data.driveOperation === 'setTtl' || selectedNode.data.driveOperation === 'setMaxDownloads'">
           <div>${{ selectedNode.data.label }}.status - "updated"</div>
           <div>${{ selectedNode.data.label }}.file_id - file ID</div>

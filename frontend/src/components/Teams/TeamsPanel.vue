@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import {
   Database,
   Edit2,
+  HardDrive,
   Key,
   Layout,
   LayoutTemplate,
@@ -232,6 +233,8 @@ function hasAnySharedEntities(entities: TeamSharedEntities | null): boolean {
     entities.credentials.length > 0 ||
     entities.global_variables.length > 0 ||
     entities.vector_stores.length > 0 ||
+    entities.data_tables.length > 0 ||
+    entities.files.length > 0 ||
     entities.workflow_templates.length > 0 ||
     entities.node_templates.length > 0
   );
@@ -639,6 +642,26 @@ function hasAnySharedEntities(entities: TeamSharedEntities | null): boolean {
                   type="button"
                   class="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-muted/50 truncate"
                   @click="navigateToTab('vectorstores')"
+                >
+                  {{ item.name }}
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="sharedEntities?.files.length"
+              class="space-y-1"
+            >
+              <p class="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <HardDrive class="w-3.5 h-3.5" />
+                Files
+              </p>
+              <div class="space-y-1">
+                <button
+                  v-for="item in sharedEntities.files"
+                  :key="item.id"
+                  type="button"
+                  class="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-muted/50 truncate"
+                  @click="navigateToTab('drive')"
                 >
                   {{ item.name }}
                 </button>

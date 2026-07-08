@@ -39,6 +39,8 @@ export interface TeamSharedEntities {
   credentials: TeamSharedEntityItem[];
   global_variables: TeamSharedEntityItem[];
   vector_stores: TeamSharedEntityItem[];
+  data_tables: TeamSharedEntityItem[];
+  files: TeamSharedEntityItem[];
   workflow_templates: TeamSharedEntityItem[];
   node_templates: TeamSharedEntityItem[];
 }

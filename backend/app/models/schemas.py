@@ -151,6 +151,7 @@ class TeamSharedEntitiesResponse(BaseModel):
     global_variables: list[TeamSharedEntityItem]
     vector_stores: list[TeamSharedEntityItem]
     data_tables: list[TeamSharedEntityItem] = Field(default_factory=list)
+    files: list[TeamSharedEntityItem] = Field(default_factory=list)
     workflow_templates: list[TeamSharedEntityItem]
     node_templates: list[TeamSharedEntityItem]
 
@@ -1355,7 +1356,21 @@ class GeneratedFileResponse(BaseModel):
     workflow_id: uuid.UUID | None = None
     source_node_label: str | None = None
     download_url: str = ""
+    authenticated_download_url: str = ""
+    is_shared: bool = False
+    shared_by: str | None = None
+    shared_by_team: str | None = None
+    shared_with_my_teams: bool = False
     created_at: datetime
+
+
+class FileTeamSharingRequest(BaseModel):
+    enabled: bool
+
+
+class FileTeamSharingResponse(BaseModel):
+    enabled: bool
+    shared_team_count: int
 
 
 class FileAccessTokenResponse(BaseModel):

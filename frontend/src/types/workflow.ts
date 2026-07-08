@@ -676,6 +676,7 @@ export interface NodeData {
     | "setPassword"
     | "setTtl"
     | "setMaxDownloads"
+    | "shareWithMyTeams"
     | "downloadUrl"
     | "save"
     | "convertFile";

@@ -1505,6 +1505,34 @@ class GeneratedFile(Base):
     access_tokens: Mapped[list["FileAccessToken"]] = relationship(
         "FileAccessToken", back_populates="file", cascade="all, delete-orphan"
     )
+    team_shares: Mapped[list["FileTeamShare"]] = relationship(
+        "FileTeamShare", back_populates="file", cascade="all, delete-orphan"
+    )
+
+
+class FileTeamShare(Base):
+    __tablename__ = "file_team_shares"
+    __table_args__ = (UniqueConstraint("file_id", "team_id", name="uq_file_team_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("generated_files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    file: Mapped["GeneratedFile"] = relationship("GeneratedFile", back_populates="team_shares")
+    team: Mapped["Team"] = relationship("Team")
 
 
 class FileAccessToken(Base):

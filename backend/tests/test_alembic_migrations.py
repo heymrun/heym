@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["093_add_codex_node_support"])
+        self.assertEqual(self.script.get_heads(), ["094_add_file_team_shares"])
 
     def test_plugins_revision_follows_workflow_timeout(self) -> None:
         plugins_revision = self.script.get_revision("090_add_plugins_table")
@@ -40,6 +40,12 @@ class AlembicMigrationGraphTest(unittest.TestCase):
 
         self.assertIsNotNone(codex_revision)
         self.assertEqual(codex_revision.down_revision, "092_add_sentry_credential_type")
+
+    def test_file_team_shares_revision_follows_codex_revision(self) -> None:
+        file_team_shares_revision = self.script.get_revision("094_add_file_team_shares")
+
+        self.assertIsNotNone(file_team_shares_revision)
+        self.assertEqual(file_team_shares_revision.down_revision, "093_add_codex_node_support")
 
     def test_github_and_supabase_revisions_are_merged(self) -> None:
         merge_revision = self.script.get_revision("080_merge_github_supabase_heads")

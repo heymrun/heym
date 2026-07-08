@@ -3,18 +3,20 @@
 import base64
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.db.models import FileAccessToken, GeneratedFile, User
+from app.db.models import FileAccessToken, FileTeamShare, GeneratedFile, Team, TeamMember, User
 from app.db.session import get_db
 from app.models.schemas import (
     CreateFileShareRequest,
     FileAccessTokenResponse,
     FileListResponse,
+    FileTeamSharingRequest,
+    FileTeamSharingResponse,
     GeneratedFileResponse,
 )
 from app.services.file_storage import (
@@ -33,11 +35,23 @@ from app.services.upload_limits import read_upload_file_limited
 router = APIRouter()
 
 
-def _file_to_response(f: GeneratedFile, base_url: str) -> GeneratedFileResponse:
+def _build_authenticated_download_url(base_url: str, file_id: uuid.UUID) -> str:
+    return f"{base_url.rstrip('/')}/api/files/{file_id}/download"
+
+
+def _file_to_response(
+    f: GeneratedFile,
+    base_url: str,
+    *,
+    is_shared: bool = False,
+    shared_by: str | None = None,
+    shared_by_team: str | None = None,
+) -> GeneratedFileResponse:
     default_token = next((t for t in f.access_tokens if t.basic_auth_password_hash is None), None)
     download_url = ""
     if default_token:
         download_url = build_download_url(base_url, default_token.token)
+    team_shares = getattr(f, "team_shares", None) or []
     return GeneratedFileResponse(
         id=f.id,
         filename=f.filename,
@@ -46,6 +60,11 @@ def _file_to_response(f: GeneratedFile, base_url: str) -> GeneratedFileResponse:
         workflow_id=f.workflow_id,
         source_node_label=f.source_node_label,
         download_url=download_url,
+        authenticated_download_url=_build_authenticated_download_url(base_url, f.id),
+        is_shared=is_shared,
+        shared_by=shared_by,
+        shared_by_team=shared_by_team,
+        shared_with_my_teams=len(team_shares) > 0,
         created_at=f.created_at,
     )
 
@@ -71,6 +90,93 @@ def _token_to_response(t: FileAccessToken, base_url: str) -> FileAccessTokenResp
     )
 
 
+async def _refresh_file_response_relations(db: AsyncSession, row: GeneratedFile) -> None:
+    await db.refresh(row, ["access_tokens", "team_shares"])
+
+
+async def _get_owned_file(
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> GeneratedFile | None:
+    return (
+        await db.execute(
+            select(GeneratedFile).where(
+                GeneratedFile.id == file_id,
+                GeneratedFile.owner_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _get_accessible_file(
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    user: User,
+) -> tuple[GeneratedFile, bool, str | None, str | None] | None:
+    owned = await _get_owned_file(db, file_id, user.id)
+    if owned is not None:
+        return owned, False, None, None
+
+    shared_result = await db.execute(
+        select(GeneratedFile, User.email, Team.name)
+        .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
+        .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
+        .join(Team, Team.id == FileTeamShare.team_id)
+        .join(User, User.id == GeneratedFile.owner_id)
+        .where(GeneratedFile.id == file_id, TeamMember.user_id == user.id)
+        .order_by(Team.name.asc())
+    )
+    shared = shared_result.first()
+    if shared is None:
+        return None
+    row, owner_email, team_name = shared
+    return row, True, owner_email, team_name
+
+
+async def _current_user_team_ids(db: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    result = await db.execute(
+        select(Team.id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .where(TeamMember.user_id == user_id)
+    )
+    return list(result.scalars().all())
+
+
+async def _set_file_team_sharing(
+    db: AsyncSession,
+    *,
+    file_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    enabled: bool,
+) -> int:
+    if not enabled:
+        await db.execute(delete(FileTeamShare).where(FileTeamShare.file_id == file_id))
+        await db.flush()
+        return 0
+
+    team_ids = await _current_user_team_ids(db, owner_id)
+    if not team_ids:
+        count_result = await db.execute(
+            select(func.count(FileTeamShare.id)).where(FileTeamShare.file_id == file_id)
+        )
+        return int(count_result.scalar() or 0)
+
+    existing_result = await db.execute(
+        select(FileTeamShare.team_id).where(FileTeamShare.file_id == file_id)
+    )
+    existing_team_ids = set(existing_result.scalars().all())
+    for team_id in team_ids:
+        if team_id not in existing_team_ids:
+            db.add(FileTeamShare(file_id=file_id, team_id=team_id))
+    await db.flush()
+
+    count_result = await db.execute(
+        select(func.count(FileTeamShare.id)).where(FileTeamShare.file_id == file_id)
+    )
+    return int(count_result.scalar() or 0)
+
+
 # ---- Authenticated endpoints ----
 
 
@@ -85,32 +191,55 @@ async def list_files(
     db: AsyncSession = Depends(get_db),
 ) -> FileListResponse:
     base_url = build_public_base_url(request)
-    query = select(GeneratedFile).where(GeneratedFile.owner_id == user.id)
-    count_query = select(func.count(GeneratedFile.id)).where(GeneratedFile.owner_id == user.id)
-
-    if workflow_id:
-        query = query.where(GeneratedFile.workflow_id == workflow_id)
-        count_query = count_query.where(GeneratedFile.workflow_id == workflow_id)
-    if mime_type:
-        query = query.where(GeneratedFile.mime_type.ilike(f"%{mime_type}%"))
-        count_query = count_query.where(GeneratedFile.mime_type.ilike(f"%{mime_type}%"))
-
-    total = (await db.execute(count_query)).scalar() or 0
-    rows = (
-        (
-            await db.execute(
-                query.order_by(GeneratedFile.created_at.desc()).offset(offset).limit(limit)
-            )
-        )
-        .scalars()
-        .all()
+    owned_query = select(GeneratedFile).where(GeneratedFile.owner_id == user.id)
+    shared_query = (
+        select(GeneratedFile, User.email, Team.name)
+        .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
+        .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
+        .join(Team, Team.id == FileTeamShare.team_id)
+        .join(User, User.id == GeneratedFile.owner_id)
+        .where(TeamMember.user_id == user.id)
     )
 
-    for row in rows:
-        await db.refresh(row, ["access_tokens"])
+    if workflow_id:
+        owned_query = owned_query.where(GeneratedFile.workflow_id == workflow_id)
+        shared_query = shared_query.where(GeneratedFile.workflow_id == workflow_id)
+    if mime_type:
+        owned_query = owned_query.where(GeneratedFile.mime_type.ilike(f"%{mime_type}%"))
+        shared_query = shared_query.where(GeneratedFile.mime_type.ilike(f"%{mime_type}%"))
+
+    owned_rows = (await db.execute(owned_query)).scalars().all()
+    shared_rows = (await db.execute(shared_query)).all()
+
+    response_rows: list[tuple[GeneratedFile, bool, str | None, str | None]] = []
+    seen_ids: set[uuid.UUID] = set()
+    for row in owned_rows:
+        seen_ids.add(row.id)
+        response_rows.append((row, False, None, None))
+    for row, owner_email, team_name in shared_rows:
+        if row.id in seen_ids:
+            continue
+        seen_ids.add(row.id)
+        response_rows.append((row, True, owner_email, team_name))
+
+    response_rows.sort(key=lambda item: item[0].created_at, reverse=True)
+    total = len(response_rows)
+    paginated_rows = response_rows[offset : offset + limit]
+
+    for row, _is_shared, _shared_by, _shared_by_team in paginated_rows:
+        await _refresh_file_response_relations(db, row)
 
     return FileListResponse(
-        files=[_file_to_response(r, base_url) for r in rows],
+        files=[
+            _file_to_response(
+                row,
+                base_url,
+                is_shared=is_shared,
+                shared_by=shared_by,
+                shared_by_team=shared_by_team,
+            )
+            for row, is_shared, shared_by, shared_by_team in paginated_rows
+        ],
         total=total,
     )
 
@@ -123,17 +252,18 @@ async def get_file_metadata(
     db: AsyncSession = Depends(get_db),
 ) -> GeneratedFileResponse:
     base_url = build_public_base_url(request)
-    row = (
-        await db.execute(
-            select(GeneratedFile).where(
-                GeneratedFile.id == file_id, GeneratedFile.owner_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
-    if not row:
+    access = await _get_accessible_file(db, file_id, user)
+    if access is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    await db.refresh(row, ["access_tokens"])
-    return _file_to_response(row, base_url)
+    row, is_shared, shared_by, shared_by_team = access
+    await _refresh_file_response_relations(db, row)
+    return _file_to_response(
+        row,
+        base_url,
+        is_shared=is_shared,
+        shared_by=shared_by,
+        shared_by_team=shared_by_team,
+    )
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -142,13 +272,7 @@ async def delete_file_endpoint(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    row = (
-        await db.execute(
-            select(GeneratedFile).where(
-                GeneratedFile.id == file_id, GeneratedFile.owner_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
+    row = await _get_owned_file(db, file_id, user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     await delete_file(db, row)
@@ -173,6 +297,7 @@ async def delete_all_files_endpoint(
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
+    share_with_my_teams: bool = Form(False),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GeneratedFileResponse:
@@ -191,9 +316,35 @@ async def upload_file(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await create_access_token(db, file_id=row.id, created_by_id=user.id)
+    if share_with_my_teams:
+        await _set_file_team_sharing(db, file_id=row.id, owner_id=user.id, enabled=True)
     await db.commit()
-    await db.refresh(row, ["access_tokens"])
+    await _refresh_file_response_relations(db, row)
     return _file_to_response(row, base_url)
+
+
+@router.patch("/{file_id}/team-sharing", response_model=FileTeamSharingResponse)
+async def update_file_team_sharing(
+    file_id: uuid.UUID,
+    payload: FileTeamSharingRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileTeamSharingResponse:
+    row = await _get_owned_file(db, file_id, user.id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    shared_team_count = await _set_file_team_sharing(
+        db,
+        file_id=file_id,
+        owner_id=user.id,
+        enabled=payload.enabled,
+    )
+    await db.commit()
+    return FileTeamSharingResponse(
+        enabled=shared_team_count > 0,
+        shared_team_count=shared_team_count,
+    )
 
 
 @router.post("/{file_id}/share", response_model=FileAccessTokenResponse)
@@ -205,13 +356,7 @@ async def create_share(
     db: AsyncSession = Depends(get_db),
 ) -> FileAccessTokenResponse:
     base_url = build_public_base_url(request)
-    row = (
-        await db.execute(
-            select(GeneratedFile).where(
-                GeneratedFile.id == file_id, GeneratedFile.owner_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
+    row = await _get_owned_file(db, file_id, user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
@@ -235,13 +380,7 @@ async def list_shares(
     db: AsyncSession = Depends(get_db),
 ) -> list[FileAccessTokenResponse]:
     base_url = build_public_base_url(request)
-    row = (
-        await db.execute(
-            select(GeneratedFile).where(
-                GeneratedFile.id == file_id, GeneratedFile.owner_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
+    row = await _get_owned_file(db, file_id, user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
@@ -260,13 +399,7 @@ async def revoke_share(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    row = (
-        await db.execute(
-            select(GeneratedFile).where(
-                GeneratedFile.id == file_id, GeneratedFile.owner_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
+    row = await _get_owned_file(db, file_id, user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
@@ -282,6 +415,30 @@ async def revoke_share(
 
     await db.delete(token)
     await db.commit()
+
+
+@router.get("/{file_id}/download")
+async def download_authenticated_file(
+    file_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    access = await _get_accessible_file(db, file_id, user)
+    if access is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    file_row = access[0]
+
+    disk_path = get_file_path(file_row)
+    if not disk_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage"
+        )
+
+    return FileResponse(
+        path=str(disk_path),
+        media_type=file_row.mime_type,
+        filename=file_row.filename,
+    )
 
 
 # ---- Public endpoints (no JWT) ----

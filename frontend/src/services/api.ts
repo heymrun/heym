@@ -2759,6 +2759,7 @@ import type {
   FileAccessToken,
   FileListParams,
   FileListResponse,
+  FileTeamSharingResponse,
   GeneratedFile,
 } from "@/types/file";
 
@@ -2781,12 +2782,24 @@ export const filesApi = {
     await api.delete("/files");
   },
 
-  upload: async (file: File): Promise<GeneratedFile> => {
+  upload: async (file: File, shareWithMyTeams = false): Promise<GeneratedFile> => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("share_with_my_teams", String(shareWithMyTeams));
     const response = await api.post<GeneratedFile>("/files/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
+    return response.data;
+  },
+
+  setTeamSharing: async (
+    fileId: string,
+    enabled: boolean,
+  ): Promise<FileTeamSharingResponse> => {
+    const response = await api.patch<FileTeamSharingResponse>(
+      `/files/${fileId}/team-sharing`,
+      { enabled },
+    );
     return response.data;
   },
 
