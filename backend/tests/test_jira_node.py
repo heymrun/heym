@@ -83,6 +83,28 @@ class JiraServiceTests(unittest.TestCase):
         self.assertEqual(fields["description"]["type"], "doc")
         self.assertEqual(len(fields["description"]["content"]), 1)
 
+    def test_create_issue_sends_plain_text_description_for_api_v2(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response(
+            {"id": "10001", "key": "ENG-1"},
+            method="POST",
+            url="https://example.atlassian.net/rest/api/2/issue",
+        )
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://example.atlassian.net",
+                "api_version": "2",
+            },
+            client=client,
+        )
+
+        service.create_issue("ENG", "Bug", "Fix checkout", description="Checkout is broken")
+
+        fields = client.request.call_args.kwargs["json"]["fields"]
+        self.assertEqual(fields["description"], "Checkout is broken")
+
     def test_create_issue_prefers_issue_type_id(self) -> None:
         client = MagicMock()
         client.request.return_value = _response(
@@ -186,7 +208,7 @@ class JiraServiceTests(unittest.TestCase):
 
     def test_get_issue_changelog_uses_pagination(self) -> None:
         client = MagicMock()
-        client.request.return_value = _response({"histories": [{"id": "10001"}], "total": 1})
+        client.request.return_value = _response({"values": [{"id": "10001"}], "total": 1})
         service = JiraService(
             {
                 "email": "ada@example.com",
@@ -256,6 +278,23 @@ class JiraServiceTests(unittest.TestCase):
             ("PUT", "https://example.atlassian.net/rest/api/3/issue/ENG-1/comment/10001"),
         )
         self.assertEqual(client.request.call_args.kwargs["json"]["body"]["type"], "doc")
+
+    def test_update_comment_sends_plain_text_body_for_api_v2(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response({"id": "10001", "body": "Updated"}, method="PUT")
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://example.atlassian.net",
+                "api_version": "2",
+            },
+            client=client,
+        )
+
+        service.update_comment("ENG-1", "10001", "Updated")
+
+        self.assertEqual(client.request.call_args.kwargs["json"]["body"], "Updated")
 
     def test_create_user_sends_optional_fields(self) -> None:
         client = MagicMock()
@@ -589,7 +628,7 @@ class JiraNodeHandlerTests(unittest.TestCase):
         mock_service.download_attachment.assert_called_once()
         self.assertEqual(result["attachment"]["content_base64"], "aGVsbG8=")
 
-    def test_get_issue_changelog_returns_histories(self) -> None:
+    def test_get_issue_changelog_returns_values(self) -> None:
         ctx = _make_ctx(
             {
                 "credentialId": "cred-1",
@@ -599,7 +638,7 @@ class JiraNodeHandlerTests(unittest.TestCase):
         )
         mock_service = MagicMock()
         mock_service.get_issue_changelog.return_value = {
-            "histories": [{"id": "10001", "items": []}],
+            "values": [{"id": "10001", "items": []}],
             "total": 1,
         }
 

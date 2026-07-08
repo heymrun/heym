@@ -84,7 +84,7 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_github_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 35. github (GitHub REST Operations)", prompt)
+        self.assertIn("### 36. github (GitHub REST Operations)", prompt)
         self.assertIn('"type": "github"', prompt)
         self.assertIn("githubOperation", prompt)
         self.assertIn("createIssue", prompt)

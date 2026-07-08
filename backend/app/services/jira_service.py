@@ -96,7 +96,7 @@ class JiraService:
             "summary": summary,
         }
         if description:
-            fields["description"] = self._adf_text_document(description)
+            fields["description"] = self._text_document_payload(description)
         if assignee_account_id:
             fields["assignee"] = {"accountId": assignee_account_id}
         if labels:
@@ -120,7 +120,7 @@ class JiraService:
             fields["summary"] = summary
         if description is not _UNSET:
             fields["description"] = (
-                None if description is None else self._adf_text_document(description)
+                None if description is None else self._text_document_payload(description)
             )
         if assignee_account_id is not _UNSET:
             fields["assignee"] = (
@@ -183,7 +183,7 @@ class JiraService:
         payload = self._request(
             "POST",
             f"/issue/{issue_key}/comment",
-            json={"body": self._adf_text_document(body)},
+            json={"body": self._text_document_payload(body)},
         )
         return self._expect_object(payload, "comment")
 
@@ -197,7 +197,7 @@ class JiraService:
         payload = self._request(
             "PUT",
             f"/issue/{issue_key}/comment/{comment_id}",
-            json={"body": self._adf_text_document(body)},
+            json={"body": self._text_document_payload(body)},
         )
         return self._expect_object(payload, "comment")
 
@@ -399,6 +399,11 @@ class JiraService:
 
     def _url(self, path: str) -> str:
         return urljoin(f"{self._base_url}/rest/api/{self._api_version}/", path.lstrip("/"))
+
+    def _text_document_payload(self, text: str) -> str | dict[str, Any]:
+        if self._api_version == "2":
+            return text
+        return self._adf_text_document(text)
 
     @staticmethod
     def _normalize_base_url(base_url: str) -> str:

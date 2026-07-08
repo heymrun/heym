@@ -175,7 +175,9 @@ The Jira credential stores an Atlassian account email, Jira API token, Jira site
 
 ### Notes
 
-- The Jira node sends issue descriptions and comments as Atlassian Document Format text documents.
+- The Jira node sends issue descriptions and comments as Atlassian Document Format text
+  documents for REST API v3. When the credential uses REST API v2, it sends plain text for
+  older Jira Server or Data Center compatibility.
 - Attachment upload accepts base64 or data URL content and is subject to the platform file size limit (default 99 MB). Attachment download can return base64 content when enabled.
 - User creation, deletion, and issue notification require the authenticated Jira account to have the relevant Jira site or organization permissions.
 - Use List Projects, Search Issues, and List Transitions to discover project keys, issue keys, and transition IDs.

@@ -244,7 +244,10 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not issue_key:
                 raise ValueError("Jira getIssueChangelog requires an issue key or ID")
             result = service.get_issue_changelog(issue_key, _limit(), _start_at())
-            histories = result.get("histories") if isinstance(result.get("histories"), list) else []
+            values = result.get("values")
+            if not isinstance(values, list):
+                values = result.get("histories")
+            histories = values if isinstance(values, list) else []
             output = {
                 "success": True,
                 "operation": operation,

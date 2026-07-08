@@ -61,7 +61,9 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 - **Transition ID** comes from List Transitions. Each transition object includes an `id` field.
 - **Comment ID** and **Attachment ID** come from List Comments, List Attachments, or prior create/get responses.
 - **Account ID** is the Jira `accountId` value. Get Myself or Get User can help you discover it.
-- Issue **description** and comment **body** text are sent as Atlassian Document Format; newline characters become separate paragraphs.
+- Issue **description** and comment **body** text are sent as Atlassian Document Format on REST
+  API v3; when the credential uses REST API v2, they are sent as plain text for Jira Server or
+  Data Center compatibility. In v3, newline characters become separate paragraphs.
 - On **Update Issue**, leave optional fields empty to preserve their current values.
 - Set **Description** or **Assignee Account ID** to `null` on update to clear those fields. Labels cannot be cleared with `null`.
 - **Recipients JSON** on Notify Issue defaults to `{"assignee":true}` when omitted. Common keys include `assignee`, `reporter`, `watchers`, and `voters` (for example `{"assignee":true,"watchers":true}`).
@@ -85,12 +87,12 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 | `jiraIssueType` | Create Issue | Defaults to `Task` |
 | `jiraIssueTypeId` | Create Issue | Optional issue type ID; overrides `jiraIssueType` when set |
 | `jiraSummary` | Create/Update Issue | Required for Create Issue |
-| `jiraDescription` | Create/Update Issue | Sent as Atlassian Document Format; use `null` on update to clear description |
+| `jiraDescription` | Create/Update Issue | Sent as ADF on REST API v3 or plain text on REST API v2; use `null` on update to clear description |
 | `jiraJql` | Search Issues | Defaults to `updated >= -30d ORDER BY updated DESC` |
 | `jiraFields` | Search Issues | Optional JSON array or comma-separated issue fields; defaults to `key`, `summary`, `status`, `assignee`, and `issuetype` when empty |
 | `jiraAssigneeAccountId` | Create/Update Issue | Use `null` on update to clear assignee |
 | `jiraLabels` | Create/Update Issue | JSON array or comma-separated text |
-| `jiraCommentBody` | Create/Update Comment | Sent as Atlassian Document Format |
+| `jiraCommentBody` | Create/Update Comment | Sent as ADF on REST API v3 or plain text on REST API v2 |
 | `jiraCommentId` | Get/Update/Delete Comment | Jira comment ID |
 | `jiraTransitionId` | Transition Issue | Discover with List Transitions |
 | `jiraAttachmentId` | Get/Delete Attachment | Jira attachment ID |

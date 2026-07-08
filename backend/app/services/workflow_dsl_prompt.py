@@ -4041,14 +4041,17 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   `jiraIssueTypeId`, `jiraSummary`, `jiraDescription`, `jiraJql`, `jiraFields`,
   `jiraAssigneeAccountId`, `jiraLabels`, `jiraCommentBody`, `jiraCommentId`,
   `jiraTransitionId`, `jiraNotifySubject`, `jiraAttachmentId`, `jiraAttachmentFilename`,
-  `jiraAttachmentBase64`, `jiraAttachmentMimeType`, `jiraIncludeBinary`,
+  `jiraAttachmentBase64`, `jiraAttachmentMimeType`,
   `jiraNotifyTextBody`, `jiraNotifyHtmlBody`, `jiraNotifyTo`, `jiraAccountId`,
   `jiraUserEmail`, `jiraUserDisplayName`, `jiraUserProducts`, `jiraLimit` (1-100),
   `jiraStartAt`, `jiraNextPageToken`
-- Text fields support expressions. `jiraLabels`, `jiraUserProducts`, and `jiraFields` may be a
+- Text fields support expressions. `jiraIncludeBinary` is a static boolean toggle.
+  `jiraLabels`, `jiraUserProducts`, and `jiraFields` may be a
   JSON array of strings or comma-separated text. `jiraNotifyTo` must be a JSON object and
   defaults to `{"assignee":true}` when omitted. `searchIssues` pagination uses
   `pagination.nextPageToken` instead of `startAt`.
+- Jira REST API v3 sends issue descriptions and comments as Atlassian Document Format (ADF);
+  REST API v2 sends plain text for older Jira Server or Data Center compatibility.
 - List outputs contain `{success, operation, count, projects|issues|comments|changelog|attachments, pagination}`.
   `searchIssues` uses cursor pagination (`pagination.nextPageToken`); other paginated lists use
   `startAt`. `listAttachments` pagination is client-side after fetching all issue attachments.
@@ -4084,7 +4087,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 35. github (GitHub REST Operations)
+### 36. github (GitHub REST Operations)
 - **Type**: `github`
 - **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
   workflows, traffic insights, and repository files
@@ -4157,7 +4160,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 36. codex (OpenAI Codex Coding Agent)
+### 37. codex (OpenAI Codex Coding Agent)
 - **Type**: `codex`
 - **Purpose**: Run a coding task against a Git repository using the Codex CLI inside Heym's
   isolated runner. This node is access-token-only; do not use OpenAI API keys.
