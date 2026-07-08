@@ -600,6 +600,33 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 node_results=[],
             )
 
+    async def test_credentials_are_masked_in_preview(self) -> None:
+        workflow = self._workflow(
+            nodes=[{"id": self.current_node_id, "type": "output", "data": {"label": "finalOutput"}}],
+        )
+        secret = "Bearer sk-super-secret-token-value"
+        with (
+            patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.expressions.get_credentials_context",
+                AsyncMock(return_value={"MyToken": secret}),
+            ),
+            patch(
+                "app.api.expressions.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await evaluate_expression(
+                self._request(expression="$credentials.MyToken"),
+                http_request=self._http_request(),
+                db=self.db,
+                current_user=self.user,
+            )
+
+        self.assertEqual(response.result, "Bearer **")
+        self.assertNotEqual(response.result, secret)
+        self.assertIsNone(response.error)
+
 
 if __name__ == "__main__":
     unittest.main()

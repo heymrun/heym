@@ -7628,6 +7628,16 @@ class WorkflowExecutor:
         )
 
 
+def mask_credentials_context(credentials_context: dict[str, str]) -> dict[str, str]:
+    """Return credentials context with masked values for expression preview only."""
+    from app.services.encryption import mask_api_key
+
+    return {
+        name: mask_api_key(value) if value else value
+        for name, value in credentials_context.items()
+    }
+
+
 def mask_sensitive_output(output: dict, credentials_context: dict[str, str]) -> dict:
     safe_output = _to_json_compatible(output)
     if not credentials_context:

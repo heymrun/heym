@@ -27,6 +27,7 @@ from app.services.expression_evaluator import (
 )
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url
+from app.services.workflow_executor import mask_credentials_context
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
 from app.services.workflow_dsl_prompt import (
@@ -328,12 +329,13 @@ async def evaluate_expression(
 
     credentials_owner_id = current_user.id if current_user else workflow.owner_id
     credentials_context = await get_credentials_context(db, credentials_owner_id)
+    preview_credentials_context = mask_credentials_context(credentials_context)
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
 
     service = ExpressionEvaluatorService(
         workflow_nodes=workflow_nodes,
         workflow_edges=workflow_edges,
-        credentials_context=credentials_context,
+        credentials_context=preview_credentials_context,
         global_variables_context=global_variables_context,
         vars_context=vars_context,
         workflow_id=workflow.id,
