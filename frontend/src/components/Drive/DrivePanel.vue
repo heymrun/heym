@@ -92,7 +92,6 @@ const isDragging = ref(false);
 const uploading = ref(false);
 const uploadError = ref("");
 const dragDepth = ref(0);
-const shareUploadsWithMyTeams = ref(false);
 
 function isFileDrag(e: DragEvent): boolean {
   return Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -133,7 +132,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
   uploadError.value = "";
   try {
     for (const f of droppedFiles) {
-      await filesApi.upload(f, shareUploadsWithMyTeams.value);
+      await filesApi.upload(f);
     }
     await loadFiles();
   } catch {
@@ -232,14 +231,6 @@ onBeforeUnmount(() => {
         <span class="text-xs text-muted-foreground">({{ total }} files)</span>
       </div>
       <div class="flex flex-wrap items-center justify-end gap-2">
-        <label class="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground">
-          <input
-            v-model="shareUploadsWithMyTeams"
-            type="checkbox"
-            class="h-3.5 w-3.5 rounded border-input bg-background"
-          >
-          Share uploads with my teams
-        </label>
         <div class="relative">
           <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input

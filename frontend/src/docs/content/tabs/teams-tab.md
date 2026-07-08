@@ -31,7 +31,7 @@ Share resources with teams from:
 - **Credentials** – Share dialog in the Credentials tab
 - **Variables** – Share dialog in the Variables tab
 - **Vector Stores** – Share dialog in the Vectors tab
-- **Drive Files** – Share dialog in the Drive tab, upload option, or Drive node `shareWithMyTeams` operation
+- **Drive Files** – Share dialog in the Drive tab or Drive node `shareWithMyTeams` operation
 
 When you share with a team, all team members gain access. See [Teams](../reference/teams.md) for details.
 
