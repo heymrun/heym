@@ -15,6 +15,7 @@ export interface SkillBuilderAttachment {
   encoding: "text" | "base64";
   mime_type?: string;
   size_bytes?: number;
+  content?: string;
 }
 
 export interface SkillBuilderExistingSkill {

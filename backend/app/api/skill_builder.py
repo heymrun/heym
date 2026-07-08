@@ -1,10 +1,15 @@
 """Skill Builder SSE endpoint for creating and editing Heym skills."""
 
+import base64
+import binascii
+import io
 import json
 import logging
 import time
 import uuid
 from typing import Any, AsyncGenerator, Literal
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -38,6 +43,7 @@ class SkillBuilderAttachment(BaseModel):
     encoding: Literal["text", "base64"] = "text"
     mime_type: str | None = None
     size_bytes: int | None = None
+    content: str | None = None
 
 
 class SkillBuilderSkill(BaseModel):
@@ -263,6 +269,14 @@ MAX_SKILL_BUILDER_ROUNDS = 6
 ALLOWED_SKILL_BUILDER_EXTENSIONS = (".md", ".py")
 MACOS_METADATA_DIR = "__MACOSX"
 MACOS_METADATA_FILENAMES = {".DS_Store"}
+ATTACHMENT_CONTEXT_MAX_BYTES = 2 * 1024 * 1024
+ATTACHMENT_TEXT_CONTEXT_MAX_CHARS = 12_000
+DOCX_CONTEXT_MAX_TABLES = 12
+DOCX_CONTEXT_MAX_ROWS = 30
+DOCX_CONTEXT_MAX_CELLS = 8
+DOCX_CONTEXT_MAX_CELL_CHARS = 120
+DOCX_CONTEXT_MAX_PARAGRAPHS = 20
+DOCX_XML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
 def _normalize_skill_builder_path(path: str) -> str:
@@ -295,6 +309,159 @@ def _is_allowed_skill_builder_file(path: str) -> bool:
 
     normalized_path = _normalize_skill_builder_path(path).lower()
     return normalized_path.endswith(ALLOWED_SKILL_BUILDER_EXTENSIONS)
+
+
+def _append_limited_line(lines: list[str], line: str, max_chars: int) -> bool:
+    """Append a line unless doing so would exceed max_chars."""
+
+    current_chars = sum(len(existing) + 1 for existing in lines)
+    if current_chars + len(line) + 1 > max_chars:
+        lines.append("... truncated ...")
+        return False
+    lines.append(line)
+    return True
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    """Return value capped to max_chars, preserving a truncation marker."""
+
+    if len(value) <= max_chars:
+        return value
+    return value[: max_chars - 3] + "..."
+
+
+def _decode_attachment_bytes(attachment: SkillBuilderAttachment) -> bytes | None:
+    """Decode attachment content into bytes when the caller opted into context."""
+
+    if not attachment.content:
+        return None
+    if attachment.encoding == "base64":
+        try:
+            return base64.b64decode(attachment.content, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+    return attachment.content.encode("utf-8", errors="replace")
+
+
+def _docx_node_text(node: ElementTree.Element) -> str:
+    """Extract visible text from a DOCX XML node."""
+
+    return "".join(text.text or "" for text in node.findall(".//w:t", DOCX_XML_NS)).strip()
+
+
+def _summarize_docx_context(data: bytes) -> str:
+    """Return a compact, LLM-readable summary of a DOCX document."""
+
+    try:
+        with ZipFile(io.BytesIO(data)) as docx:
+            document_xml = docx.read("word/document.xml")
+    except (BadZipFile, KeyError):
+        return "DOCX summary unavailable: document.xml could not be read."
+
+    try:
+        root = ElementTree.fromstring(document_xml)
+    except ElementTree.ParseError:
+        return "DOCX summary unavailable: document.xml is not valid XML."
+
+    lines: list[str] = [
+        "DOCX structure summary:",
+        "Use this to compare Python placeholder logic with the actual template layout.",
+    ]
+
+    body = root.find(".//w:body", DOCX_XML_NS)
+    if body is not None:
+        paragraph_texts = [
+            _docx_node_text(paragraph)
+            for paragraph in body.findall("./w:p", DOCX_XML_NS)
+            if _docx_node_text(paragraph)
+        ][:DOCX_CONTEXT_MAX_PARAGRAPHS]
+        if paragraph_texts:
+            lines.append("Top-level paragraphs:")
+            for index, text in enumerate(paragraph_texts, start=1):
+                if not _append_limited_line(
+                    lines,
+                    f"- Paragraph {index}: {_truncate_text(text, DOCX_CONTEXT_MAX_CELL_CHARS)}",
+                    ATTACHMENT_TEXT_CONTEXT_MAX_CHARS,
+                ):
+                    return "\n".join(lines)
+
+    label_value_candidates: list[str] = []
+    tables = root.findall(".//w:tbl", DOCX_XML_NS)
+    if tables:
+        lines.append("Tables:")
+
+    for table_index, table in enumerate(tables[:DOCX_CONTEXT_MAX_TABLES], start=1):
+        if not _append_limited_line(
+            lines, f"Table {table_index}:", ATTACHMENT_TEXT_CONTEXT_MAX_CHARS
+        ):
+            return "\n".join(lines)
+        rows = table.findall("./w:tr", DOCX_XML_NS)
+        for row_index, row in enumerate(rows[:DOCX_CONTEXT_MAX_ROWS], start=1):
+            cells: list[str] = []
+            raw_cell_texts: list[str] = []
+            for cell in row.findall("./w:tc", DOCX_XML_NS)[:DOCX_CONTEXT_MAX_CELLS]:
+                text = _docx_node_text(cell)
+                raw_cell_texts.append(text)
+                if text:
+                    cells.append(_truncate_text(text, DOCX_CONTEXT_MAX_CELL_CHARS))
+                    continue
+                run_count = len(cell.findall(".//w:r", DOCX_XML_NS))
+                cells.append(f"<EMPTY runs={run_count}>")
+            if len(raw_cell_texts) >= 2 and raw_cell_texts[0] and not raw_cell_texts[1]:
+                label_value_candidates.append(
+                    f"Table {table_index} row {row_index}: `{raw_cell_texts[0]}` -> adjacent empty cell"
+                )
+            if not _append_limited_line(
+                lines,
+                f"  Row {row_index}: {' | '.join(cells)}",
+                ATTACHMENT_TEXT_CONTEXT_MAX_CHARS,
+            ):
+                return "\n".join(lines)
+
+    if label_value_candidates:
+        lines.append("Detected label/value table candidates:")
+        for candidate in label_value_candidates[:20]:
+            if not _append_limited_line(lines, f"- {candidate}", ATTACHMENT_TEXT_CONTEXT_MAX_CHARS):
+                return "\n".join(lines)
+        lines.append(
+            "If Python code replaces text in the label cell, update it to write the value into "
+            "the adjacent empty cell instead."
+        )
+
+    return "\n".join(lines)
+
+
+def _summarize_text_attachment(data: bytes) -> str:
+    """Return a capped UTF-8 text summary for included text attachments."""
+
+    text = data.decode("utf-8", errors="replace")
+    return _truncate_text(text, ATTACHMENT_TEXT_CONTEXT_MAX_CHARS)
+
+
+def _build_attachment_context(
+    normalized_path: str, attachment: SkillBuilderAttachment
+) -> str | None:
+    """Build optional attachment content context for the skill builder prompt."""
+
+    data = _decode_attachment_bytes(attachment)
+    if data is None:
+        return None
+    if len(data) > ATTACHMENT_CONTEXT_MAX_BYTES:
+        return (
+            "Content context omitted because the attachment is larger than "
+            f"{ATTACHMENT_CONTEXT_MAX_BYTES // (1024 * 1024)} MB."
+        )
+
+    lower_path = normalized_path.lower()
+    mime_type = (attachment.mime_type or "").lower()
+    if lower_path.endswith(".docx") or mime_type.endswith(
+        "officedocument.wordprocessingml.document"
+    ):
+        return _summarize_docx_context(data)
+    if attachment.encoding == "text" or mime_type.startswith("text/"):
+        return _summarize_text_attachment(data)
+
+    return None
 
 
 def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
@@ -353,6 +520,21 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
                 "code and `SKILL.md` so the relative path still points to the asset in "
                 "the final ZIP layout.\n\n"
             )
+            attachment_contexts: list[str] = []
+            for normalized_path, attachment in attachments:
+                context = _build_attachment_context(normalized_path, attachment)
+                if context:
+                    attachment_contexts.append(f"### {normalized_path}\n\n{context}")
+            if attachment_contexts:
+                base += (
+                    "## Included Attachment Context\n\n"
+                    "The user explicitly selected these binary/non-editable files for context. "
+                    "Use these extracted summaries to diagnose mismatches between the "
+                    "Python code and bundled templates, then update only editable `.md` "
+                    "and `.py` files.\n\n"
+                )
+                base += "\n\n".join(attachment_contexts)
+                base += "\n\n"
         base += (
             "When you update files, always call `set_skill_files` with ALL editable "
             "`.md`/`.py` files, including unchanged editable files.\n"

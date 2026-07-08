@@ -1,10 +1,13 @@
 """Unit tests for Skill Builder prompt and SSE behavior."""
 
+import base64
+import io
 import json
 import unittest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zipfile import ZipFile
 
 from app.api.skill_builder import (
     SkillBuilderAttachment,
@@ -15,6 +18,15 @@ from app.api.skill_builder import (
     run_skill_builder,
 )
 from app.services.llm_trace import LLMTraceContext
+
+
+def _make_docx_base64(document_xml: str) -> str:
+    """Build a minimal DOCX-like zip containing word/document.xml."""
+
+    buf = io.BytesIO()
+    with ZipFile(buf, mode="w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 class BuildSkillBuilderPromptTests(unittest.TestCase):
@@ -103,6 +115,53 @@ class BuildSkillBuilderPromptTests(unittest.TestCase):
         self.assertIn("application/pdf", prompt)
         self.assertIn("Do not include these non-editable files", prompt)
         self.assertIn("If you move a Python file", prompt)
+
+    def test_edit_skill_prompt_includes_docx_table_context_when_content_is_present(self) -> None:
+        document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Name</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r/></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Surname</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r/></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>
+"""
+        skill = SkillBuilderSkill(
+            name="docx-form-filler",
+            files=[
+                SkillBuilderFile(path="SKILL.md", content="---\nname: docx-form-filler\n---"),
+                SkillBuilderFile(
+                    path="main.py",
+                    content="def execute(params, files):\n    return {}\n",
+                ),
+            ],
+            attachments=[
+                SkillBuilderAttachment(
+                    path="fill.docx",
+                    encoding="base64",
+                    mime_type=(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ),
+                    size_bytes=512,
+                    content=_make_docx_base64(document_xml),
+                )
+            ],
+        )
+
+        prompt = build_skill_builder_prompt(skill)
+
+        self.assertIn("Included Attachment Context", prompt)
+        self.assertIn("Table 1:", prompt)
+        self.assertIn("Row 1: Name | <EMPTY runs=1>", prompt)
+        self.assertIn("`Name` -> adjacent empty cell", prompt)
+        self.assertIn("update it to write the value into the adjacent empty cell", prompt)
 
 
 class RunSkillBuilderTests(unittest.IsolatedAsyncioTestCase):

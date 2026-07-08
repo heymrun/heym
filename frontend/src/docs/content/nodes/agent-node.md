@@ -308,6 +308,7 @@ The Skills section also includes **AI Build**:
 - **Save & Add** saves the generated files back through the same ZIP parsing flow used by manual uploads
 
 When editing with AI, Heym only sends text `.md` and `.py` skill files to the builder. Binary and other non-editable attachments are preserved and shared with the builder as path metadata so generated Python code can keep relative file references correct.
+Select an attached file in the right panel and enable **Include this file in AI context** when the AI needs to inspect a bundled template. Supported attachments such as DOCX files are summarized for the AI, including table rows and empty value cells, while oversized files stay metadata-only.
 
 ## Guardrails
 
