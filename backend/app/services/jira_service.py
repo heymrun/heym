@@ -45,10 +45,24 @@ class JiraService:
 
     def list_projects(self, limit: int = 50, start_at: int = 0) -> dict[str, Any]:
         """List Jira projects visible to the authenticated user."""
+        normalized_limit = self._normalize_limit(limit)
+        offset = max(start_at, 0)
+        if self._is_data_center:
+            payload = self._request("GET", "/project")
+            projects = self._expect_project_list(payload)
+            page = projects[offset : offset + normalized_limit]
+            total = len(projects)
+            return {
+                "values": page,
+                "startAt": offset,
+                "maxResults": normalized_limit,
+                "total": total,
+                "isLast": offset + normalized_limit >= total,
+            }
         payload = self._request(
             "GET",
             "/project/search",
-            params={"maxResults": self._normalize_limit(limit), "startAt": max(start_at, 0)},
+            params={"maxResults": normalized_limit, "startAt": offset},
         )
         return self._expect_object(payload, "project.search")
 
@@ -494,6 +508,12 @@ class JiraService:
         if not isinstance(payload, dict):
             raise ValueError(f"Jira API returned an invalid {label} payload")
         return payload
+
+    @staticmethod
+    def _expect_project_list(payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, list):
+            raise ValueError("Jira API returned an invalid project list payload")
+        return [project for project in payload if isinstance(project, dict)]
 
     @staticmethod
     def _adf_text_document(text: str) -> dict[str, Any]:

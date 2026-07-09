@@ -127,6 +127,39 @@ class JiraServiceTests(unittest.TestCase):
         fields = client.request.call_args.kwargs["json"]["fields"]
         self.assertEqual(fields["assignee"], {"name": "ada"})
 
+    def test_list_projects_uses_array_endpoint_for_data_center(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response(
+            [
+                {"id": "10000", "key": "ENG"},
+                {"id": "10001", "key": "OPS"},
+                {"id": "10002", "key": "DOCS"},
+            ],
+            url="https://jira.example.com/rest/api/2/project",
+        )
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example.com",
+                "deployment": "data_center",
+            },
+            client=client,
+        )
+
+        result = service.list_projects(limit=1, start_at=1)
+
+        self.assertEqual(result["values"], [{"id": "10001", "key": "OPS"}])
+        self.assertEqual(result["startAt"], 1)
+        self.assertEqual(result["maxResults"], 1)
+        self.assertEqual(result["total"], 3)
+        self.assertFalse(result["isLast"])
+        self.assertEqual(
+            client.request.call_args.args[:2],
+            ("GET", "https://jira.example.com/rest/api/2/project"),
+        )
+        self.assertIsNone(client.request.call_args.kwargs["params"])
+
     def test_create_issue_prefers_issue_type_id(self) -> None:
         client = MagicMock()
         client.request.return_value = _response(

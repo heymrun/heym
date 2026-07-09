@@ -15,7 +15,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
-| [Jira](../nodes/jira-node.md) | Jira | Atlassian account email, Jira API token, Jira site base URL, and optional REST API version |
+| [Jira](../nodes/jira-node.md) | Jira | Cloud email/API token or Data Center username/password, Jira site base URL, deployment mode, and optional REST API version |
 | [Linear](../nodes/linear-node.md) | Linear | Personal API key or OAuth2 for teams, projects, issues, and comments |
 | [HTTP](../nodes/http-node.md) | Bearer, Header | Auth for requests |
 | [Telegram](../nodes/telegram-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md) | Telegram | Bot token and optional webhook secret |
@@ -56,7 +56,7 @@ Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md)
 
 Codex credentials are intentionally excluded from `$credentials`. Whether you sign in with ChatGPT (subscription, no per-token API cost) or paste a Codex `access_token`, the tokens are only passed to the local Codex runner process. ChatGPT sign-in tokens are refreshed automatically as they expire.
 
-Jira credentials are also excluded from `$credentials`. The [Jira node](../nodes/jira-node.md) loads the credential by `credentialId` at run time. For custom Jira REST calls not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token`), for example `curl -u you@example.com:YOUR_API_TOKEN https://your-domain.atlassian.net/rest/api/3/myself`. You can also use a [Header](../nodes/http-node.md) credential with `Authorization: Basic <base64(email:api_token)>`.
+Jira credentials are also excluded from `$credentials`. The [Jira node](../nodes/jira-node.md) loads the credential by `credentialId` at run time. For custom Jira REST calls not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token` for Jira Cloud or `username:password` for Data Center / Server), for example `curl -u you@example.com:YOUR_API_TOKEN https://your-domain.atlassian.net/rest/api/3/myself`. You can also use a [Header](../nodes/http-node.md) credential with `Authorization: Basic <base64(user:secret)>`. Jira Data Center / Server personal access tokens and Bearer auth are not supported by the Jira credential yet.
 
 | Credential type | Value exposed to `$credentials.Name` |
 |-----------------|--------------------------------------|

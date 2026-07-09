@@ -53,6 +53,26 @@ const jiraApiVersion = ref("3");
 const jiraTesting = ref(false);
 const jiraTestSuccess = ref<boolean | null>(null);
 const jiraTestMessage = ref("");
+const jiraUserLabel = computed((): string =>
+  jiraDeployment.value === "data_center" ? "Jira Username" : "Jira Email",
+);
+const jiraUserPlaceholder = computed((): string =>
+  jiraDeployment.value === "data_center" ? "jira-user" : "you@example.com",
+);
+const jiraSecretLabel = computed((): string =>
+  jiraDeployment.value === "data_center" ? "Password" : "API Token",
+);
+const jiraSecretPlaceholder = computed((): string => {
+  if (isEditing.value) {
+    return "••••••• (re-enter to update)";
+  }
+  return jiraDeployment.value === "data_center" ? "Jira password" : "Atlassian API token";
+});
+const jiraAuthHelpText = computed((): string =>
+  jiraDeployment.value === "data_center"
+    ? "Data Center / Server currently supports Basic auth with username and password. Personal access tokens and Bearer auth are not supported yet."
+    : "Jira Cloud uses an Atlassian account email and API token.",
+);
 const bearerToken = ref("");
 const headerKey = ref("");
 const headerValue = ref("");
@@ -1078,7 +1098,10 @@ async function testLinearConnection(): Promise<void> {
 
 async function testJiraConnection(): Promise<void> {
   if (!canTestJiraConnection.value) {
-    error.value = "Enter Jira email, API token, and base URL to test the connection.";
+    error.value =
+      jiraDeployment.value === "data_center"
+        ? "Enter Jira username, password, and base URL to test the connection."
+        : "Enter Jira email, API token, and base URL to test the connection.";
     return;
   }
 
@@ -1678,22 +1701,22 @@ async function handleSave(): Promise<void> {
 
       <template v-if="type === 'jira'">
         <div class="space-y-2">
-          <Label for="cred-jira-email">Jira Email</Label>
+          <Label for="cred-jira-email">{{ jiraUserLabel }}</Label>
           <Input
             id="cred-jira-email"
             v-model="jiraEmail"
-            placeholder="you@example.com"
+            :placeholder="jiraUserPlaceholder"
             :disabled="saving"
           />
         </div>
         <div class="space-y-2">
-          <Label for="cred-jira-api-token">API Token</Label>
+          <Label for="cred-jira-api-token">{{ jiraSecretLabel }}</Label>
           <div class="relative">
             <Input
               id="cred-jira-api-token"
               v-model="apiKey"
               :type="showApiKey ? 'text' : 'password'"
-              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Atlassian API token'"
+              :placeholder="jiraSecretPlaceholder"
               :disabled="saving"
               class="pr-10"
             />
@@ -1744,8 +1767,8 @@ async function handleSave(): Promise<void> {
             @update:model-value="jiraApiVersion = String($event)"
           />
           <p class="text-xs text-muted-foreground">
-            Use the Jira site URL, not a REST path. Jira Cloud defaults to v3; Data Center and
-            Server use REST API v2.
+            {{ jiraAuthHelpText }} Use the Jira site URL, not a REST path. Jira Cloud defaults to
+            v3; Data Center and Server use REST API v2.
           </p>
         </div>
         <div class="flex items-center gap-3">
