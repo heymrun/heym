@@ -363,6 +363,7 @@ export async function parseSkillZip(file: File): Promise<AgentSkill[]> {
       content: skillMd.content,
       files: skillFiles && skillFiles.length > 0 ? skillFiles : undefined,
       timeoutSeconds: 30,
+      driveFilesEnabled: false,
     };
   });
 

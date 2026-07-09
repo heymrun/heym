@@ -2229,6 +2229,68 @@ def _normalize_skill_file_references(
     return _walk(copy.deepcopy(output))
 
 
+def _load_skill_drive_files(actor_user_id: str | None) -> list[dict[str, Any]]:
+    """Return Drive files the actor can read for an enabled skill run."""
+
+    if not actor_user_id:
+        return []
+
+    import uuid as _uuid
+
+    from app.db.models import FileTeamShare, GeneratedFile, TeamMember
+    from app.db.session import SessionLocal
+    from app.services.file_storage import get_file_path
+
+    try:
+        actor_uuid = _uuid.UUID(str(actor_user_id))
+    except (TypeError, ValueError):
+        return []
+
+    with SessionLocal() as db:
+        owned_rows = (
+            db.query(GeneratedFile)
+            .filter(GeneratedFile.owner_id == actor_uuid)
+            .order_by(GeneratedFile.created_at.desc())
+            .all()
+        )
+        shared_rows = (
+            db.query(GeneratedFile)
+            .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
+            .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
+            .filter(TeamMember.user_id == actor_uuid)
+            .order_by(GeneratedFile.created_at.desc())
+            .all()
+        )
+
+        rows_by_id: dict[Any, Any] = {}
+        for row in [*owned_rows, *shared_rows]:
+            rows_by_id.setdefault(row.id, row)
+
+        rows = sorted(
+            rows_by_id.values(),
+            key=lambda row: row.created_at,
+            reverse=True,
+        )
+        drive_files: list[dict[str, Any]] = []
+        for row in rows:
+            source_path = get_file_path(row)
+            if not source_path.exists():
+                continue
+            drive_files.append(
+                {
+                    "id": str(row.id),
+                    "filename": row.filename,
+                    "mime_type": row.mime_type,
+                    "size_bytes": row.size_bytes,
+                    "workflow_id": str(row.workflow_id) if row.workflow_id else None,
+                    "source_node_label": row.source_node_label,
+                    "created_at": row.created_at,
+                    "source_path": str(source_path),
+                }
+            )
+        return drive_files
+
+
 def _unified_tool_executor(
     tool_def: dict[str, Any],
     name: str,
@@ -2251,7 +2313,12 @@ def _unified_tool_executor(
         skill_files = tool_def.get("_skill_files") or []
         skill_timeout = tool_def.get("_skill_timeout")
         effective_timeout = float(skill_timeout) if skill_timeout is not None else timeout_seconds
-        result = execute_skill_python(skill_files, args, effective_timeout)
+        drive_files = (
+            _load_skill_drive_files(str(tool_def.get("_actor_user_id") or ""))
+            if tool_def.get("_drive_files_enabled")
+            else None
+        )
+        result = execute_skill_python(skill_files, args, effective_timeout, drive_files=drive_files)
 
         if isinstance(result, SkillExecutionResult):
             if result.hitl_request:

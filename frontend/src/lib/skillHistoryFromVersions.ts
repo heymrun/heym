@@ -13,6 +13,7 @@ interface SkillSnapshotComparable {
   content: string;
   files: AgentSkill["files"];
   timeoutSeconds: number | undefined;
+  driveFilesEnabled: boolean | undefined;
 }
 
 function cloneSkill(skill: AgentSkill): AgentSkill {
@@ -48,6 +49,7 @@ export function normalizeSkillForCompare(skill: AgentSkill): SkillSnapshotCompar
       mimeType: file.mimeType,
     })),
     timeoutSeconds: skill.timeoutSeconds,
+    driveFilesEnabled: skill.driveFilesEnabled,
   };
 }
 
@@ -101,6 +103,9 @@ export function getSkillChangeLabels(previous: AgentSkill | null, current: Agent
   }
   if (getSkillTimeoutSeconds(previous) !== getSkillTimeoutSeconds(current)) {
     changes.push("Timeout");
+  }
+  if (!!previous.driveFilesEnabled !== !!current.driveFilesEnabled) {
+    changes.push("Drive access");
   }
 
   return changes;

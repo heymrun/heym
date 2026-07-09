@@ -28,6 +28,10 @@ Create share links with:
 
 Enable **Share with my teams** on a file to make it visible to all teams you currently belong to. Shared team members get read-only access; management actions stay owner-only.
 
+## Agent Skill Access
+
+Skills on the Agent node can opt into reading Drive files. When **Enable Drive files** is on for a skill, its Python code can read accessible Drive files by file id or exact filename through the generated `heym_drive.py` helper. The setting is off by default.
+
 See [Drive reference](../reference/drive.md) for full details.
 
 ## Related

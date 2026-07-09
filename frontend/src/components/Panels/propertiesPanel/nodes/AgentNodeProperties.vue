@@ -736,6 +736,7 @@ const {
         @history="openSkillHistory(skill, idx)"
         @update:name="updateAgentSkill(idx, 'name', $event)"
         @update:timeout-seconds="updateAgentSkill(idx, 'timeoutSeconds', $event)"
+        @update:drive-files-enabled="updateAgentSkill(idx, 'driveFilesEnabled', $event)"
         @update:content="updateAgentSkill(idx, 'content', $event)"
         @update:file-content="(fileIndex, value) => updateAgentSkillFile(idx, fileIndex, 'content', value)"
         @add-files="addAgentSkillFiles(idx, $event)"

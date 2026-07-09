@@ -73,6 +73,12 @@ Reference the file by its ID from the skill output: `$agentLabel._generated_file
 
 See the [Drive node documentation](../nodes/drive-node.md) for configuration details.
 
+## Reading Drive Files from Skills
+
+Agent skills can opt into Drive reads with the skill card's **Enable Drive files** setting. When enabled, the skill runtime includes a generated `heym_drive.py` helper. Skill code can import helpers such as `read_drive_text`, `read_drive_file`, `read_drive_base64`, `get_drive_file`, `get_drive_file_path`, and `list_drive_files`.
+
+Drive reads are limited to files accessible to the workflow actor: owned files and files shared with the actor through teams. Use a file id for exact lookup, or an exact filename when the user refers to a file by name. Filename lookup returns the newest accessible file with that name; `list_drive_files(filename="...")` returns all matches.
+
 ## Related
 
 - [Drive Node](../nodes/drive-node.md) - Workflow operations (list, get, delete, password, TTL, max downloads, team sharing)

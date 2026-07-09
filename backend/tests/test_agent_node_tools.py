@@ -400,3 +400,95 @@ class TestAgentNodeToolIntegration(unittest.TestCase):
         node_tool = next(t for t in captured_tools[0] if t["name"] == "fetch_users")
         self.assertEqual(node_tool["_source"], "node_tool")
         self.assertIn("curl", node_tool["parameters"]["properties"])
+
+    def test_skill_tool_definitions_carry_drive_access_only_when_enabled(self) -> None:
+        """Skill tool metadata exposes Drive files only for opted-in skills."""
+        import uuid
+        from unittest.mock import patch
+
+        actor_user_id = uuid.uuid4()
+        agent_id = "agent-1"
+        nodes = {
+            agent_id: {
+                "type": "agent",
+                "data": {
+                    "label": "Agent",
+                    "model": "claude-3-5-sonnet-20241022",
+                    "credentialId": "cred-1",
+                    "tools": [],
+                    "mcpConnections": [],
+                    "skills": [
+                        {
+                            "id": "drive-skill",
+                            "name": "Drive Skill",
+                            "content": "---\nname: drive-skill\n---",
+                            "files": [{"path": "main.py", "content": "print('ok')"}],
+                            "driveFilesEnabled": True,
+                        },
+                        {
+                            "id": "plain-skill",
+                            "name": "Plain Skill",
+                            "content": "---\nname: plain-skill\n---",
+                            "files": [{"path": "main.py", "content": "print('ok')"}],
+                            "driveFilesEnabled": False,
+                        },
+                    ],
+                    "toolTimeoutSeconds": 30,
+                    "maxToolIterations": 5,
+                    "systemInstruction": "You are helpful.",
+                    "userMessage": "hello",
+                    "active": True,
+                },
+            },
+        }
+        ex = self._make_full_executor(nodes, [])
+        ex.actor_user_id = actor_user_id
+
+        captured_tools: list[list[dict]] = []
+        captured_system_instructions: list[str] = []
+
+        def fake_execute_llm_with_tools(**kwargs):  # type: ignore[misc]
+            captured_tools.append(kwargs.get("tools", []))
+            captured_system_instructions.append(kwargs.get("system_instruction", ""))
+
+            async def _coro() -> dict:
+                return {
+                    "text": "done",
+                    "model": "claude-3-5-sonnet-20241022",
+                    "tool_calls": [],
+                    "usage": {},
+                    "elapsed_ms": 10.0,
+                }
+
+            return _coro()
+
+        mock_cred = MagicMock()
+        mock_cred.type = MagicMock()
+        mock_cred.type.value = "anthropic"
+        mock_cred.encrypted_config = b"enc"
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_cred
+        mock_db.__enter__ = MagicMock(return_value=mock_db)
+        mock_db.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("app.services.llm_service.execute_llm_with_tools", fake_execute_llm_with_tools),
+            patch("app.db.session.SessionLocal", return_value=mock_db),
+            patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"api_key": "test-key"},
+            ),
+            patch(
+                "app.services.agent_memory_service.augment_system_instruction_with_memory",
+                side_effect=lambda si, *a, **kw: si,
+            ),
+        ):
+            ex._execute_agent_node(agent_id, {}, nodes[agent_id]["data"])
+
+        drive_tool = next(t for t in captured_tools[0] if t["name"] == "skill_drive_skill")
+        plain_tool = next(t for t in captured_tools[0] if t["name"] == "skill_plain_skill")
+        self.assertIs(drive_tool["_drive_files_enabled"], True)
+        self.assertEqual(drive_tool["_actor_user_id"], str(actor_user_id))
+        self.assertIs(plain_tool["_drive_files_enabled"], False)
+        self.assertIn("Drive files are enabled for this skill", captured_system_instructions[0])

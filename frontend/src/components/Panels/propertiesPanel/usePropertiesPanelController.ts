@@ -6994,6 +6994,7 @@ export function usePropertiesPanelController() {
         content: "",
         files: [],
         timeoutSeconds: 30,
+        driveFilesEnabled: false,
       },
     ]);
   }
@@ -7008,7 +7009,7 @@ export function usePropertiesPanelController() {
   function updateAgentSkill(
     index: number,
     field: keyof AgentSkill,
-    value: string | number | AgentSkillFile[] | undefined
+    value: string | number | boolean | AgentSkillFile[] | undefined
   ): void {
     if (!selectedNode.value) return;
     const current = [...(selectedNode.value.data.skills || [])];
@@ -7130,6 +7131,7 @@ export function usePropertiesPanelController() {
               ...skill,
               id: originalSkill.id,
               timeoutSeconds: skill.timeoutSeconds ?? originalSkill.timeoutSeconds ?? 30,
+              driveFilesEnabled: skill.driveFilesEnabled ?? originalSkill.driveFilesEnabled ?? false,
             }
           : skill,
       );
@@ -7172,6 +7174,7 @@ export function usePropertiesPanelController() {
             content: await file.text(),
             files: [],
             timeoutSeconds: 30,
+            driveFilesEnabled: false,
           },
         ],
         replaceSkillId,

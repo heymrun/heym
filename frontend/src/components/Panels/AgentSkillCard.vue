@@ -1,15 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import {
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  Download,
-  Loader2,
-  Sparkles,
-  Trash2,
-  Upload,
-} from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Clock, Download, Loader2, Sparkles, Trash2, Upload } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
@@ -32,10 +23,7 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-
-const sortedSkillFiles = computed(() =>
-  getSkillFilesSortedForDisplay(props.skill.files ?? []),
-);
+const sortedSkillFiles = computed(() => getSkillFilesSortedForDisplay(props.skill.files ?? []));
 
 const emit = defineEmits<{
   (e: "toggle-expand"): void;
@@ -45,6 +33,7 @@ const emit = defineEmits<{
   (e: "history"): void;
   (e: "update:name", value: string): void;
   (e: "update:timeout-seconds", value: number): void;
+  (e: "update:drive-files-enabled", value: boolean): void;
   (e: "update:content", value: string): void;
   (e: "update:file-content", fileIndex: number, value: string): void;
   (e: "add-files", files: File[]): void;
@@ -193,6 +182,20 @@ function handleFileDrop(event: DragEvent): void {
           placeholder="30"
           @update:model-value="emit('update:timeout-seconds', parseInt($event, 10) || 30)"
         />
+      </div>
+      <div class="rounded border border-border/60 bg-muted/20 p-3">
+        <label class="flex items-start gap-2">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-input bg-background"
+            :checked="!!skill.driveFilesEnabled"
+            @change="emit('update:drive-files-enabled', ($event.target as HTMLInputElement).checked)"
+          >
+          <span class="min-w-0">
+            <span class="block text-sm font-medium text-foreground">Enable Drive files</span>
+            <span class="block text-xs leading-snug text-muted-foreground">Allow this skill to read accessible Drive files by id or filename during execution.</span>
+          </span>
+        </label>
       </div>
       <div>
         <Label class="text-xs">SKILL.md Content</Label>

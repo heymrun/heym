@@ -163,6 +163,51 @@ class BuildSkillBuilderPromptTests(unittest.TestCase):
         self.assertIn("`Name` -> adjacent empty cell", prompt)
         self.assertIn("update it to write the value into the adjacent empty cell", prompt)
 
+    def test_large_text_attachment_context_is_not_omitted_by_two_mb_gate(self) -> None:
+        large_text = "alpha " * 400_000
+        skill = SkillBuilderSkill(
+            name="large-context",
+            files=[SkillBuilderFile(path="SKILL.md", content="---\nname: large-context\n---")],
+            attachments=[
+                SkillBuilderAttachment(
+                    path="large.txt",
+                    encoding="text",
+                    mime_type="text/plain",
+                    size_bytes=len(large_text.encode()),
+                    content=large_text,
+                )
+            ],
+        )
+
+        prompt = build_skill_builder_prompt(skill)
+
+        self.assertIn("large.txt", prompt)
+        self.assertIn("alpha alpha", prompt)
+        self.assertNotIn("larger than 2 MB", prompt)
+        self.assertNotIn("Content context omitted", prompt)
+
+    def test_message_pdf_attachment_context_is_extracted(self) -> None:
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Quarterly report text"
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_page]
+
+        attachment = SkillBuilderAttachment(
+            path="report.pdf",
+            encoding="base64",
+            mime_type="application/pdf",
+            size_bytes=128,
+            content=base64.b64encode(b"%PDF fake").decode("ascii"),
+        )
+
+        with patch("pypdf.PdfReader", return_value=mock_reader):
+            prompt = build_skill_builder_prompt(None, [attachment])
+
+        self.assertIn("Uploaded Files For This Request", prompt)
+        self.assertIn("report.pdf", prompt)
+        self.assertIn("Page 1:", prompt)
+        self.assertIn("Quarterly report text", prompt)
+
 
 class RunSkillBuilderTests(unittest.IsolatedAsyncioTestCase):
     """Verify emitted SSE events for the skill builder loop."""

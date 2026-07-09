@@ -2,9 +2,23 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { Download, FileCode2, FileText, Loader2, Send, Sparkles, X } from "lucide-vue-next";
+import {
+  Download,
+  FileCode2,
+  FileText,
+  Loader2,
+  Send,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-vue-next";
 
-import type { SkillBuilderExistingSkill, SkillBuilderFile } from "@/services/skillBuilderApi";
+import type {
+  SkillBuilderAttachment,
+  SkillBuilderExistingSkill,
+  SkillBuilderFile,
+} from "@/services/skillBuilderApi";
 import type { AgentSkill, AgentSkillFile } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
@@ -12,6 +26,8 @@ import {
   createSkillFilesZipBlob,
   extractNameFromFrontmatter,
   getSkillZipFileName,
+  normalizeSkillArchivePath,
+  parseSkillAssetFile,
 } from "@/lib/skillZipParser";
 import { useSkillBuilder } from "@/composables/useSkillBuilder";
 
@@ -52,6 +68,10 @@ const {
 const activeFileIndex = ref(0);
 const inputText = ref("");
 const includedAttachmentPaths = ref<Set<string>>(new Set());
+const pendingAttachmentPaths = ref<Set<string>>(new Set());
+const uploadedAttachmentFiles = ref<AgentSkillFile[]>([]);
+const attachmentInputRef = ref<HTMLInputElement | null>(null);
+const isAttachmentDragActive = ref(false);
 const isDownloading = ref(false);
 const isSaving = ref(false);
 const localError = ref<string | null>(null);
@@ -63,7 +83,6 @@ const keydownCaptureOptions = { capture: true } as const;
 const customScrollbarTrackInset = 16;
 const customScrollbarMinThumbHeight = 24;
 const SKILL_BUILDER_MAX_FILE_BYTES = 75 * 1024;
-const SKILL_BUILDER_MAX_ATTACHMENT_CONTEXT_BYTES = 2 * 1024 * 1024;
 const SKILL_BUILDER_TEXT_EXTENSIONS = new Set([
   "md",
   "py",
@@ -107,8 +126,8 @@ function canSendFileToSkillBuilder(file: AgentSkillFile): boolean {
   return getTextSizeBytes(file.content) <= SKILL_BUILDER_MAX_FILE_BYTES;
 }
 
-function canIncludeAttachmentContent(file: AgentSkillFile): boolean {
-  return getSkillFileSizeBytes(file) <= SKILL_BUILDER_MAX_ATTACHMENT_CONTEXT_BYTES;
+function canIncludeAttachmentContent(_file: AgentSkillFile): boolean {
+  return true;
 }
 
 function formatFileSize(bytes: number): string {
@@ -135,6 +154,127 @@ function setAttachmentIncluded(path: string, included: boolean): void {
   includedAttachmentPaths.value = next;
 }
 
+function getArchivePathSet(): Set<string> {
+  return new Set([
+    ...existingSkillFiles.value.map((file) => file.path),
+    ...uploadedAttachmentFiles.value.map((file) => file.path),
+    ...currentFiles.value.map((file) => file.path),
+  ]);
+}
+
+function getUniqueUploadedAttachmentPath(fileName: string, reservedPaths: Set<string>): string {
+  const fallbackName = fileName.trim() || "attachment";
+  const basePath =
+    normalizeSkillArchivePath(`attachments/${fallbackName}`) || "attachments/attachment";
+  if (!reservedPaths.has(basePath)) {
+    return basePath;
+  }
+
+  const slashIndex = basePath.lastIndexOf("/");
+  const directory = slashIndex >= 0 ? basePath.slice(0, slashIndex + 1) : "";
+  const name = slashIndex >= 0 ? basePath.slice(slashIndex + 1) : basePath;
+  const dotIndex = name.lastIndexOf(".");
+  const stem = dotIndex > 0 ? name.slice(0, dotIndex) : name;
+  const extension = dotIndex > 0 ? name.slice(dotIndex) : "";
+
+  let counter = 2;
+  for (;;) {
+    const candidate = `${directory}${stem}-${counter}${extension}`;
+    if (!reservedPaths.has(candidate)) {
+      return candidate;
+    }
+    counter += 1;
+  }
+}
+
+function openAttachmentPicker(): void {
+  attachmentInputRef.value?.click();
+}
+
+async function addUploadedAttachmentFiles(files: File[]): Promise<void> {
+  if (files.length === 0) {
+    return;
+  }
+
+  const parsedFiles: AgentSkillFile[] = [];
+  const reservedPaths = getArchivePathSet();
+  for (const file of files) {
+    const path = getUniqueUploadedAttachmentPath(file.name, reservedPaths);
+    reservedPaths.add(path);
+    const parsedFile = await parseSkillAssetFile(file, path);
+    if (parsedFile) {
+      parsedFiles.push(parsedFile);
+    }
+  }
+
+  if (parsedFiles.length === 0) {
+    localError.value = "No usable attachment files found";
+    return;
+  }
+
+  uploadedAttachmentFiles.value = [...uploadedAttachmentFiles.value, ...parsedFiles];
+
+  const nextPending = new Set(pendingAttachmentPaths.value);
+  const nextIncluded = new Set(includedAttachmentPaths.value);
+  parsedFiles.forEach((file) => {
+    nextPending.add(file.path);
+    nextIncluded.add(file.path);
+  });
+  pendingAttachmentPaths.value = nextPending;
+  includedAttachmentPaths.value = nextIncluded;
+  localError.value = null;
+  nextTick(scheduleCustomScrollbarUpdate);
+}
+
+function handleAttachmentInputChange(event: Event): void {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  void addUploadedAttachmentFiles(Array.from(input.files ?? []));
+  input.value = "";
+}
+
+function handleAttachmentDragOver(event: DragEvent): void {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  isAttachmentDragActive.value = true;
+}
+
+function handleAttachmentDragLeave(event: DragEvent): void {
+  const currentTarget = event.currentTarget;
+  const relatedTarget = event.relatedTarget;
+  if (
+    currentTarget instanceof HTMLElement &&
+    relatedTarget instanceof Node &&
+    currentTarget.contains(relatedTarget)
+  ) {
+    return;
+  }
+  isAttachmentDragActive.value = false;
+}
+
+function handleAttachmentDrop(event: DragEvent): void {
+  isAttachmentDragActive.value = false;
+  void addUploadedAttachmentFiles(Array.from(event.dataTransfer?.files ?? []));
+}
+
+function removeUploadedAttachment(path: string): void {
+  uploadedAttachmentFiles.value = uploadedAttachmentFiles.value.filter(
+    (file) => file.path !== path,
+  );
+  const nextPending = new Set(pendingAttachmentPaths.value);
+  nextPending.delete(path);
+  pendingAttachmentPaths.value = nextPending;
+
+  const nextIncluded = new Set(includedAttachmentPaths.value);
+  nextIncluded.delete(path);
+  includedAttachmentPaths.value = nextIncluded;
+  nextTick(scheduleCustomScrollbarUpdate);
+}
+
 const existingSkillFiles = computed<AgentSkillFile[]>(() => {
   if (!props.existingSkill) {
     return [];
@@ -151,7 +291,22 @@ const existingSkillFiles = computed<AgentSkillFile[]>(() => {
   ];
 });
 
-const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() => {
+function toSkillBuilderAttachment(
+  file: AgentSkillFile,
+  includeContent: boolean,
+): SkillBuilderAttachment {
+  return {
+    path: file.path,
+    encoding: file.encoding ?? "text",
+    mime_type: file.mimeType,
+    size_bytes: getSkillFileSizeBytes(file),
+    content: includeContent ? file.content : undefined,
+  };
+}
+
+function buildExistingSkillForApi(
+  excludedAttachmentPaths: Set<string> = new Set(),
+): SkillBuilderExistingSkill | undefined {
   if (!props.existingSkill) {
     return undefined;
   }
@@ -166,21 +321,32 @@ const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() =
   return {
     name: props.existingSkill.name,
     files: editableFiles,
-    attachments: preservedSkillFiles.value.map((file) => ({
-      path: file.path,
-      encoding: file.encoding ?? "text",
-      mime_type: file.mimeType,
-      size_bytes: getSkillFileSizeBytes(file),
-      content:
-        isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file)
-          ? file.content
-          : undefined,
-    })),
+    attachments: preservedSkillFiles.value
+      .filter((file) => !excludedAttachmentPaths.has(file.path))
+      .map((file) =>
+        toSkillBuilderAttachment(
+          file,
+          isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file),
+        ),
+      ),
   };
-});
+}
 
-const preservedSkillFiles = computed<AgentSkillFile[]>(() =>
+const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() =>
+  buildExistingSkillForApi(),
+);
+
+const existingPreservedSkillFiles = computed<AgentSkillFile[]>(() =>
   existingSkillFiles.value.filter((file) => !canSendFileToSkillBuilder(file)),
+);
+
+const preservedSkillFiles = computed<AgentSkillFile[]>(() => [
+  ...existingPreservedSkillFiles.value,
+  ...uploadedAttachmentFiles.value,
+]);
+
+const pendingAttachmentFiles = computed<AgentSkillFile[]>(() =>
+  uploadedAttachmentFiles.value.filter((file) => pendingAttachmentPaths.value.has(file.path)),
 );
 
 const previewFiles = computed<SkillBuilderPreviewFile[]>(() => {
@@ -206,9 +372,9 @@ const preservedFileNote = computed(() => {
     (file) => isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file),
   ).length;
   if (includedCount > 0) {
-    return `${preservedCount} non-editable, large, or non-text file(s) will stay attached. ${includedCount} selected file(s) will also be sent as AI context.`;
+    return `${preservedCount} non-editable or non-text file(s) will stay attached. ${includedCount} selected file(s) will also be sent as AI context.`;
   }
-  return `${preservedCount} non-editable, large, or non-text file(s) will stay attached. Select individual files on the right to include them as AI context.`;
+  return `${preservedCount} non-editable or non-text file(s) will stay attached. Select individual files on the right to include them as AI context.`;
 });
 
 const modalTitle = computed(() => {
@@ -231,10 +397,6 @@ const activeAttachment = computed<AgentSkillFile | null>(() => {
 
 const activeAttachmentSize = computed(() =>
   activeAttachment.value ? getSkillFileSizeBytes(activeAttachment.value) : 0,
-);
-
-const activeAttachmentCanInclude = computed(() =>
-  activeAttachment.value ? canIncludeAttachmentContent(activeAttachment.value) : false,
 );
 
 const activeAttachmentIncluded = computed(() =>
@@ -403,8 +565,19 @@ function submit(): void {
 
   localError.value = null;
   const prompt = inputText.value.trim();
+  const promptAttachmentPaths = new Set(pendingAttachmentPaths.value);
+  const promptAttachments = pendingAttachmentFiles.value.map((file) =>
+    toSkillBuilderAttachment(file, true),
+  );
   inputText.value = "";
-  sendMessage(prompt, props.credentialId, props.model, existingSkillForApi.value);
+  pendingAttachmentPaths.value = new Set();
+  sendMessage(
+    prompt,
+    props.credentialId,
+    props.model,
+    buildExistingSkillForApi(promptAttachmentPaths),
+    promptAttachments,
+  );
 }
 
 function handleInputKeydown(event: KeyboardEvent): void {
@@ -509,6 +682,9 @@ watch(
       reset();
       inputText.value = "";
       includedAttachmentPaths.value = new Set();
+      pendingAttachmentPaths.value = new Set();
+      uploadedAttachmentFiles.value = [];
+      isAttachmentDragActive.value = false;
       localError.value = null;
       activeFileIndex.value = 0;
       initialize(getGreeting(), existingSkillForApi.value?.files ?? []);
@@ -526,6 +702,9 @@ watch(
     reset();
     inputText.value = "";
     includedAttachmentPaths.value = new Set();
+    pendingAttachmentPaths.value = new Set();
+    uploadedAttachmentFiles.value = [];
+    isAttachmentDragActive.value = false;
     localError.value = null;
     activeFileIndex.value = 0;
   },
@@ -662,6 +841,76 @@ onUnmounted(() => {
                 placeholder="Describe the skill or the changes you want..."
                 @keydown="handleInputKeydown"
               />
+              <div class="mt-2">
+                <input
+                  ref="attachmentInputRef"
+                  type="file"
+                  class="sr-only"
+                  multiple
+                  @change="handleAttachmentInputChange"
+                >
+                <div
+                  :class="[
+                    'rounded-lg border border-dashed px-3 py-2 transition-colors',
+                    isAttachmentDragActive
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border/70 bg-muted/10',
+                  ]"
+                  @dragenter.stop.prevent="isAttachmentDragActive = true"
+                  @dragover.stop.prevent="handleAttachmentDragOver"
+                  @dragleave.stop.prevent="handleAttachmentDragLeave"
+                  @drop.stop.prevent="handleAttachmentDrop"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="min-w-0 text-xs text-muted-foreground">
+                      <span v-if="pendingAttachmentFiles.length > 0">
+                        {{ pendingAttachmentFiles.length }} file(s) attached to this comment
+                      </span>
+                      <span v-else>
+                        Drop files for this comment
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-8 gap-1"
+                      :disabled="isStreaming || isDownloading || isSaving"
+                      @click="openAttachmentPicker"
+                    >
+                      <Upload class="h-3.5 w-3.5" />
+                      Add files
+                    </Button>
+                  </div>
+                  <div
+                    v-if="uploadedAttachmentFiles.length > 0"
+                    class="mt-2 flex flex-wrap gap-1.5"
+                  >
+                    <span
+                      v-for="file in uploadedAttachmentFiles"
+                      :key="file.path"
+                      class="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border/70 bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                      :title="file.path"
+                    >
+                      <span class="min-w-0 max-w-40 truncate">{{ file.path }}</span>
+                      <span
+                        v-if="pendingAttachmentPaths.has(file.path)"
+                        class="shrink-0 text-primary"
+                      >
+                        next
+                      </span>
+                      <button
+                        type="button"
+                        class="shrink-0 text-muted-foreground hover:text-destructive"
+                        :disabled="isStreaming || isDownloading || isSaving"
+                        :aria-label="`Remove ${file.path}`"
+                        @click="removeUploadedAttachment(file.path)"
+                      >
+                        <Trash2 class="h-3 w-3" />
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </div>
               <div class="mt-2 flex min-h-11 items-center justify-between gap-3">
                 <p class="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
                   {{ preservedFileNote ?? (credentialId && model ? "Press Enter to send, Shift+Enter for a new line." : "Select an agent credential and model to use AI Build.") }}
@@ -767,7 +1016,7 @@ onUnmounted(() => {
                           type="checkbox"
                           class="mt-0.5 h-3.5 w-3.5 rounded border-border bg-background"
                           :checked="activeAttachmentIncluded"
-                          :disabled="!activeAttachmentCanInclude || isStreaming || isDownloading || isSaving"
+                          :disabled="isStreaming || isDownloading || isSaving"
                           @change="handleActiveAttachmentIncludedChange"
                         >
                         <span class="min-w-0">
@@ -775,16 +1024,9 @@ onUnmounted(() => {
                             Include this file in AI context
                           </span>
                           <span
-                            v-if="activeAttachmentCanInclude"
                             class="block leading-snug"
                           >
-                            Sends only this attachment to AI. DOCX files are summarized with tables, rows, and empty value cells.
-                          </span>
-                          <span
-                            v-else
-                            class="block leading-snug text-destructive"
-                          >
-                            This file is larger than 2 MB and stays metadata-only.
+                            Sends this attachment to AI. Text, PDF, and DOCX files are extracted into prompt context when possible.
                           </span>
                         </span>
                       </label>
