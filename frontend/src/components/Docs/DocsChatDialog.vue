@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Check, ChevronDown, Copy, FileText, Loader2, Send, Square, Trash2, Wand2 } from "lucide-vue-next";
+import { Check, Copy, FileText, Loader2, Send, Square, Trash2, Wand2 } from "lucide-vue-next";
 
 import { useDocsChatDialog } from "@/components/Docs/useDocsChatDialog";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 
 interface Props { open: boolean; docPath: string | null }
 
@@ -11,12 +12,14 @@ const props = defineProps<Props>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const {
-  credentials,
-  models,
   selectedCredentialId,
   selectedModel,
   loadingModels,
   modelsLoadFailed,
+  credentialOptions,
+  modelOptions,
+  credentialSelectPlaceholder,
+  modelSelectPlaceholder,
   messages,
   inputText,
   streaming,
@@ -55,54 +58,37 @@ const {
     </template>
     <div class="flex h-[70vh] min-h-[420px] min-w-0 flex-col">
       <div class="grid grid-cols-2 gap-2 shrink-0 border-b border-border/50 pb-3">
-        <div class="relative min-w-0">
-          <select
-            v-model="selectedCredentialId"
-            class="h-10 w-full cursor-pointer appearance-none truncate rounded-lg border border-input bg-background pl-3 pr-9 text-sm"
-          >
-            <option
-              value=""
-              disabled
-            >
-              {{ credentials.length === 0 ? "No credentials" : "Select credential..." }}
-            </option>
-            <option
-              v-for="credential in credentials"
-              :key="credential.id"
-              :value="credential.id"
-            >
-              {{ credential.name }}
-            </option>
-          </select>
-          <ChevronDown class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        </div>
-        <div class="relative min-w-0">
-          <select
-            v-model="selectedModel"
-            :disabled="!selectedCredentialId || loadingModels || modelsLoadFailed"
-            class="h-10 w-full cursor-pointer appearance-none truncate rounded-lg border border-input bg-background pl-3 pr-9 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option
-              value=""
-              disabled
-            >
-              {{ loadingModels ? "Loading..." : modelsLoadFailed ? "Failed to load" : !selectedCredentialId ? "Select credential first" : "Select model..." }}
-            </option>
-            <option
-              v-for="model in models"
-              :key="model.id"
-              :value="model.id"
-            >
-              {{ model.name }}
-            </option>
-          </select>
-          <Loader2
-            v-if="loadingModels"
-            class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+        <div
+          class="min-w-0"
+          data-testid="docs-chat-credential-selector"
+        >
+          <SearchableSelect
+            id="docs-chat-credential-select"
+            :model-value="selectedCredentialId"
+            :options="credentialOptions"
+            :placeholder="credentialSelectPlaceholder"
+            search-placeholder="Search credentials..."
+            empty-text="No credentials found."
+            select-class="h-10 min-h-0 rounded-lg border-input bg-background shadow-none"
+            content-class="z-[70]"
+            @update:model-value="selectedCredentialId = $event ?? ''"
           />
-          <ChevronDown
-            v-else
-            class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+        </div>
+        <div
+          class="min-w-0"
+          data-testid="docs-chat-model-selector"
+        >
+          <SearchableSelect
+            id="docs-chat-model-select"
+            :model-value="selectedModel"
+            :options="modelOptions"
+            :placeholder="modelSelectPlaceholder"
+            search-placeholder="Search models..."
+            empty-text="No models found."
+            :disabled="!selectedCredentialId || loadingModels || modelsLoadFailed"
+            select-class="h-10 min-h-0 rounded-lg border-input bg-background shadow-none"
+            content-class="z-[70]"
+            @update:model-value="selectedModel = $event ?? ''"
           />
         </div>
       </div>
