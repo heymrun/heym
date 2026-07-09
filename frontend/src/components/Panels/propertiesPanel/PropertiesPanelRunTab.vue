@@ -53,8 +53,8 @@ const {
     <div class="flex-1 flex flex-col overflow-hidden min-h-0">
       <div
         :class="[
-          'overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 min-w-0',
-          !lastExecutedNode || isExecuting ? 'flex-1' : 'flex-shrink-0'
+          'overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 min-w-0 min-h-0',
+          lastExecutedNode && !isExecuting ? 'flex-[3]' : 'flex-1',
         ]"
       >
         <template v-if="isGenericWebhookBodyMode">
@@ -138,7 +138,7 @@ const {
       <div
         v-if="lastExecutedNode && !isExecuting"
         :class="[
-          'flex-1 flex flex-col overflow-hidden pt-4 px-4 pb-4 min-h-0',
+          'flex-[2] flex flex-col overflow-hidden pt-4 px-4 pb-4 min-h-0',
           allInputFields.length > 0 || isGenericWebhookBodyMode ? 'border-t border-border/30' : ''
         ]"
       >

@@ -7643,6 +7643,22 @@ def mask_sensitive_output(output: dict, credentials_context: dict[str, str]) -> 
     return json.loads(output_str)
 
 
+def mask_credentials_context(credentials_context: dict[str, str] | None) -> dict[str, str]:
+    """Return a preview-safe credentials context with secret values masked."""
+    if not credentials_context:
+        return {}
+
+    masked_context: dict[str, str] = {}
+    for name, value in credentials_context.items():
+        if not value:
+            masked_context[name] = value
+        elif len(value) > 7:
+            masked_context[name] = value[:7] + "**"
+        else:
+            masked_context[name] = "**"
+    return masked_context
+
+
 def execute_workflow(
     workflow_id: uuid.UUID,
     nodes: list[dict],

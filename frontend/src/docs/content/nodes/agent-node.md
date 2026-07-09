@@ -264,16 +264,17 @@ Example — Slack MCP:
 
 ## Skills
 
-Skills are SKILL.md instructions plus optional Python files. They extend the agent's system context and can add Python tools.
+Skills are SKILL.md instructions plus optional Python files and bundled assets. They extend the agent's system context and can add Python tools.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | string | Skill name |
 | `content` | string | SKILL.md content (instructions) |
 | `timeoutSeconds` | number | Timeout for skill Python execution (default: 30) |
-| `files` | array | Optional `{ path, content }` entries (e.g. `.py` scripts) |
+| `files` | array | Optional `{ path, content, encoding, mimeType }` entries (e.g. `.py` scripts or binary assets stored as base64) |
 
 Skills can be added by dropping a `.zip` or `.md` file onto the Skills area.
+After expanding a skill card, drop any file onto that skill to attach or replace a bundled file, including binary assets such as PDFs and images.
 Use the download button on a skill card to export that skill as a `.zip` archive for backup or reuse in another workflow.
 
 Each skill card has four actions on the row below the title:
@@ -306,7 +307,8 @@ The Skills section also includes **AI Build**:
 - **Download ZIP** exports the current preview without adding it to the node
 - **Save & Add** saves the generated files back through the same ZIP parsing flow used by manual uploads
 
-When editing with AI, Heym only sends text `.md` and `.py` skill files to the builder. Binary files are not included; if a skill needs images or other binary inputs, pass them as workflow inputs instead of embedding them inside Python source.
+When editing with AI, Heym only sends text `.md` and `.py` skill files to the builder. Binary and other non-editable attachments are preserved and shared with the builder as path metadata so generated Python code can keep relative file references correct.
+Select an attached file in the right panel and enable **Include this file in AI context** when the AI needs to inspect a bundled template. Supported attachments such as DOCX files are summarized for the AI, including table rows and empty value cells, while oversized files stay metadata-only.
 
 ## Guardrails
 

@@ -1,6 +1,6 @@
 # Teams
 
-Teams let you share workflows, credentials, global variables, and vector stores with a group of users at once.
+Teams let you share workflows, credentials, global variables, vector stores, and Drive files with a group of users at once.
 
 ## Overview
 
@@ -34,14 +34,16 @@ Both models are additive. A user gains access if they are either:
 | Credentials | Share dialog in Credentials tab |
 | Global Variables | Share dialog in Variables tab |
 | Vector Stores | Share dialog in Vectors tab |
+| Drive Files | Share dialog in Drive tab or Drive node `shareWithMyTeams` / `unshareWithMyTeams` operations |
 
 For templates, when visibility is **Specific users**, you can also select teams. All members of selected teams gain access to the template.
+Drive file team shares are read-only for team members; the file owner keeps management permissions.
 
 ## API Endpoints
 
 - `GET /api/teams` – List teams the user belongs to
 - `GET /api/teams/{id}` – Get team details with members
-- `GET /api/teams/{id}/shared-entities` – Returns entities shared with the team (workflows, credentials, global variables, vector stores, workflow templates, node templates)
+- `GET /api/teams/{id}/shared-entities` – Returns entities shared with the team (workflows, credentials, global variables, vector stores, files, workflow templates, node templates)
 - `POST /api/teams` – Create team
 - `PATCH /api/teams/{id}` – Update team
 - `DELETE /api/teams/{id}` – Delete team (creator only)
@@ -54,6 +56,7 @@ Team shares per resource:
 - `GET/POST/DELETE /api/credentials/{id}/team-shares`
 - `GET/POST/DELETE /api/global-variables/{id}/team-shares`
 - `GET/POST/DELETE /api/vector-stores/{id}/team-shares`
+- `PATCH /api/files/{id}/team-sharing`
 
 ## Related
 

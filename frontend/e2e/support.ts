@@ -113,9 +113,11 @@ export async function uploadDriveFile(
   page: Page,
   filename: string,
   contents: string,
+  shareWithMyTeams = false,
 ): Promise<{ id: string }> {
   const response = await page.request.post("/api/files/upload", {
     multipart: {
+      share_with_my_teams: String(shareWithMyTeams),
       file: {
         name: filename,
         mimeType: "text/plain",

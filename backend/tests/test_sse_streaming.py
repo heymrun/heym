@@ -14,6 +14,7 @@ from app.services.workflow_executor import (
     _wrap_value,
     build_node_start_message,
     execute_workflow_streaming,
+    mask_credentials_context,
     mask_sensitive_output,
 )
 
@@ -262,6 +263,24 @@ class NodeResultTimingMetadataTests(unittest.TestCase):
 
 
 class MaskSensitiveOutputTests(unittest.TestCase):
+    def test_mask_credentials_context_masks_values_for_preview(self) -> None:
+        masked = mask_credentials_context(
+            {
+                "LongToken": "sk-live-secret-key-value",
+                "ShortToken": "secret",
+                "EmptyToken": "",
+            }
+        )
+
+        self.assertEqual(
+            masked,
+            {
+                "LongToken": "sk-live**",
+                "ShortToken": "**",
+                "EmptyToken": "",
+            },
+        )
+
     def test_masks_dot_wrapped_outputs_without_json_serialization_error(self) -> None:
         output = {
             "value": _wrap_value(

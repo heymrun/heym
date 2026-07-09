@@ -69,7 +69,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Sentry](../nodes/sentry-node.md) | Manage Sentry organizations, projects, teams, issues, events, and releases | 1 | 1 |
 | [Amazon S3](../nodes/amazon-s3-node.md) | Manage buckets and folders; list, upload, download, copy, and delete objects | 1 | 1 |
 | [DataTable](../nodes/datatable-node.md) | Read/write Heym DataTables (first-party storage) | 1 | 1 |
-| [Drive](../nodes/drive-node.md) | Manage Drive files: delete, set password, TTL, max downloads | 1 | 1 |
+| [Drive](../nodes/drive-node.md) | Manage Drive files: delete, set password, TTL, max downloads, team share/unshare | 1 | 1 |
 
 ## Automation Nodes
 

@@ -10,9 +10,18 @@ export interface SkillBuilderFile {
   content: string;
 }
 
+export interface SkillBuilderAttachment {
+  path: string;
+  encoding: "text" | "base64";
+  mime_type?: string;
+  size_bytes?: number;
+  content?: string;
+}
+
 export interface SkillBuilderExistingSkill {
   name: string;
   files: SkillBuilderFile[];
+  attachments?: SkillBuilderAttachment[];
 }
 
 export interface SkillBuilderRequest {

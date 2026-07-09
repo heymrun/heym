@@ -10,6 +10,8 @@ from app.api.deps import get_current_user, get_db
 from app.db.models import (
     Credential,
     CredentialTeamShare,
+    FileTeamShare,
+    GeneratedFile,
     GlobalVariable,
     GlobalVariableTeamShare,
     NodeTemplate,
@@ -308,12 +310,20 @@ async def get_team_shared_entities(
     )
     data_tables = [TeamSharedEntityItem(id=r[0], name=r[1]) for r in dt_result.all()]
 
+    files_result = await db.execute(
+        select(GeneratedFile.id, GeneratedFile.filename)
+        .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
+        .where(FileTeamShare.team_id == team_id_val)
+    )
+    files = [TeamSharedEntityItem(id=r[0], name=r[1]) for r in files_result.all()]
+
     return TeamSharedEntitiesResponse(
         workflows=workflows,
         credentials=credentials,
         global_variables=global_variables,
         vector_stores=vector_stores,
         data_tables=data_tables,
+        files=files,
         workflow_templates=workflow_templates,
         node_templates=node_templates,
     )

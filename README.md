@@ -314,7 +314,7 @@ docker run \
 
 Open the editor in your browser at port `4017` in either setup.
 See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
-For direct `docker run` setups, the `data/files` mount keeps Drive uploads and skill-generated files available across container restarts.
+For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts.
 The Docker socket mount supports Docker-based MCP stdio tools and grants broad host control. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
 
 ## Deploy & Call Workflows
@@ -729,7 +729,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.60" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.62" />
 </a>
 
 </div>

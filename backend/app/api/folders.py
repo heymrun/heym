@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db
-from app.db.models import Folder, User, Workflow, WorkflowShare
+from app.db.models import Folder, TeamMember, User, Workflow, WorkflowShare, WorkflowTeamShare
 from app.models.schemas import (
     FolderCreate,
     FolderResponse,
@@ -61,6 +61,43 @@ def _write_folder_to_zip(
             child["children"],
             folder_path,
         )
+
+
+def _accessible_workflow_filter(user_id: uuid.UUID):
+    return or_(
+        Workflow.owner_id == user_id,
+        Workflow.id.in_(select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)),
+        Workflow.id.in_(
+            select(WorkflowTeamShare.workflow_id).where(
+                WorkflowTeamShare.team_id.in_(
+                    select(TeamMember.team_id).where(TeamMember.user_id == user_id)
+                )
+            )
+        ),
+    )
+
+
+async def _set_shared_workflow_folder(
+    db: AsyncSession,
+    workflow_id: uuid.UUID,
+    user_id: uuid.UUID,
+    folder_id: uuid.UUID | None,
+) -> WorkflowShare:
+    share_result = await db.execute(
+        select(WorkflowShare).where(
+            WorkflowShare.workflow_id == workflow_id,
+            WorkflowShare.user_id == user_id,
+        )
+    )
+    share = share_result.scalar_one_or_none()
+    if share is None:
+        share = WorkflowShare(workflow_id=workflow_id, user_id=user_id, folder_id=folder_id)
+        db.add(share)
+    else:
+        share.folder_id = folder_id
+    await db.commit()
+    await db.refresh(share)
+    return share
 
 
 def _get_first_node_type(workflow: Workflow) -> str | None:
@@ -415,14 +452,7 @@ async def move_workflow_to_folder(
     workflow_result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            ),
+            _accessible_workflow_filter(current_user.id),
         )
     )
     workflow = workflow_result.scalar_one_or_none()
@@ -443,28 +473,18 @@ async def move_workflow_to_folder(
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )
-    else:
-        share_result = await db.execute(
-            select(WorkflowShare).where(
-                WorkflowShare.workflow_id == workflow_id,
-                WorkflowShare.user_id == current_user.id,
-            )
-        )
-        share = share_result.scalar_one_or_none()
-        if share:
-            share.folder_id = folder_id
-            await db.commit()
-            await db.refresh(share)
-        return WorkflowListResponse(
-            id=workflow.id,
-            name=workflow.name,
-            description=workflow.description,
-            folder_id=folder_id,
-            first_node_type=_get_first_node_type(workflow),
-            scheduled_for_deletion=None,
-            created_at=workflow.created_at,
-            updated_at=workflow.updated_at,
-        )
+
+    await _set_shared_workflow_folder(db, workflow_id, current_user.id, folder_id)
+    return WorkflowListResponse(
+        id=workflow.id,
+        name=workflow.name,
+        description=workflow.description,
+        folder_id=folder_id,
+        first_node_type=_get_first_node_type(workflow),
+        scheduled_for_deletion=None,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+    )
 
 
 @router.delete("/workflows/{workflow_id}/folder", response_model=WorkflowListResponse)
@@ -476,14 +496,7 @@ async def remove_workflow_from_folder(
     result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            ),
+            _accessible_workflow_filter(current_user.id),
         )
     )
     workflow = result.scalar_one_or_none()
@@ -504,25 +517,15 @@ async def remove_workflow_from_folder(
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )
-    else:
-        share_result = await db.execute(
-            select(WorkflowShare).where(
-                WorkflowShare.workflow_id == workflow_id,
-                WorkflowShare.user_id == current_user.id,
-            )
-        )
-        share = share_result.scalar_one_or_none()
-        if share:
-            share.folder_id = None
-            await db.commit()
-            await db.refresh(share)
-        return WorkflowListResponse(
-            id=workflow.id,
-            name=workflow.name,
-            description=workflow.description,
-            folder_id=None,
-            first_node_type=_get_first_node_type(workflow),
-            scheduled_for_deletion=None,
-            created_at=workflow.created_at,
-            updated_at=workflow.updated_at,
-        )
+
+    await _set_shared_workflow_folder(db, workflow_id, current_user.id, None)
+    return WorkflowListResponse(
+        id=workflow.id,
+        name=workflow.name,
+        description=workflow.description,
+        folder_id=None,
+        first_node_type=_get_first_node_type(workflow),
+        scheduled_for_deletion=None,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+    )

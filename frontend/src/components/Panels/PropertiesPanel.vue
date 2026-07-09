@@ -11,7 +11,7 @@ providePropertiesPanelContext(propertiesPanelContext);
 
 <template>
   <div
-    class="properties-panel w-80 sm:w-72 md:w-80 border-l border-border/30 flex flex-col max-w-full overflow-x-hidden"
+    class="properties-panel w-80 sm:w-72 md:w-80 border-l border-border/30 flex flex-col h-full min-h-0 max-w-full overflow-hidden"
   >
     <PropertiesPanelTabs />
     <PropertiesPanelPropertiesTab />

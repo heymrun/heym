@@ -27,6 +27,10 @@ interface CustomScrollbarState {
   thumbTop: number;
 }
 
+interface SkillBuilderPreviewFile extends SkillBuilderFile {
+  previewable: boolean;
+}
+
 const props = defineProps<Props>();
 
 const emit = defineEmits<{
@@ -47,6 +51,7 @@ const {
 
 const activeFileIndex = ref(0);
 const inputText = ref("");
+const includedAttachmentPaths = ref<Set<string>>(new Set());
 const isDownloading = ref(false);
 const isSaving = ref(false);
 const localError = ref<string | null>(null);
@@ -58,6 +63,7 @@ const keydownCaptureOptions = { capture: true } as const;
 const customScrollbarTrackInset = 16;
 const customScrollbarMinThumbHeight = 24;
 const SKILL_BUILDER_MAX_FILE_BYTES = 75 * 1024;
+const SKILL_BUILDER_MAX_ATTACHMENT_CONTEXT_BYTES = 2 * 1024 * 1024;
 const SKILL_BUILDER_TEXT_EXTENSIONS = new Set([
   "md",
   "py",
@@ -73,8 +79,20 @@ function getFileExtension(path: string): string {
   return lastDot >= 0 ? normalizedPath.slice(lastDot + 1) : "";
 }
 
-function getFileSizeBytes(content: string): number {
+function getTextSizeBytes(content: string): number {
   return new TextEncoder().encode(content).length;
+}
+
+function getBase64SizeBytes(content: string): number {
+  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+  return Math.max(Math.floor((content.length * 3) / 4) - padding, 0);
+}
+
+function getSkillFileSizeBytes(file: AgentSkillFile): number {
+  if ((file.encoding ?? "text") === "base64") {
+    return getBase64SizeBytes(file.content);
+  }
+  return getTextSizeBytes(file.content);
 }
 
 function canSendFileToSkillBuilder(file: AgentSkillFile): boolean {
@@ -86,7 +104,35 @@ function canSendFileToSkillBuilder(file: AgentSkillFile): boolean {
     return false;
   }
 
-  return getFileSizeBytes(file.content) <= SKILL_BUILDER_MAX_FILE_BYTES;
+  return getTextSizeBytes(file.content) <= SKILL_BUILDER_MAX_FILE_BYTES;
+}
+
+function canIncludeAttachmentContent(file: AgentSkillFile): boolean {
+  return getSkillFileSizeBytes(file) <= SKILL_BUILDER_MAX_ATTACHMENT_CONTEXT_BYTES;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isAttachmentIncluded(path: string): boolean {
+  return includedAttachmentPaths.value.has(path);
+}
+
+function setAttachmentIncluded(path: string, included: boolean): void {
+  const next = new Set(includedAttachmentPaths.value);
+  if (included) {
+    next.add(path);
+  } else {
+    next.delete(path);
+  }
+  includedAttachmentPaths.value = next;
 }
 
 const existingSkillFiles = computed<AgentSkillFile[]>(() => {
@@ -120,6 +166,16 @@ const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() =
   return {
     name: props.existingSkill.name,
     files: editableFiles,
+    attachments: preservedSkillFiles.value.map((file) => ({
+      path: file.path,
+      encoding: file.encoding ?? "text",
+      mime_type: file.mimeType,
+      size_bytes: getSkillFileSizeBytes(file),
+      content:
+        isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file)
+          ? file.content
+          : undefined,
+    })),
   };
 });
 
@@ -127,18 +183,15 @@ const preservedSkillFiles = computed<AgentSkillFile[]>(() =>
   existingSkillFiles.value.filter((file) => !canSendFileToSkillBuilder(file)),
 );
 
-const previewFiles = computed<SkillBuilderFile[]>(() => {
-  const mergedFiles = new Map<string, SkillBuilderFile>();
+const previewFiles = computed<SkillBuilderPreviewFile[]>(() => {
+  const mergedFiles = new Map<string, SkillBuilderPreviewFile>();
 
   preservedSkillFiles.value.forEach((file) => {
-    if ((file.encoding ?? "text") !== "text") {
-      return;
-    }
-    mergedFiles.set(file.path, { path: file.path, content: file.content });
+    mergedFiles.set(file.path, { path: file.path, content: "", previewable: false });
   });
 
   currentFiles.value.forEach((file) => {
-    mergedFiles.set(file.path, file);
+    mergedFiles.set(file.path, { ...file, previewable: true });
   });
 
   return Array.from(mergedFiles.values());
@@ -149,7 +202,13 @@ const preservedFileNote = computed(() => {
   if (preservedCount === 0) {
     return null;
   }
-  return `${preservedCount} non-editable, large, or non-text file(s) will stay attached to the skill but will not be sent to AI. Skill Builder only edits English Markdown and Python files.`;
+  const includedCount = preservedSkillFiles.value.filter(
+    (file) => isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file),
+  ).length;
+  if (includedCount > 0) {
+    return `${preservedCount} non-editable, large, or non-text file(s) will stay attached. ${includedCount} selected file(s) will also be sent as AI context.`;
+  }
+  return `${preservedCount} non-editable, large, or non-text file(s) will stay attached. Select individual files on the right to include them as AI context.`;
 });
 
 const modalTitle = computed(() => {
@@ -158,9 +217,43 @@ const modalTitle = computed(() => {
   return generatedName || props.existingSkill?.name || "New Skill";
 });
 
-const activeFile = computed<SkillBuilderFile | null>(
+const activeFile = computed<SkillBuilderPreviewFile | null>(
   () => previewFiles.value[activeFileIndex.value] ?? null,
 );
+
+const activeAttachment = computed<AgentSkillFile | null>(() => {
+  const path = activeFile.value?.path;
+  if (!path) {
+    return null;
+  }
+  return preservedSkillFiles.value.find((file) => file.path === path) ?? null;
+});
+
+const activeAttachmentSize = computed(() =>
+  activeAttachment.value ? getSkillFileSizeBytes(activeAttachment.value) : 0,
+);
+
+const activeAttachmentCanInclude = computed(() =>
+  activeAttachment.value ? canIncludeAttachmentContent(activeAttachment.value) : false,
+);
+
+const activeAttachmentIncluded = computed(() =>
+  activeAttachment.value ? isAttachmentIncluded(activeAttachment.value.path) : false,
+);
+
+function handleActiveAttachmentIncludedChange(event: Event): void {
+  if (!activeAttachment.value || !(event.target instanceof HTMLInputElement)) {
+    return;
+  }
+  setAttachmentIncluded(activeAttachment.value.path, event.target.checked);
+}
+
+const activeFileContent = computed(() => {
+  if (!activeFile.value?.previewable) {
+    return null;
+  }
+  return activeFile.value.content;
+});
 
 const canPrompt = computed(
   () =>
@@ -415,6 +508,7 @@ watch(
       window.addEventListener("keydown", handleWindowKeydown, keydownCaptureOptions);
       reset();
       inputText.value = "";
+      includedAttachmentPaths.value = new Set();
       localError.value = null;
       activeFileIndex.value = 0;
       initialize(getGreeting(), existingSkillForApi.value?.files ?? []);
@@ -431,6 +525,7 @@ watch(
     customScrollbarResizeObserver = null;
     reset();
     inputText.value = "";
+    includedAttachmentPaths.value = new Set();
     localError.value = null;
     activeFileIndex.value = 0;
   },
@@ -568,7 +663,7 @@ onUnmounted(() => {
                 @keydown="handleInputKeydown"
               />
               <div class="mt-2 flex min-h-11 items-center justify-between gap-3">
-                <p class="text-xs leading-none text-muted-foreground">
+                <p class="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
                   {{ preservedFileNote ?? (credentialId && model ? "Press Enter to send, Shift+Enter for a new line." : "Select an agent credential and model to use AI Build.") }}
                 </p>
                 <Button
@@ -589,7 +684,7 @@ onUnmounted(() => {
                 Files
               </p>
               <p class="text-xs text-muted-foreground">
-                Read-only preview of generated skill files
+                Generated and attached skill files
               </p>
             </div>
 
@@ -608,7 +703,7 @@ onUnmounted(() => {
                       :class="[
                         'flex w-full min-w-0 items-center justify-start gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs transition-colors',
                         index === activeFileIndex
-                          ? 'border-primary/40 bg-primary/10 text-primary'
+                          ? 'border-violet-500/70 bg-violet-50 text-violet-700 shadow-[0_0_0_1px_rgba(139,92,246,0.18)] dark:border-violet-500/80 dark:bg-violet-950/45 dark:text-violet-300 dark:shadow-[0_0_18px_rgba(124,58,237,0.18)]'
                           : 'border-border/60 bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
                       ]"
                       @click="activeFileIndex = index"
@@ -618,6 +713,12 @@ onUnmounted(() => {
                         class="h-3.5 w-3.5 shrink-0"
                       />
                       <span class="min-w-0 break-all">{{ file.path }}</span>
+                      <span
+                        v-if="!file.previewable && isAttachmentIncluded(file.path)"
+                        class="ml-auto shrink-0 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-500 dark:text-violet-300"
+                      >
+                        AI
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -639,9 +740,56 @@ onUnmounted(() => {
                   @scroll="scheduleCustomScrollbarUpdate"
                 >
                   <pre
-                    v-if="activeFile"
+                    v-if="activeFileContent !== null"
                     class="whitespace-pre-wrap break-words text-xs leading-5 text-foreground"
-                  >{{ activeFile.content }}</pre>
+                  >{{ activeFileContent }}</pre>
+                  <div
+                    v-else-if="activeFile"
+                    class="space-y-3 text-xs text-muted-foreground"
+                  >
+                    <p>
+                      {{ activeFile.path }} is attached to the skill but is not editable in Skill Builder.
+                    </p>
+                    <div
+                      v-if="activeAttachment"
+                      class="min-w-0 rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <div class="space-y-1 pb-3">
+                        <p class="break-all font-medium text-foreground">
+                          {{ activeAttachment.path }}
+                        </p>
+                        <p class="break-all leading-snug">
+                          {{ activeAttachment.mimeType || "application/octet-stream" }} · {{ formatFileSize(activeAttachmentSize) }}
+                        </p>
+                      </div>
+                      <label class="flex items-start gap-2 border-t border-border/60 pt-3">
+                        <input
+                          type="checkbox"
+                          class="mt-0.5 h-3.5 w-3.5 rounded border-border bg-background"
+                          :checked="activeAttachmentIncluded"
+                          :disabled="!activeAttachmentCanInclude || isStreaming || isDownloading || isSaving"
+                          @change="handleActiveAttachmentIncludedChange"
+                        >
+                        <span class="min-w-0">
+                          <span class="block font-medium text-foreground">
+                            Include this file in AI context
+                          </span>
+                          <span
+                            v-if="activeAttachmentCanInclude"
+                            class="block leading-snug"
+                          >
+                            Sends only this attachment to AI. DOCX files are summarized with tables, rows, and empty value cells.
+                          </span>
+                          <span
+                            v-else
+                            class="block leading-snug text-destructive"
+                          >
+                            This file is larger than 2 MB and stays metadata-only.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                   <p
                     v-else
                     class="text-xs text-muted-foreground"

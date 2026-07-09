@@ -33,6 +33,7 @@ from app.services.workflow_dsl_prompt import (
     DASHBOARD_WIDGET_PROMPT_HINT,
     WORKFLOW_DSL_SYSTEM_PROMPT,
 )
+from app.services.workflow_executor import mask_credentials_context
 
 router = APIRouter()
 
@@ -328,12 +329,13 @@ async def evaluate_expression(
 
     credentials_owner_id = current_user.id if current_user else workflow.owner_id
     credentials_context = await get_credentials_context(db, credentials_owner_id)
+    preview_credentials_context = mask_credentials_context(credentials_context)
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
 
     service = ExpressionEvaluatorService(
         workflow_nodes=workflow_nodes,
         workflow_edges=workflow_edges,
-        credentials_context=credentials_context,
+        credentials_context=preview_credentials_context,
         global_variables_context=global_variables_context,
         vars_context=vars_context,
         workflow_id=workflow.id,

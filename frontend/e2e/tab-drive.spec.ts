@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import {
   acceptNextDialog,
   clearDriveFiles,
+  deleteTeam,
+  expectOk,
   prepareAuthenticatedPage,
   uploadDriveFile,
 } from "./support";
@@ -52,4 +54,28 @@ test("lists an uploaded file, filters it via search, and deletes it", async ({ p
   );
   await expect(main.getByText(filename)).toBeHidden();
   await expect(main.getByText("No files yet", { exact: true })).toBeVisible();
+});
+
+test("shows team sharing state for files uploaded with team sharing", async ({ page }) => {
+  await clearDriveFiles(page);
+  const teamName = `Drive Share Team ${Date.now()}`;
+  const teamResponse = await page.request.post("/api/teams", {
+    data: { name: teamName, description: "Drive team sharing E2E" },
+  });
+  await expectOk(teamResponse);
+  const team = (await teamResponse.json()) as { id: string };
+  const filename = `e2e-team-shared-${Date.now()}.txt`;
+
+  try {
+    await uploadDriveFile(page, filename, "team shared drive contents", true);
+
+    await page.goto("/?tab=drive");
+    const main = page.getByRole("main");
+    const row = main.locator("tr").filter({ hasText: filename });
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Teams", { exact: true })).toBeVisible();
+  } finally {
+    await clearDriveFiles(page);
+    await deleteTeam(page, team.id);
+  }
 });

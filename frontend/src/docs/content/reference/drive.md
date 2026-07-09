@@ -19,7 +19,7 @@ The file list shows:
 
 ## Sharing Files
 
-Click the **Share** icon to open the share dialog. You can create multiple share links per file with different configurations:
+Click the **Share** icon to open the share dialog. You can create multiple share links per file with different configurations and optionally share the file with your current teams.
 
 ### Public Link (Token-based)
 
@@ -34,6 +34,12 @@ Set a password when creating the share. The download URL uses HTTP Basic Authent
 - **Expires (hours)** - Optionally set an expiration time
 - **Max downloads** - Optionally limit the number of downloads
 - Both can be combined for maximum control
+
+### Share With My Teams
+
+Enable **Share with my teams** to grant read-only access to all teams you currently belong to. Team members can see and download the file from Drive and use read-oriented Drive node operations, but only the file owner can delete the file, create or revoke public links, or change password/TTL/download limits.
+
+The setting is file-specific. If you join or create another team later, toggle sharing again or run the Drive node's `shareWithMyTeams` operation to add that team. Use `unshareWithMyTeams` to remove team shares from the file in a workflow.
 
 ### Managing Shares
 
@@ -58,6 +64,7 @@ The [Drive node](../nodes/drive-node.md) lets you manage Drive files programmati
 - **List** your files and return metadata such as filename, MIME type, size, source, and download URL
 - **Convert** a file to a different format — documents via pandoc (docx, html, md, txt, pdf) or images via Pillow (jpg, png, bmp, webp)
 - **Delete** a file after it has been delivered to the user
+- **Share or unshare with your teams** so team members can read and download it only while the team share exists
 - **Set a password** on the download link
 - **Set a TTL** so the link expires after N hours
 - **Set a max downloads** limit
@@ -68,7 +75,7 @@ See the [Drive node documentation](../nodes/drive-node.md) for configuration det
 
 ## Related
 
-- [Drive Node](../nodes/drive-node.md) - Workflow operations (list, get, delete, password, TTL, max downloads)
+- [Drive Node](../nodes/drive-node.md) - Workflow operations (list, get, delete, password, TTL, max downloads, team sharing)
 - [Drive Tab](../tabs/drive-tab.md) - Browse files in the dashboard
 - [File Generation](./file-generation.md) - How `_generated_files` and download URLs are produced
 

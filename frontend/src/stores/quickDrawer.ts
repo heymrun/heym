@@ -291,14 +291,27 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     runState.value = createEmptyRunState();
   }
 
+  /** Drop pinned IDs that no longer exist after a fresh workflow fetch. */
+  function pruneStalePinnedWorkflowIds(): void {
+    if (workflows.value.length === 0) return;
+
+    const availableIds = new Set(workflows.value.map((workflow) => workflow.id));
+    const filteredPinnedIds = pinnedWorkflowIds.value.filter((workflowId) =>
+      availableIds.has(workflowId),
+    );
+
+    if (filteredPinnedIds.length === pinnedWorkflowIds.value.length) return;
+
+    pinnedWorkflowIds.value = filteredPinnedIds;
+    applyPinnedFlags();
+    savePreferences();
+  }
+
   function reconcileSelection(): void {
     const availableIds = new Set(workflows.value.map((workflow) => workflow.id));
-    const filteredPinnedIds = pinnedWorkflowIds.value.filter((workflowId) => availableIds.has(workflowId));
-
-    if (filteredPinnedIds.length !== pinnedWorkflowIds.value.length) {
-      pinnedWorkflowIds.value = filteredPinnedIds;
-      savePreferences();
-    }
+    const pinnedIdsInDrawer = pinnedWorkflowIds.value.filter((workflowId) =>
+      availableIds.has(workflowId),
+    );
 
     const nextInputValues: Record<string, Record<string, string>> = {};
     for (const workflowId of Object.keys(inputValuesByWorkflowId.value)) {
@@ -313,9 +326,9 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
       return;
     }
 
-    const firstPinnedWorkflowId = filteredPinnedIds[0] ?? null;
+    const firstPinnedWorkflowId = pinnedIdsInDrawer[0] ?? null;
     const firstOtherWorkflowId =
-      workflows.value.find((workflow) => !filteredPinnedIds.includes(workflow.id))?.id ?? null;
+      workflows.value.find((workflow) => !pinnedIdsInDrawer.includes(workflow.id))?.id ?? null;
 
     const nextSelection =
       selectedWorkflowId.value === null &&
@@ -348,6 +361,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
         const items = await workflowApi.listWithInputs();
         workflows.value = items.map(normalizeWorkflow);
         workflowsFetchedAt.value = Date.now();
+        pruneStalePinnedWorkflowIds();
         applyPinnedFlags();
         reconcileSelection();
       } catch (error) {

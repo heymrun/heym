@@ -228,6 +228,38 @@ def _make_get_all_db_mock(file_rows: list[object]) -> MagicMock:
     return fake_db
 
 
+def _make_query_mock(
+    *,
+    first: object | None = None,
+    all_rows: list[object] | None = None,
+    count: int = 0,
+) -> MagicMock:
+    """Build a chainable sync SQLAlchemy query mock."""
+    query = MagicMock()
+    query.filter.return_value = query
+    query.join.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.first.return_value = first
+    query.all.return_value = all_rows or []
+    query.count.return_value = count
+    return query
+
+
+def _make_db_from_queries(queries: list[MagicMock]) -> MagicMock:
+    """Build a fake SessionLocal mock from ordered query mocks."""
+    fake_db = MagicMock()
+    fake_db.__enter__ = MagicMock(return_value=fake_db)
+    fake_db.__exit__ = MagicMock(return_value=False)
+    fake_db.query.side_effect = queries
+    fake_db.add = MagicMock()
+    fake_db.delete = MagicMock()
+    fake_db.flush = MagicMock()
+    fake_db.commit = MagicMock()
+    fake_db.rollback = MagicMock()
+    return fake_db
+
+
 class DriveNodeDeleteTests(unittest.TestCase):
     """Drive node delete operation."""
 
@@ -573,6 +605,259 @@ class DriveNodeSetMaxDownloadsTests(unittest.TestCase):
         )
 
         self.assertIn(default_token, db._deleted)
+
+
+class DriveNodeTeamSharingTests(unittest.TestCase):
+    """Drive node team sharing operation and read-only shared access."""
+
+    def test_share_with_my_teams_creates_missing_team_shares(self) -> None:
+        from app.db.models import FileTeamShare
+
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        team_a = uuid.uuid4()
+        team_b = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=owner_id,
+            filename="report.pdf",
+            storage_path=f"{owner_id}/{file_id}/report.pdf",
+        )
+        db = _make_db_from_queries(
+            [
+                _make_query_mock(first=file_row),
+                _make_query_mock(all_rows=[(team_a,), (team_b,)]),
+                _make_query_mock(all_rows=[(team_a,)]),
+                _make_query_mock(count=2),
+            ]
+        )
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "shareWithMyTeams",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["operation"], "shareWithMyTeams")
+        self.assertEqual(nr["output"]["shared_team_count"], 2)
+        db.add.assert_called_once()
+        added_share = db.add.call_args.args[0]
+        self.assertIsInstance(added_share, FileTeamShare)
+        self.assertEqual(added_share.file_id, file_id)
+        self.assertEqual(added_share.team_id, team_b)
+
+    def test_share_with_my_teams_succeeds_with_no_teams(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=owner_id,
+            filename="report.pdf",
+            storage_path=f"{owner_id}/{file_id}/report.pdf",
+        )
+        db = _make_db_from_queries(
+            [
+                _make_query_mock(first=file_row),
+                _make_query_mock(all_rows=[]),
+                _make_query_mock(count=0),
+            ]
+        )
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "shareWithMyTeams",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["shared_team_count"], 0)
+        db.add.assert_not_called()
+
+    def test_share_with_my_teams_requires_owner_file(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        db = _make_db_from_queries([_make_query_mock(first=None)])
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "shareWithMyTeams",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("not found", nr["error"].lower())
+        db.add.assert_not_called()
+
+    def test_unshare_with_my_teams_removes_team_shares(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=owner_id,
+            filename="report.pdf",
+            storage_path=f"{owner_id}/{file_id}/report.pdf",
+        )
+        share_query = _make_query_mock()
+        db = _make_db_from_queries([_make_query_mock(first=file_row), share_query])
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "unshareWithMyTeams",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["operation"], "unshareWithMyTeams")
+        self.assertEqual(nr["output"]["shared_team_count"], 0)
+        share_query.delete.assert_called_once_with(synchronize_session=False)
+        db.add.assert_not_called()
+
+    def test_unshare_with_my_teams_requires_owner_file(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        db = _make_db_from_queries([_make_query_mock(first=None)])
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "unshareWithMyTeams",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("not found", nr["error"].lower())
+        db.add.assert_not_called()
+
+    def test_get_all_includes_team_shared_files(self) -> None:
+        owner_id = uuid.uuid4()
+        owned_id = uuid.uuid4()
+        shared_id = uuid.uuid4()
+        owned = SimpleNamespace(
+            id=owned_id,
+            owner_id=owner_id,
+            filename="owned.txt",
+            mime_type="text/plain",
+            size_bytes=5,
+            workflow_id=None,
+            source_node_label=None,
+            access_tokens=[],
+            team_shares=[],
+            metadata_json={},
+            created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        )
+        shared = SimpleNamespace(
+            id=shared_id,
+            owner_id=uuid.uuid4(),
+            filename="shared.txt",
+            mime_type="text/plain",
+            size_bytes=7,
+            workflow_id=None,
+            source_node_label=None,
+            access_tokens=[],
+            team_shares=[SimpleNamespace(team_id=uuid.uuid4())],
+            metadata_json={},
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        db = _make_db_from_queries(
+            [
+                _make_query_mock(all_rows=[owned]),
+                _make_query_mock(all_rows=[(shared, "owner@example.com", "Ops")]),
+            ]
+        )
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "getAll",
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(nr["output"]["count"], 2)
+        shared_output = next(f for f in nr["output"]["files"] if f["id"] == str(shared_id))
+        self.assertTrue(shared_output["is_shared"])
+        self.assertEqual(shared_output["shared_by_team"], "Ops")
+
+    def test_get_can_read_team_shared_file(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=uuid.uuid4(),
+            filename="shared.txt",
+            mime_type="text/plain",
+            size_bytes=7,
+            storage_path=f"other/{file_id}/shared.txt",
+        )
+        default_token = SimpleNamespace(
+            id=uuid.uuid4(),
+            file_id=file_id,
+            token="tok-shared",
+            basic_auth_password_hash=None,
+        )
+        db = _make_db_from_queries(
+            [
+                _make_query_mock(first=None),
+                _make_query_mock(first=(file_row, "owner@example.com", "Ops")),
+                _make_query_mock(first=default_token),
+            ]
+        )
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "get",
+                "driveFileId": str(file_id),
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertTrue(nr["output"]["is_shared"])
+        self.assertEqual(nr["output"]["shared_by_team"], "Ops")
+
+    def test_set_password_cannot_manage_team_shared_file(self) -> None:
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        db = _make_db_from_queries([_make_query_mock(first=None)])
+
+        nr = _run_drive_workflow(
+            {
+                "label": "drive",
+                "driveOperation": "setPassword",
+                "driveFileId": str(file_id),
+                "drivePassword": "secret123",
+            },
+            owner_id,
+            db,
+        )
+
+        self.assertEqual(nr["status"], "error")
+        self.assertIn("not found", nr["error"].lower())
+        db.add.assert_not_called()
 
 
 class DriveNodeErrorCaseTests(unittest.TestCase):

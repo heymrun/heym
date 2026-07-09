@@ -591,6 +591,30 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.result, "second")
         self.assertEqual(response.result_type, "string")
 
+    async def test_credentials_context_is_masked_for_preview(self) -> None:
+        raw_secret = "sk-live-secret-key-value"
+        workflow = self._workflow()
+        request = self._request(expression="$credentials.MyToken")
+        with (
+            patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.expressions.get_credentials_context",
+                AsyncMock(return_value={"MyToken": raw_secret}),
+            ),
+            patch(
+                "app.api.expressions.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
+
+        self.assertEqual(response.result, "sk-live**")
+        self.assertNotEqual(response.result, raw_secret)
+        self.assertNotIn("secret-key-value", response.result)
+        self.assertEqual(response.result_type, "string")
+
     def test_request_rejects_expression_over_max_length(self) -> None:
         with self.assertRaises(ValidationError):
             ExpressionEvaluateRequest(

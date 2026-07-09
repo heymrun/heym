@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  Download,
   FileText,
   HardDrive,
   Image,
@@ -10,6 +11,7 @@ import {
   Sheet,
   Trash2,
   Upload,
+  Users,
 } from "lucide-vue-next";
 
 import type { GeneratedFile } from "@/types/file";
@@ -44,6 +46,7 @@ const filtered = computed(() => {
       (f.source_node_label || "").toLowerCase().includes(q),
   );
 });
+const hasOwnedFilesOnPage = computed(() => files.value.some((file) => !file.is_shared));
 
 async function loadFiles() {
   loading.value = true;
@@ -145,6 +148,12 @@ function openShare(file: GeneratedFile) {
   showShare.value = true;
 }
 
+function downloadFile(file: GeneratedFile): void {
+  const url = file.authenticated_download_url || file.download_url;
+  if (!url) return;
+  window.open(url, "_blank", "noopener");
+}
+
 function mimeIcon(mime: string) {
   if (mime.startsWith("image/")) return Image;
   if (mime === "application/pdf") return FileText;
@@ -221,7 +230,7 @@ onBeforeUnmount(() => {
         </h2>
         <span class="text-xs text-muted-foreground">({{ total }} files)</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
         <div class="relative">
           <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -242,7 +251,7 @@ onBeforeUnmount(() => {
           />
         </Button>
         <Button
-          v-if="total > 0"
+          v-if="hasOwnedFilesOnPage"
           size="sm"
           variant="destructive"
           :loading="clearing"
@@ -330,7 +339,27 @@ onBeforeUnmount(() => {
                   :class="mimeColor(file.mime_type)"
                 />
                 <span class="truncate max-w-[200px] sm:max-w-[300px]">{{ file.filename }}</span>
+                <span
+                  v-if="file.shared_with_my_teams && !file.is_shared"
+                  class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:bg-violet-400/15 dark:text-violet-200"
+                >
+                  <Users class="w-3 h-3" />
+                  Teams
+                </span>
+                <span
+                  v-if="file.is_shared"
+                  class="inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500"
+                >
+                  <Users class="w-3 h-3" />
+                  Shared
+                </span>
               </div>
+              <p
+                v-if="file.is_shared && (file.shared_by || file.shared_by_team)"
+                class="mt-1 text-[11px] text-muted-foreground"
+              >
+                Shared{{ file.shared_by ? ` by ${file.shared_by}` : "" }}{{ file.shared_by_team ? ` via ${file.shared_by_team}` : "" }}
+              </p>
             </td>
             <td class="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">
               {{ file.mime_type.split("/").pop() }}
@@ -351,12 +380,21 @@ onBeforeUnmount(() => {
               >
                 <button
                   class="p-1 rounded hover:bg-muted"
+                  title="Download"
+                  @click="downloadFile(file)"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  v-if="!file.is_shared"
+                  class="p-1 rounded hover:bg-muted"
                   title="Share"
                   @click="openShare(file)"
                 >
                   <Share2 class="w-3.5 h-3.5" />
                 </button>
                 <button
+                  v-if="!file.is_shared"
                   class="p-1 rounded hover:bg-destructive/10 text-destructive"
                   title="Delete"
                   @click="deleteFile(file)"
@@ -401,7 +439,9 @@ onBeforeUnmount(() => {
       :open="showShare"
       :file-id="shareFileId"
       :filename="shareFilename"
+      :shared-with-my-teams="files.find((f) => f.id === shareFileId)?.shared_with_my_teams ?? false"
       @close="showShare = false"
+      @updated="loadFiles"
     />
   </div>
 </template>

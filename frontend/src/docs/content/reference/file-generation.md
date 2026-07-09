@@ -150,6 +150,6 @@ File types are automatically detected from the file extension. Common types:
 
 ## Related
 
-- [Drive Node](../nodes/drive-node.md) - Programmatic delete, password, TTL, and download limits on generated files
+- [Drive Node](../nodes/drive-node.md) - Programmatic delete, password, TTL, download limits, and team share/unshare on generated files
 - [Drive](../reference/drive.md) - Dashboard Drive tab and share-link behavior
 - [Drive Tab](../tabs/drive-tab.md) - Browse and manage files in the UI

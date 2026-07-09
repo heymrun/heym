@@ -6,6 +6,11 @@ export interface GeneratedFile {
   workflow_id: string | null;
   source_node_label: string | null;
   download_url: string;
+  authenticated_download_url: string;
+  is_shared: boolean;
+  shared_by: string | null;
+  shared_by_team: string | null;
+  shared_with_my_teams: boolean;
   created_at: string;
 }
 
@@ -24,6 +29,11 @@ export interface CreateShareRequest {
   expires_hours?: number | null;
   basic_auth_password?: string | null;
   max_downloads?: number | null;
+}
+
+export interface FileTeamSharingResponse {
+  enabled: boolean;
+  shared_team_count: number;
 }
 
 export interface FileListResponse {

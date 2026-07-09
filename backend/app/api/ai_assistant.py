@@ -32,7 +32,6 @@ from app.api.workflows import (
 )
 from app.db.models import (
     Credential,
-    CredentialShare,
     CredentialType,
     ExecutionHistory,
     GlobalVariable,
@@ -47,6 +46,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.services import template_service
+from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import (
     build_hitl_resolved_output,
@@ -681,20 +681,7 @@ async def get_credential_for_user(
     user: User,
     db: AsyncSession,
 ) -> Credential | None:
-    result = await db.execute(
-        select(Credential).where(Credential.id == credential_id, Credential.owner_id == user.id)
-    )
-    credential = result.scalar_one_or_none()
-
-    if credential:
-        return credential
-
-    shared_result = await db.execute(
-        select(Credential)
-        .join(CredentialShare, CredentialShare.credential_id == Credential.id)
-        .where(Credential.id == credential_id, CredentialShare.user_id == user.id)
-    )
-    return shared_result.scalar_one_or_none()
+    return await get_accessible_credential(db, credential_id, user.id)
 
 
 def get_openai_client(

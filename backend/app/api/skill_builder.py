@@ -1,10 +1,15 @@
 """Skill Builder SSE endpoint for creating and editing Heym skills."""
 
+import base64
+import binascii
+import io
 import json
 import logging
 import time
 import uuid
 from typing import Any, AsyncGenerator, Literal
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -31,11 +36,22 @@ class SkillBuilderFile(BaseModel):
     encoding: Literal["text"] = "text"
 
 
+class SkillBuilderAttachment(BaseModel):
+    """A non-editable file attached to the skill bundle."""
+
+    path: str
+    encoding: Literal["text", "base64"] = "text"
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    content: str | None = None
+
+
 class SkillBuilderSkill(BaseModel):
     """Existing skill context passed to the assistant when editing."""
 
     name: str
     files: list[SkillBuilderFile] = Field(default_factory=list)
+    attachments: list[SkillBuilderAttachment] = Field(default_factory=list)
 
 
 class SkillBuilderConversationMessage(BaseModel):
@@ -60,16 +76,16 @@ SET_SKILL_FILES_TOOL: dict[str, Any] = {
     "function": {
         "name": "set_skill_files",
         "description": (
-            "Set the complete current skill file contents. "
-            "Call this whenever you create or update any file. "
-            "Always include ALL files in a single call."
+            "Set the complete current editable skill file contents. "
+            "Call this whenever you create or update any Markdown or Python file. "
+            "Always include ALL editable .md and .py files in a single call."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "files": {
                     "type": "array",
-                    "description": "All files that currently make up the skill.",
+                    "description": "All editable .md and .py files that currently make up the skill.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -92,7 +108,8 @@ A Heym skill is a ZIP bundle containing:
 - `SKILL.md` describing when and how the skill should be used
 - `main.py` implementing `execute(params, files) -> dict`
 - Optional extra `.py` or `.md` helper files
-- No binary files in the generated output
+- Optional bundled asset files that existing skills may reference
+- No binary files in generated Skill Builder output
 
 ### Required SKILL.md format
 
@@ -239,22 +256,212 @@ def execute(params: dict, files: dict) -> dict:
 2. Every `main.py` MUST import `json` and `sys` and include the `if __name__ == "__main__":` block shown above. Without it the script produces no output and the skill silently fails.
 3. NEVER embed fonts as Python strings or base64. Use reportlab built-in fonts: `Helvetica`, `Times-Roman`, `Courier`, and their bold/italic variants.
 4. NEVER embed image bytes as Python constants or base64. Ask the user to pass images as input files.
-5. Always call `set_skill_files` with the COMPLETE file set every time you create or modify files.
+5. Always call `set_skill_files` with the COMPLETE editable `.md`/`.py` file set every time you create or modify files.
 6. Keep `SKILL.md` accurate because the LLM reads it to decide when to call the skill.
 7. `execute()` must remain a top-level function in `main.py`.
 8. Only generate or update `.md` and `.py` files.
 9. Use English only for all natural language content, parameter names, descriptions, comments, docstrings, and user-facing strings.
+10. Preserve existing file paths unless the user explicitly asks to reorganize them. If you rename or move a Python file, update imports, relative file reads/writes, and `SKILL.md` so the final ZIP layout still works.
+11. When reading bundled assets, prefer paths based on `pathlib.Path(__file__).resolve().parent` so the code remains correct when the script lives in a subdirectory.
 """
 
 MAX_SKILL_BUILDER_ROUNDS = 6
 ALLOWED_SKILL_BUILDER_EXTENSIONS = (".md", ".py")
+MACOS_METADATA_DIR = "__MACOSX"
+MACOS_METADATA_FILENAMES = {".DS_Store"}
+ATTACHMENT_CONTEXT_MAX_BYTES = 2 * 1024 * 1024
+ATTACHMENT_TEXT_CONTEXT_MAX_CHARS = 12_000
+DOCX_CONTEXT_MAX_TABLES = 12
+DOCX_CONTEXT_MAX_ROWS = 30
+DOCX_CONTEXT_MAX_CELLS = 8
+DOCX_CONTEXT_MAX_CELL_CHARS = 120
+DOCX_CONTEXT_MAX_PARAGRAPHS = 20
+DOCX_XML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+
+def _normalize_skill_builder_path(path: str) -> str:
+    """Normalize a skill file path for prompt and tool use."""
+
+    normalized = path.replace("\\", "/").lstrip("/")
+    parts = [part for part in normalized.split("/") if part and part not in {".", ".."}]
+    return "/".join(parts)
+
+
+def _is_ignored_skill_builder_path(path: str) -> bool:
+    """Return whether a path is generated OS metadata that should be skipped."""
+
+    normalized = _normalize_skill_builder_path(path)
+    if not normalized:
+        return True
+
+    parts = normalized.split("/")
+    return any(
+        part == MACOS_METADATA_DIR or part in MACOS_METADATA_FILENAMES or part.startswith("._")
+        for part in parts
+    )
 
 
 def _is_allowed_skill_builder_file(path: str) -> bool:
     """Return whether the skill builder may generate or edit the given file path."""
 
-    normalized_path = path.lower()
+    if _is_ignored_skill_builder_path(path):
+        return False
+
+    normalized_path = _normalize_skill_builder_path(path).lower()
     return normalized_path.endswith(ALLOWED_SKILL_BUILDER_EXTENSIONS)
+
+
+def _append_limited_line(lines: list[str], line: str, max_chars: int) -> bool:
+    """Append a line unless doing so would exceed max_chars."""
+
+    current_chars = sum(len(existing) + 1 for existing in lines)
+    if current_chars + len(line) + 1 > max_chars:
+        lines.append("... truncated ...")
+        return False
+    lines.append(line)
+    return True
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    """Return value capped to max_chars, preserving a truncation marker."""
+
+    if len(value) <= max_chars:
+        return value
+    return value[: max_chars - 3] + "..."
+
+
+def _decode_attachment_bytes(attachment: SkillBuilderAttachment) -> bytes | None:
+    """Decode attachment content into bytes when the caller opted into context."""
+
+    if not attachment.content:
+        return None
+    if attachment.encoding == "base64":
+        try:
+            return base64.b64decode(attachment.content, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+    return attachment.content.encode("utf-8", errors="replace")
+
+
+def _docx_node_text(node: ElementTree.Element) -> str:
+    """Extract visible text from a DOCX XML node."""
+
+    return "".join(text.text or "" for text in node.findall(".//w:t", DOCX_XML_NS)).strip()
+
+
+def _summarize_docx_context(data: bytes) -> str:
+    """Return a compact, LLM-readable summary of a DOCX document."""
+
+    try:
+        with ZipFile(io.BytesIO(data)) as docx:
+            document_xml = docx.read("word/document.xml")
+    except (BadZipFile, KeyError):
+        return "DOCX summary unavailable: document.xml could not be read."
+
+    try:
+        root = ElementTree.fromstring(document_xml)
+    except ElementTree.ParseError:
+        return "DOCX summary unavailable: document.xml is not valid XML."
+
+    lines: list[str] = [
+        "DOCX structure summary:",
+        "Use this to compare Python placeholder logic with the actual template layout.",
+    ]
+
+    body = root.find(".//w:body", DOCX_XML_NS)
+    if body is not None:
+        paragraph_texts = [
+            _docx_node_text(paragraph)
+            for paragraph in body.findall("./w:p", DOCX_XML_NS)
+            if _docx_node_text(paragraph)
+        ][:DOCX_CONTEXT_MAX_PARAGRAPHS]
+        if paragraph_texts:
+            lines.append("Top-level paragraphs:")
+            for index, text in enumerate(paragraph_texts, start=1):
+                if not _append_limited_line(
+                    lines,
+                    f"- Paragraph {index}: {_truncate_text(text, DOCX_CONTEXT_MAX_CELL_CHARS)}",
+                    ATTACHMENT_TEXT_CONTEXT_MAX_CHARS,
+                ):
+                    return "\n".join(lines)
+
+    label_value_candidates: list[str] = []
+    tables = root.findall(".//w:tbl", DOCX_XML_NS)
+    if tables:
+        lines.append("Tables:")
+
+    for table_index, table in enumerate(tables[:DOCX_CONTEXT_MAX_TABLES], start=1):
+        if not _append_limited_line(
+            lines, f"Table {table_index}:", ATTACHMENT_TEXT_CONTEXT_MAX_CHARS
+        ):
+            return "\n".join(lines)
+        rows = table.findall("./w:tr", DOCX_XML_NS)
+        for row_index, row in enumerate(rows[:DOCX_CONTEXT_MAX_ROWS], start=1):
+            cells: list[str] = []
+            raw_cell_texts: list[str] = []
+            for cell in row.findall("./w:tc", DOCX_XML_NS)[:DOCX_CONTEXT_MAX_CELLS]:
+                text = _docx_node_text(cell)
+                raw_cell_texts.append(text)
+                if text:
+                    cells.append(_truncate_text(text, DOCX_CONTEXT_MAX_CELL_CHARS))
+                    continue
+                run_count = len(cell.findall(".//w:r", DOCX_XML_NS))
+                cells.append(f"<EMPTY runs={run_count}>")
+            if len(raw_cell_texts) >= 2 and raw_cell_texts[0] and not raw_cell_texts[1]:
+                label_value_candidates.append(
+                    f"Table {table_index} row {row_index}: `{raw_cell_texts[0]}` -> adjacent empty cell"
+                )
+            if not _append_limited_line(
+                lines,
+                f"  Row {row_index}: {' | '.join(cells)}",
+                ATTACHMENT_TEXT_CONTEXT_MAX_CHARS,
+            ):
+                return "\n".join(lines)
+
+    if label_value_candidates:
+        lines.append("Detected label/value table candidates:")
+        for candidate in label_value_candidates[:20]:
+            if not _append_limited_line(lines, f"- {candidate}", ATTACHMENT_TEXT_CONTEXT_MAX_CHARS):
+                return "\n".join(lines)
+        lines.append(
+            "If Python code replaces text in the label cell, update it to write the value into "
+            "the adjacent empty cell instead."
+        )
+
+    return "\n".join(lines)
+
+
+def _summarize_text_attachment(data: bytes) -> str:
+    """Return a capped UTF-8 text summary for included text attachments."""
+
+    text = data.decode("utf-8", errors="replace")
+    return _truncate_text(text, ATTACHMENT_TEXT_CONTEXT_MAX_CHARS)
+
+
+def _build_attachment_context(
+    normalized_path: str, attachment: SkillBuilderAttachment
+) -> str | None:
+    """Build optional attachment content context for the skill builder prompt."""
+
+    data = _decode_attachment_bytes(attachment)
+    if data is None:
+        return None
+    if len(data) > ATTACHMENT_CONTEXT_MAX_BYTES:
+        return (
+            "Content context omitted because the attachment is larger than "
+            f"{ATTACHMENT_CONTEXT_MAX_BYTES // (1024 * 1024)} MB."
+        )
+
+    lower_path = normalized_path.lower()
+    mime_type = (attachment.mime_type or "").lower()
+    if lower_path.endswith(".docx") or mime_type.endswith(
+        "officedocument.wordprocessingml.document"
+    ):
+        return _summarize_docx_context(data)
+    if attachment.encoding == "text" or mime_type.startswith("text/"):
+        return _summarize_text_attachment(data)
+
+    return None
 
 
 def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
@@ -265,6 +472,8 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
         "You help users create and edit skills for the Heym AI workflow platform. "
         "A skill is a Python-backed tool bundle for Agent nodes. "
         "Generate and edit only `.md` and `.py` files. "
+        "Existing non-editable attachments may be referenced by path, but you must not "
+        "generate placeholders for them. "
         "All natural language content must be English only, including parameter names, "
         "descriptions, output names, output descriptions, comments, docstrings, "
         "and user-facing strings.\n\n"
@@ -278,7 +487,8 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
             file for file in existing_skill.files if _is_allowed_skill_builder_file(file.path)
         ]
         for file in editable_files:
-            base += f"### {file.path}\n\n```\n{file.content}\n```\n\n"
+            normalized_path = _normalize_skill_builder_path(file.path)
+            base += f"### {normalized_path}\n\n```\n{file.content}\n```\n\n"
         skipped_files_count = len(existing_skill.files) - len(editable_files)
         if skipped_files_count > 0:
             base += (
@@ -286,9 +496,48 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
                 "context because only `.md` and `.py` files are editable here. "
                 "Those excluded files must remain untouched.\n\n"
             )
+        attachments = [
+            (_normalize_skill_builder_path(attachment.path), attachment)
+            for attachment in existing_skill.attachments
+            if _normalize_skill_builder_path(attachment.path)
+            and not _is_ignored_skill_builder_path(attachment.path)
+        ]
+        if attachments:
+            base += (
+                "Non-editable files attached to the final ZIP bundle. Their contents are "
+                "not shown, but their paths are real and must stay valid:\n"
+            )
+            for normalized_path, attachment in attachments:
+                details = [attachment.encoding]
+                if attachment.mime_type:
+                    details.append(attachment.mime_type)
+                if attachment.size_bytes is not None:
+                    details.append(f"{attachment.size_bytes} bytes")
+                base += f"- `{normalized_path}` ({', '.join(details)})\n"
+            base += (
+                "\nDo not include these non-editable files in `set_skill_files`. "
+                "If you move a Python file that reads one of these paths, update the "
+                "code and `SKILL.md` so the relative path still points to the asset in "
+                "the final ZIP layout.\n\n"
+            )
+            attachment_contexts: list[str] = []
+            for normalized_path, attachment in attachments:
+                context = _build_attachment_context(normalized_path, attachment)
+                if context:
+                    attachment_contexts.append(f"### {normalized_path}\n\n{context}")
+            if attachment_contexts:
+                base += (
+                    "## Included Attachment Context\n\n"
+                    "The user explicitly selected these binary/non-editable files for context. "
+                    "Use these extracted summaries to diagnose mismatches between the "
+                    "Python code and bundled templates, then update only editable `.md` "
+                    "and `.py` files.\n\n"
+                )
+                base += "\n\n".join(attachment_contexts)
+                base += "\n\n"
         base += (
-            "When you update files, always call `set_skill_files` with ALL files, "
-            "including unchanged ones.\n"
+            "When you update files, always call `set_skill_files` with ALL editable "
+            "`.md`/`.py` files, including unchanged editable files.\n"
         )
     else:
         base += (
@@ -332,10 +581,11 @@ def _normalize_skill_files(raw_files: list[Any]) -> tuple[list[dict[str, str]], 
         content = raw_file.get("content")
         if not isinstance(path, str) or not isinstance(content, str):
             continue
-        if not _is_allowed_skill_builder_file(path):
+        normalized_path = _normalize_skill_builder_path(path)
+        if not _is_allowed_skill_builder_file(normalized_path):
             rejected_paths.append(path)
             continue
-        files.append({"path": path, "content": content})
+        files.append({"path": normalized_path, "content": content})
     return files, rejected_paths
 
 
