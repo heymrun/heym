@@ -1,15 +1,15 @@
 """Merge Jira and file team share migration heads.
 
-Revision ID: 095_merge_jira_file_team_share_heads
-Revises: 094_add_jira_credential_type, 094_add_file_team_shares
+Revision ID: 096_merge_jira_file_team_share_heads
+Revises: 095_add_jira_credential_type, 094_add_file_team_shares
 Create Date: 2026-07-09 00:00:00.000000
 """
 
 from collections.abc import Sequence
 
-revision: str = "095_merge_jira_file_team_share_heads"
+revision: str = "096_merge_jira_file_team_share_heads"
 down_revision: tuple[str, str] = (
-    "094_add_jira_credential_type",
+    "095_add_jira_credential_type",
     "094_add_file_team_shares",
 )
 branch_labels: str | Sequence[str] | None = None

@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["095_merge_jira_file_team_share_heads"])
+        self.assertEqual(self.script.get_heads(), ["096_merge_jira_file_team_share_heads"])
 
     def test_plugins_revision_follows_workflow_timeout(self) -> None:
         plugins_revision = self.script.get_revision("090_add_plugins_table")
@@ -42,7 +42,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.assertEqual(codex_revision.down_revision, "092_add_sentry_credential_type")
 
     def test_jira_revision_follows_codex_revision(self) -> None:
-        jira_revision = self.script.get_revision("094_add_jira_credential_type")
+        jira_revision = self.script.get_revision("095_add_jira_credential_type")
 
         self.assertIsNotNone(jira_revision)
         self.assertEqual(jira_revision.down_revision, "093_add_codex_node_support")
@@ -54,12 +54,12 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.assertEqual(file_team_shares_revision.down_revision, "093_add_codex_node_support")
 
     def test_jira_and_file_team_share_heads_are_merged(self) -> None:
-        merge_revision = self.script.get_revision("095_merge_jira_file_team_share_heads")
+        merge_revision = self.script.get_revision("096_merge_jira_file_team_share_heads")
 
         self.assertIsNotNone(merge_revision)
         self.assertEqual(
             set(merge_revision.down_revision),
-            {"094_add_jira_credential_type", "094_add_file_team_shares"},
+            {"095_add_jira_credential_type", "094_add_file_team_shares"},
         )
 
     def test_github_and_supabase_revisions_are_merged(self) -> None:
