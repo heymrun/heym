@@ -38,6 +38,7 @@ interface InternalOptionGroup {
 }
 
 interface Props {
+  id?: string;
   modelValue?: string | undefined;
   options?: Option[];
   groups?: OptionGroup[];
@@ -53,6 +54,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: undefined,
   modelValue: "",
   options: () => [],
   groups: undefined,
@@ -171,11 +173,29 @@ function openOptions(): void {
   }
 }
 
-function handleUpdateSelectedKey(key: string): void {
-  selectedKey.value = key;
-  const option = internalOptions.value.find((item) => item.key === key);
+function handleUpdateSelectedKey(key: string | undefined): void {
+  const nextKey = key ?? "";
+  const option = internalOptions.value.find((item) => item.key === nextKey);
+  if (!option && selectedOption.value) {
+    selectedKey.value = selectedOption.value.key;
+    searchTerm.value = selectedOption.value.label;
+    return;
+  }
+
+  selectedKey.value = nextKey;
   const value = option?.value;
   emit("update:modelValue", value && value.length > 0 ? value : undefined);
+}
+
+function handleItemSelect(event: Event, option: InternalOption): void {
+  if ((option.value ?? "") !== (props.modelValue ?? "")) {
+    return;
+  }
+
+  event.preventDefault();
+  selectedKey.value = option.key;
+  searchTerm.value = option.label;
+  open.value = false;
 }
 
 function clearValue(): void {
@@ -204,6 +224,7 @@ function clearValue(): void {
       >
         <Search class="ml-3.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <ComboboxInput
+          :id="id"
           class="h-full min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
           :placeholder="open ? searchPlaceholder : placeholder"
           :disabled="disabled"
@@ -256,6 +277,7 @@ function clearValue(): void {
             :key="option.key"
             :value="option.key"
             class="relative flex min-h-9 cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+            @select="handleItemSelect($event, option)"
           >
             <ComboboxItemIndicator class="absolute left-2 flex h-4 w-4 items-center justify-center">
               <Check class="h-4 w-4" />

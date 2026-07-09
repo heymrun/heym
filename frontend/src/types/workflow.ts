@@ -125,6 +125,7 @@ export interface AgentSkill {
   content: string;
   files?: AgentSkillFile[];
   timeoutSeconds?: number;
+  driveFilesEnabled?: boolean;
 }
 
 export type NodeType =

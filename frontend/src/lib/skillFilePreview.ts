@@ -58,3 +58,43 @@ export function getSkillFileImageSrc(file: AgentSkillFile): string {
 export function canPreviewSkillFile(file: AgentSkillFile): boolean {
   return isTextSkillFile(file) || isImageSkillFile(file) || isSvgSkillFile(file);
 }
+
+export function isEditableSkillFile(file: AgentSkillFile): boolean {
+  return isTextSkillFile(file);
+}
+
+export interface SkillFileWithIndex {
+  file: AgentSkillFile;
+  originalIndex: number;
+}
+
+export function compareSkillFilesForDisplay(
+  left: AgentSkillFile,
+  right: AgentSkillFile,
+): number {
+  const leftEditable = isEditableSkillFile(left);
+  const rightEditable = isEditableSkillFile(right);
+  if (leftEditable !== rightEditable) {
+    return leftEditable ? -1 : 1;
+  }
+
+  return left.path.localeCompare(right.path);
+}
+
+export function sortSkillFiles(files: AgentSkillFile[]): AgentSkillFile[] {
+  return [...files].sort(compareSkillFilesForDisplay);
+}
+
+export function getSkillFilesSortedForDisplay(
+  files: AgentSkillFile[],
+): SkillFileWithIndex[] {
+  return files
+    .map((file, originalIndex) => ({ file, originalIndex }))
+    .sort((left, right) => {
+      const order = compareSkillFilesForDisplay(left.file, right.file);
+      if (order !== 0) {
+        return order;
+      }
+      return left.originalIndex - right.originalIndex;
+    });
+}

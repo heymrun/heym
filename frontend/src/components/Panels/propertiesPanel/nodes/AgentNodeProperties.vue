@@ -5,6 +5,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { GuardrailCategory, ReasoningEffort } from "@/types/workflow";
@@ -104,9 +105,12 @@ const {
     </div>
     <div class="space-y-2">
       <Label>Model</Label>
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.model || ''"
         :options="modelOptions"
+        placeholder="Select model..."
+        search-placeholder="Search models..."
+        empty-text="No models found."
         :disabled="!selectedNode.data.credentialId || loadingModels"
         @update:model-value="handleModelChange($event)"
       />
@@ -147,9 +151,12 @@ const {
         :options="fallbackCredentialOptions"
         @update:model-value="handleFallbackCredentialChange($event)"
       />
-      <Select
+      <SearchableSelect
         :model-value="selectedNode.data.fallbackModel || ''"
         :options="fallbackModelOptions"
+        placeholder="Select fallback model..."
+        search-placeholder="Search fallback models..."
+        empty-text="No fallback models found."
         :disabled="!selectedNode.data.fallbackCredentialId || loadingFallbackModels"
         @update:model-value="handleFallbackModelChange($event)"
       />
@@ -736,6 +743,7 @@ const {
         @history="openSkillHistory(skill, idx)"
         @update:name="updateAgentSkill(idx, 'name', $event)"
         @update:timeout-seconds="updateAgentSkill(idx, 'timeoutSeconds', $event)"
+        @update:drive-files-enabled="updateAgentSkill(idx, 'driveFilesEnabled', $event)"
         @update:content="updateAgentSkill(idx, 'content', $event)"
         @update:file-content="(fileIndex, value) => updateAgentSkillFile(idx, fileIndex, 'content', value)"
         @add-files="addAgentSkillFiles(idx, $event)"

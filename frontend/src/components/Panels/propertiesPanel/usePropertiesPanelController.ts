@@ -20,6 +20,7 @@ import {
   parseSkillAssetFile,
   parseSkillZip,
 } from "@/lib/skillZipParser";
+import { sortSkillFiles } from "@/lib/skillFilePreview";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
@@ -7298,6 +7299,7 @@ export function usePropertiesPanelController() {
         content: "",
         files: [],
         timeoutSeconds: 30,
+        driveFilesEnabled: false,
       },
     ]);
   }
@@ -7312,7 +7314,7 @@ export function usePropertiesPanelController() {
   function updateAgentSkill(
     index: number,
     field: keyof AgentSkill,
-    value: string | number | AgentSkillFile[] | undefined
+    value: string | number | boolean | AgentSkillFile[] | undefined
   ): void {
     if (!selectedNode.value) return;
     const current = [...(selectedNode.value.data.skills || [])];
@@ -7388,7 +7390,7 @@ export function usePropertiesPanelController() {
       filesByPath.set(file.path, file);
     });
 
-    const nextFiles = Array.from(filesByPath.values());
+    const nextFiles = sortSkillFiles(Array.from(filesByPath.values()));
     skills[skillIndex] = {
       ...skill,
       content: nextContent,
@@ -7434,6 +7436,7 @@ export function usePropertiesPanelController() {
               ...skill,
               id: originalSkill.id,
               timeoutSeconds: skill.timeoutSeconds ?? originalSkill.timeoutSeconds ?? 30,
+              driveFilesEnabled: skill.driveFilesEnabled ?? originalSkill.driveFilesEnabled ?? false,
             }
           : skill,
       );
@@ -7476,6 +7479,7 @@ export function usePropertiesPanelController() {
             content: await file.text(),
             files: [],
             timeoutSeconds: 30,
+            driveFilesEnabled: false,
           },
         ],
         replaceSkillId,

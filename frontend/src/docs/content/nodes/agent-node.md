@@ -271,11 +271,14 @@ Skills are SKILL.md instructions plus optional Python files and bundled assets. 
 | `name` | string | Skill name |
 | `content` | string | SKILL.md content (instructions) |
 | `timeoutSeconds` | number | Timeout for skill Python execution (default: 30) |
+| `driveFilesEnabled` | boolean | Enables the runtime `heym_drive` helper for this skill (default: false) |
 | `files` | array | Optional `{ path, content, encoding, mimeType }` entries (e.g. `.py` scripts or binary assets stored as base64) |
 
 Skills can be added by dropping a `.zip` or `.md` file onto the Skills area.
 After expanding a skill card, drop any file onto that skill to attach or replace a bundled file, including binary assets such as PDFs and images.
 Use the download button on a skill card to export that skill as a `.zip` archive for backup or reuse in another workflow.
+
+Enable **Drive files** on a skill only when its Python code needs to read files from Heym Drive. Enabled skills receive a generated `heym_drive.py` helper at runtime and can call `list_drive_files`, `get_drive_file`, `get_drive_file_path`, `read_drive_file`, `read_drive_text`, or `read_drive_base64` with a Drive file id or exact filename. Filename lookup uses the newest accessible match. Disabled skills do not receive the helper.
 
 Each skill card has four actions on the row below the title:
 
@@ -303,12 +306,13 @@ The Skills section also includes **AI Build**:
 
 - Click **AI Build** to create a new skill from a chat prompt
 - Click the sparkle button on an existing skill to revise it with AI
+- Drop files into the prompt composer to attach them to the fine-tune comment; those files are also saved as bundled skill assets
 - The modal streams assistant text while showing live `SKILL.md` and `.py` file previews
 - **Download ZIP** exports the current preview without adding it to the node
 - **Save & Add** saves the generated files back through the same ZIP parsing flow used by manual uploads
 
 When editing with AI, Heym only sends text `.md` and `.py` skill files to the builder. Binary and other non-editable attachments are preserved and shared with the builder as path metadata so generated Python code can keep relative file references correct.
-Select an attached file in the right panel and enable **Include this file in AI context** when the AI needs to inspect a bundled template. Supported attachments such as DOCX files are summarized for the AI, including table rows and empty value cells, while oversized files stay metadata-only.
+Select an attached file in the right panel and enable **Include this file in AI context** when the AI needs to inspect a bundled template. Text, PDF, and DOCX files are extracted into prompt context when possible; Heym does not apply a separate Skill Builder attachment-size cap beyond the platform request body limit.
 
 ## Guardrails
 

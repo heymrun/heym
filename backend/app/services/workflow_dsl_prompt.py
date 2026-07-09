@@ -709,6 +709,7 @@ The response includes `$llmNodeLabel.image` (base64 data URL) which can be used 
   - `userMessage`: User message/prompt, supports expressions like `$previousNodeLabel.body.text`
   - `tools`: Array of Python tool definitions (optional, empty array = no Python tools)
   - `mcpConnections`: Array of MCP server connections (optional). Each connection exposes tools from an MCP server.
+  - `skills`: Array of skill bundles (optional). Each skill has `name`, `content`, optional `files`, optional `timeoutSeconds`, and optional `driveFilesEnabled` (default false). Set `driveFilesEnabled: true` only when that skill must read Heym Drive files by id or filename at runtime.
   - `toolTimeoutSeconds`: Timeout per tool execution in seconds (default: 30)
   - `maxToolIterations`: Max tool-call loop iterations (default: 30)
   - `temperature`: Creativity (0.0-2.0, default 0.7)
@@ -755,6 +756,8 @@ The agent will return structured JSON matching the schema, accessible via `$agen
 - `code`: Python function code (e.g., `def count_characters(text: str) -> int:\n    return len(text)`)
 
 **⚠️ CRITICAL for agent tools**: Always use `parameters` as a JSON **object**, never as a string. String format requires nested escaping that causes parse failures when applying the workflow.
+
+**Skill Drive files**: When a skill needs access to files stored in Heym Drive, set that skill's `driveFilesEnabled` to `true`. The Python skill can then import `heym_drive` and call `read_drive_file`, `read_drive_text`, `read_drive_base64`, `get_drive_file`, `get_drive_file_path`, or `list_drive_files` with `file_id` or `filename`. Leave it `false` unless Drive access is required.
 
 **Agent with Tools Example:**
 ```json

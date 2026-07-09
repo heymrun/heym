@@ -168,6 +168,7 @@ async function createVectorStore(): Promise<void> {
       is_shared: false,
       shared_by: null,
       stats: store.stats,
+      backend: store.backend,
     });
     showCreateDialog.value = false;
   } catch (e: unknown) {
@@ -212,6 +213,7 @@ async function cloneVectorStore(store: VectorStoreListItem, event: Event): Promi
       is_shared: false,
       shared_by: null,
       stats: cloned.stats,
+      backend: cloned.backend,
     });
   } catch {
     alert("Failed to clone vector store");

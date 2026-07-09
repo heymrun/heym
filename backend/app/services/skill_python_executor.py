@@ -7,9 +7,11 @@ import json
 import logging
 import mimetypes
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,120 @@ _SECRET_ENV_KEYS: frozenset[str] = frozenset(  # pragma: allowlist secret
 _MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB virtual memory cap
 _OUTPUT_FILES_DIR = "_output_files"
 _HITL_SENTINEL = "_hitl_request.json"
+_DRIVE_FILES_DIR = "_drive_files"
+_DRIVE_MANIFEST = "_drive_files_manifest.json"
+_DRIVE_HELPER = "heym_drive.py"
+
+
+_DRIVE_HELPER_SOURCE = r'''"""Read Heym Drive files exposed to this skill run."""
+
+from __future__ import annotations
+
+import base64
+import json
+from pathlib import Path
+from typing import Any
+
+_ROOT = Path(__file__).resolve().parent
+_MANIFEST_PATH = _ROOT / "_drive_files_manifest.json"
+
+
+def _load_manifest() -> list[dict[str, Any]]:
+    if not _MANIFEST_PATH.exists():
+        raise RuntimeError("Drive files are not enabled for this skill.")
+    data = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        return []
+    rows = [row for row in data if isinstance(row, dict)]
+    return sorted(rows, key=lambda row: str(row.get("created_at") or ""), reverse=True)
+
+
+def _public_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "filename": row.get("filename"),
+        "mime_type": row.get("mime_type"),
+        "size_bytes": row.get("size_bytes"),
+        "workflow_id": row.get("workflow_id"),
+        "source_node_label": row.get("source_node_label"),
+        "created_at": row.get("created_at"),
+        "path": row.get("path"),
+    }
+
+
+def list_drive_files(filename: str | None = None) -> list[dict[str, Any]]:
+    """Return accessible Drive file metadata, optionally filtered by exact filename."""
+    rows = _load_manifest()
+    if filename is not None:
+        rows = [row for row in rows if row.get("filename") == filename]
+    return [_public_metadata(row) for row in rows]
+
+
+def get_drive_file(
+    file_id: str | None = None,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Return metadata for an accessible Drive file by id or newest exact filename match."""
+    if not file_id and not filename:
+        raise ValueError("Provide file_id or filename.")
+    all_rows = _load_manifest()
+    rows = all_rows
+    if file_id:
+        rows = [row for row in rows if str(row.get("id") or "") == str(file_id)]
+        if not rows and not filename:
+            rows = [row for row in all_rows if row.get("filename") == file_id]
+    if filename:
+        rows = [row for row in rows if row.get("filename") == filename]
+    if not rows:
+        raise FileNotFoundError("Drive file not found or not accessible.")
+    return _public_metadata(rows[0])
+
+
+def get_drive_file_path(
+    file_id: str | None = None,
+    filename: str | None = None,
+) -> str:
+    """Return the local copied path for a Drive file."""
+    metadata = get_drive_file(file_id=file_id, filename=filename)
+    path = metadata.get("path")
+    if not isinstance(path, str) or not path:
+        raise FileNotFoundError("Drive file copy is unavailable.")
+    return path
+
+
+def read_drive_file(
+    file_id: str | None = None,
+    filename: str | None = None,
+    encoding: str | None = None,
+) -> bytes | str:
+    """Read a Drive file. With no encoding, returns bytes; use encoding='base64' for base64."""
+    data = Path(get_drive_file_path(file_id=file_id, filename=filename)).read_bytes()
+    if encoding is None or encoding in {"bytes", "binary"}:
+        return data
+    if encoding == "base64":
+        return base64.b64encode(data).decode("ascii")
+    return data.decode(encoding)
+
+
+def read_drive_text(
+    file_id: str | None = None,
+    filename: str | None = None,
+    encoding: str = "utf-8",
+) -> str:
+    """Read a Drive file as text."""
+    value = read_drive_file(file_id=file_id, filename=filename, encoding=encoding)
+    if not isinstance(value, str):
+        return value.decode(encoding)
+    return value
+
+
+def read_drive_base64(file_id: str | None = None, filename: str | None = None) -> str:
+    """Read a Drive file and return base64 text."""
+    value = read_drive_file(file_id=file_id, filename=filename, encoding="base64")
+    if not isinstance(value, str):
+        raise TypeError("Expected base64 text.")
+    return value
+'''
 
 
 @dataclass
@@ -116,6 +232,72 @@ def _write_skill_file(root: Path, file_data: dict[str, Any]) -> None:
     path.write_text(str(content), encoding="utf-8")
 
 
+def _drive_created_at_sort_key(file_data: dict[str, Any]) -> str:
+    """Return a stable descending sort key for Drive file creation time."""
+
+    created_at = file_data.get("created_at")
+    if isinstance(created_at, datetime):
+        return created_at.astimezone(timezone.utc).isoformat()
+    return str(created_at or "")
+
+
+def _safe_drive_copy_filename(filename: object) -> str:
+    """Return a path-safe filename for a Drive file copy."""
+
+    raw = str(filename or "drive-file").strip() or "drive-file"
+    sanitized = raw.replace("\\", "_").replace("/", "_").replace("\x00", "")
+    return sanitized or "drive-file"
+
+
+def _prepare_drive_files(root: Path, drive_files: list[dict[str, Any]]) -> None:
+    """Copy accessible Drive files into the skill workspace and write the helper module."""
+
+    drive_root = root / _DRIVE_FILES_DIR
+    drive_root.mkdir(exist_ok=True)
+    manifest: list[dict[str, Any]] = []
+
+    sorted_files = sorted(drive_files, key=_drive_created_at_sort_key, reverse=True)
+    for file_data in sorted_files:
+        file_id = str(file_data.get("id") or "").strip()
+        source_path_value = file_data.get("source_path")
+        if not file_id or not source_path_value:
+            continue
+
+        source_path = Path(str(source_path_value))
+        if not source_path.exists() or not source_path.is_file():
+            continue
+
+        filename = str(file_data.get("filename") or "drive-file")
+        copy_path = drive_root / file_id / _safe_drive_copy_filename(filename)
+        copy_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, copy_path)
+
+        created_at = file_data.get("created_at")
+        if isinstance(created_at, datetime):
+            created_at_value: str | None = created_at.astimezone(timezone.utc).isoformat()
+        elif created_at is None:
+            created_at_value = None
+        else:
+            created_at_value = str(created_at)
+
+        workflow_id = file_data.get("workflow_id")
+        manifest.append(
+            {
+                "id": file_id,
+                "filename": filename,
+                "mime_type": str(file_data.get("mime_type") or "application/octet-stream"),
+                "size_bytes": int(file_data.get("size_bytes") or copy_path.stat().st_size),
+                "workflow_id": str(workflow_id) if workflow_id else None,
+                "source_node_label": file_data.get("source_node_label"),
+                "created_at": created_at_value,
+                "path": str(copy_path),
+            }
+        )
+
+    (root / _DRIVE_MANIFEST).write_text(json.dumps(manifest, default=str), encoding="utf-8")
+    (root / _DRIVE_HELPER).write_text(_DRIVE_HELPER_SOURCE, encoding="utf-8")
+
+
 def _serialize_skill_stdin(arguments: dict[str, Any]) -> str:
     """Serialize skill tool arguments to the stdin format expected by skills.
 
@@ -136,6 +318,7 @@ def execute_skill_python(
     skill_files: list[dict[str, Any]],
     arguments: dict[str, Any],
     timeout_seconds: float = 30.0,
+    drive_files: list[dict[str, Any]] | None = None,
 ) -> SkillExecutionResult:
     """
     Execute a skill's Python script using uv.
@@ -144,6 +327,7 @@ def execute_skill_python(
         skill_files: List of {"path": str, "content": str}
         arguments: Dict of arguments to pass to the script (as JSON on stdin)
         timeout_seconds: Max execution time
+        drive_files: Optional accessible Drive file metadata with source_path values
 
     Returns:
         SkillExecutionResult with output, any generated files, and optional HITL request.
@@ -156,6 +340,8 @@ def execute_skill_python(
         root = Path(tmpdir)
         for f in skill_files:
             _write_skill_file(root, f)
+        if drive_files is not None:
+            _prepare_drive_files(root, drive_files)
 
         output_dir = root / _OUTPUT_FILES_DIR
         output_dir.mkdir(exist_ok=True)

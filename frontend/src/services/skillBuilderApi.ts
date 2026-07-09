@@ -28,6 +28,7 @@ export interface SkillBuilderRequest {
   credentialId: string;
   model: string;
   message: string;
+  attachments?: SkillBuilderAttachment[];
   existingSkill?: SkillBuilderExistingSkill;
   conversationHistory?: SkillBuilderConversationMessage[];
 }
@@ -60,6 +61,7 @@ export function skillBuilderStream(
       credential_id: request.credentialId,
       model: request.model,
       message: request.message,
+      attachments: request.attachments ?? [],
       existing_skill: request.existingSkill ?? null,
       conversation_history: request.conversationHistory ?? [],
     }),

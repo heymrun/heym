@@ -68,6 +68,7 @@ class SkillBuilderRequest(BaseModel):
     model: str
     message: str
     existing_skill: SkillBuilderSkill | None = None
+    attachments: list[SkillBuilderAttachment] = Field(default_factory=list)
     conversation_history: list[SkillBuilderConversationMessage] = Field(default_factory=list)
 
 
@@ -110,6 +111,33 @@ A Heym skill is a ZIP bundle containing:
 - Optional extra `.py` or `.md` helper files
 - Optional bundled asset files that existing skills may reference
 - No binary files in generated Skill Builder output
+
+### Optional Drive files helper
+
+Agent skills can optionally read Heym Drive files when the skill card's
+**Enable Drive files** setting is on. If the user asks for Drive access, mention
+that this setting must be enabled on the skill. When it is enabled, Python code
+can import:
+
+```python
+from heym_drive import (
+    get_drive_file,
+    get_drive_file_path,
+    list_drive_files,
+    read_drive_base64,
+    read_drive_file,
+    read_drive_text,
+)
+```
+
+Use `file_id="..."` when the workflow has a Drive file id, or `filename="report.pdf"`
+when the user refers to a file by name. Filename lookup uses the newest matching
+accessible Drive file.
+
+If a skill parameter may contain either a Drive id or a filename, branch before
+calling the helper and pass filenames through `filename=...`. For example,
+`read_drive_file(filename=identifier)` for `report.pdf`, and
+`read_drive_file(file_id=identifier)` for a real Drive file id.
 
 ### Required SKILL.md format
 
@@ -269,7 +297,6 @@ MAX_SKILL_BUILDER_ROUNDS = 6
 ALLOWED_SKILL_BUILDER_EXTENSIONS = (".md", ".py")
 MACOS_METADATA_DIR = "__MACOSX"
 MACOS_METADATA_FILENAMES = {".DS_Store"}
-ATTACHMENT_CONTEXT_MAX_BYTES = 2 * 1024 * 1024
 ATTACHMENT_TEXT_CONTEXT_MAX_CHARS = 12_000
 DOCX_CONTEXT_MAX_TABLES = 12
 DOCX_CONTEXT_MAX_ROWS = 30
@@ -438,6 +465,26 @@ def _summarize_text_attachment(data: bytes) -> str:
     return _truncate_text(text, ATTACHMENT_TEXT_CONTEXT_MAX_CHARS)
 
 
+def _summarize_pdf_context(data: bytes) -> str:
+    """Return a compact text summary of a PDF attachment."""
+
+    try:
+        import pypdf
+
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        parts: list[str] = []
+        for page_index, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            if not text.strip():
+                continue
+            parts.append(f"Page {page_index}:\n{text.strip()}")
+        if not parts:
+            return "PDF text extraction returned no readable text."
+        return _truncate_text("\n\n".join(parts), ATTACHMENT_TEXT_CONTEXT_MAX_CHARS)
+    except Exception as exc:
+        return f"PDF summary unavailable: {exc}"
+
+
 def _build_attachment_context(
     normalized_path: str, attachment: SkillBuilderAttachment
 ) -> str | None:
@@ -446,11 +493,6 @@ def _build_attachment_context(
     data = _decode_attachment_bytes(attachment)
     if data is None:
         return None
-    if len(data) > ATTACHMENT_CONTEXT_MAX_BYTES:
-        return (
-            "Content context omitted because the attachment is larger than "
-            f"{ATTACHMENT_CONTEXT_MAX_BYTES // (1024 * 1024)} MB."
-        )
 
     lower_path = normalized_path.lower()
     mime_type = (attachment.mime_type or "").lower()
@@ -458,13 +500,42 @@ def _build_attachment_context(
         "officedocument.wordprocessingml.document"
     ):
         return _summarize_docx_context(data)
+    if lower_path.endswith(".pdf") or mime_type == "application/pdf":
+        return _summarize_pdf_context(data)
     if attachment.encoding == "text" or mime_type.startswith("text/"):
         return _summarize_text_attachment(data)
 
     return None
 
 
-def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
+def _attachment_details(attachment: SkillBuilderAttachment) -> str:
+    """Return a compact attachment metadata string for prompts."""
+
+    details = [attachment.encoding]
+    if attachment.mime_type:
+        details.append(attachment.mime_type)
+    if attachment.size_bytes is not None:
+        details.append(f"{attachment.size_bytes} bytes")
+    return ", ".join(details)
+
+
+def _attachment_context_sections(
+    attachments: list[tuple[str, SkillBuilderAttachment]],
+) -> list[str]:
+    """Build prompt sections for attachments that have extractable content."""
+
+    attachment_contexts: list[str] = []
+    for normalized_path, attachment in attachments:
+        context = _build_attachment_context(normalized_path, attachment)
+        if context:
+            attachment_contexts.append(f"### {normalized_path}\n\n{context}")
+    return attachment_contexts
+
+
+def build_skill_builder_prompt(
+    existing_skill: SkillBuilderSkill | None,
+    message_attachments: list[SkillBuilderAttachment] | None = None,
+) -> str:
     """Build the system prompt for the skill builder assistant."""
 
     base = (
@@ -474,6 +545,8 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
         "Generate and edit only `.md` and `.py` files. "
         "Existing non-editable attachments may be referenced by path, but you must not "
         "generate placeholders for them. "
+        "Uploaded files in this chat are bundled assets; use their context and paths, "
+        "but do not include them in `set_skill_files`. "
         "All natural language content must be English only, including parameter names, "
         "descriptions, output names, output descriptions, comments, docstrings, "
         "and user-facing strings.\n\n"
@@ -508,23 +581,14 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
                 "not shown, but their paths are real and must stay valid:\n"
             )
             for normalized_path, attachment in attachments:
-                details = [attachment.encoding]
-                if attachment.mime_type:
-                    details.append(attachment.mime_type)
-                if attachment.size_bytes is not None:
-                    details.append(f"{attachment.size_bytes} bytes")
-                base += f"- `{normalized_path}` ({', '.join(details)})\n"
+                base += f"- `{normalized_path}` ({_attachment_details(attachment)})\n"
             base += (
                 "\nDo not include these non-editable files in `set_skill_files`. "
                 "If you move a Python file that reads one of these paths, update the "
                 "code and `SKILL.md` so the relative path still points to the asset in "
                 "the final ZIP layout.\n\n"
             )
-            attachment_contexts: list[str] = []
-            for normalized_path, attachment in attachments:
-                context = _build_attachment_context(normalized_path, attachment)
-                if context:
-                    attachment_contexts.append(f"### {normalized_path}\n\n{context}")
+            attachment_contexts = _attachment_context_sections(attachments)
             if attachment_contexts:
                 base += (
                     "## Included Attachment Context\n\n"
@@ -545,6 +609,31 @@ def build_skill_builder_prompt(existing_skill: SkillBuilderSkill | None) -> str:
             "If the request is specific enough, generate the skill immediately and call "
             "`set_skill_files`. If the request is vague, ask a concise clarifying question first."
         )
+
+    uploaded_attachments = [
+        (_normalize_skill_builder_path(attachment.path), attachment)
+        for attachment in (message_attachments or [])
+        if _normalize_skill_builder_path(attachment.path)
+        and not _is_ignored_skill_builder_path(attachment.path)
+    ]
+    if uploaded_attachments:
+        base += (
+            "\n\n## Uploaded Files For This Request\n\n"
+            "The user attached these files with the current comment. They will be preserved "
+            "as bundled skill assets when the user saves the skill. Reference their exact "
+            "paths from Python code when needed, but do not include them in `set_skill_files`.\n"
+        )
+        for normalized_path, attachment in uploaded_attachments:
+            base += f"- `{normalized_path}` ({_attachment_details(attachment)})\n"
+
+        uploaded_contexts = _attachment_context_sections(uploaded_attachments)
+        if uploaded_contexts:
+            base += (
+                "\n## Uploaded File Context\n\n"
+                "Use this extracted context to update only editable `.md` and `.py` files.\n\n"
+            )
+            base += "\n\n".join(uploaded_contexts)
+            base += "\n\n"
 
     return base.strip()
 
@@ -597,7 +686,7 @@ async def run_skill_builder(
 ) -> AsyncGenerator[str, None]:
     """Run a non-streaming tool loop and emit SSE events for chat and files."""
 
-    system_prompt = build_skill_builder_prompt(request.existing_skill)
+    system_prompt = build_skill_builder_prompt(request.existing_skill, request.attachments)
     history = [message.model_dump() for message in request.conversation_history]
     all_messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},

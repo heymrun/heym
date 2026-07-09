@@ -4548,6 +4548,12 @@ class WorkflowExecutor:
         for s in skills:
             content = s.get("content", "")
             if content:
+                if s.get("driveFilesEnabled"):
+                    content = (
+                        content
+                        + "\n\nDrive files are enabled for this skill. Python code may import "
+                        "`heym_drive` and read accessible Drive files by id or filename."
+                    )
                 skills_content_parts.append(content)
         skills_content = "\n\n---\n\n".join(skills_content_parts) if skills_content_parts else ""
         system_instruction = (
@@ -4868,10 +4874,19 @@ class WorkflowExecutor:
                 continue
             skill_name = (skill.get("name") or "skill").replace(" ", "_").lower()
             skill_timeout = float(skill.get("timeoutSeconds") or tool_timeout_seconds)
+            drive_files_enabled = bool(skill.get("driveFilesEnabled"))
+            skill_description = (
+                f"Run {skill.get('name', 'skill')} Python script. Pass arguments as JSON."
+            )
+            if drive_files_enabled:
+                skill_description += (
+                    " This skill can import heym_drive to read accessible Drive files by "
+                    "file_id or filename."
+                )
             merged_tools.append(
                 {
                     "name": f"skill_{skill_name}",
-                    "description": f"Run {skill.get('name', 'skill')} Python script. Pass arguments as JSON.",
+                    "description": skill_description,
                     "parameters": json.dumps(
                         {
                             "type": "object",
@@ -4884,6 +4899,8 @@ class WorkflowExecutor:
                     "_source": "skill",
                     "_skill_files": skill_files,
                     "_skill_timeout": skill_timeout,
+                    "_drive_files_enabled": drive_files_enabled,
+                    "_actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,
                     "_owner_id": str(self.trace_user_id) if self.trace_user_id else None,
                     "_workflow_id": str(self.workflow_id) if self.workflow_id else None,
                     "_node_id": node_id,

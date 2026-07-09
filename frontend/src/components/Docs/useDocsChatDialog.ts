@@ -16,6 +16,11 @@ interface ChatMessage {
   content: string;
 }
 
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
 const MAX_CONTEXT_MESSAGES = 25;
 
 export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => void) {
@@ -35,6 +40,27 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   const activeAbortController = ref<AbortController | null>(null);
   const activeAssistantMessageId = ref<string | null>(null);
   const copiedMessageId = ref<string | null>(null);
+  const credentialOptions = computed<SelectOption[]>(() =>
+    credentials.value.map((credential) => ({
+      value: credential.id,
+      label: credential.name,
+    })),
+  );
+  const modelOptions = computed<SelectOption[]>(() =>
+    models.value.map((model) => ({
+      value: model.id,
+      label: model.name,
+    })),
+  );
+  const credentialSelectPlaceholder = computed<string>(() =>
+    credentials.value.length === 0 ? "No credentials" : "Select credential...",
+  );
+  const modelSelectPlaceholder = computed<string>(() => {
+    if (loadingModels.value) return "Loading...";
+    if (modelsLoadFailed.value) return "Failed to load";
+    if (!selectedCredentialId.value) return "Select credential first";
+    return "Select model...";
+  });
   let activeStreamSequence = 0;
   let activeFlushPromise: Promise<void> = Promise.resolve();
   let copiedMessageIdTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +91,8 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     }
     loadingModels.value = true;
     modelsLoadFailed.value = false;
+    models.value = [];
+    selectedModel.value = "";
     try {
       models.value = await credentialsApi.getModels(selectedCredentialId.value);
       selectedModel.value = models.value.length > 0 ? pickDefaultModel(models.value) : "";
@@ -236,12 +264,14 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   });
 
   return {
-    credentials,
-    models,
     selectedCredentialId,
     selectedModel,
     loadingModels,
     modelsLoadFailed,
+    credentialOptions,
+    modelOptions,
+    credentialSelectPlaceholder,
+    modelSelectPlaceholder,
     messages,
     inputText,
     streaming,

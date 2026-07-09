@@ -2,6 +2,7 @@ import { ref } from "vue";
 
 import type {
   SkillBuilderConversationMessage,
+  SkillBuilderAttachment,
   SkillBuilderExistingSkill,
   SkillBuilderFile,
 } from "@/services/skillBuilderApi";
@@ -42,6 +43,7 @@ export function useSkillBuilder() {
     credentialId: string,
     model: string,
     existingSkill?: SkillBuilderExistingSkill,
+    attachments: SkillBuilderAttachment[] = [],
   ): void {
     const trimmed = text.trim();
     if (!trimmed || isStreaming.value) {
@@ -65,6 +67,7 @@ export function useSkillBuilder() {
         credentialId,
         model,
         message: trimmed,
+        attachments,
         existingSkill,
         conversationHistory: conversationHistory.value,
       },

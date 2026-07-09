@@ -20,6 +20,7 @@ import {
   Table2,
   Terminal,
   Trash2,
+  Users,
   Variable,
   Workflow,
 } from "lucide-vue-next";
@@ -49,6 +50,7 @@ const TABS = [
   { id: "datatable", label: "DataTable", icon: Table2 },
   { id: "evals", label: "Evals", icon: FlaskConical },
   { id: "schedules", label: "Scheduled", icon: CalendarDays },
+  { id: "teams", label: "Teams", icon: Users },
   { id: "logs", label: "Logs", icon: Terminal },
 ] as const;
 
