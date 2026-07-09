@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  ChevronDown,
   Download,
   FileText,
   HardDrive,
   Image,
   RefreshCw,
   Search,
+  Settings,
   Share2,
   Sheet,
   Trash2,
@@ -373,8 +375,8 @@ onBeforeUnmount(() => {
         size="sm"
         @click="showBulk = true"
       >
-        <Users class="w-3.5 h-3.5 mr-1" />
-        Bulk actions
+        <Settings class="w-3.5 h-3.5 mr-1" />
+        Actions
       </Button>
       <Button
         size="sm"
@@ -524,18 +526,21 @@ onBeforeUnmount(() => {
     >
       <label class="flex items-center gap-1.5 text-muted-foreground">
         Rows per page
-        <select
-          v-model="pageSizeChoice"
-          class="h-8 rounded-md border border-border bg-background px-2 text-xs"
-        >
-          <option
-            v-for="opt in PAGE_SIZE_OPTIONS"
-            :key="opt"
-            :value="opt"
+        <span class="relative inline-flex">
+          <select
+            v-model="pageSizeChoice"
+            class="h-8 min-w-24 appearance-none rounded-md border border-border bg-background pl-3 pr-9 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            {{ opt }}
-          </option>
-        </select>
+            <option
+              v-for="opt in PAGE_SIZE_OPTIONS"
+              :key="opt"
+              :value="opt"
+            >
+              {{ opt }}
+            </option>
+          </select>
+          <ChevronDown class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        </span>
       </label>
       <div
         v-if="totalPages > 1"
