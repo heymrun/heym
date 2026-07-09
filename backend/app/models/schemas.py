@@ -1401,6 +1401,23 @@ class CreateFileShareRequest(BaseModel):
     max_downloads: int | None = None
 
 
+class BulkFileTeamSharingRequest(BaseModel):
+    file_ids: list[uuid.UUID] = Field(min_length=1)
+    enabled: bool
+
+
+class BulkCreateFileShareRequest(BaseModel):
+    file_ids: list[uuid.UUID] = Field(min_length=1)
+    expires_hours: int | None = None
+    basic_auth_password: str | None = None
+    max_downloads: int | None = None
+
+
+class BulkFileOperationResponse(BaseModel):
+    succeeded: list[uuid.UUID] = Field(default_factory=list)
+    failed: list[uuid.UUID] = Field(default_factory=list)
+
+
 class FileListResponse(BaseModel):
     files: list[GeneratedFileResponse] = Field(default_factory=list)
     total: int = 0

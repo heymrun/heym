@@ -2755,6 +2755,7 @@ export const templatesApi = {
 // ---------- Files / Drive ----------
 
 import type {
+  BulkFileOperationResult,
   CreateShareRequest,
   FileAccessToken,
   FileListParams,
@@ -2818,6 +2819,28 @@ export const filesApi = {
 
   revokeShare: async (fileId: string, tokenId: string): Promise<void> => {
     await api.delete(`/files/${fileId}/share/${tokenId}`);
+  },
+
+  bulkSetTeamSharing: async (
+    fileIds: string[],
+    enabled: boolean,
+  ): Promise<BulkFileOperationResult> => {
+    const response = await api.patch<BulkFileOperationResult>("/files/team-sharing/bulk", {
+      file_ids: fileIds,
+      enabled,
+    });
+    return response.data;
+  },
+
+  bulkCreateShare: async (
+    fileIds: string[],
+    data: CreateShareRequest,
+  ): Promise<BulkFileOperationResult> => {
+    const response = await api.post<BulkFileOperationResult>("/files/share/bulk", {
+      file_ids: fileIds,
+      ...data,
+    });
+    return response.data;
   },
 };
 

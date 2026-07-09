@@ -12,6 +12,9 @@ from app.api.deps import get_current_user
 from app.db.models import FileAccessToken, FileTeamShare, GeneratedFile, Team, TeamMember, User
 from app.db.session import get_db
 from app.models.schemas import (
+    BulkCreateFileShareRequest,
+    BulkFileOperationResponse,
+    BulkFileTeamSharingRequest,
     CreateFileShareRequest,
     FileAccessTokenResponse,
     FileListResponse,
@@ -347,6 +350,31 @@ async def update_file_team_sharing(
     )
 
 
+@router.patch("/team-sharing/bulk", response_model=BulkFileOperationResponse)
+async def bulk_update_file_team_sharing(
+    payload: BulkFileTeamSharingRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BulkFileOperationResponse:
+    """Enable or disable team sharing for multiple owned files in one request."""
+    succeeded: list[uuid.UUID] = []
+    failed: list[uuid.UUID] = []
+    for file_id in payload.file_ids:
+        row = await _get_owned_file(db, file_id, user.id)
+        if not row:
+            failed.append(file_id)
+            continue
+        await _set_file_team_sharing(
+            db,
+            file_id=file_id,
+            owner_id=user.id,
+            enabled=payload.enabled,
+        )
+        succeeded.append(file_id)
+    await db.commit()
+    return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
+
+
 @router.post("/{file_id}/share", response_model=FileAccessTokenResponse)
 async def create_share(
     file_id: uuid.UUID,
@@ -370,6 +398,33 @@ async def create_share(
     )
     await db.commit()
     return _token_to_response(token, base_url)
+
+
+@router.post("/share/bulk", response_model=BulkFileOperationResponse)
+async def bulk_create_share(
+    payload: BulkCreateFileShareRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BulkFileOperationResponse:
+    """Create a share link with the same settings for multiple owned files."""
+    succeeded: list[uuid.UUID] = []
+    failed: list[uuid.UUID] = []
+    for file_id in payload.file_ids:
+        row = await _get_owned_file(db, file_id, user.id)
+        if not row:
+            failed.append(file_id)
+            continue
+        await create_access_token(
+            db,
+            file_id=file_id,
+            created_by_id=user.id,
+            expires_hours=payload.expires_hours,
+            basic_auth_password=payload.basic_auth_password,
+            max_downloads=payload.max_downloads,
+        )
+        succeeded.append(file_id)
+    await db.commit()
+    return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
 
 
 @router.get("/{file_id}/share", response_model=list[FileAccessTokenResponse])

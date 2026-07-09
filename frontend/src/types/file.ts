@@ -36,6 +36,11 @@ export interface FileTeamSharingResponse {
   shared_team_count: number;
 }
 
+export interface BulkFileOperationResult {
+  succeeded: string[];
+  failed: string[];
+}
+
 export interface FileListResponse {
   files: GeneratedFile[];
   total: number;

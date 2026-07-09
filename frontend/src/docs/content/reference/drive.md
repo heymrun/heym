@@ -17,6 +17,15 @@ The file list shows:
 - **Date** - When the file was created
 - **Actions** - Download, share, and delete buttons
 
+## Bulk Actions
+
+Each file you own has a checkbox at the start of its row. Files shared with you through a team are read-only and cannot be selected. Select multiple files (Shift-click selects a contiguous range; the header checkbox selects the whole page) to reveal the bulk action bar above the list, then click **Bulk actions** to open one dialog that applies the same setting to every selected file:
+
+- **Share all with my teams** / **Remove team sharing** — toggles team sharing for all selected files at once
+- **Create share link for each file** — creates a share link on every selected file using the same expiry, password, and max-downloads values
+
+The dialog reports how many files it applied to; files you don't own are skipped. The rows-per-page selector (25 / 50 / 100 / **All**) at the bottom of the list lets you load more files on one page so you can select across your whole Drive.
+
 ## Sharing Files
 
 Click the **Share** icon to open the share dialog. You can create multiple share links per file with different configurations and optionally share the file with your current teams.

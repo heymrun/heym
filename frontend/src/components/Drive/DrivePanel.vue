@@ -21,6 +21,7 @@ import Input from "@/components/ui/Input.vue";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import { filesApi } from "@/services/api";
 
+import BulkFileShareDialog from "./BulkFileShareDialog.vue";
 import FileShareDialog from "./FileShareDialog.vue";
 
 const files = ref<GeneratedFile[]>([]);
@@ -30,11 +31,21 @@ const clearing = ref(false);
 const error = ref("");
 const searchQuery = ref("");
 const page = ref(0);
-const pageSize = 25;
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, "All"] as const;
+const ALL_PAGE_SIZE = 1000;
+const pageSizeChoice = ref<(typeof PAGE_SIZE_OPTIONS)[number]>(25);
+const pageSize = computed(() =>
+  pageSizeChoice.value === "All" ? ALL_PAGE_SIZE : pageSizeChoice.value,
+);
 
 const showShare = ref(false);
 const shareFileId = ref("");
 const shareFilename = ref("");
+
+const showBulk = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
+const lastSelectedIndex = ref<number | null>(null);
 
 const filtered = computed(() => {
   if (!searchQuery.value) return files.value;
@@ -48,13 +59,63 @@ const filtered = computed(() => {
 });
 const hasOwnedFilesOnPage = computed(() => files.value.some((file) => !file.is_shared));
 
+// Only owned files can be team-shared or given share links, so only they are selectable.
+const selectableFiles = computed(() => filtered.value.filter((f) => !f.is_shared));
+const selectedFileIds = computed(() => Array.from(selectedIds.value));
+const allSelectableSelected = computed(
+  () =>
+    selectableFiles.value.length > 0 &&
+    selectableFiles.value.every((f) => selectedIds.value.has(f.id)),
+);
+const someSelectableSelected = computed(
+  () => selectableFiles.value.some((f) => selectedIds.value.has(f.id)) && !allSelectableSelected.value,
+);
+
+function clearSelection(): void {
+  selectedIds.value = new Set();
+  lastSelectedIndex.value = null;
+}
+
+function toggleRow(file: GeneratedFile, index: number, shiftKey: boolean): void {
+  const next = new Set(selectedIds.value);
+  if (shiftKey && lastSelectedIndex.value !== null) {
+    const [start, end] = [lastSelectedIndex.value, index].sort((a, b) => a - b);
+    const select = !next.has(file.id);
+    for (let i = start; i <= end; i++) {
+      const target = selectableFiles.value[i];
+      if (!target) continue;
+      if (select) next.add(target.id);
+      else next.delete(target.id);
+    }
+  } else if (next.has(file.id)) {
+    next.delete(file.id);
+  } else {
+    next.add(file.id);
+  }
+  selectedIds.value = next;
+  lastSelectedIndex.value = index;
+}
+
+function toggleSelectAll(): void {
+  if (allSelectableSelected.value) {
+    clearSelection();
+  } else {
+    selectedIds.value = new Set(selectableFiles.value.map((f) => f.id));
+    lastSelectedIndex.value = null;
+  }
+}
+
 async function loadFiles() {
   loading.value = true;
   error.value = "";
   try {
-    const res = await filesApi.list({ limit: pageSize, offset: page.value * pageSize });
+    const res = await filesApi.list({
+      limit: pageSize.value,
+      offset: page.value * pageSize.value,
+    });
     files.value = res.files;
     total.value = res.total;
+    clearSelection();
   } catch {
     error.value = "Failed to load files";
   } finally {
@@ -169,10 +230,15 @@ function mimeColor(mime: string) {
   return "text-muted-foreground";
 }
 
-const totalPages = computed(() => Math.ceil(total.value / pageSize));
+const totalPages = computed(() => Math.ceil(total.value / pageSize.value));
 
 watch(page, () => {
   if (!clearing.value) void loadFiles();
+});
+
+watch(pageSizeChoice, () => {
+  if (page.value === 0) void loadFiles();
+  else page.value = 0;
 });
 
 onMounted(() => {
@@ -297,14 +363,47 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
+    <!-- Bulk action bar -->
+    <div
+      v-if="selectedIds.size > 0"
+      class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
+    >
+      <span class="font-medium">{{ selectedIds.size }} selected</span>
+      <Button
+        size="sm"
+        @click="showBulk = true"
+      >
+        <Users class="w-3.5 h-3.5 mr-1" />
+        Bulk actions
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        @click="clearSelection"
+      >
+        Clear selection
+      </Button>
+    </div>
+
     <!-- File list -->
     <div
-      v-else
+      v-if="files.length > 0"
       class="rounded-lg border border-border overflow-hidden"
     >
       <table class="w-full text-sm">
         <thead class="bg-muted/50 text-xs text-muted-foreground">
           <tr>
+            <th class="w-9 px-3 py-2">
+              <input
+                v-if="selectableFiles.length > 0"
+                type="checkbox"
+                class="h-4 w-4 rounded border-input bg-background align-middle"
+                title="Select all"
+                :checked="allSelectableSelected"
+                :indeterminate="someSelectableSelected"
+                @change="toggleSelectAll"
+              >
+            </th>
             <th class="text-left px-3 py-2 font-medium">
               Name
             </th>
@@ -329,8 +428,18 @@ onBeforeUnmount(() => {
           <tr
             v-for="file in filtered"
             :key="file.id"
-            class="hover:bg-muted/30 transition-colors"
+            class="transition-colors"
+            :class="selectedIds.has(file.id) ? 'bg-primary/5' : 'hover:bg-muted/30'"
           >
+            <td class="w-9 px-3 py-2.5 align-top">
+              <input
+                v-if="!file.is_shared"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 rounded border-input bg-background"
+                :checked="selectedIds.has(file.id)"
+                @click="toggleRow(file, selectableFiles.indexOf(file), ($event as MouseEvent).shiftKey)"
+              >
+            </td>
             <td class="px-3 py-2.5">
               <div class="flex items-center gap-2">
                 <component
@@ -408,30 +517,50 @@ onBeforeUnmount(() => {
       </table>
     </div>
 
-    <!-- Pagination -->
+    <!-- Pagination + page size -->
     <div
-      v-if="totalPages > 1"
-      class="flex items-center justify-center gap-2 text-xs"
+      v-if="files.length > 0"
+      class="flex items-center justify-between gap-2 text-xs"
     >
-      <Button
-        size="sm"
-        variant="ghost"
-        :disabled="page === 0"
-        @click="page--"
+      <label class="flex items-center gap-1.5 text-muted-foreground">
+        Rows per page
+        <select
+          v-model="pageSizeChoice"
+          class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+        >
+          <option
+            v-for="opt in PAGE_SIZE_OPTIONS"
+            :key="opt"
+            :value="opt"
+          >
+            {{ opt }}
+          </option>
+        </select>
+      </label>
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center gap-2"
       >
-        Previous
-      </Button>
-      <span class="text-muted-foreground">
-        Page {{ page + 1 }} of {{ totalPages }}
-      </span>
-      <Button
-        size="sm"
-        variant="ghost"
-        :disabled="page >= totalPages - 1"
-        @click="page++"
-      >
-        Next
-      </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          :disabled="page === 0"
+          @click="page--"
+        >
+          Previous
+        </Button>
+        <span class="text-muted-foreground">
+          Page {{ page + 1 }} of {{ totalPages }}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          :disabled="page >= totalPages - 1"
+          @click="page++"
+        >
+          Next
+        </Button>
+      </div>
     </div>
 
     <!-- Share dialog -->
@@ -441,6 +570,14 @@ onBeforeUnmount(() => {
       :filename="shareFilename"
       :shared-with-my-teams="files.find((f) => f.id === shareFileId)?.shared_with_my_teams ?? false"
       @close="showShare = false"
+      @updated="loadFiles"
+    />
+
+    <!-- Bulk actions dialog -->
+    <BulkFileShareDialog
+      :open="showBulk"
+      :file-ids="selectedFileIds"
+      @close="showBulk = false"
       @updated="loadFiles"
     />
   </div>
