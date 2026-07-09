@@ -41,6 +41,7 @@ def execute(params: dict, files: dict) -> dict:
     return {
         "newest_id": newest["id"],
         "newest_text": read_drive_text(filename="report.txt"),
+        "newest_text_from_file_id_arg": read_drive_text(file_id="report.txt"),
         "old_text": read_drive_text(file_id=params["old_file_id"]),
         "old_base64": read_drive_base64(file_id=params["old_file_id"]),
         "matches": [item["id"] for item in matches],
@@ -86,6 +87,7 @@ if __name__ == "__main__":
 
         self.assertEqual(result.output["newest_id"], new_file_id)
         self.assertEqual(result.output["newest_text"], "new contents")
+        self.assertEqual(result.output["newest_text_from_file_id_arg"], "new contents")
         self.assertEqual(result.output["old_text"], "old contents")
         self.assertEqual(result.output["old_base64"], "b2xkIGNvbnRlbnRz")
         self.assertEqual(result.output["matches"], [new_file_id, old_file_id])

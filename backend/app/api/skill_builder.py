@@ -134,6 +134,11 @@ Use `file_id="..."` when the workflow has a Drive file id, or `filename="report.
 when the user refers to a file by name. Filename lookup uses the newest matching
 accessible Drive file.
 
+If a skill parameter may contain either a Drive id or a filename, branch before
+calling the helper and pass filenames through `filename=...`. For example,
+`read_drive_file(filename=identifier)` for `report.pdf`, and
+`read_drive_file(file_id=identifier)` for a real Drive file id.
+
 ### Required SKILL.md format
 
 ```markdown

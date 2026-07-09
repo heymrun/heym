@@ -90,9 +90,12 @@ def get_drive_file(
     """Return metadata for an accessible Drive file by id or newest exact filename match."""
     if not file_id and not filename:
         raise ValueError("Provide file_id or filename.")
-    rows = _load_manifest()
+    all_rows = _load_manifest()
+    rows = all_rows
     if file_id:
         rows = [row for row in rows if str(row.get("id") or "") == str(file_id)]
+        if not rows and not filename:
+            rows = [row for row in all_rows if row.get("filename") == file_id]
     if filename:
         rows = [row for row in rows if row.get("filename") == filename]
     if not rows:
