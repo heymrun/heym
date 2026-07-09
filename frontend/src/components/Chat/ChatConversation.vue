@@ -6,7 +6,6 @@ import {
   Bot,
   Loader2,
   ChevronRight,
-  ChevronDown,
   Copy,
   Check,
   ExternalLink,
@@ -30,6 +29,7 @@ import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Tooltip from "@/components/ui/Tooltip.vue";
 import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
 import {
@@ -57,6 +57,11 @@ interface Props {
   conversationId: string;
 }
 
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
 const props = defineProps<Props>();
 
 const UUID_PATTERN =
@@ -81,6 +86,30 @@ const selectedModel = ref("");
 const isLoadingModels = ref(false);
 const credentialError = ref("");
 const modelsLoadFailed = ref(false);
+
+const credentialOptions = computed<SelectOption[]>(() =>
+  credentials.value.map((credential) => ({
+    value: credential.id,
+    label: credential.name,
+  })),
+);
+
+const modelOptions = computed<SelectOption[]>(() =>
+  models.value.map((model) => ({
+    value: model.id,
+    label: model.name,
+  })),
+);
+
+const modelSelectPlaceholder = computed<string>(() => {
+  if (isLoadingModels.value) {
+    return "Loading...";
+  }
+  if (modelsLoadFailed.value) {
+    return "Failed to load";
+  }
+  return "Select...";
+});
 const copiedMessageId = ref<string | null>(null);
 const queueEditingId = ref<string | null>(null);
 const queueEditingValue = ref("");
@@ -769,6 +798,16 @@ async function onCredentialChange(): Promise<void> {
   await loadModels(selectedCredentialId.value);
 }
 
+function onCredentialSelect(value: string | undefined): void {
+  selectedCredentialId.value = value ?? "";
+  if (!selectedCredentialId.value) {
+    models.value = [];
+    selectedModel.value = "";
+    return;
+  }
+  void onCredentialChange();
+}
+
 function sendQuickPrompt(text: string): void {
   input.value = text;
   void send();
@@ -896,50 +935,39 @@ onUnmounted(() => {
 
       <div class="flex flex-col sm:flex-row gap-2 sm:gap-2 sm:flex-nowrap sm:items-end">
         <div class="grid grid-cols-2 gap-2 sm:flex sm:items-end sm:gap-2 flex-1 min-w-0">
-          <div class="chat-select-wrap relative flex flex-col min-w-0 sm:max-w-[140px]">
-            <select
-              v-model="selectedCredentialId"
-              class="chat-select min-h-[44px] sm:min-h-0 sm:h-9 rounded-lg border border-input bg-background pl-3 pr-9 py-2.5 sm:py-0 text-sm touch-manipulation w-full truncate appearance-none cursor-pointer"
-              @change="onCredentialChange"
-            >
-              <option
-                value=""
-                disabled
-              >
-                Select...
-              </option>
-              <option
-                v-for="cred in credentials"
-                :key="cred.id"
-                :value="cred.id"
-              >
-                {{ cred.name }}
-              </option>
-            </select>
-            <ChevronDown class="chat-select-arrow pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground shrink-0" />
+          <div
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[140px]"
+            data-testid="chat-credential-selector"
+          >
+            <SearchableSelect
+              id="chat-credential-select"
+              :model-value="selectedCredentialId"
+              :options="credentialOptions"
+              placeholder="Select..."
+              search-placeholder="Search credentials..."
+              empty-text="No credentials found."
+              select-class="min-h-[44px] sm:min-h-0 sm:h-9 md:h-9 rounded-lg border-input bg-background shadow-none"
+              content-class="z-[60]"
+              @update:model-value="onCredentialSelect"
+            />
           </div>
 
-          <div class="chat-select-wrap relative flex flex-col min-w-0 sm:max-w-[160px]">
-            <select
-              v-model="selectedModel"
-              class="chat-select min-h-[44px] sm:min-h-0 sm:h-9 rounded-lg border border-input bg-background pl-3 pr-9 py-2.5 sm:py-0 text-sm disabled:opacity-50 touch-manipulation w-full truncate appearance-none cursor-pointer"
+          <div
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[160px]"
+            data-testid="chat-model-selector"
+          >
+            <SearchableSelect
+              id="chat-model-select"
+              :model-value="selectedModel"
+              :options="modelOptions"
+              :placeholder="modelSelectPlaceholder"
+              search-placeholder="Search models..."
+              empty-text="No models found."
               :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            >
-              <option
-                value=""
-                disabled
-              >
-                {{ isLoadingModels ? "Loading..." : modelsLoadFailed ? "Failed to load" : "Select..." }}
-              </option>
-              <option
-                v-for="m in models"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name }}
-              </option>
-            </select>
-            <ChevronDown class="chat-select-arrow pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground shrink-0" />
+              select-class="min-h-[44px] sm:min-h-0 sm:h-9 md:h-9 rounded-lg border-input bg-background shadow-none"
+              content-class="z-[60]"
+              @update:model-value="selectedModel = $event ?? ''"
+            />
           </div>
         </div>
 

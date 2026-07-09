@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { prepareAuthenticatedPage } from "./support";
+import { prepareAuthenticatedPage, selectSearchableOption } from "./support";
 
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
@@ -50,6 +50,153 @@ test("creates and deletes a conversation", async ({ page }) => {
   await item.getByTitle("Confirm delete").click();
   await expect(page).toHaveURL(/\/chats$/);
   await expect(page.getByTestId(`chat-list-item-${conversationId}`)).toHaveCount(0);
+});
+
+test("filters chat credentials and models with searchable selectors", async ({ page }) => {
+  const conversationId = "11111111-1111-4111-8111-111111111112";
+  const openAiCredentialId = "22222222-2222-4222-8222-222222222223";
+  const cerebrasCredentialId = "22222222-2222-4222-8222-222222222224";
+  const now = new Date().toISOString();
+
+  await page.route("**/api/workflows", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/credentials/llm", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: openAiCredentialId,
+          name: "OpenAI Main",
+          type: "openai",
+          masked_value: "sk-...",
+          header_key: null,
+          created_at: now,
+        },
+        {
+          id: cerebrasCredentialId,
+          name: "Cerebras Chat",
+          type: "openai",
+          masked_value: "csk-...",
+          header_key: null,
+          created_at: now,
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/credentials/${openAiCredentialId}/models`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "gpt-4o",
+          name: "GPT-4o",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 128000,
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/credentials/${cerebrasCredentialId}/models`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "gemma-4-31b",
+          name: "Gemma 4 31B",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 32768,
+        },
+        {
+          id: "gpt-oss-120b",
+          name: "GPT OSS 120B",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 131072,
+        },
+        {
+          id: "zai-glm-4.7",
+          name: "ZAI GLM 4.7",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 65536,
+        },
+      ],
+    });
+  });
+  await page.route("**/api/chats/quick-prompts", async (route) => {
+    await route.fulfill({ json: { prompts: [] } });
+  });
+  await page.route(`**/api/chats/${conversationId}/context-summary**`, async (route) => {
+    await route.fulfill({
+      json: {
+        used: 0,
+        limit: 1000,
+        breakdown: {
+          system: 0,
+          agents_md: 0,
+          workflows: 0,
+          user_rules: 0,
+          history: 0,
+          attachment: 0,
+        },
+      },
+    });
+  });
+  await page.route(`**/api/chats/${conversationId}/read`, async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route("**/api/chats", async (route) => {
+    await route.fulfill({
+      json: {
+        conversations: [
+          {
+            id: conversationId,
+            title: "Selector Chat",
+            is_pinned: false,
+            is_running: false,
+            has_unread: false,
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(`**/api/chats/${conversationId}`, async (route) => {
+    await route.fulfill({
+      json: {
+        id: conversationId,
+        title: "Selector Chat",
+        is_pinned: false,
+        is_running: false,
+        has_unread: false,
+        last_credential_id: openAiCredentialId,
+        last_model: "gpt-4o",
+        created_at: now,
+        updated_at: now,
+        messages: [],
+        queued_messages: [],
+      },
+    });
+  });
+
+  await page.goto(`/chats/${conversationId}`);
+
+  const credentialField = page.getByTestId("chat-credential-selector");
+  const modelField = page.getByTestId("chat-model-selector");
+  await expect(credentialField.getByRole("combobox")).toHaveValue("OpenAI Main");
+  await expect(modelField.getByRole("combobox")).toHaveValue("GPT-4o");
+
+  await selectSearchableOption(page, credentialField, "Cerebras Chat");
+  await expect(credentialField.getByRole("combobox")).toHaveValue("Cerebras Chat");
+  await expect(modelField.getByRole("combobox")).toHaveValue("ZAI GLM 4.7");
+
+  await selectSearchableOption(page, modelField, "GPT OSS 120B");
+  await expect(modelField.getByRole("combobox")).toHaveValue("GPT OSS 120B");
 });
 
 test("queues, edits, and deletes a message while streaming", async ({ page }) => {
