@@ -5,6 +5,7 @@ import { useRoute } from "vue-router";
 
 import Button from "@/components/ui/Button.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -26,6 +27,11 @@ interface ChatMessage {
   content: string;
   images?: string[];
   attachmentName?: string;
+}
+
+interface SelectOption {
+  value: string;
+  label: string;
 }
 
 interface SpeechRecognitionResultAlternative {
@@ -99,6 +105,23 @@ const selectedModel = ref("");
 const loadingModels = ref(false);
 const modelsLoadFailed = ref(false);
 const models = ref<LLMModel[]>([]);
+
+const modelOptions = computed<SelectOption[]>(() =>
+  models.value.map((model) => ({
+    value: model.id,
+    label: model.name,
+  })),
+);
+
+const modelSelectPlaceholder = computed<string>(() => {
+  if (loadingModels.value) {
+    return "Loading...";
+  }
+  if (modelsLoadFailed.value) {
+    return "Failed to load";
+  }
+  return "Select...";
+});
 
 const authStore = useAuthStore();
 const messages = ref<ChatMessage[]>([]);
@@ -557,27 +580,18 @@ onUnmounted(() => {
             </select>
             <ChevronDown class="chat-select-arrow pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground shrink-0" />
           </div>
-          <div class="chat-select-wrap relative flex flex-col min-w-0 sm:max-w-[160px]">
-            <select
-              v-model="selectedModel"
+          <div class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[160px]">
+            <SearchableSelect
+              :model-value="selectedModel"
+              :options="modelOptions"
+              :placeholder="modelSelectPlaceholder"
+              search-placeholder="Search models..."
+              empty-text="No models found."
               :disabled="!selectedCredentialId || loadingModels || modelsLoadFailed"
-              class="chat-select min-h-[44px] sm:min-h-0 sm:h-9 rounded-lg border border-input bg-background pl-3 pr-9 py-2.5 sm:py-0 text-sm disabled:opacity-50 touch-manipulation w-full truncate appearance-none cursor-pointer"
-            >
-              <option
-                value=""
-                disabled
-              >
-                {{ loadingModels ? "Loading..." : modelsLoadFailed ? "Failed to load" : !selectedCredentialId ? "Select..." : "Select..." }}
-              </option>
-              <option
-                v-for="m in models"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name }}
-              </option>
-            </select>
-            <ChevronDown class="chat-select-arrow pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground shrink-0" />
+              select-class="min-h-[44px] sm:min-h-0 sm:h-9 md:h-9 rounded-lg border-input bg-background shadow-none"
+              content-class="z-[60]"
+              @update:model-value="selectedModel = $event ?? ''"
+            />
           </div>
         </div>
         <p

@@ -22,12 +22,48 @@ async function openCredentialDialog(page: import("@playwright/test").Page): Prom
   await page.getByRole("button", { name: /New Credential|Add Credential/ }).first().click();
 }
 
+async function selectCredentialType(
+  page: import("@playwright/test").Page,
+  optionLabel: string,
+): Promise<void> {
+  const combobox = page.locator("#cred-type");
+  await combobox.click();
+  await combobox.fill(optionLabel);
+  const listboxId = await combobox.getAttribute("aria-controls");
+  const listbox = listboxId ? page.locator(`#${listboxId}`) : page.getByRole("listbox");
+  await listbox.getByRole("option", { name: optionLabel, exact: true }).click();
+  await expect(combobox).toHaveValue(optionLabel);
+}
+
+async function reselectCurrentCredentialType(
+  page: import("@playwright/test").Page,
+): Promise<void> {
+  const combobox = page.locator("#cred-type");
+  const optionLabel = await combobox.inputValue();
+  await combobox.click();
+  const listboxId = await combobox.getAttribute("aria-controls");
+  const listbox = listboxId ? page.locator(`#${listboxId}`) : page.getByRole("listbox");
+  await listbox.getByRole("option", { name: optionLabel, exact: true }).click();
+  await expect(combobox).toHaveValue(optionLabel);
+}
+
+test("keeps the credential type when the selected option is clicked again", async ({ page }) => {
+  await openCredentialDialog(page);
+  await selectCredentialType(page, "Header Authorization");
+  await expect(page.getByLabel("Header Key")).toBeVisible();
+
+  await reselectCurrentCredentialType(page);
+
+  await expect(page.locator("#cred-type")).toHaveValue("Header Authorization");
+  await expect(page.getByLabel("Header Key")).toBeVisible();
+});
+
 test("creates and deletes a bearer credential", async ({ page }) => {
   const credentialName = `e2e-bearer-${Date.now()}`;
 
   await openCredentialDialog(page);
   await page.getByLabel("Name").fill(credentialName);
-  await page.locator("#cred-type select").selectOption("bearer");
+  await selectCredentialType(page, "Authorization Bearer Token");
   await page.getByLabel("Bearer Token").fill("e2e-secret-token");
 
   const credentialResponsePromise = page.waitForResponse(
@@ -55,7 +91,7 @@ test("creates a header credential with type-specific fields and deletes it", asy
   await page.getByLabel("Name").fill(credentialName);
 
   // Switching the type swaps in type-specific fields (Header Key/Value).
-  await page.locator("#cred-type select").selectOption("header");
+  await selectCredentialType(page, "Header Authorization");
   await page.getByLabel("Header Key").fill("X-Custom-Header");
   await page.getByLabel("Header Value").fill("e2e-header-value");
 
@@ -84,7 +120,7 @@ test("creates and deletes a Linear credential", async ({ page }) => {
 
   await openCredentialDialog(page);
   await page.getByLabel("Name").fill(credentialName);
-  await page.locator("#cred-type select").selectOption("linear");
+  await selectCredentialType(page, "Linear");
   await page.getByLabel("API Key").fill("lin_api_e2e_test");
   await expect(page.getByTestId("linear-test-connection-button")).toBeVisible();
 
@@ -136,7 +172,7 @@ test("creates and deletes a Sentry credential with base URL and test connection"
 
   await openCredentialDialog(page);
   await page.getByLabel("Name").fill(credentialName);
-  await page.locator("#cred-type select").selectOption("sentry");
+  await selectCredentialType(page, "Sentry");
   await page.getByLabel("API Key").fill("sntrys_e2e_test");
   await page.getByLabel("Sentry Base URL (Optional)").fill("https://sentry.example.com");
   await expect(page.getByTestId("sentry-test-connection-button")).toBeVisible();
@@ -194,7 +230,7 @@ test("creates and deletes a Notion internal token credential", async ({ page }) 
 
   await openCredentialDialog(page);
   await page.getByLabel("Name").fill(credentialName);
-  await page.locator("#cred-type select").selectOption("notion");
+  await selectCredentialType(page, "Notion (Token or OAuth)");
   await expect(page.locator('label[for="cred-notion-token"]')).toBeVisible();
   await page.getByLabel("Internal Integration Token").fill("ntn_e2e_internal_token");
 
@@ -221,7 +257,7 @@ test("creates and deletes a Notion internal token credential", async ({ page }) 
 test("shows Linear test connection failure message", async ({ page }) => {
   await openCredentialDialog(page);
   await page.getByLabel("Name").fill(`e2e-linear-fail-${Date.now()}`);
-  await page.locator("#cred-type select").selectOption("linear");
+  await selectCredentialType(page, "Linear");
   await page.getByLabel("API Key").fill("lin_api_invalid");
 
   await page.route("**/api/credentials/test", async (route) => {

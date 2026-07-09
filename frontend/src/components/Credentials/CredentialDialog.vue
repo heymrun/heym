@@ -12,6 +12,7 @@ import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { credentialsApi } from "@/services/api";
 import { AWS_REGION_OPTIONS } from "@/lib/awsRegions";
@@ -1419,11 +1420,15 @@ async function handleSave(): Promise<void> {
         class="space-y-2"
       >
         <Label for="cred-type">Type</Label>
-        <Select
+        <SearchableSelect
           id="cred-type"
-          v-model="type"
+          :model-value="type"
           :options="typeOptions"
+          placeholder="Select credential type..."
+          search-placeholder="Search credential types..."
+          empty-text="No credential types found."
           :disabled="saving"
+          @update:model-value="type = ($event || 'openai') as CredentialType"
         />
         <p class="text-xs text-muted-foreground">
           {{ CREDENTIAL_TYPE_DESCRIPTIONS[type] }}
