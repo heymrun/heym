@@ -15,7 +15,12 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["096_merge_jira_file_team_share_heads"])
+        self.assertEqual(self.script.get_heads(), ["096_merge_jira_file_heads"])
+
+    def test_revision_ids_fit_default_alembic_version_column(self) -> None:
+        for revision in self.script.walk_revisions():
+            with self.subTest(revision=revision.revision):
+                self.assertLessEqual(len(revision.revision), 32)
 
     def test_plugins_revision_follows_workflow_timeout(self) -> None:
         plugins_revision = self.script.get_revision("090_add_plugins_table")
@@ -54,7 +59,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.assertEqual(file_team_shares_revision.down_revision, "093_add_codex_node_support")
 
     def test_jira_and_file_team_share_heads_are_merged(self) -> None:
-        merge_revision = self.script.get_revision("096_merge_jira_file_team_share_heads")
+        merge_revision = self.script.get_revision("096_merge_jira_file_heads")
 
         self.assertIsNotNone(merge_revision)
         self.assertEqual(
