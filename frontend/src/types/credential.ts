@@ -101,6 +101,7 @@ export interface CredentialConfigJira {
   email: string;
   api_token: string;
   base_url: string;
+  deployment?: "cloud" | "data_center";
   api_version?: string;
 }
 

@@ -70,7 +70,7 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_amazon_s3_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 32. s3 (Amazon S3 Operations)", prompt)
+        self.assertIn("### 35. s3 (Amazon S3 Operations)", prompt)
         self.assertIn('"type": "s3"', prompt)
         self.assertIn("s3Operation", prompt)
         self.assertIn("s3ContentType", prompt)
@@ -84,7 +84,7 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_github_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 36. github (GitHub REST Operations)", prompt)
+        self.assertIn("### 39. github (GitHub REST Operations)", prompt)
         self.assertIn('"type": "github"', prompt)
         self.assertIn("githubOperation", prompt)
         self.assertIn("createIssue", prompt)
@@ -95,7 +95,7 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_sentry_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 34. sentry (Sentry REST Operations)", prompt)
+        self.assertIn("### 37. sentry (Sentry REST Operations)", prompt)
         self.assertIn('"type": "sentry"', prompt)
         self.assertIn("sentryOperation", prompt)
         self.assertIn("listIssues", prompt)
@@ -105,7 +105,7 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
     def test_includes_linear_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
-        self.assertIn("### 33. linear (Linear Workspace and Issue Operations)", prompt)
+        self.assertIn("### 36. linear (Linear Workspace and Issue Operations)", prompt)
         self.assertIn('"type": "linear"', prompt)
         self.assertIn("linearOperation", prompt)
         self.assertIn("linearTeamId", prompt)

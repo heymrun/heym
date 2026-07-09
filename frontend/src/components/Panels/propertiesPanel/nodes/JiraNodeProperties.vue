@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { AlertTriangle } from "lucide-vue-next";
+import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -33,6 +34,7 @@ const {
   jiraNotifyHtmlBodyExpressionInputRef,
   jiraNotifyToExpressionInputRef,
   jiraAccountIdExpressionInputRef,
+  jiraUsernameExpressionInputRef,
   jiraUserEmailExpressionInputRef,
   jiraUserDisplayNameExpressionInputRef,
   jiraUserProductsExpressionInputRef,
@@ -280,11 +282,11 @@ const {
       class="space-y-2"
       data-testid="jira-assignee-field"
     >
-      <Label>Assignee Account ID</Label>
+      <Label>Assignee Account ID / Username</Label>
       <ExpressionInput
         ref="jiraAssigneeAccountIdExpressionInputRef"
         :model-value="selectedNode.data.jiraAssigneeAccountId || ''"
-        placeholder="Jira accountId or null"
+        placeholder="Jira accountId, username, or null"
         single-line
         :nodes="workflowStore.nodes"
         :node-results="workflowStore.nodeResults"
@@ -576,6 +578,10 @@ const {
         @change="updateNodeData('jiraIncludeBinary', ($event.target as HTMLInputElement).checked)"
       >
       <span>Include binary content as base64</span>
+      <AgentFieldToggle
+        :node-id="selectedNode.id"
+        field-key="jiraIncludeBinary"
+      />
     </label>
 
     <div
@@ -588,13 +594,13 @@ const {
         class="text-xs text-amber-500 flex items-center gap-1"
       >
         <AlertTriangle class="h-3 w-3" />
-        Delete User typically requires Jira Cloud organization admin permissions.
+        Delete User typically requires Jira admin permissions.
       </p>
-      <Label>Account ID <span>*</span></Label>
+      <Label>Account ID / Username <span>*</span></Label>
       <ExpressionInput
         ref="jiraAccountIdExpressionInputRef"
         :model-value="selectedNode.data.jiraAccountId || ''"
-        placeholder="712020:..."
+        placeholder="712020:... or username"
         single-line
         :nodes="workflowStore.nodes"
         :node-results="workflowStore.nodeResults"
@@ -611,7 +617,7 @@ const {
     <template v-if="selectedNode.data.jiraOperation === 'createUser'">
       <p class="text-xs text-amber-500 flex items-center gap-1">
         <AlertTriangle class="h-3 w-3" />
-        Create User typically requires Jira Cloud organization admin permissions.
+        Create User typically requires Jira admin permissions.
       </p>
       <div
         class="space-y-2"
@@ -633,6 +639,31 @@ const {
           @navigate="handleJiraExpressionFieldNavigate"
           @register-field-index="onJiraRegisterExpressionFieldIndex"
         />
+      </div>
+
+      <div
+        class="space-y-2"
+        data-testid="jira-username-field"
+      >
+        <Label>Username</Label>
+        <ExpressionInput
+          ref="jiraUsernameExpressionInputRef"
+          :model-value="selectedNode.data.jiraUsername || ''"
+          placeholder="ada"
+          single-line
+          :nodes="workflowStore.nodes"
+          :node-results="workflowStore.nodeResults"
+          :edges="workflowStore.edges"
+          :current-node-id="selectedNode.id"
+          field-key="jiraUsername"
+          v-bind="jiraExpressionNavBindings('jiraUsername')"
+          @update:model-value="updateNodeData('jiraUsername', $event)"
+          @navigate="handleJiraExpressionFieldNavigate"
+          @register-field-index="onJiraRegisterExpressionFieldIndex"
+        />
+        <p class="text-xs text-muted-foreground">
+          Optional. Used as the Data Center / Server username; falls back to User Email.
+        </p>
       </div>
 
       <div
@@ -724,7 +755,7 @@ const {
         />
       </div>
       <div
-        v-else-if="isJiraStartAtPaginatedOperation()"
+        v-if="isJiraStartAtPaginatedOperation()"
         class="space-y-2"
       >
         <Label>Start At</Label>

@@ -522,6 +522,7 @@ class CredentialConfigJira(BaseModel):
     email: str
     api_token: str
     base_url: str
+    deployment: str | None = None
     api_version: str | None = None
 
 

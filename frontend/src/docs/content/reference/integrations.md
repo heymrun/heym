@@ -14,7 +14,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenAI Codex** | [Codex](../nodes/codex-node.md) | `access_token` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
-| **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, optional `api_version` |
+| **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, `deployment`, optional `api_version` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
@@ -155,7 +155,7 @@ OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and re
 
 ## Jira
 
-The Jira credential stores an Atlassian account email, Jira API token, Jira site base URL, and optional REST API version for the [Jira node](../nodes/jira-node.md). Heym defaults to Jira REST API v3 for Jira Cloud; use `api_version` `2` for older Jira Server or Data Center sites.
+The Jira credential stores an Atlassian account email, Jira API token, Jira site base URL, deployment mode, and optional REST API version for the [Jira node](../nodes/jira-node.md). Use `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server.
 
 ### Setup
 
@@ -171,13 +171,13 @@ The Jira credential stores an Atlassian account email, Jira API token, Jira site
 | `email` | Atlassian account email |
 | `api_token` | Jira API token |
 | `base_url` | Jira site base URL |
-| `api_version` | REST API version; defaults to `3` for Jira Cloud |
+| `deployment` | `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server |
+| `api_version` | REST API version; defaults to `3` for Jira Cloud. Data Center / Server uses v2 |
 
 ### Notes
 
 - The Jira node sends issue descriptions and comments as Atlassian Document Format text
-  documents for REST API v3. When the credential uses REST API v2, it sends plain text for
-  older Jira Server or Data Center compatibility.
+  documents for Jira Cloud REST API v3. Data Center / Server credentials send plain text.
 - Attachment upload accepts base64 or data URL content and is subject to the platform file size limit (default 99 MB). Attachment download can return base64 content when enabled.
 - User creation, deletion, and issue notification require the authenticated Jira account to have the relevant Jira site or organization permissions.
 - Use List Projects, Search Issues, and List Transitions to discover project keys, issue keys, and transition IDs.

@@ -670,6 +670,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       jiraNotifyHtmlBody: "",
       jiraNotifyTo: "{\"assignee\":true}",
       jiraAccountId: "",
+      jiraUsername: "",
       jiraUserEmail: "",
       jiraUserDisplayName: "",
       jiraUserProducts: "",

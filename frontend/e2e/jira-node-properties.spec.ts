@@ -154,6 +154,7 @@ test("shows Jira search operation fields", async ({ page }) => {
     await expect(panel.getByTestId("jira-fields-field")).toBeVisible();
     await expect(panel.getByText("Limit", { exact: true })).toBeVisible();
     await expect(panel.getByText("Next Page Token", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Start At", { exact: true })).toBeVisible();
   } finally {
     await deleteWorkflow(page, workflow.id);
   }
@@ -192,6 +193,42 @@ test("shows Jira list attachments operation fields", async ({ page }) => {
     await expect(panel.getByText("Limit", { exact: true })).toBeVisible();
     await expect(panel.getByText("Start At", { exact: true })).toBeVisible();
     await expect(panel.getByText("Include binary content as base64")).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("shows Jira create user identity fields", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Jira Create User Properties ${Date.now()}`,
+    [
+      {
+        id: "jira-node",
+        type: "jira",
+        position: { x: 120, y: 160 },
+        data: {
+          label: "jira",
+          credentialId: "",
+          jiraOperation: "createUser",
+          jiraUserEmail: "ada@example.com",
+          jiraUsername: "ada",
+          jiraUserDisplayName: "Ada Lovelace",
+        },
+      },
+    ],
+  );
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(1);
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await page.locator('.vue-flow__node[data-id="jira-node"]').click();
+
+    const panel = page.locator(".properties-panel");
+    await expect(panel.getByTestId("jira-user-email-field")).toBeVisible();
+    await expect(panel.getByTestId("jira-username-field")).toBeVisible();
+    await expect(panel.getByTestId("jira-user-display-name-field")).toBeVisible();
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

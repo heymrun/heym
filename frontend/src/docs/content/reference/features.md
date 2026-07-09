@@ -266,7 +266,7 @@ Pairs with [Agent Node](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), 
 
 #### [Jira](../nodes/jira-node.md)
 
-The Jira node connects workflows to the Jira REST API (defaults to v3 for Jira Cloud; set `api_version` to `2` on the credential for older Jira Server or Data Center sites) for project, issue, comment, attachment, user, notification, and transition automation. It can list projects, search issues with JQL, create or update issues, inspect changelogs, notify stakeholders, manage comments and attachments, fetch or manage users, list available transitions, and move issues through a transition ID. Use a Jira credential with Atlassian email, API token, and site base URL.
+The Jira node connects workflows to Jira Cloud or Jira Data Center / Server REST APIs for project, issue, comment, attachment, user, notification, and transition automation. It can list projects, search issues with JQL, create or update issues, inspect changelogs, notify stakeholders, manage comments and attachments, fetch or manage users, list available transitions, and move issues through a transition ID. Use a Jira credential with Atlassian email, API token, site base URL, and deployment mode.
 
 Pairs with [LLM](../nodes/llm-node.md), [Agent Node](../nodes/agent-node.md), [Slack](../nodes/slack-node.md), and [Third-Party Integrations](./integrations.md) for support intake, bug triage, and release workflows.
 

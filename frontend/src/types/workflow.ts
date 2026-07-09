@@ -669,6 +669,7 @@ export interface NodeData {
   jiraNotifyHtmlBody?: string;
   jiraNotifyTo?: string;
   jiraAccountId?: string;
+  jiraUsername?: string;
   jiraUserEmail?: string;
   jiraUserDisplayName?: string;
   jiraUserProducts?: string;

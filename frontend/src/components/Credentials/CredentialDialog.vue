@@ -48,6 +48,7 @@ const codexSignInError = ref("");
 const codexSignedInAccount = ref("");
 const baseUrl = ref("");
 const jiraEmail = ref("");
+const jiraDeployment = ref<"cloud" | "data_center">("cloud");
 const jiraApiVersion = ref("3");
 const jiraTesting = ref(false);
 const jiraTestSuccess = ref<boolean | null>(null);
@@ -249,6 +250,11 @@ watch(
           props.credential.type === "jira"
             ? props.credential.public_fields?.email ?? ""
             : "";
+        jiraDeployment.value =
+          props.credential.type === "jira" &&
+          props.credential.public_fields?.deployment === "data_center"
+            ? "data_center"
+            : "cloud";
         jiraApiVersion.value =
           props.credential.type === "jira"
             ? props.credential.public_fields?.api_version ?? "3"
@@ -361,6 +367,7 @@ watch(
         codexSignedInAccount.value = "";
         baseUrl.value = "";
         jiraEmail.value = "";
+        jiraDeployment.value = "cloud";
         jiraApiVersion.value = "3";
         bearerToken.value = "";
         headerKey.value = "";
@@ -697,8 +704,9 @@ function buildConfig(): CredentialConfig {
       email: jiraEmail.value.trim(),
       api_token: apiKey.value.trim(),
       base_url: baseUrl.value.trim(),
+      deployment: jiraDeployment.value,
     };
-    const apiVersion = jiraApiVersion.value.trim();
+    const apiVersion = jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim();
     if (apiVersion) {
       config.api_version = apiVersion;
     }
@@ -1086,7 +1094,8 @@ async function testJiraConnection(): Promise<void> {
         email: jiraEmail.value.trim(),
         api_token: apiKey.value.trim(),
         base_url: baseUrl.value.trim(),
-        ...(jiraApiVersion.value.trim() ? { api_version: jiraApiVersion.value.trim() } : {}),
+        deployment: jiraDeployment.value,
+        api_version: jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim(),
       },
       credential_id: isEditing.value ? props.credential?.id : undefined,
     });
@@ -1714,16 +1723,29 @@ async function handleSave(): Promise<void> {
           />
         </div>
         <div class="space-y-2">
+          <Label for="cred-jira-deployment">Deployment</Label>
+          <Select
+            id="cred-jira-deployment"
+            v-model="jiraDeployment"
+            :options="[
+              { value: 'cloud', label: 'Jira Cloud' },
+              { value: 'data_center', label: 'Jira Data Center / Server' },
+            ]"
+            :disabled="saving"
+          />
+        </div>
+        <div class="space-y-2">
           <Label for="cred-jira-api-version">REST API Version</Label>
           <Input
             id="cred-jira-api-version"
-            v-model="jiraApiVersion"
+            :model-value="jiraDeployment === 'data_center' ? '2' : jiraApiVersion"
             placeholder="3"
-            :disabled="saving"
+            :disabled="saving || jiraDeployment === 'data_center'"
+            @update:model-value="jiraApiVersion = String($event)"
           />
           <p class="text-xs text-muted-foreground">
-            Use the Jira site URL, not a REST path. Defaults to API v3 for Jira Cloud; use 2 for
-            older Jira Server or Data Center sites.
+            Use the Jira site URL, not a REST path. Jira Cloud defaults to v3; Data Center and
+            Server use REST API v2.
           </p>
         </div>
         <div class="flex items-center gap-3">

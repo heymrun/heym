@@ -33,6 +33,7 @@ export type JiraExpressionFieldKey =
   | "jiraNotifyHtmlBody"
   | "jiraNotifyTo"
   | "jiraAccountId"
+  | "jiraUsername"
   | "jiraUserEmail"
   | "jiraUserDisplayName"
   | "jiraUserProducts";
@@ -51,7 +52,8 @@ export function getJiraExpressionFields(operation: string): JiraExpressionField[
     fields.push({ key: "jiraLimit", label: "Limit" });
     if (op === "searchIssues") {
       fields.push({ key: "jiraNextPageToken", label: "Next Page Token" });
-    } else if (jiraStartAtPaginatedOperations.has(op)) {
+    }
+    if (jiraStartAtPaginatedOperations.has(op)) {
       fields.push({ key: "jiraStartAt", label: "Start At" });
     }
   }
@@ -74,7 +76,7 @@ export function getJiraExpressionFields(operation: string): JiraExpressionField[
   if (op === "createIssue" || op === "updateIssue") {
     fields.push({ key: "jiraSummary", label: "Summary" });
     fields.push({ key: "jiraDescription", label: "Description" });
-    fields.push({ key: "jiraAssigneeAccountId", label: "Assignee Account ID" });
+    fields.push({ key: "jiraAssigneeAccountId", label: "Assignee Account ID / Username" });
     fields.push({ key: "jiraLabels", label: "Labels" });
   }
 
@@ -108,11 +110,12 @@ export function getJiraExpressionFields(operation: string): JiraExpressionField[
   }
 
   if (jiraAccountIdOperations.has(op)) {
-    fields.push({ key: "jiraAccountId", label: "Account ID" });
+    fields.push({ key: "jiraAccountId", label: "Account ID / Username" });
   }
 
   if (op === "createUser") {
     fields.push({ key: "jiraUserEmail", label: "User Email" });
+    fields.push({ key: "jiraUsername", label: "Username" });
     fields.push({ key: "jiraUserDisplayName", label: "Display Name" });
     fields.push({ key: "jiraUserProducts", label: "Products" });
   }

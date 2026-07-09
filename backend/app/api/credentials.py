@@ -126,7 +126,7 @@ def merge_credential_config_for_update(
 
     if credential_type == CredentialType.jira:
         merged_config = dict(existing_config)
-        for key in ("email", "api_token", "base_url", "api_version"):
+        for key in ("email", "api_token", "base_url", "api_version", "deployment"):
             incoming_value = str(incoming_config.get(key, "") or "").strip()
             if incoming_value:
                 merged_config[key] = incoming_value
@@ -289,7 +289,13 @@ def get_public_credential_fields(
         base_url = str(config.get("base_url", "")).strip() or None
         email = str(config.get("email", "")).strip() or None
         api_version = str(config.get("api_version", "") or "").strip() or None
-        return {"base_url": base_url, "email": email, "api_version": api_version}
+        deployment = str(config.get("deployment", "") or "").strip() or "cloud"
+        return {
+            "base_url": base_url,
+            "email": email,
+            "api_version": api_version,
+            "deployment": deployment,
+        }
     if credential_type == CredentialType.codex:
         auth_mode = str(config.get("auth_mode", "access_token")).strip() or "access_token"
         fields: dict[str, str | None] = {"auth_mode": auth_mode}
@@ -1388,6 +1394,12 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Jira credential base_url must be a valid http(s) URL",
+            )
+        deployment = str(config.get("deployment", "") or "cloud").strip()
+        if deployment not in {"cloud", "data_center"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential deployment must be cloud or data_center",
             )
     elif credential_type == CredentialType.sentry:
         if "api_token" not in config or not str(config["api_token"]).strip():

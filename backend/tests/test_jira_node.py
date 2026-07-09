@@ -105,6 +105,28 @@ class JiraServiceTests(unittest.TestCase):
         fields = client.request.call_args.kwargs["json"]["fields"]
         self.assertEqual(fields["description"], "Checkout is broken")
 
+    def test_create_issue_uses_username_assignee_for_data_center(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response(
+            {"id": "10001", "key": "ENG-1"},
+            method="POST",
+            url="https://jira.example.com/rest/api/2/issue",
+        )
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example.com",
+                "deployment": "data_center",
+            },
+            client=client,
+        )
+
+        service.create_issue("ENG", "Bug", "Fix checkout", assignee_account_id="ada")
+
+        fields = client.request.call_args.kwargs["json"]["fields"]
+        self.assertEqual(fields["assignee"], {"name": "ada"})
+
     def test_create_issue_prefers_issue_type_id(self) -> None:
         client = MagicMock()
         client.request.return_value = _response(
@@ -187,6 +209,46 @@ class JiraServiceTests(unittest.TestCase):
             },
         )
 
+    def test_search_issues_uses_offset_search_for_data_center(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response(
+            {"issues": [{"id": "10001", "key": "ENG-1"}], "startAt": 10, "total": 11},
+            method="POST",
+            url="https://jira.example.com/rest/api/2/search",
+        )
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example.com",
+                "deployment": "data_center",
+            },
+            client=client,
+        )
+
+        result = service.search_issues(
+            "project = ENG",
+            25,
+            next_page_token="ignored-for-data-center",
+            start_at=10,
+            fields=["key", "summary"],
+        )
+
+        self.assertEqual(result["total"], 11)
+        self.assertEqual(
+            client.request.call_args.args[:2],
+            ("POST", "https://jira.example.com/rest/api/2/search"),
+        )
+        self.assertEqual(
+            client.request.call_args.kwargs["json"],
+            {
+                "jql": "project = ENG",
+                "maxResults": 25,
+                "fields": ["key", "summary"],
+                "startAt": 10,
+            },
+        )
+
     def test_adf_text_document_splits_newlines(self) -> None:
         document = JiraService._adf_text_document("line one\nline two")
         self.assertEqual(len(document["content"]), 2)
@@ -227,6 +289,40 @@ class JiraServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             client.request.call_args.kwargs["params"], {"maxResults": 25, "startAt": 10}
+        )
+
+    def test_get_issue_changelog_uses_expanded_issue_for_api_v2(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response(
+            {
+                "changelog": {
+                    "histories": [{"id": "10001"}, {"id": "10002"}, {"id": "10003"}],
+                    "total": 3,
+                }
+            }
+        )
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://example.atlassian.net",
+                "api_version": "2",
+            },
+            client=client,
+        )
+
+        result = service.get_issue_changelog("ENG-1", limit=1, start_at=1)
+
+        self.assertEqual(result["histories"], [{"id": "10002"}])
+        self.assertEqual(result["total"], 3)
+        self.assertFalse(result["isLast"])
+        self.assertEqual(
+            client.request.call_args.args[:2],
+            ("GET", "https://example.atlassian.net/rest/api/2/issue/ENG-1"),
+        )
+        self.assertEqual(
+            client.request.call_args.kwargs["params"],
+            {"expand": "changelog", "fields": "none"},
         )
 
     def test_notify_issue_sends_recipient_payload(self) -> None:
@@ -310,6 +406,7 @@ class JiraServiceTests(unittest.TestCase):
 
         user = service.create_user(
             "ada@example.com",
+            username="ada",
             display_name="Ada",
             products=["jira-software"],
         )
@@ -326,6 +423,60 @@ class JiraServiceTests(unittest.TestCase):
                 "displayName": "Ada",
                 "products": ["jira-software"],
             },
+        )
+
+    def test_get_and_delete_user_use_username_for_data_center(self) -> None:
+        client = MagicMock()
+        client.request.side_effect = [
+            _response({"name": "ada"}, url="https://jira.example.com/rest/api/2/user"),
+            _response(None, status_code=204, method="DELETE"),
+        ]
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example.com",
+                "deployment": "data_center",
+            },
+            client=client,
+        )
+
+        user = service.get_user("ada")
+        deleted = service.delete_user("ada")
+
+        self.assertEqual(user["name"], "ada")
+        self.assertTrue(deleted)
+        self.assertEqual(client.request.call_args_list[0].kwargs["params"], {"username": "ada"})
+        self.assertEqual(client.request.call_args_list[1].kwargs["params"], {"username": "ada"})
+
+    def test_create_user_sends_data_center_payload(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response({"name": "ada"}, method="POST")
+        service = JiraService(
+            {
+                "email": "admin@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example.com",
+                "deployment": "data_center",
+            },
+            client=client,
+        )
+
+        user = service.create_user(
+            "ada@example.com",
+            username="ada",
+            display_name="Ada",
+            products=["jira-software"],
+        )
+
+        self.assertEqual(user["name"], "ada")
+        self.assertEqual(
+            client.request.call_args.args[:2],
+            ("POST", "https://jira.example.com/rest/api/2/user"),
+        )
+        self.assertEqual(
+            client.request.call_args.kwargs["json"],
+            {"emailAddress": "ada@example.com", "name": "ada", "displayName": "Ada"},
         )
 
     def test_add_attachment_sends_multipart_payload(self) -> None:
@@ -560,10 +711,11 @@ class JiraNodeHandlerTests(unittest.TestCase):
                 "credentialId": "cred-1",
                 "jiraOperation": "createUser",
                 "jiraUserEmail": "$input.email",
+                "jiraUsername": "$input.username",
                 "jiraUserDisplayName": "Ada",
                 "jiraUserProducts": '["jira-software"]',
             },
-            {"email": "ada@example.com"},
+            {"email": "ada@example.com", "username": "ada"},
         )
         mock_service = MagicMock()
         mock_service.create_user.return_value = {"accountId": "acct-1"}
@@ -574,6 +726,7 @@ class JiraNodeHandlerTests(unittest.TestCase):
 
         mock_service.create_user.assert_called_once_with(
             "ada@example.com",
+            username="ada",
             display_name="Ada",
             products=["jira-software"],
         )
@@ -676,6 +829,7 @@ class JiraNodeHandlerTests(unittest.TestCase):
             "project = ENG",
             25,
             next_page_token="token-1",
+            start_at=0,
             fields=["key", "summary"],
         )
         self.assertEqual(result["pagination"]["nextPageToken"], "token-2")
@@ -1047,6 +1201,7 @@ class JiraNodeHandlerTests(unittest.TestCase):
             "project = ENG",
             50,
             next_page_token=None,
+            start_at=0,
             fields=["key", "summary", "status"],
         )
 

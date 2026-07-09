@@ -8,19 +8,20 @@ The **Jira** node connects workflows to the Jira REST API for project, issue, co
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Credential | Jira (email, API token, base URL, optional REST API version) |
+| Credential | Jira (email, API token, base URL, deployment mode, optional REST API version) |
 | Output | `$nodeLabel.*` |
 
 ## Credential
 
-Create a **Jira** credential in the [Credentials Tab](../tabs/credentials-tab.md). Stored config keys are `email`, `api_token`, `base_url`, and optional `api_version`. See [Third-Party Integrations](../reference/integrations.md#jira) for setup steps.
+Create a **Jira** credential in the [Credentials Tab](../tabs/credentials-tab.md). Stored config keys are `email`, `api_token`, `base_url`, `deployment`, and optional `api_version`. See [Third-Party Integrations](../reference/integrations.md#jira) for setup steps.
 
 | Field | Config key | Description |
 | --- | --- | --- |
 | Email | `email` | Atlassian account email |
 | API Token | `api_token` | Atlassian API token |
 | Base URL | `base_url` | Jira site URL, for example `https://your-domain.atlassian.net` |
-| REST API Version | `api_version` | Defaults to `3` for Jira Cloud; use `2` for older Jira Server or Data Center sites |
+| Deployment | `deployment` | `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server |
+| REST API Version | `api_version` | Defaults to `3` for Jira Cloud. Data Center / Server uses REST API v2 |
 
 Use **Test Connection** to verify the credential against the current Jira user.
 
@@ -30,7 +31,7 @@ Use **Test Connection** to verify the credential against the current Jira user.
 | --- | --- | --- |
 | Get Myself | — | `user` |
 | List Projects | Optional Limit, Start At | `projects`, `count`, `pagination` |
-| Search Issues | Optional JQL, Issue Fields, Limit, Next Page Token | `issues`, `count`, `pagination` |
+| Search Issues | Optional JQL, Issue Fields, Limit, Next Page Token, Start At | `issues`, `count`, `pagination` |
 | Get Issue | Issue Key or ID | `issue`, `key` |
 | Create Issue | Project Key, Summary | `issue`, `key` |
 | Update Issue | Issue Key or ID and at least one changed field | `issue`, `key` |
@@ -48,11 +49,11 @@ Use **Test Connection** to verify the credential against the current Jira user.
 | Delete Attachment | Attachment ID | `deleted` |
 | List Transitions | Issue Key or ID | `transitions`, `count` |
 | Transition Issue | Issue Key or ID, Transition ID | `transition`, `issue`, `key` |
-| Get User | Account ID | `user` |
+| Get User | Account ID / Username | `user` |
 | Create User | User Email | `user` |
-| Delete User | Account ID | `deleted` |
+| Delete User | Account ID / Username | `deleted` |
 
-Expression-capable text fields support [expressions](../reference/expression-dsl.md) such as `$input.text`. `jiraIncludeBinary` is a boolean toggle and does not support expressions.
+Expression-capable text fields support [expressions](../reference/expression-dsl.md) such as `$input.text`. `jiraIncludeBinary` is a boolean toggle and does not support expressions, but it can be marked as agent-provided when the Jira node is attached to an Agent tool handle.
 
 ## Issue and update fields
 
@@ -60,18 +61,20 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 - **Issue Key or ID** accepts keys such as `ENG-123` or numeric issue IDs. Use Search Issues or List Projects to discover values.
 - **Transition ID** comes from List Transitions. Each transition object includes an `id` field.
 - **Comment ID** and **Attachment ID** come from List Comments, List Attachments, or prior create/get responses.
-- **Account ID** is the Jira `accountId` value. Get Myself or Get User can help you discover it.
+- **Account ID / Username** is the Jira Cloud `accountId` value or the Jira Data Center / Server username. Get Myself or Get User can help you discover it.
 - Issue **description** and comment **body** text are sent as Atlassian Document Format on REST
-  API v3; when the credential uses REST API v2, they are sent as plain text for Jira Server or
-  Data Center compatibility. In v3, newline characters become separate paragraphs.
+  API v3; when the credential deployment is Data Center / Server, they are sent as plain text.
+  In v3, newline characters become separate paragraphs.
+- **Get Issue Changelog** uses Jira Cloud's paginated changelog endpoint. For Data Center / Server, it reads expanded issue changelog data and applies the configured offset/limit to the returned histories.
 - On **Update Issue**, leave optional fields empty to preserve their current values.
-- Set **Description** or **Assignee Account ID** to `null` on update to clear those fields. Labels cannot be cleared with `null`.
+- Set **Description** or **Assignee Account ID / Username** to `null` on update to clear those fields. Labels cannot be cleared with `null`.
 - **Recipients JSON** on Notify Issue defaults to `{"assignee":true}` when omitted. Common keys include `assignee`, `reporter`, `watchers`, and `voters` (for example `{"assignee":true,"watchers":true}`).
 - **Add Attachment** accepts raw base64 or data URL content and is limited by the platform file size setting (default 99 MB).
 
 ## Pagination
 
-- **Search Issues** uses cursor pagination via `jiraNextPageToken`. Read `pagination.nextPageToken` from the previous run and pass it into the next Search Issues node. Search Issues does not use `jiraStartAt`.
+- **Search Issues** uses cursor pagination via `jiraNextPageToken` for Jira Cloud. Read `pagination.nextPageToken` from the previous run and pass it into the next Search Issues node.
+- **Search Issues** uses offset pagination via `jiraStartAt` for Jira Data Center / Server. Read `pagination.startAt`, `pagination.maxResults`, and `pagination.total` to calculate the next page.
 - **List Projects**, **Get Issue Changelog**, **List Comments**, and **List Attachments** use offset pagination with `jiraLimit` and `jiraStartAt`. Paged results return `pagination.startAt`, `pagination.maxResults`, `pagination.total`, and `pagination.isLast`.
 - **List Attachments** fetches all attachments from the issue first, then slices the result client-side. Pagination fields still describe the returned page, but large issues may incur an extra fetch cost.
 - **List Transitions** does not paginate.
@@ -90,7 +93,7 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 | `jiraDescription` | Create/Update Issue | Sent as ADF on REST API v3 or plain text on REST API v2; use `null` on update to clear description |
 | `jiraJql` | Search Issues | Defaults to `updated >= -30d ORDER BY updated DESC` |
 | `jiraFields` | Search Issues | Optional JSON array or comma-separated issue fields; defaults to `key`, `summary`, `status`, `assignee`, and `issuetype` when empty |
-| `jiraAssigneeAccountId` | Create/Update Issue | Use `null` on update to clear assignee |
+| `jiraAssigneeAccountId` | Create/Update Issue | Jira Cloud accountId or Data Center / Server username; use `null` on update to clear assignee |
 | `jiraLabels` | Create/Update Issue | JSON array or comma-separated text |
 | `jiraCommentBody` | Create/Update Comment | Sent as ADF on REST API v3 or plain text on REST API v2 |
 | `jiraCommentId` | Get/Update/Delete Comment | Jira comment ID |
@@ -104,13 +107,14 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 | `jiraNotifyTextBody` | Notify Issue | Required plain-text notification body |
 | `jiraNotifyHtmlBody` | Notify Issue | Optional HTML body |
 | `jiraNotifyTo` | Notify Issue | Recipients JSON; defaults to `{"assignee":true}` |
-| `jiraAccountId` | Get/Delete User | Jira account ID |
+| `jiraAccountId` | Get/Delete User | Jira Cloud accountId or Data Center / Server username |
 | `jiraUserEmail` | Create User | New user email address |
+| `jiraUsername` | Create User | Optional Data Center / Server username; falls back to `jiraUserEmail` |
 | `jiraUserDisplayName` | Create User | Optional display name |
-| `jiraUserProducts` | Create User | JSON array or comma-separated product keys |
+| `jiraUserProducts` | Create User | JSON array or comma-separated product keys; Jira Cloud only |
 | `jiraLimit` | Search Issues, List Projects, Get Issue Changelog, List Comments, List Attachments | Defaults to `50`; range 1–100 |
-| `jiraStartAt` | List Projects, Get Issue Changelog, List Comments, List Attachments | Offset pagination start index |
-| `jiraNextPageToken` | Search Issues | Cursor token from a previous search response |
+| `jiraStartAt` | Search Issues on Data Center / Server, List Projects, Get Issue Changelog, List Comments, List Attachments | Offset pagination start index |
+| `jiraNextPageToken` | Search Issues on Jira Cloud | Cursor token from a previous search response |
 
 ## Examples
 
@@ -128,7 +132,7 @@ Update an issue and clear the assignee:
 - Operation: `updateIssue`
 - Issue Key or ID: `ENG-123`
 - Summary: `$input.title`
-- Assignee Account ID: `null`
+- Assignee Account ID / Username: `null`
 
 Search issues with custom fields and cursor pagination:
 
@@ -137,6 +141,13 @@ Search issues with custom fields and cursor pagination:
 - Issue Fields: `["key","summary","status"]`
 - Limit: `25`
 - Next Page Token: `$searchJira.pagination.nextPageToken`
+
+Search issues on Data Center with offset pagination:
+
+- Operation: `searchIssues`
+- JQL: `project = ENG ORDER BY updated DESC`
+- Limit: `25`
+- Start At: `25`
 
 Transition an issue after listing available transitions:
 
@@ -166,7 +177,7 @@ Every successful operation sets:
 | Operation | Collection key | Pagination shape |
 | --- | --- | --- |
 | List Projects | `projects` | `{ startAt, maxResults, total, isLast }` |
-| Search Issues | `issues` | `{ maxResults, nextPageToken, isLast }` |
+| Search Issues | `issues` | Cloud: `{ maxResults, nextPageToken, isLast }`; Data Center: `{ startAt, maxResults, total, isLast }` |
 | Get Issue Changelog | `changelog` | `{ startAt, maxResults, total, isLast }` |
 | List Comments | `comments` | `{ startAt, maxResults, total, isLast }` |
 | List Attachments | `attachments` | `{ startAt, maxResults, total, isLast }` |

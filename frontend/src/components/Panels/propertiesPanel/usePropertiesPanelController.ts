@@ -723,6 +723,7 @@ export function usePropertiesPanelController() {
   const jiraNotifyHtmlBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const jiraNotifyToExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const jiraAccountIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const jiraUsernameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const jiraUserEmailExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const jiraUserDisplayNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const jiraUserProductsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -4188,6 +4189,8 @@ export function usePropertiesPanelController() {
         return jiraNotifyToExpressionInputRef.value;
       case "jiraAccountId":
         return jiraAccountIdExpressionInputRef.value;
+      case "jiraUsername":
+        return jiraUsernameExpressionInputRef.value;
       case "jiraUserEmail":
         return jiraUserEmailExpressionInputRef.value;
       case "jiraUserDisplayName":
@@ -4254,6 +4257,7 @@ export function usePropertiesPanelController() {
     jiraNotifyHtmlBodyExpressionInputRef.value?.closeExpandDialog();
     jiraNotifyToExpressionInputRef.value?.closeExpandDialog();
     jiraAccountIdExpressionInputRef.value?.closeExpandDialog();
+    jiraUsernameExpressionInputRef.value?.closeExpandDialog();
     jiraUserEmailExpressionInputRef.value?.closeExpandDialog();
     jiraUserDisplayNameExpressionInputRef.value?.closeExpandDialog();
     jiraUserProductsExpressionInputRef.value?.closeExpandDialog();
@@ -8540,6 +8544,7 @@ export function usePropertiesPanelController() {
     jiraNotifyHtmlBodyExpressionInputRef,
     jiraNotifyToExpressionInputRef,
     jiraAccountIdExpressionInputRef,
+    jiraUsernameExpressionInputRef,
     jiraUserEmailExpressionInputRef,
     jiraUserDisplayNameExpressionInputRef,
     jiraUserProductsExpressionInputRef,

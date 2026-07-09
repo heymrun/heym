@@ -8,6 +8,7 @@ import httpx
 from app.http_identity import merge_outbound_headers
 
 _DEFAULT_API_VERSION = "3"
+_DEFAULT_DEPLOYMENT = "cloud"
 _DEFAULT_SEARCH_FIELDS = ["key", "summary", "status", "assignee", "issuetype"]
 _DEFAULT_SEARCH_JQL = "updated >= -30d ORDER BY updated DESC"
 _MAX_ERROR_DETAIL_CHARS = 500
@@ -20,7 +21,8 @@ class JiraService:
     def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
         self._config = dict(config)
         self._base_url = self._normalize_base_url(str(self._config.get("base_url", "") or ""))
-        self._api_version = str(self._config.get("api_version") or _DEFAULT_API_VERSION).strip()
+        self._deployment = self._normalize_deployment(self._config)
+        self._api_version = self._normalize_api_version(self._config, self._deployment)
         self._client = client or httpx.Client(
             headers=merge_outbound_headers({"Accept": "application/json"}),
             timeout=httpx.Timeout(30.0),
@@ -56,14 +58,19 @@ class JiraService:
         limit: int = 50,
         *,
         next_page_token: str | None = None,
+        start_at: int = 0,
         fields: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Search issues with JQL via the current /search/jql endpoint."""
+        """Search issues with JQL."""
         body: dict[str, Any] = {
             "jql": jql or _DEFAULT_SEARCH_JQL,
             "maxResults": self._normalize_limit(limit),
             "fields": fields or list(_DEFAULT_SEARCH_FIELDS),
         }
+        if self._is_data_center:
+            body["startAt"] = max(start_at, 0)
+            payload = self._request("POST", "/search", json=body)
+            return self._expect_object(payload, "issue.search")
         if next_page_token:
             body["nextPageToken"] = next_page_token
         payload = self._request("POST", "/search/jql", json=body)
@@ -98,7 +105,7 @@ class JiraService:
         if description:
             fields["description"] = self._text_document_payload(description)
         if assignee_account_id:
-            fields["assignee"] = {"accountId": assignee_account_id}
+            fields["assignee"] = self._user_identity_payload(assignee_account_id)
         if labels:
             fields["labels"] = labels
         return self._expect_object(
@@ -124,7 +131,9 @@ class JiraService:
             )
         if assignee_account_id is not _UNSET:
             fields["assignee"] = (
-                None if assignee_account_id is None else {"accountId": assignee_account_id}
+                None
+                if assignee_account_id is None
+                else self._user_identity_payload(assignee_account_id)
             )
         if labels is not _UNSET:
             fields["labels"] = labels
@@ -142,10 +151,14 @@ class JiraService:
         self, issue_key: str, limit: int = 50, start_at: int = 0
     ) -> dict[str, Any]:
         """Return the changelog entries for a Jira issue."""
+        normalized_limit = self._normalize_limit(limit)
+        offset = max(start_at, 0)
+        if self._api_version == "2":
+            return self._get_issue_changelog_v2(issue_key, normalized_limit, offset)
         payload = self._request(
             "GET",
             f"/issue/{issue_key}/changelog",
-            params={"maxResults": self._normalize_limit(limit), "startAt": max(start_at, 0)},
+            params={"maxResults": normalized_limit, "startAt": offset},
         )
         return self._expect_object(payload, "issue.changelog")
 
@@ -292,29 +305,34 @@ class JiraService:
         return payload
 
     def get_user(self, account_id: str) -> dict[str, Any]:
-        """Fetch a Jira user by account ID."""
-        payload = self._request("GET", "/user", params={"accountId": account_id})
+        """Fetch a Jira user by account ID or Data Center username."""
+        payload = self._request("GET", "/user", params=self._user_identity_params(account_id))
         return self._expect_object(payload, "user")
 
     def create_user(
         self,
         email_address: str,
         *,
+        username: str | None = None,
         display_name: str | None = None,
         products: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a Jira user."""
         payload: dict[str, Any] = {"emailAddress": email_address}
+        if self._is_data_center:
+            payload["name"] = username or email_address
         if display_name:
             payload["displayName"] = display_name
-        if products:
+        if products and not self._is_data_center:
             payload["products"] = products
         result = self._request("POST", "/user", json=payload)
         return self._expect_object(result, "user")
 
     def delete_user(self, account_id: str) -> bool:
-        """Delete a Jira user by account ID."""
-        self._request("DELETE", "/user", params={"accountId": account_id}, expect_json=False)
+        """Delete a Jira user by account ID or Data Center username."""
+        self._request(
+            "DELETE", "/user", params=self._user_identity_params(account_id), expect_json=False
+        )
         return True
 
     def get_issue_with_fields(self, issue_key: str, fields: list[str]) -> dict[str, Any]:
@@ -325,6 +343,30 @@ class JiraService:
             params={"fields": ",".join(fields)},
         )
         return self._expect_object(payload, "issue")
+
+    def _get_issue_changelog_v2(self, issue_key: str, limit: int, start_at: int) -> dict[str, Any]:
+        payload = self._request(
+            "GET",
+            f"/issue/{issue_key}",
+            params={"expand": "changelog", "fields": "none"},
+        )
+        issue = self._expect_object(payload, "issue")
+        changelog = issue.get("changelog")
+        if not isinstance(changelog, dict):
+            raise ValueError("Jira API returned an invalid issue.changelog payload")
+        histories = changelog.get("histories")
+        if not isinstance(histories, list):
+            raise ValueError("Jira API returned an invalid issue.changelog payload")
+        normalized = [history for history in histories if isinstance(history, dict)]
+        total = int(changelog.get("total") or len(normalized))
+        page = normalized[start_at : start_at + limit]
+        return {
+            "histories": page,
+            "startAt": start_at,
+            "maxResults": limit,
+            "total": total,
+            "isLast": start_at + limit >= total,
+        }
 
     def _request(
         self,
@@ -400,6 +442,20 @@ class JiraService:
     def _url(self, path: str) -> str:
         return urljoin(f"{self._base_url}/rest/api/{self._api_version}/", path.lstrip("/"))
 
+    @property
+    def _is_data_center(self) -> bool:
+        return self._deployment == "data_center"
+
+    def _user_identity_payload(self, value: str) -> dict[str, str]:
+        if self._is_data_center:
+            return {"name": value}
+        return {"accountId": value}
+
+    def _user_identity_params(self, value: str) -> dict[str, str]:
+        if self._is_data_center:
+            return {"username": value}
+        return {"accountId": value}
+
     def _text_document_payload(self, text: str) -> str | dict[str, Any]:
         if self._api_version == "2":
             return text
@@ -411,6 +467,23 @@ class JiraService:
         if not normalized:
             raise ValueError("Jira credential requires base_url")
         return normalized
+
+    @staticmethod
+    def _normalize_deployment(config: dict[str, Any]) -> str:
+        raw_deployment = str(config.get("deployment", "") or "").strip().lower().replace("-", "_")
+        if raw_deployment in {"data_center", "datacenter", "server", "self_hosted"}:
+            return "data_center"
+        if raw_deployment == "cloud":
+            return "cloud"
+        if not raw_deployment and str(config.get("api_version", "") or "").strip() == "2":
+            return "data_center"
+        return _DEFAULT_DEPLOYMENT
+
+    @staticmethod
+    def _normalize_api_version(config: dict[str, Any], deployment: str) -> str:
+        if deployment == "data_center":
+            return "2"
+        return str(config.get("api_version") or _DEFAULT_API_VERSION).strip()
 
     @staticmethod
     def _normalize_limit(limit: int) -> int:

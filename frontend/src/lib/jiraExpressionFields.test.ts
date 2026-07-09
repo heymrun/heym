@@ -19,6 +19,7 @@ describe("getJiraExpressionFields", () => {
     expect(keys).toEqual([
       "jiraLimit",
       "jiraNextPageToken",
+      "jiraStartAt",
       "jiraJql",
       "jiraFields",
     ]);
@@ -160,7 +161,12 @@ describe("getJiraExpressionFields", () => {
   it("includes user fields for createUser", () => {
     const keys = getJiraExpressionFields("createUser").map((field) => field.key);
 
-    expect(keys).toEqual(["jiraUserEmail", "jiraUserDisplayName", "jiraUserProducts"]);
+    expect(keys).toEqual([
+      "jiraUserEmail",
+      "jiraUsername",
+      "jiraUserDisplayName",
+      "jiraUserProducts",
+    ]);
   });
 
   it("includes account id for deleteUser", () => {

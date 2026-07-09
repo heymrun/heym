@@ -128,6 +128,7 @@ export const jiraPaginatedOperations = new Set([
 
 export const jiraStartAtPaginatedOperations = new Set([
   "listProjects",
+  "searchIssues",
   "getIssueChangelog",
   "listComments",
   "listAttachments",

@@ -172,6 +172,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 _field("jiraJql", _DEFAULT_SEARCH_JQL),
                 _limit(),
                 next_page_token=_next_page_token(),
+                start_at=_start_at(),
                 fields=_search_fields(),
             )
             issues = result.get("issues") if isinstance(result.get("issues"), list) else []
@@ -418,6 +419,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 "operation": operation,
                 "user": service.create_user(
                     email_address,
+                    username=_field("jiraUsername") or None,
                     display_name=_field("jiraUserDisplayName") or None,
                     products=_string_list_field("jiraUserProducts"),
                 ),
@@ -448,6 +450,8 @@ def _pagination(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _search_pagination(result: dict[str, Any], limit: int) -> dict[str, Any]:
+    if "total" in result or "startAt" in result:
+        return _pagination(result)
     return {
         "maxResults": limit,
         "nextPageToken": result.get("nextPageToken"),
