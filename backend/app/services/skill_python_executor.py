@@ -479,7 +479,11 @@ def _build_skill_docker_command(
             continue
         cmd.extend(["--env", f"{key}={value}"])
     # The backend image ENTRYPOINT starts uvicorn; override it to run the skill.
-    cmd.extend(["--entrypoint", "uv", image, "run", "python", entry_point])
+    # `--no-project` keeps uv from discovering the backend's own project: the
+    # workspace volume lives under /app in the Compose image, so uv would
+    # otherwise walk up, find /app's pyproject/.venv, and try to repair it on the
+    # read-only root filesystem. The skill runs in its own isolated environment.
+    cmd.extend(["--entrypoint", "uv", image, "run", "--no-project", "python", entry_point])
     return cmd
 
 
@@ -744,7 +748,9 @@ def _execute_skill_subprocess(
 
         try:
             result = subprocess.run(
-                ["uv", "run", "python", entry_point],
+                # `--no-project` isolates the skill from any surrounding uv
+                # project (e.g. the backend's own), matching the Docker path.
+                ["uv", "run", "--no-project", "python", entry_point],
                 cwd=str(root),
                 input=args_json,
                 capture_output=True,
