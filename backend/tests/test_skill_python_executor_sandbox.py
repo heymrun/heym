@@ -393,5 +393,34 @@ class SkillDockerFailClosedTest(unittest.TestCase):
         self.assertEqual(result.output, {"partial": True})
 
 
+class SkillImageResolutionTest(unittest.TestCase):
+    """The sandbox image must resolve without relying on `docker inspect`."""
+
+    def test_resolves_from_codex_docker_image_when_no_dedicated_image(self) -> None:
+        # The single-container release image and Compose set HEYM_CODEX_DOCKER_IMAGE
+        # to the backend image; skills reuse it so resolution never depends on the
+        # (unreliable) container self-inspection.
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HEYM_SKILL_IMAGE": "",
+                "HEYM_PYTHON_TOOL_IMAGE": "",
+                "HEYM_CODEX_DOCKER_IMAGE": "ghcr.io/heymrun/heym:1.2.3",
+            },
+        ):
+            self.assertEqual(executor._resolve_image(), "ghcr.io/heymrun/heym:1.2.3")
+
+    def test_dedicated_skill_image_takes_precedence(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HEYM_SKILL_IMAGE": "explicit:image",
+                "HEYM_PYTHON_TOOL_IMAGE": "",
+                "HEYM_CODEX_DOCKER_IMAGE": "codex:image",
+            },
+        ):
+            self.assertEqual(executor._resolve_image(), "explicit:image")
+
+
 if __name__ == "__main__":
     unittest.main()

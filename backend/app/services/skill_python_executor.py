@@ -299,12 +299,21 @@ def _docker_available() -> bool:
 
 
 def _resolve_image() -> str | None:
-    """Resolve the image to run skills in: explicit override, else this container's image."""
+    """Resolve the image to run skills in.
+
+    Prefers an explicit override, then the Codex runner image (both the single
+    container release image and Docker Compose already set
+    ``HEYM_CODEX_DOCKER_IMAGE`` to the backend image, and it always carries uv),
+    and finally falls back to inspecting this container's own image. The env
+    fallbacks matter because ``docker inspect <hostname>`` is not reliable in
+    every deployment (e.g. a custom hostname, or an image referenced by digest).
+    """
     import socket  # noqa: PLC0415 (only needed for the Docker sandbox path)
 
     override = (
         os.environ.get("HEYM_SKILL_IMAGE", "").strip()
         or os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
+        or os.environ.get("HEYM_CODEX_DOCKER_IMAGE", "").strip()
     )
     if override:
         return override
