@@ -165,12 +165,13 @@ class SkillDockerCommandTest(unittest.TestCase):
                     "main.py",
                 )
 
-    def test_entrypoint_runs_skill_not_uvicorn(self) -> None:
+    def test_entrypoint_runs_skill_with_backend_interpreter(self) -> None:
         cmd = self._build()
-        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "uv")
-        # `--no-project` isolates the skill from the backend's own uv project so
-        # uv never tries to repair /app's venv on the read-only filesystem.
-        self.assertEqual(cmd[-5:], ["heym-backend", "run", "--no-project", "python", "main.py"])
+        # The skill runs with the backend's own venv interpreter (so backend
+        # packages like python-docx are available), not uvicorn and not uv.
+        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], executor._skill_interpreter())
+        self.assertNotIn("uv", cmd)
+        self.assertEqual(cmd[-2:], ["heym-backend", "main.py"])
 
     def test_backend_secrets_not_forwarded_as_env(self) -> None:
         with mock.patch.dict(

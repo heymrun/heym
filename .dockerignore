@@ -1,0 +1,33 @@
+# Build artifacts that must never be copied from the host into images.
+# Critically, the host `.venv` has interpreter symlinks pointing at host paths
+# that do not exist in the container; copying it clobbers the clean venv that
+# `uv sync` builds inside the image and leaves a broken Python interpreter.
+
+# Python
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/*.egg-info
+
+# Node / frontend
+**/node_modules
+frontend/dist
+frontend/.e2e-artifacts
+
+# VCS & editor / OS
+.git
+.gitignore
+**/.DS_Store
+
+# Local secrets (never bake into an image)
+.env
+.env.local
+**/.env.local
+
+# Logs
+**/*.log

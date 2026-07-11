@@ -1,5 +1,5 @@
 """
-Execute skill Python scripts with uv, preserving directory structure.
+Execute skill Python scripts with the backend interpreter, preserving directory structure.
 
 Skill Python code is **untrusted** (it can arrive verbatim inside a shared
 workflow / ``everyone``-visibility template), so it is treated exactly like the
@@ -34,6 +34,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -332,6 +333,18 @@ def _resolve_image() -> str | None:
     return None
 
 
+def _skill_interpreter() -> str:
+    """Python interpreter used to run skills.
+
+    Skills rely on the backend's installed packages (python-docx, pypdf, etc.),
+    so they run with the backend's own venv interpreter rather than an isolated
+    uv environment. In the Docker sandbox the sibling uses the backend image, so
+    ``sys.executable`` (e.g. ``/app/backend/.venv/bin/python``) is a valid path
+    there too. Override with ``HEYM_SKILL_PYTHON`` for a custom skill image.
+    """
+    return os.environ.get("HEYM_SKILL_PYTHON", "").strip() or sys.executable
+
+
 def _skill_volume_mount_point() -> Path:
     """Absolute path where the shared workspace volume is mounted in the backend."""
     return Path(
@@ -443,7 +456,6 @@ def _build_skill_docker_command(
     """
     memory = os.environ.get("HEYM_SKILL_MEMORY", "512m")
     home_dir = run_dir / ".home"
-    cache_dir = home_dir / ".uv-cache"
     cmd = [
         "docker",
         "run",
@@ -451,7 +463,7 @@ def _build_skill_docker_command(
         "-i",
         "--name",
         name,
-        # Egress preserved: skills call APIs / install their own deps via uv.
+        # Egress preserved: skills call external APIs.
         "--network",
         os.environ.get("HEYM_SKILL_NETWORK", "bridge"),
         *_resolve_workspace_mount(mount_point, run_dir),
@@ -477,22 +489,19 @@ def _build_skill_docker_command(
         "--env",
         f"HOME={home_dir}",
         "--env",
-        f"UV_CACHE_DIR={cache_dir}",
-        "--env",
         f"_OUTPUT_DIR={run_dir / _OUTPUT_FILES_DIR}",
     ]
     for key, value in _docker_forward_env().items():
-        # HOME / UV_CACHE_DIR are set explicitly above to point inside the
-        # writable workspace; never let the backend's values override them.
-        if key in {"HOME", "UV_CACHE_DIR"}:
+        # HOME is set explicitly above to point inside the writable workspace;
+        # never let the backend's value (a read-only path) override it.
+        if key == "HOME":
             continue
         cmd.extend(["--env", f"{key}={value}"])
-    # The backend image ENTRYPOINT starts uvicorn; override it to run the skill.
-    # `--no-project` keeps uv from discovering the backend's own project: the
-    # workspace volume lives under /app in the Compose image, so uv would
-    # otherwise walk up, find /app's pyproject/.venv, and try to repair it on the
-    # read-only root filesystem. The skill runs in its own isolated environment.
-    cmd.extend(["--entrypoint", "uv", image, "run", "--no-project", "python", entry_point])
+    # Override the backend image ENTRYPOINT (uvicorn) and run the skill directly
+    # with the backend's own venv interpreter so backend packages (python-docx,
+    # pypdf, ...) are available. Running the interpreter directly also avoids uv
+    # discovering / repairing the backend project on the read-only filesystem.
+    cmd.extend(["--entrypoint", _skill_interpreter(), image, entry_point])
     return cmd
 
 
@@ -757,9 +766,9 @@ def _execute_skill_subprocess(
 
         try:
             result = subprocess.run(
-                # `--no-project` isolates the skill from any surrounding uv
-                # project (e.g. the backend's own), matching the Docker path.
-                ["uv", "run", "--no-project", "python", entry_point],
+                # Run with the backend's own interpreter so backend packages
+                # (python-docx, pypdf, ...) are available to the skill.
+                [_skill_interpreter(), entry_point],
                 cwd=str(root),
                 input=args_json,
                 capture_output=True,
