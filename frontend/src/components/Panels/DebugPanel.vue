@@ -3017,7 +3017,7 @@ function renderContent(content: string): string {
                   <span
                     v-for="(s, i) in getSkillsUsed(result.output)"
                     :key="i"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                   >
                     {{ s }}
                   </span>
@@ -3041,13 +3041,13 @@ function renderContent(content: string): string {
                     </span>
                     <span
                       v-if="tc.source === 'mcp'"
-                      class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                      class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                     >
                       MCP{{ tc.mcp_server ? `: ${tc.mcp_server}` : '' }}
                     </span>
                     <span
                       v-else-if="tc.source === 'skill'"
-                      class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                      class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                     >
                       Skill
                     </span>
@@ -3130,7 +3130,7 @@ function renderContent(content: string): string {
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
               <span class="font-medium">{{ runningAgentNode.data?.label || runningAgentNode.id }}</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300">
                 Live
               </span>
             </div>
@@ -3158,13 +3158,13 @@ function renderContent(content: string): string {
                   </span>
                   <span
                     v-if="tc.source === 'mcp'"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                   >
                     MCP{{ tc.mcp_server ? `: ${tc.mcp_server}` : '' }}
                   </span>
                   <span
                     v-else-if="tc.source === 'skill'"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                   >
                     Skill
                   </span>

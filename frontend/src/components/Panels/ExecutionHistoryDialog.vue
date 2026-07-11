@@ -1016,7 +1016,7 @@ function bringToCanvas(): void {
                       <span
                         v-for="(s, i) in getSkillsUsed(node.output)"
                         :key="i"
-                        class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                        class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                       >
                         {{ s }}
                       </span>
@@ -1042,13 +1042,13 @@ function bringToCanvas(): void {
                           </span>
                           <span
                             v-if="tc.source === 'mcp'"
-                            class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                            class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                           >
                             MCP{{ tc.mcp_server ? `: ${tc.mcp_server}` : '' }}
                           </span>
                           <span
                             v-else-if="tc.source === 'skill'"
-                            class="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary"
+                            class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300"
                           >
                             Skill
                           </span>
