@@ -1,7 +1,8 @@
 import datetime
 import unittest
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
@@ -9,6 +10,7 @@ from app.api import boards as boards_api
 from app.models.board_schemas import (
     BoardCreateRequest,
     CardCreateRequest,
+    CardMoveRequest,
     ColumnUpdateRequest,
     CommentCreateRequest,
 )
@@ -219,3 +221,119 @@ class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(activities[0].kind, "comment")
         self.assertEqual(activities[0].author_type, "user")
         self.assertEqual(activities[0].author_user_id, user.id)
+
+
+class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
+    def _setup(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        from_column = MagicMock()
+        from_column.id = uuid.uuid4()
+        from_column.board_id = board.id
+        from_column.name = "Backlog"
+        to_column = MagicMock()
+        to_column.id = uuid.uuid4()
+        to_column.board_id = board.id
+        to_column.name = "Planning"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # Real field values (not MagicMock) so `_card_response` validates cleanly.
+        card = SimpleNamespace(
+            id=uuid.uuid4(),
+            board_id=board.id,
+            column_id=from_column.id,
+            title="Write launch email",
+            content="",
+            position=0,
+            run_status="idle",
+            card_metadata={},
+            created_at=now,
+            updated_at=now,
+        )
+        return user, board, from_column, to_column, card
+
+    async def test_move_to_new_column_enqueues_chain(self):
+        user, board, from_column, to_column, card = self._setup()
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        # 1: board, 2: card, 3: target column, 4: source column,
+        # 5+: reindex queries (return empty lists)
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=to_column),
+                _result_with(scalar=from_column),
+                _result_with(scalars_list=[]),
+                _result_with(scalars_list=[]),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.move_card(
+                board_id=board.id,
+                card_id=card.id,
+                request=CardMoveRequest(to_column_id=to_column.id, position=0),
+                db=db,
+                current_user=user,
+            )
+
+        enqueue.assert_awaited_once()
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["move"]["from_column"], "Backlog")
+        self.assertEqual(kwargs["move"]["to_column"], "Planning")
+        self.assertFalse(kwargs["rerun"])
+        added = [call.args[0] for call in db.add.call_args_list]
+        events = [o for o in added if type(o).__name__ == "BoardCardActivity"]
+        self.assertTrue(any(a.kind == "event" for a in events))
+
+    async def test_same_column_reorder_does_not_enqueue(self):
+        user, board, from_column, _, card = self._setup()
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=from_column),
+                _result_with(scalars_list=[]),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.move_card(
+                board_id=board.id,
+                card_id=card.id,
+                request=CardMoveRequest(to_column_id=from_column.id, position=1),
+                db=db,
+                current_user=user,
+            )
+
+        enqueue.assert_not_awaited()
+
+    async def test_follow_up_run_conflicts_when_not_enqueued(self):
+        user, board, from_column, _, card = self._setup()
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=from_column),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=False)
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await boards_api.run_card_chain(
+                    board_id=board.id, card_id=card.id, db=db, current_user=user
+                )
+        self.assertEqual(ctx.exception.status_code, 409)

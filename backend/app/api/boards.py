@@ -29,12 +29,14 @@ from app.models.board_schemas import (
     CardActivityResponse,
     CardCreateRequest,
     CardDetailResponse,
+    CardMoveRequest,
     CardRunResponse,
     CardUpdateRequest,
     ColumnCreateRequest,
     ColumnUpdateRequest,
     CommentCreateRequest,
 )
+from app.services import board_run_service
 
 router = APIRouter()
 
@@ -551,3 +553,73 @@ async def create_card_comment(
         run_id=activity.run_id,
         created_at=activity.created_at,
     )
+
+
+@router.post("/{board_id}/cards/{card_id}/move", response_model=BoardCardResponse)
+async def move_card(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    request: CardMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardCardResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    target = await _get_board_column(db, board, request.to_column_id)
+    column_changed = card.column_id != target.id
+    source = await _get_board_column(db, board, card.column_id) if column_changed else target
+
+    old_column_id = card.column_id
+    card.column_id = target.id
+    if request.position is not None:
+        card.position = request.position
+    await _reindex_cards(db, target.id)
+    if column_changed:
+        await _reindex_cards(db, old_column_id)
+        db.add(
+            BoardCardActivity(
+                card_id=card.id,
+                kind="event",
+                author_type="system",
+                content=f"Moved from {source.name} to {target.name}",
+                data={
+                    "from_column_id": str(old_column_id),
+                    "to_column_id": str(target.id),
+                },
+            )
+        )
+    await db.commit()
+
+    if column_changed:
+        await board_run_service.enqueue_card_chain(
+            db,
+            card=card,
+            column=target,
+            board=board,
+            move={"from_column": source.name, "to_column": target.name},
+            rerun=False,
+        )
+    await db.refresh(card)
+    return _card_response(card)
+
+
+@router.post("/{board_id}/cards/{card_id}/run", response_model=BoardCardResponse)
+async def run_card_chain(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardCardResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    column = await _get_board_column(db, board, card.column_id)
+    enqueued = await board_run_service.enqueue_card_chain(
+        db, card=card, column=column, board=board, move=None, rerun=True
+    )
+    if not enqueued:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A run is already active or the column has no workflows",
+        )
+    await db.refresh(card)
+    return _card_response(card)
