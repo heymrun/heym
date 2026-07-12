@@ -33,6 +33,8 @@ from app.api.workflows import (
 from app.db.models import (
     Board,
     BoardCard,
+    BoardCardActivity,
+    BoardCardRun,
     BoardColumn,
     Credential,
     CredentialType,
@@ -363,7 +365,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 5. When the user asks about execution or analytics statistics (e.g. how many requests today, how many runs in the last 24 hours, error rate), use get_analytics_stats with the appropriate time_range (24h for today, 7d for last week, 30d, or all). You may pass an optional workflow_id to filter by one workflow (get id from list_workflows). Summarize the result in the user's language.
 6. When the user asks for details of what ran or what came in (e.g. what ran, show details, list recent runs), use get_recent_executions with the appropriate time_range and optionally limit. Summarize the list (workflow name, time, status, brief output) in the user's language.
 6a. When the user asks about scheduled cron runs, the calendar, or when workflows will run (today, this week, this month, upcoming times), use get_schedule_events with view_window day, week, or month, optional reference_date (YYYY-MM-DD), include_shared false for owned-only or true to include shared workflows, or start_iso/end_iso for a custom range. Summarize events (workflow name and time) in the user's language.
-6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. Answer from the results in the user's language; do not execute workflows for these questions.
+6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. For a specific task/card (what it is, its description, the comments/conversation on it, what happened, its output or error), use get_card_detail with the card_id from get_board_tasks. Answer from the results in the user's language; do not execute workflows for these questions.
 7. When a workflow is waiting for human review and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation.
 8. When the user asks you to wait, monitor, or check again for a workflow that is still running or pending, use wait_for_execution_update instead of repeatedly polling yourself. Default to 5 seconds between checks and at most 5 checks unless the user explicitly asks otherwise.
 9. If execute_workflow or wait_for_execution_update returns a pending workflow with review details, explain that pending state in the same language as the user, include the review link as a markdown link, briefly summarize the blocked step, and show the three direct chat reply options: approve, edit: ..., and reject.
@@ -707,6 +709,23 @@ DASHBOARD_CHAT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_card_detail",
+            "description": "Read the full detail of one kanban card/task: its description/content, run status, board and column, the comment thread, the activity timeline, and its workflow runs (with outputs and errors). Use when the user asks about a specific task/card — what it is, what was said on it, what happened, its output or error. Get the card_id from get_board_tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "card_id": {
+                        "type": "string",
+                        "description": "UUID of the card to read (from get_board_tasks).",
+                    },
+                },
+                "required": ["card_id"],
+            },
+        },
+    },
 ]
 
 
@@ -796,6 +815,85 @@ async def get_board_tasks_for_chat(
         for card in cards
     ]
     return {"count": len(tasks), "tasks": tasks}
+
+
+async def get_card_detail_for_chat(db: AsyncSession, user_id: uuid.UUID, card_id: str) -> dict:
+    """Read-only detail of one board card (content, comments, activity, runs)."""
+    try:
+        cid = uuid.UUID(card_id)
+    except (ValueError, TypeError):
+        return {"error": "Invalid card_id"}
+    card = (
+        await db.execute(
+            select(BoardCard)
+            .join(Board, Board.id == BoardCard.board_id)
+            .where(BoardCard.id == cid, Board.owner_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if card is None:
+        return {"error": "Card not found"}
+    column = await db.get(BoardColumn, card.column_id)
+    board = await db.get(Board, card.board_id)
+    activities = (
+        (
+            await db.execute(
+                select(BoardCardActivity)
+                .where(BoardCardActivity.card_id == cid)
+                .order_by(BoardCardActivity.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    runs = (
+        (
+            await db.execute(
+                select(BoardCardRun)
+                .where(BoardCardRun.card_id == cid)
+                .order_by(BoardCardRun.started_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "id": str(card.id),
+        "title": card.title,
+        "content": card.content,
+        "status": card.run_status,
+        "board": board.name if board else None,
+        "column": column.name if column else None,
+        "comments": [
+            {
+                "author": a.author_type,
+                "content": a.content,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in activities
+            if a.kind == "comment"
+        ],
+        "activity": [
+            {
+                "kind": a.kind,
+                "author": a.author_type,
+                "content": a.content,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in activities
+        ],
+        "runs": [
+            {
+                "workflow": r.workflow_name,
+                "status": r.status,
+                "output": r.output or {},
+                "error": r.error,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in runs
+        ],
+    }
 
 
 def get_openai_client(
@@ -2258,6 +2356,14 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         if isinstance(data, dict) and "count" in data:
             return f"{int(data.get('count') or 0)} task(s) listed"
         return result_json[:200] + ("..." if len(result_json) > 200 else "")
+    if tool_name == "get_card_detail":
+        if isinstance(data, dict) and "error" in data:
+            return f"Error: {str(data.get('error'))[:150]}"
+        if isinstance(data, dict) and "title" in data:
+            runs = data.get("runs") or []
+            comments = data.get("comments") or []
+            return f"Card {data.get('title')!r}: {data.get('status')}, {len(comments)} comment(s), {len(runs)} run(s)"
+        return result_json[:200] + ("..." if len(result_json) > 200 else "")
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
@@ -3492,6 +3598,40 @@ async def stream_dashboard_chat(
                             board_id=args.get("board_id") or None,
                             status=args.get("status") or None,
                         )
+                    )
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
+                elif name == "get_card_detail":
+                    step_label = "Reading card detail..."
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(
+                        await get_card_detail_for_chat(db, user_id, args.get("card_id", "") or "")
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(

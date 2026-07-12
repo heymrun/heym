@@ -637,6 +637,9 @@ async def move_card(
     await db.commit()
 
     if column_changed:
+        # Only a forward move (into a later column) may cascade; moving a card back
+        # (e.g. to Backlog) runs the column's chain but must not auto-advance.
+        forward = target.position > source.position
         await board_run_service.enqueue_card_chain(
             db,
             card=card,
@@ -644,6 +647,7 @@ async def move_card(
             board=board,
             move={"from_column": source.name, "to_column": target.name},
             rerun=False,
+            allow_advance=forward,
         )
     await db.refresh(card)
     return _card_response(card)

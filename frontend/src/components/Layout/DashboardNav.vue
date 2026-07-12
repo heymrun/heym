@@ -305,6 +305,7 @@ watch(activeTab, () => {
 
 /* --- per-tab hover animations --- */
 .tab-item[data-tab-id="workflows"]:hover       .tab-icon { animation: icon-spin   0.45s ease-out; }
+.tab-item[data-tab-id="board"]:hover           .tab-icon { animation: icon-pop    0.35s ease-out; }
 .tab-item[data-tab-id="schedules"]:hover       .tab-icon { animation: icon-tick   0.40s ease-out; }
 .tab-item[data-tab-id="templates"]:hover       .tab-icon { animation: icon-pop    0.35s ease-out; }
 .tab-item[data-tab-id="dashboard"]:hover       .tab-icon { animation: icon-pop    0.35s ease-out; }

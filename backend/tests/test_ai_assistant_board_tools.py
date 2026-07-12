@@ -18,11 +18,18 @@ def _scalar(value):
     return res
 
 
+def _scalar_one(value):
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = value
+    return res
+
+
 class TestBoardToolsRegistered(unittest.TestCase):
     def test_tools_present(self):
         names = {t["function"]["name"] for t in ai_assistant.DASHBOARD_CHAT_TOOLS}
         self.assertIn("list_boards", names)
         self.assertIn("get_board_tasks", names)
+        self.assertIn("get_card_detail", names)
 
 
 class TestListBoardsForChat(unittest.IsolatedAsyncioTestCase):
@@ -72,4 +79,49 @@ class TestGetBoardTasksForChat(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_board_id(self):
         db = AsyncMock()
         result = await ai_assistant.get_board_tasks_for_chat(db, uuid.uuid4(), board_id="nope")
+        self.assertIn("error", result)
+
+
+class TestGetCardDetailForChat(unittest.IsolatedAsyncioTestCase):
+    async def test_returns_content_comments_runs(self):
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 7, 12, tzinfo=timezone.utc)
+        card = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Write email",
+            content="draft it",
+            run_status="success",
+            board_id=uuid.uuid4(),
+            column_id=uuid.uuid4(),
+        )
+        board = SimpleNamespace(name="Launch")
+        column = SimpleNamespace(name="Done")
+        activity = SimpleNamespace(
+            kind="comment", author_type="user", content="use Q3 tone", created_at=now
+        )
+        run = SimpleNamespace(
+            workflow_name="Enrich",
+            status="success",
+            output={"text": "done"},
+            error=None,
+            started_at=now,
+            finished_at=now,
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[_scalar_one(card), _scalars([activity]), _scalars([run])]
+        )
+        db.get = AsyncMock(side_effect=[column, board])
+        result = await ai_assistant.get_card_detail_for_chat(db, uuid.uuid4(), str(card.id))
+        self.assertEqual(result["title"], "Write email")
+        self.assertEqual(result["content"], "draft it")
+        self.assertEqual(result["column"], "Done")
+        self.assertEqual(result["comments"][0]["content"], "use Q3 tone")
+        self.assertEqual(result["runs"][0]["workflow"], "Enrich")
+
+    async def test_card_not_found(self):
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_scalar_one(None))
+        result = await ai_assistant.get_card_detail_for_chat(db, uuid.uuid4(), str(uuid.uuid4()))
         self.assertIn("error", result)

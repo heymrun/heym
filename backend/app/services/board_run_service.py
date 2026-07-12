@@ -169,6 +169,7 @@ async def _run_chain(
     links: list[dict],
     move: dict | None,
     rerun: bool,
+    allow_advance: bool = True,
     session_factory=async_session_maker,
 ) -> None:
     """Execute a column's workflow chain for a card, sequentially, off the request path."""
@@ -382,7 +383,7 @@ async def _run_chain(
 
             await _set_card_status(db, card_id, "success")
             await db.commit()
-        if not rerun:
+        if not rerun and allow_advance:
             await _auto_advance(
                 card_id=card_id,
                 board_id=board_id,
@@ -436,7 +437,9 @@ async def _fail_open_runs(db, card_id: uuid.UUID, error: str) -> None:
         run.finished_at = datetime.now(timezone.utc)
 
 
-async def enqueue_card_chain(db, *, card, column, board, move: dict | None, rerun: bool) -> bool:
+async def enqueue_card_chain(
+    db, *, card, column, board, move: dict | None, rerun: bool, allow_advance: bool = True
+) -> bool:
     """Start the column's workflow chain for a card.
 
     Returns False when the column has no chain or the card already has an active run.
@@ -484,6 +487,7 @@ async def enqueue_card_chain(db, *, card, column, board, move: dict | None, reru
         links=links,
         move=move,
         rerun=rerun,
+        allow_advance=allow_advance,
     )
     return True
 
@@ -496,6 +500,7 @@ def _spawn_chain(
     links: list[dict],
     move: dict | None,
     rerun: bool,
+    allow_advance: bool = True,
 ) -> None:
     """Start a chain run as a background task, holding a strong reference to it."""
     task = asyncio.create_task(
@@ -506,6 +511,7 @@ def _spawn_chain(
             links=links,
             move=move,
             rerun=rerun,
+            allow_advance=allow_advance,
         )
     )
     _BACKGROUND_CHAIN_TASKS.add(task)

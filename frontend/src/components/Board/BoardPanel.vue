@@ -81,10 +81,10 @@ async function onBoardCreated(boardId: string): Promise<void> {
 
 <template>
   <div
-    class="flex h-full flex-col"
+    class="flex h-full flex-col -mt-4 md:-mt-6"
     data-testid="board-panel"
   >
-    <div class="flex items-center gap-3 border-b border-border/60 px-4 py-2.5">
+    <div class="flex items-center gap-3 border-b border-border/60 px-4 pb-2.5 pt-0">
       <h2 class="text-xl md:text-2xl font-bold tracking-tight">
         Board
       </h2>

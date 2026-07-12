@@ -233,10 +233,12 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
         from_column.id = uuid.uuid4()
         from_column.board_id = board.id
         from_column.name = "Backlog"
+        from_column.position = 0
         to_column = MagicMock()
         to_column.id = uuid.uuid4()
         to_column.board_id = board.id
         to_column.name = "Planning"
+        to_column.position = 1
         now = datetime.datetime.now(datetime.timezone.utc)
         # Real field values (not MagicMock) so `_card_response` validates cleanly.
         card = SimpleNamespace(
@@ -287,9 +289,41 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["move"]["from_column"], "Backlog")
         self.assertEqual(kwargs["move"]["to_column"], "Planning")
         self.assertFalse(kwargs["rerun"])
+        self.assertTrue(kwargs["allow_advance"])  # forward move may cascade
         added = [call.args[0] for call in db.add.call_args_list]
         events = [o for o in added if type(o).__name__ == "BoardCardActivity"]
         self.assertTrue(any(a.kind == "event" for a in events))
+
+    async def test_backward_move_does_not_allow_advance(self):
+        user, board, from_column, to_column, card = self._setup()
+        # Card currently in "Planning" (pos 1), moving back to "Backlog" (pos 0).
+        card.column_id = to_column.id
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        # 1: board, 2: card, 3: target (Backlog), 4: source (Planning), 5+: reindex
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=from_column),
+                _result_with(scalar=to_column),
+                _result_with(scalars_list=[]),
+                _result_with(scalars_list=[]),
+            ]
+        )
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.move_card(
+                board_id=board.id,
+                card_id=card.id,
+                request=CardMoveRequest(to_column_id=from_column.id, position=0),
+                db=db,
+                current_user=user,
+            )
+        enqueue.assert_awaited_once()
+        self.assertFalse(enqueue.await_args.kwargs["allow_advance"])
 
     async def test_same_column_reorder_does_not_enqueue(self):
         user, board, from_column, _, card = self._setup()
