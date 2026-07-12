@@ -179,6 +179,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Data Tables** — Manage structured data directly in the dashboard and reference it from workflows
 - **Workflow Analyzer** — Run-aware AI feedback that generates a shared Markdown report with improvement areas, purpose, and step-by-step behavior
 - **Workflow-Powered Dashboards** — Build custom chart dashboards where every widget is backed by its own hidden Heym workflow
+- **Agentic Kanban Board** — Cards are persistent agentic jobs; moving a card into a column runs that column's ordered workflow chain with the card's full context (content, comments, history, previous outputs), and results are written back to the card
 - **Templates** — Start from pre-built workflow templates to get up and running quickly
 - **Parallel Execution** — Independent nodes run concurrently based on the graph structure, no configuration needed
 - **Auto Heal** — Playwright selectors break? AI automatically detects and fixes them at runtime

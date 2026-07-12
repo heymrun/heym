@@ -4,26 +4,27 @@
     <style>
       .ff-orb-a { animation: ffOrbA 7s ease-in-out infinite; transform-origin: 200px 140px; }
       .ff-orb-b { animation: ffOrbB 8s ease-in-out infinite; transform-origin: 1080px 580px; }
-      .ff-progress { animation: ffProgress 95s linear infinite; }
-      .ff-scene { opacity: 0; animation: ffScene 95s linear infinite both; }
-      .ff-scene.s02 { animation-delay: -90s; }
-      .ff-scene.s03 { animation-delay: -85s; }
-      .ff-scene.s04 { animation-delay: -80s; }
-      .ff-scene.s05 { animation-delay: -75s; }
-      .ff-scene.s06 { animation-delay: -70s; }
-      .ff-scene.s07 { animation-delay: -65s; }
-      .ff-scene.s08 { animation-delay: -60s; }
-      .ff-scene.s09 { animation-delay: -55s; }
-      .ff-scene.s10 { animation-delay: -50s; }
-      .ff-scene.s11 { animation-delay: -45s; }
-      .ff-scene.s12 { animation-delay: -40s; }
-      .ff-scene.s13 { animation-delay: -35s; }
-      .ff-scene.s14 { animation-delay: -30s; }
-      .ff-scene.s15 { animation-delay: -25s; }
-      .ff-scene.s16 { animation-delay: -20s; }
-      .ff-scene.s17 { animation-delay: -15s; }
-      .ff-scene.s18 { animation-delay: -10s; }
-      .ff-scene.s19 { animation-delay: -5s; }
+      .ff-progress { animation: ffProgress 100s linear infinite; }
+      .ff-scene { opacity: 0; animation: ffScene 100s linear infinite both; }
+      .ff-scene.s02 { animation-delay: -95s; }
+      .ff-scene.s03 { animation-delay: -90s; }
+      .ff-scene.s04 { animation-delay: -85s; }
+      .ff-scene.s05 { animation-delay: -80s; }
+      .ff-scene.s06 { animation-delay: -75s; }
+      .ff-scene.s07 { animation-delay: -70s; }
+      .ff-scene.s08 { animation-delay: -65s; }
+      .ff-scene.s09 { animation-delay: -60s; }
+      .ff-scene.s10 { animation-delay: -55s; }
+      .ff-scene.s11 { animation-delay: -50s; }
+      .ff-scene.s12 { animation-delay: -45s; }
+      .ff-scene.s13 { animation-delay: -40s; }
+      .ff-scene.s14 { animation-delay: -35s; }
+      .ff-scene.s15 { animation-delay: -30s; }
+      .ff-scene.s16 { animation-delay: -25s; }
+      .ff-scene.s17 { animation-delay: -20s; }
+      .ff-scene.s18 { animation-delay: -15s; }
+      .ff-scene.s19 { animation-delay: -10s; }
+      .ff-scene.s20 { animation-delay: -5s; }
       .ff-flow { stroke-dasharray: 8 8; animation: ffDash 1.6s linear infinite; }
       .ff-blink { animation: ffBlink 1s steps(2, jump-none) infinite; }
       .ff-wave { animation: ffWave 1.2s ease-in-out infinite; }
@@ -45,9 +46,9 @@
       .ff-logo-tile { transform-origin: center; animation: ffLogoGlow 2.8s ease-in-out infinite; }
       .ff-logo-mark { stroke-dasharray: 10 6; animation: ffLogoDash 2.4s linear infinite; }
       @keyframes ffScene {
-        0%, 4.6% { opacity: 1; transform: translateY(0); }
-        5.263% { opacity: 0; transform: translateY(10px); }
-        5.264%, 100% { opacity: 0; transform: translateY(10px); }
+        0%, 4.37% { opacity: 1; transform: translateY(0); }
+        5% { opacity: 0; transform: translateY(10px); }
+        5.001%, 100% { opacity: 0; transform: translateY(10px); }
       }
       @keyframes ffProgress {
         0% { width: 0; fill: #A78BFA; }
@@ -142,23 +143,24 @@
     
     <g fill="#374151">
       <circle cx="0" cy="1.5" r="3"></circle>
-      <circle cx="64" cy="1.5" r="3"></circle>
-      <circle cx="128" cy="1.5" r="3"></circle>
-      <circle cx="192" cy="1.5" r="3"></circle>
-      <circle cx="256" cy="1.5" r="3"></circle>
-      <circle cx="320" cy="1.5" r="3"></circle>
-      <circle cx="384" cy="1.5" r="3"></circle>
-      <circle cx="448" cy="1.5" r="3"></circle>
-      <circle cx="512" cy="1.5" r="3"></circle>
-      <circle cx="576" cy="1.5" r="3"></circle>
-      <circle cx="640" cy="1.5" r="3"></circle>
-      <circle cx="704" cy="1.5" r="3"></circle>
-      <circle cx="768" cy="1.5" r="3"></circle>
-      <circle cx="832" cy="1.5" r="3"></circle>
-      <circle cx="896" cy="1.5" r="3"></circle>
-      <circle cx="960" cy="1.5" r="3"></circle>
-      <circle cx="1024" cy="1.5" r="3"></circle>
-      <circle cx="1088" cy="1.5" r="3"></circle>
+      <circle cx="61" cy="1.5" r="3"></circle>
+      <circle cx="121" cy="1.5" r="3"></circle>
+      <circle cx="182" cy="1.5" r="3"></circle>
+      <circle cx="242" cy="1.5" r="3"></circle>
+      <circle cx="303" cy="1.5" r="3"></circle>
+      <circle cx="364" cy="1.5" r="3"></circle>
+      <circle cx="424" cy="1.5" r="3"></circle>
+      <circle cx="485" cy="1.5" r="3"></circle>
+      <circle cx="545" cy="1.5" r="3"></circle>
+      <circle cx="606" cy="1.5" r="3"></circle>
+      <circle cx="667" cy="1.5" r="3"></circle>
+      <circle cx="727" cy="1.5" r="3"></circle>
+      <circle cx="788" cy="1.5" r="3"></circle>
+      <circle cx="848" cy="1.5" r="3"></circle>
+      <circle cx="909" cy="1.5" r="3"></circle>
+      <circle cx="970" cy="1.5" r="3"></circle>
+      <circle cx="1030" cy="1.5" r="3"></circle>
+      <circle cx="1091" cy="1.5" r="3"></circle>
       <circle cx="1152" cy="1.5" r="3"></circle>
     </g>
   </g>
@@ -961,6 +963,33 @@
           <text x="434" y="35" text-anchor="end" font-size="26" fill="#10D9A0" font-weight="800">$0.1204</text>
           <rect class="ff-fill" x="0" y="0" height="54" rx="12" fill="#10D9A0" fill-opacity="0.08"></rect>
         </g>
+      </g>
+    </g>
+
+    <g class="ff-scene s20">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">20 · AGENTIC KANBAN BOARD</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Move it.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">It works.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Cards are agentic jobs — columns run workflow chains with full card context.</text>
+      <g transform="translate(620,40)">
+        <rect width="500" height="200" rx="14" fill="#111827" stroke="#1F2937"></rect>
+        <text x="20" y="26" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">BACKLOG</text>
+        <g transform="translate(20,38)">
+          <rect width="140" height="34" rx="8" fill="#0A0E1A" stroke="#374151"></rect>
+          <text x="10" y="21" font-size="10.5" fill="#9CA3AF">Write launch email</text>
+        </g>
+        <text x="180" y="26" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">PLANNING · 2 WF</text>
+        <g transform="translate(180,38)">
+          <rect class="ff-pulse" width="140" height="34" rx="8" fill="#F59E0B" fill-opacity="0.08" stroke="#F59E0B"></rect>
+          <text x="10" y="21" font-size="10.5" fill="#F59E0B">Research pricing…</text>
+        </g>
+        <text x="340" y="26" font-size="10" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">DONE</text>
+        <g transform="translate(340,38)">
+          <rect width="140" height="34" rx="8" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0"></rect>
+          <text x="10" y="21" font-size="10.5" fill="#10D9A0">Ship changelog ✓</text>
+        </g>
+        <path class="ff-flow" d="M90 110 L90 140 L420 140" stroke="#10D9A0" stroke-opacity="0.5" fill="none"></path>
+        <text x="20" y="168" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">card → column chain → outputs → green</text>
       </g>
     </g>
 
