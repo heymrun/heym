@@ -18,12 +18,21 @@ const loading = ref(false);
 const comment = ref("");
 const editedContent = ref("");
 const savingContent = ref(false);
+const activityScroll = ref<HTMLElement | null>(null);
+const activityAtBottom = ref(false);
+
+function onActivityScroll(): void {
+  const el = activityScroll.value;
+  if (!el) return;
+  activityAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+}
 
 watch(
   () => [props.open, props.cardId] as const,
   async ([open, cardId]) => {
     if (!open || !cardId || !boardStore.activeBoard) return;
     loading.value = true;
+    activityAtBottom.value = false;
     try {
       detail.value = await boardApi.getCard(boardStore.activeBoard.id, cardId);
       editedContent.value = detail.value.card.content;
@@ -77,6 +86,20 @@ function formatTime(iso: string): string {
     :title="detail?.card.title ?? 'Card'"
     @close="emit('close')"
   >
+    <template #header-trailing>
+      <Button
+        v-if="detail"
+        size="icon"
+        variant="outline"
+        data-testid="card-run-followup"
+        title="Run follow-up round"
+        aria-label="Run follow-up round"
+        :disabled="detail.card.run_status === 'running' || detail.card.run_status === 'pending'"
+        @click="runFollowUp"
+      >
+        <Play class="h-4 w-4" />
+      </Button>
+    </template>
     <div
       v-if="loading"
       class="flex items-center justify-center p-8"
@@ -87,9 +110,9 @@ function formatTime(iso: string): string {
       v-else-if="detail"
       class="flex flex-col gap-3 p-1 text-sm"
     >
-      <div class="flex items-center justify-between gap-2">
+      <div>
         <span
-          class="rounded-full px-2 py-0.5 text-xs font-medium"
+          class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
           :class="{
             'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
             'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
@@ -100,15 +123,6 @@ function formatTime(iso: string): string {
         >
           {{ detail.card.run_status }}
         </span>
-        <Button
-          size="sm"
-          variant="outline"
-          data-testid="card-run-followup"
-          :disabled="detail.card.run_status === 'running' || detail.card.run_status === 'pending'"
-          @click="runFollowUp"
-        >
-          <Play class="mr-1 h-3.5 w-3.5" /> Run follow-up round
-        </Button>
       </div>
 
       <section>
@@ -136,7 +150,11 @@ function formatTime(iso: string): string {
           Activity
         </h3>
         <div class="relative">
-          <div class="flex max-h-[286px] flex-col gap-2 overflow-y-auto pr-1">
+          <div
+            ref="activityScroll"
+            class="flex max-h-[286px] flex-col gap-2 overflow-y-auto pr-1"
+            @scroll="onActivityScroll"
+          >
             <div
               v-for="activity in detail.activities"
               :key="activity.id"
@@ -167,7 +185,7 @@ function formatTime(iso: string): string {
             </p>
           </div>
           <div
-            v-if="detail.activities.length > 5"
+            v-if="detail.activities.length > 5 && !activityAtBottom"
             class="pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-lg bg-gradient-to-t from-card to-transparent"
           />
         </div>
@@ -221,6 +239,12 @@ function formatTime(iso: string): string {
                 {{ run.status }}
               </span>
             </div>
+            <p class="mt-1 text-[11px] text-muted-foreground">
+              {{ formatTime(run.started_at) }}
+              <template v-if="run.finished_at">
+                · {{ formatTime(run.finished_at) }}
+              </template>
+            </p>
             <p
               v-if="run.error"
               class="mt-1 text-xs text-red-500"

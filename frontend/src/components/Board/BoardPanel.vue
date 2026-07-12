@@ -84,7 +84,6 @@ async function onBoardCreated(boardId: string): Promise<void> {
     data-testid="board-panel"
   >
     <div class="flex items-center gap-3 border-b border-border/60 px-4 py-2.5">
-      <SquareKanban class="h-6 w-6 text-primary" />
       <h2 class="text-xl md:text-2xl font-bold tracking-tight">
         Board
       </h2>
