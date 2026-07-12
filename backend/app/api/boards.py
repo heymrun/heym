@@ -24,6 +24,8 @@ from app.models.board_schemas import (
     BoardStateResponse,
     BoardSummaryResponse,
     BoardUpdateRequest,
+    ColumnCreateRequest,
+    ColumnUpdateRequest,
 )
 
 router = APIRouter()
@@ -235,4 +237,120 @@ async def delete_board(
 ) -> None:
     board = await _get_owned_board(db, board_id, current_user)
     await db.delete(board)
+    await db.commit()
+
+
+@router.post(
+    "/{board_id}/columns",
+    response_model=BoardColumnResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_column(
+    board_id: uuid.UUID,
+    request: ColumnCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardColumnResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    count = (
+        await db.execute(select(func.count(BoardColumn.id)).where(BoardColumn.board_id == board.id))
+    ).scalar() or 0
+    position = request.position if request.position is not None else count
+    column = BoardColumn(
+        board_id=board.id, name=request.name, position=position, color=request.color
+    )
+    db.add(column)
+    await db.commit()
+    await db.refresh(column)
+    return BoardColumnResponse(
+        id=column.id,
+        board_id=column.board_id,
+        name=column.name,
+        position=column.position,
+        color=column.color,
+        workflows=[],
+    )
+
+
+@router.patch("/{board_id}/columns/{column_id}", response_model=BoardColumnResponse)
+async def update_column(
+    board_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: ColumnUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardColumnResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    column = await _get_board_column(db, board, column_id)
+    if request.name is not None:
+        column.name = request.name
+    if request.color is not None:
+        column.color = request.color
+    if request.position is not None:
+        column.position = request.position
+    if request.workflow_ids is not None:
+        owned = (
+            (
+                await db.execute(
+                    select(Workflow).where(
+                        Workflow.id.in_(request.workflow_ids),
+                        Workflow.owner_id == current_user.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(owned) != len(set(request.workflow_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more workflows were not found",
+            )
+        existing = (
+            (
+                await db.execute(
+                    select(BoardColumnWorkflow).where(BoardColumnWorkflow.column_id == column.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for link in existing:
+            await db.delete(link)
+        await db.flush()
+        for index, workflow_id in enumerate(request.workflow_ids):
+            db.add(
+                BoardColumnWorkflow(column_id=column.id, workflow_id=workflow_id, position=index)
+            )
+    await db.commit()
+    await db.refresh(column)
+    workflows_by_column = await _column_workflow_responses(db, [column.id])
+    return BoardColumnResponse(
+        id=column.id,
+        board_id=column.board_id,
+        name=column.name,
+        position=column.position,
+        color=column.color,
+        workflows=workflows_by_column.get(column.id, []),
+    )
+
+
+@router.delete("/{board_id}/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_column(
+    board_id: uuid.UUID,
+    column_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    board = await _get_owned_board(db, board_id, current_user)
+    column = await _get_board_column(db, board, column_id)
+    card_count = (
+        await db.execute(select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id))
+    ).scalar() or 0
+    if card_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Move or delete the cards in this column first",
+        )
+    await db.delete(column)
     await db.commit()

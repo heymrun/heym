@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.api import boards as boards_api
 from app.models.board_schemas import (
     BoardCreateRequest,
+    ColumnUpdateRequest,
 )
 
 
@@ -91,3 +92,65 @@ class TestBoardOwnership(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as ctx:
             await boards_api.get_board_state(board_id=uuid.uuid4(), db=db, current_user=_User())
         self.assertEqual(ctx.exception.status_code, 404)
+
+
+class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
+    def _board(self, user):
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        return board
+
+    async def test_set_chain_rejects_unowned_workflows(self):
+        user = _User()
+        board = self._board(user)
+        column = MagicMock()
+        column.id = uuid.uuid4()
+        column.board_id = board.id
+        wanted = [uuid.uuid4(), uuid.uuid4()]
+        owned_workflow = MagicMock()
+        owned_workflow.id = wanted[0]
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        # 1: board lookup, 2: column lookup, 3: owned workflows lookup (only one found)
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=column),
+                _result_with(scalars_list=[owned_workflow]),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api.update_column(
+                board_id=board.id,
+                column_id=column.id,
+                request=ColumnUpdateRequest(workflow_ids=wanted),
+                db=db,
+                current_user=user,
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_delete_column_with_cards_conflicts(self):
+        user = _User()
+        board = self._board(user)
+        column = MagicMock()
+        column.id = uuid.uuid4()
+        column.board_id = board.id
+
+        db = AsyncMock()
+        # 1: board, 2: column, 3: card count
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=column),
+                _result_with(scalar_one=3),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api.delete_column(
+                board_id=board.id, column_id=column.id, db=db, current_user=user
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
