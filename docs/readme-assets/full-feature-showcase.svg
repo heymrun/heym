@@ -27,6 +27,15 @@
       .ff-scene.s20 { animation-delay: -5s; }
       .ff-flow { stroke-dasharray: 8 8; animation: ffDash 1.6s linear infinite; }
       .ff-blink { animation: ffBlink 1s steps(2, jump-none) infinite; }
+      .ff-sse { opacity: 0; animation: ffSSE 100s linear infinite both; animation-delay: -45s; }
+      .ff-sse.q2 { animation-delay: -44.7s; }
+      .ff-sse.q3 { animation-delay: -44.4s; }
+      .ff-sse.q4 { animation-delay: -44.1s; }
+      .ff-sse.q5 { animation-delay: -43.8s; }
+      .ff-sse.q6 { animation-delay: -43.5s; }
+      .ff-sse.q7 { animation-delay: -43.2s; }
+      .ff-sse.q8 { animation-delay: -42.9s; }
+      .ff-sse.q9 { animation-delay: -42.6s; }
       .ff-wave { animation: ffWave 1.2s ease-in-out infinite; }
       .ff-wave.w2 { animation-delay: .08s; }
       .ff-wave.w3 { animation-delay: .16s; }
@@ -58,6 +67,12 @@
       }
       @keyframes ffDash { to { stroke-dashoffset: -32; } }
       @keyframes ffBlink { 50% { opacity: .15; } }
+      @keyframes ffSSE {
+        0% { opacity: 0; }
+        0.3% { opacity: 1; }
+        5% { opacity: 1; }
+        5.001%, 100% { opacity: 0; }
+      }
       @keyframes ffWave {
         0%, 100% { opacity: .35; }
         50% { opacity: 1; }
@@ -616,16 +631,16 @@
         <rect y="14" width="500" height="14" fill="#151B2E"></rect>
         <text x="20" y="20" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">terminal · sse</text>
         <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="12" transform="translate(20,60)">
-          <text fill="#10D9A0">$ curl --no-buffer https://heym.run/api/wf/.../execute/stream</text>
-          <text y="32" fill="#22D3EE">event: execution_started</text>
-          <text y="60" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[Input]</tspan></text>
-          <text y="78" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[Input] 12ms</tspan></text>
-          <text y="106" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[LLM]</tspan></text>
-          <text y="134" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[RAG]</tspan></text>
-          <text y="162" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[RAG] 84ms</tspan></text>
-          <text y="190" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[LLM] 1.4s</tspan></text>
-          <text y="218" fill="#22D3EE">event: execution_complete</text>
-          <rect x="195" y="208" width="8" height="14" fill="#22D3EE" class="ff-blink"></rect>
+          <text class="ff-sse q1" fill="#10D9A0">$ curl --no-buffer https://heym.run/api/wf/.../execute/stream</text>
+          <text class="ff-sse q2" y="32" fill="#22D3EE">event: execution_started</text>
+          <text class="ff-sse q3" y="60" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[Input]</tspan></text>
+          <text class="ff-sse q4" y="78" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[Input] 12ms</tspan></text>
+          <text class="ff-sse q5" y="106" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[LLM]</tspan></text>
+          <text class="ff-sse q6" y="134" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[RAG]</tspan></text>
+          <text class="ff-sse q7" y="162" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[RAG] 84ms</tspan></text>
+          <text class="ff-sse q8" y="190" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[LLM] 1.4s</tspan></text>
+          <text class="ff-sse q9" y="218" fill="#22D3EE">event: execution_complete</text>
+          <rect class="ff-sse q9" x="195" y="208" width="8" height="14" fill="#22D3EE"></rect>
         </g>
       </g>
     </g>
