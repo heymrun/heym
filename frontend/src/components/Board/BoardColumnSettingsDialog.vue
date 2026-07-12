@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ArrowDown, ArrowUp, Trash2, X } from "lucide-vue-next";
+import { useRouter } from "vue-router";
+import { ArrowDown, ArrowUp, ExternalLink, Trash2, X } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
@@ -8,6 +9,13 @@ import Input from "@/components/ui/Input.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { boardApi, workflowApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
+
+const router = useRouter();
+
+function openWorkflow(workflowId: string): void {
+  const href = router.resolve({ name: "editor", params: { id: workflowId } }).href;
+  window.open(href, "_blank", "noopener,noreferrer");
+}
 
 const props = defineProps<{ open: boolean; columnId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -138,7 +146,15 @@ async function removeColumn(): Promise<void> {
             <span class="text-xs text-muted-foreground">{{ index + 1 }}.</span>
             <span class="truncate">{{ workflow.name }}</span>
             <button
-              class="ml-auto p-0.5"
+              class="ml-auto p-0.5 text-muted-foreground hover:text-primary"
+              aria-label="Open workflow in new tab"
+              title="Open workflow in new tab"
+              @click="openWorkflow(workflow.id)"
+            >
+              <ExternalLink class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="p-0.5"
               aria-label="Move up"
               @click="moveLink(index, -1)"
             >
