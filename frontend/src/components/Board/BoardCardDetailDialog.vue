@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { Bot, Loader2, Play, User as UserIcon } from "lucide-vue-next";
+import { Bot, Check, Copy, Loader2, Play, User as UserIcon } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import type { CardDetail } from "@/types/board";
+import type { CardDetail, CardRun } from "@/types/board";
 import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
 
@@ -78,6 +78,23 @@ async function runFollowUp(): Promise<void> {
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
+
+const copiedRunId = ref<string | null>(null);
+
+async function copyRun(run: CardRun): Promise<void> {
+  const text = Object.keys(run.output).length
+    ? JSON.stringify(run.output, null, 2)
+    : (run.error ?? "");
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedRunId.value = run.id;
+    setTimeout(() => {
+      if (copiedRunId.value === run.id) copiedRunId.value = null;
+    }, 1500);
+  } catch {
+    // clipboard unavailable; ignore
+  }
+}
 </script>
 
 <template>
@@ -86,6 +103,23 @@ function formatTime(iso: string): string {
     :title="detail?.card.title ?? 'Card'"
     @close="emit('close')"
   >
+    <template
+      v-if="detail"
+      #subtitle
+    >
+      <span
+        class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+        :class="{
+          'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
+          'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
+          'bg-amber-500/15 text-amber-500':
+            detail.card.run_status === 'running' || detail.card.run_status === 'pending',
+          'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
+        }"
+      >
+        {{ detail.card.run_status }}
+      </span>
+    </template>
     <template #header-trailing>
       <Button
         v-if="detail"
@@ -110,21 +144,6 @@ function formatTime(iso: string): string {
       v-else-if="detail"
       class="flex flex-col gap-3 p-1 text-sm"
     >
-      <div>
-        <span
-          class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-          :class="{
-            'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
-            'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
-            'bg-amber-500/15 text-amber-500':
-              detail.card.run_status === 'running' || detail.card.run_status === 'pending',
-            'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
-          }"
-        >
-          {{ detail.card.run_status }}
-        </span>
-      </div>
-
       <section>
         <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
           Description
@@ -218,26 +237,43 @@ function formatTime(iso: string): string {
           <div
             v-for="run in detail.runs"
             :key="run.id"
-            class="rounded-lg border border-border/50 p-2"
+            class="group rounded-lg border border-border/50 p-2"
           >
             <div class="flex items-center gap-2 text-xs">
               <span class="font-medium">{{ run.workflow_name }}</span>
               <span class="text-muted-foreground">
                 step {{ run.chain_position + 1 }}/{{ run.chain_length }}
               </span>
-              <span
-                class="ml-auto rounded-full px-2 py-0.5 font-medium"
-                :class="{
-                  'bg-emerald-500/15 text-emerald-500': run.status === 'success',
-                  'bg-red-500/15 text-red-500': run.status === 'failed',
-                  'bg-amber-500/15 text-amber-500':
-                    run.status === 'running' || run.status === 'pending',
-                  'bg-muted text-muted-foreground':
-                    run.status === 'skipped' || run.status === 'cancelled',
-                }"
-              >
-                {{ run.status }}
-              </span>
+              <div class="ml-auto flex items-center gap-1.5">
+                <button
+                  class="hidden items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground group-hover:inline-flex"
+                  :data-testid="`run-copy-${run.id}`"
+                  @click.stop="copyRun(run)"
+                >
+                  <Check
+                    v-if="copiedRunId === run.id"
+                    class="h-3 w-3 text-emerald-500"
+                  />
+                  <Copy
+                    v-else
+                    class="h-3 w-3"
+                  />
+                  {{ copiedRunId === run.id ? "Copied" : "Copy" }}
+                </button>
+                <span
+                  class="rounded-full px-2 py-0.5 font-medium"
+                  :class="{
+                    'bg-emerald-500/15 text-emerald-500': run.status === 'success',
+                    'bg-red-500/15 text-red-500': run.status === 'failed',
+                    'bg-amber-500/15 text-amber-500':
+                      run.status === 'running' || run.status === 'pending',
+                    'bg-muted text-muted-foreground':
+                      run.status === 'skipped' || run.status === 'cancelled',
+                  }"
+                >
+                  {{ run.status }}
+                </span>
+              </div>
             </div>
             <p class="mt-1 text-[11px] text-muted-foreground">
               {{ formatTime(run.started_at) }}

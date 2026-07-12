@@ -89,7 +89,7 @@ async function onBoardCreated(boardId: string): Promise<void> {
       </h2>
       <SearchableSelect
         v-if="boardStore.boards.length"
-        class="w-56 shrink-0"
+        class="ml-auto w-56 shrink-0"
         :model-value="boardStore.activeBoard?.id ?? ''"
         :options="boardOptions"
         placeholder="Select board"
