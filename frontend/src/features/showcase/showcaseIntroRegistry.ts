@@ -7,6 +7,7 @@ export interface ShowcaseIntroContent {
 
 export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = {
   "dashboard:workflows": "/features/showcase/workflows.webm",
+  "dashboard:board": "/features/showcase/board.webm",
   "dashboard:templates": "/features/showcase/templates.webm",
   "dashboard:globalvariables": "/features/showcase/globalvariables.webm",
   "dashboard:chat": "/features/showcase/chat.webm",
@@ -30,6 +31,11 @@ export const SHOWCASE_INTRO_CONTENT_BY_CONTEXT: Record<ShowcaseContext, Showcase
   "dashboard:workflows": {
     title: "Build faster in Workflows",
     description: "Create, organize, and reopen workflows from one place. Use folders and quick actions to keep production automations clean.",
+  },
+  "dashboard:board": {
+    title: "Run work through an agentic board",
+    description:
+      "Move cards through columns to trigger workflow chains with the card's full context. Results come back to the card — green means done.",
   },
   "dashboard:templates": {
     title: "Start from proven templates",

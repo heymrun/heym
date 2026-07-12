@@ -1,5 +1,6 @@
 export type ShowcaseContext =
   | "dashboard:workflows"
+  | "dashboard:board"
   | "dashboard:templates"
   | "dashboard:globalvariables"
   | "dashboard:chat"
@@ -20,6 +21,7 @@ export type ShowcaseContext =
 
 export type DashboardShowcaseTab =
   | "workflows"
+  | "board"
   | "templates"
   | "globalvariables"
   | "credentials"

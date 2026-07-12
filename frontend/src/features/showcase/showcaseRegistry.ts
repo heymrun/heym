@@ -49,6 +49,57 @@ export const SHOWCASE_DEFINITIONS: Record<ShowcaseContext, ShowcaseDefinition> =
     ],
     docsTarget: docsTarget("tabs", "workflows-tab", "Workflows Tab"),
   },
+  "dashboard:board": {
+    id: "dashboard:board",
+    title: "Board",
+    summary:
+      "An agentic kanban board. Each card is a persistent job with context, history, and outputs — moving a card into a column runs that column's workflow chain.",
+    bullets: [
+      "Create plain-text cards in Backlog and drag them across columns.",
+      "Attach ordered workflows to any column; card moves trigger them.",
+      "Card turns green on success, red on failure, amber while running.",
+      "Comments and previous outputs feed the next run's context.",
+    ],
+    highlights: [
+      {
+        eyebrow: "Core idea",
+        title: "Cards are jobs, not notes",
+        description:
+          "Every card carries its full history: comments, moves, and each workflow's output.",
+        tone: "primary",
+      },
+      {
+        eyebrow: "Planning loop",
+        title: "Follow-up rounds",
+        description:
+          "Answer in comments, run again, and the chain sees everything accumulated so far.",
+        tone: "blue",
+      },
+    ],
+    actions: [
+      docsAction(
+        "board-docs",
+        "Board documentation",
+        "Column chains, the card payload contract, and follow-up rounds.",
+        docsTarget("tabs", "board-tab", "Board"),
+      ),
+    ],
+    details: [
+      {
+        id: "board-chains",
+        title: "How column chains run",
+        content:
+          "Workflows attached to a column run sequentially when a card enters. Each workflow's output is appended to the card context before the next one starts; a failure stops the chain.",
+      },
+      {
+        id: "board-context",
+        title: "What workflows receive",
+        content:
+          "The run input contains the card (title, content, metadata, comments, history, previous outputs), the board, the move, and the chain position. Read it with $input.card expressions.",
+      },
+    ],
+    docsTarget: docsTarget("tabs", "board-tab", "Board"),
+  },
   "dashboard:templates": {
     id: "dashboard:templates",
     title: "Templates",
