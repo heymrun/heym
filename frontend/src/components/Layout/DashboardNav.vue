@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   MessageCircle,
   Server,
+  SquareKanban,
   Table2,
   Terminal,
   Users,
@@ -27,6 +28,7 @@ const route = useRoute();
 
 const tabs = [
   { id: "workflows", label: "Workflows", icon: Workflow },
+  { id: "board", label: "Board", icon: SquareKanban },
   { id: "schedules", label: "Scheduled", icon: CalendarClock },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "globalvariables", label: "Variables", icon: Variable },
@@ -49,6 +51,7 @@ const activeTab = computed(() => {
   if (route.path.startsWith("/chats")) return "chat";
   const tabParam = route.query.tab as string;
   if (
+    tabParam === "board" ||
     tabParam === "schedules" ||
     tabParam === "credentials" ||
     tabParam === "globalvariables" ||

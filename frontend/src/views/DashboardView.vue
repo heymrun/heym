@@ -27,6 +27,7 @@ import {
 
 import AnalyticsDashboard from "@/components/Analytics/AnalyticsDashboard.vue";
 import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
+import BoardPanel from "@/components/Board/BoardPanel.vue";
 import CredentialsPanel from "@/components/Credentials/CredentialsPanel.vue";
 import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
@@ -98,12 +99,12 @@ function parseTabParam(raw: string | undefined | null): { tab: string; subPath: 
 }
 
 const validTabs = new Set([
-  "workflows", "schedules", "credentials", "globalvariables", "vectorstores", "mcp",
+  "workflows", "board", "schedules", "credentials", "globalvariables", "vectorstores", "mcp",
   "traces", "analytics", "dashboard", "templates", "teams", "logs", "drive", "datatable",
 ]);
 
 const parsedInitial = parseTabParam(tabParam === "chat" ? undefined : tabParam);
-type TabKey = "workflows" | "schedules" | "credentials" | "globalvariables" | "vectorstores" | "mcp" | "traces" | "analytics" | "dashboard" | "templates" | "teams" | "logs" | "drive" | "datatable";
+type TabKey = "workflows" | "board" | "schedules" | "credentials" | "globalvariables" | "vectorstores" | "mcp" | "traces" | "analytics" | "dashboard" | "templates" | "teams" | "logs" | "drive" | "datatable";
 const initialTab: TabKey = validTabs.has(parsedInitial.tab) ? (parsedInitial.tab as TabKey) : "workflows";
 const dataTableInitialId = ref<string | null>(parsedInitial.tab === "datatable" ? parsedInitial.subPath : null);
 const activeTab = ref<TabKey>(initialTab);
@@ -1986,6 +1987,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
           />
 
           <DashboardsPanel v-else-if="activeTab === 'dashboard'" />
+
+          <BoardPanel v-else-if="activeTab === 'board'" />
 
           <TeamsPanel v-else-if="activeTab === 'teams'" />
 
