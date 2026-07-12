@@ -121,7 +121,7 @@ function toggleFullscreen(): void {
           ]"
           @click.stop
         >
-          <div class="dialog-header flex items-center justify-between pb-4 mb-5 shrink-0 gap-2">
+          <div class="dialog-header flex items-center justify-between py-4 mb-4 shrink-0 gap-2">
             <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
               <div
                 v-if="title || $slots.subtitle"
@@ -176,7 +176,7 @@ function toggleFullscreen(): void {
               </button>
             </div>
           </div>
-          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -mx-1 px-1">
+          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -ml-1 pl-1 -mr-4 pr-4 md:-mr-5 md:pr-5">
             <slot />
           </div>
         </div>
