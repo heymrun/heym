@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onUnmounted, ref, watch } from "vue";
 import { Bot, Check, Copy, Loader2, Play, User as UserIcon } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
@@ -27,15 +27,42 @@ function onActivityScroll(): void {
   activityAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
 }
 
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPolling(): void {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+// While the card has an active run, poll its detail so the status and run
+// results update live without reopening the dialog.
+function syncPolling(): void {
+  const status = detail.value?.card.run_status;
+  const active = props.open && (status === "running" || status === "pending");
+  if (active && pollTimer === null) {
+    pollTimer = setInterval(() => {
+      void reload();
+    }, 2500);
+  } else if (!active) {
+    stopPolling();
+  }
+}
+
 watch(
   () => [props.open, props.cardId] as const,
   async ([open, cardId]) => {
-    if (!open || !cardId || !boardStore.activeBoard) return;
+    if (!open || !cardId || !boardStore.activeBoard) {
+      stopPolling();
+      return;
+    }
     loading.value = true;
     activityAtBottom.value = false;
     try {
       detail.value = await boardApi.getCard(boardStore.activeBoard.id, cardId);
       editedContent.value = detail.value.card.content;
+      syncPolling();
     } finally {
       loading.value = false;
     }
@@ -46,7 +73,10 @@ watch(
 async function reload(): Promise<void> {
   if (!props.cardId || !boardStore.activeBoard) return;
   detail.value = await boardApi.getCard(boardStore.activeBoard.id, props.cardId);
+  syncPolling();
 }
+
+onUnmounted(stopPolling);
 
 async function saveContent(): Promise<void> {
   if (!detail.value || !boardStore.activeBoard || savingContent.value) return;

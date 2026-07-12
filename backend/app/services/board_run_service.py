@@ -36,6 +36,11 @@ MAX_HISTORY_ENTRIES = 200
 ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
 
+# The event loop only keeps weak references to tasks, so a fire-and-forget
+# ``create_task`` result can be garbage-collected mid-flight. Hold strong
+# references here until each chain task finishes.
+_BACKGROUND_CHAIN_TASKS: set[asyncio.Task] = set()
+
 
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
@@ -433,7 +438,7 @@ async def enqueue_card_chain(db, *, card, column, board, move: dict | None, reru
     ]
     card.run_status = "running"
     await db.commit()
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_chain(
             card_id=card.id,
             board_id=board.id,
@@ -443,6 +448,8 @@ async def enqueue_card_chain(db, *, card, column, board, move: dict | None, reru
             rerun=rerun,
         )
     )
+    _BACKGROUND_CHAIN_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_CHAIN_TASKS.discard)
     return True
 
 

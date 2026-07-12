@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { deleteAllBoards, prepareAuthenticatedPage } from "./support";
+import {
+  createWorkflow,
+  deleteAllBoards,
+  deleteWorkflow,
+  prepareAuthenticatedPage,
+} from "./support";
 
 // Board tests share one account's board list and assert on its empty state.
 test.describe.configure({ mode: "serial" });
@@ -81,6 +86,65 @@ test("clones and deletes a card from the hover actions", async ({ page }) => {
   await firstCard.hover();
   await firstCard.locator('[data-testid^="board-card-delete-"]').click();
   await expect(backlog.getByText("Draft brief")).toHaveCount(1);
+});
+
+type ApiCard = { id: string; run_status: string };
+
+test("runs a column workflow chain to completion when a card enters", async ({ page }) => {
+  const wf = await createWorkflow(
+    page,
+    `Board WF ${Date.now()}`,
+    [
+      {
+        id: "s1",
+        type: "set",
+        position: { x: 100, y: 100 },
+        data: { label: "greet", mappings: [{ key: "text", value: "done" }] },
+      },
+      {
+        id: "o1",
+        type: "output",
+        position: { x: 400, y: 100 },
+        data: { label: "out", message: "$greet.text" },
+      },
+    ],
+    [{ id: "e1", source: "s1", target: "o1" }],
+  );
+
+  try {
+    const board = await (await page.request.post("/api/boards", { data: { name: "Chain board" } })).json();
+    const state = await (await page.request.get(`/api/boards/${board.id}`)).json();
+    const planning = state.columns.find((c: { name: string }) => c.name === "Planning");
+    const backlog = state.columns.find((c: { name: string }) => c.name === "Backlog");
+
+    await page.request.patch(`/api/boards/${board.id}/columns/${planning.id}`, {
+      data: { workflow_ids: [wf.id] },
+    });
+    const card = await (
+      await page.request.post(`/api/boards/${board.id}/cards`, {
+        data: { title: "run me", column_id: backlog.id },
+      })
+    ).json();
+    await page.request.post(`/api/boards/${board.id}/cards/${card.id}/move`, {
+      data: { to_column_id: planning.id },
+    });
+
+    let status = "";
+    for (let i = 0; i < 40; i += 1) {
+      const s = await (await page.request.get(`/api/boards/${board.id}`)).json();
+      status = (s.cards as ApiCard[]).find((c) => c.id === card.id)?.run_status ?? "";
+      if (status === "success" || status === "failed") break;
+      await page.waitForTimeout(500);
+    }
+    expect(status).toBe("success");
+
+    const detail = await (await page.request.get(`/api/boards/${board.id}/cards/${card.id}`)).json();
+    expect(detail.runs.length).toBeGreaterThanOrEqual(1);
+    expect(detail.runs[0].status).toBe("success");
+  } finally {
+    await deleteAllBoards(page);
+    await deleteWorkflow(page, wf.id);
+  }
 });
 
 test("opens card detail and posts a comment", async ({ page }) => {

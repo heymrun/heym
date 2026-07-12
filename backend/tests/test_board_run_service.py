@@ -290,3 +290,34 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         runs = [o for o in session.added if type(o).__name__ == "BoardCardRun"]
         self.assertEqual(runs[0].status, "pending")
         self.assertEqual(card.run_status, "pending")
+
+
+class TestEnqueueHoldsTaskReference(unittest.IsolatedAsyncioTestCase):
+    async def test_enqueue_retains_background_task(self):
+        import asyncio
+
+        card = SimpleNamespace(id=uuid.uuid4(), run_status="idle")
+        column = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=uuid.uuid4())
+        link = SimpleNamespace(workflow_id=uuid.uuid4(), position=0)
+
+        active_res = MagicMock()
+        active_res.scalars.return_value.all.return_value = []
+        links_res = MagicMock()
+        links_res.all.return_value = [(link, "WF")]
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[active_res, links_res])
+
+        with patch.object(board_run_service, "_run_chain", AsyncMock(return_value=None)):
+            result = await board_run_service.enqueue_card_chain(
+                db, card=card, column=column, board=board, move=None, rerun=True
+            )
+            # The task must be strongly referenced so the GC cannot drop it mid-run.
+            self.assertTrue(result)
+            self.assertEqual(card.run_status, "running")
+            self.assertGreaterEqual(len(board_run_service._BACKGROUND_CHAIN_TASKS), 1)
+            # let the scheduled task finish and clear itself from the set
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        self.assertEqual(len(board_run_service._BACKGROUND_CHAIN_TASKS), 0)
