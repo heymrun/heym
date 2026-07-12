@@ -118,6 +118,18 @@ import type {
   WidgetUpdateRequest,
 } from "@/types/dashboard";
 import type {
+  BoardCard,
+  BoardColumn,
+  BoardCreatePayload,
+  BoardState,
+  BoardSummary,
+  CardActivity,
+  CardCreatePayload,
+  CardDetail,
+  CardUpdatePayload,
+  ColumnUpdatePayload,
+} from "@/types/board";
+import type {
   Conversation,
   ConversationCreate,
   ConversationDetail,
@@ -1451,6 +1463,94 @@ export const dashboardApi = {
         model,
       },
       { timeout: AI_REQUEST_TIMEOUT_MS },
+    );
+    return response.data;
+  },
+};
+
+export const boardApi = {
+  list: async (): Promise<BoardSummary[]> => {
+    const response = await api.get<BoardSummary[]>("/boards");
+    return response.data;
+  },
+  create: async (payload: BoardCreatePayload): Promise<BoardSummary> => {
+    const response = await api.post<BoardSummary>("/boards", payload);
+    return response.data;
+  },
+  getState: async (boardId: string): Promise<BoardState> => {
+    const response = await api.get<BoardState>(`/boards/${boardId}`);
+    return response.data;
+  },
+  update: async (boardId: string, payload: BoardCreatePayload): Promise<BoardSummary> => {
+    const response = await api.patch<BoardSummary>(`/boards/${boardId}`, payload);
+    return response.data;
+  },
+  remove: async (boardId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}`);
+  },
+  createColumn: async (
+    boardId: string,
+    payload: { name: string; position?: number; color?: string | null },
+  ): Promise<BoardColumn> => {
+    const response = await api.post<BoardColumn>(`/boards/${boardId}/columns`, payload);
+    return response.data;
+  },
+  updateColumn: async (
+    boardId: string,
+    columnId: string,
+    payload: ColumnUpdatePayload,
+  ): Promise<BoardColumn> => {
+    const response = await api.patch<BoardColumn>(
+      `/boards/${boardId}/columns/${columnId}`,
+      payload,
+    );
+    return response.data;
+  },
+  deleteColumn: async (boardId: string, columnId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/columns/${columnId}`);
+  },
+  createCard: async (boardId: string, payload: CardCreatePayload): Promise<BoardCard> => {
+    const response = await api.post<BoardCard>(`/boards/${boardId}/cards`, payload);
+    return response.data;
+  },
+  getCard: async (boardId: string, cardId: string): Promise<CardDetail> => {
+    const response = await api.get<CardDetail>(`/boards/${boardId}/cards/${cardId}`);
+    return response.data;
+  },
+  updateCard: async (
+    boardId: string,
+    cardId: string,
+    payload: CardUpdatePayload,
+  ): Promise<BoardCard> => {
+    const response = await api.patch<BoardCard>(`/boards/${boardId}/cards/${cardId}`, payload);
+    return response.data;
+  },
+  deleteCard: async (boardId: string, cardId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/cards/${cardId}`);
+  },
+  moveCard: async (
+    boardId: string,
+    cardId: string,
+    payload: { to_column_id: string; position?: number },
+  ): Promise<BoardCard> => {
+    const response = await api.post<BoardCard>(
+      `/boards/${boardId}/cards/${cardId}/move`,
+      payload,
+    );
+    return response.data;
+  },
+  runCard: async (boardId: string, cardId: string): Promise<BoardCard> => {
+    const response = await api.post<BoardCard>(`/boards/${boardId}/cards/${cardId}/run`, {});
+    return response.data;
+  },
+  addComment: async (
+    boardId: string,
+    cardId: string,
+    content: string,
+  ): Promise<CardActivity> => {
+    const response = await api.post<CardActivity>(
+      `/boards/${boardId}/cards/${cardId}/comments`,
+      { content },
     );
     return response.data;
   },
