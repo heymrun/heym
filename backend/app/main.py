@@ -187,6 +187,10 @@ async def lifespan(app: FastAPI):
     await active_execution_registry.start()
     await execution_recovery_service.start()
     await cron_scheduler.start()
+
+    from app.services.board_run_service import reconcile_orphaned_board_runs
+
+    await reconcile_orphaned_board_runs()
     await imap_trigger_manager.start()
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
