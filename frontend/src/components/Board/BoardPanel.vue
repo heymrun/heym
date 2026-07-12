@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
+import { Plus, Settings, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -11,11 +11,13 @@ import BoardCanvas from "./BoardCanvas.vue";
 import BoardCardDetailDialog from "./BoardCardDetailDialog.vue";
 import BoardColumnSettingsDialog from "./BoardColumnSettingsDialog.vue";
 import BoardCreateDialog from "./BoardCreateDialog.vue";
+import BoardSettingsDialog from "./BoardSettingsDialog.vue";
 
 const boardStore = useBoardStore();
 const route = useRoute();
 const router = useRouter();
 const createOpen = ref(false);
+const settingsOpen = ref(false);
 const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
 
@@ -34,6 +36,7 @@ let removeOverlayDismiss: (() => void) | null = null;
 onMounted(async () => {
   removeOverlayDismiss = onDismissOverlays(() => {
     createOpen.value = false;
+    settingsOpen.value = false;
     openCardId.value = null;
     settingsColumnId.value = null;
   });
@@ -109,6 +112,16 @@ async function onBoardCreated(boardId: string): Promise<void> {
         v-if="boardStore.activeBoard"
         size="sm"
         variant="ghost"
+        aria-label="Board settings"
+        data-testid="board-settings"
+        @click="settingsOpen = true"
+      >
+        <Settings class="h-4 w-4 text-muted-foreground" />
+      </Button>
+      <Button
+        v-if="boardStore.activeBoard"
+        size="sm"
+        variant="ghost"
         aria-label="Delete board"
         @click="removeActiveBoard"
       >
@@ -153,6 +166,10 @@ async function onBoardCreated(boardId: string): Promise<void> {
       :open="settingsColumnId !== null"
       :column-id="settingsColumnId"
       @close="settingsColumnId = null"
+    />
+    <BoardSettingsDialog
+      :open="settingsOpen"
+      @close="settingsOpen = false"
     />
   </div>
 </template>

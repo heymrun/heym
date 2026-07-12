@@ -18,6 +18,7 @@ class BoardColumnResponse(BaseModel):
     name: str
     position: int
     color: str | None = None
+    ai_instructions: str | None = None
     workflows: list[BoardColumnWorkflowResponse] = Field(default_factory=list)
 
 
@@ -40,6 +41,9 @@ class BoardSummaryResponse(BaseModel):
     description: str | None = None
     column_count: int
     card_count: int
+    mapper_model: str | None = None
+    mapper_credential_id: uuid.UUID | None = None
+    mapper_credential_name: str | None = None
     updated_at: datetime
 
 
@@ -47,6 +51,9 @@ class BoardStateResponse(BaseModel):
     id: uuid.UUID
     name: str
     description: str | None = None
+    mapper_model: str | None = None
+    mapper_credential_id: uuid.UUID | None = None
+    mapper_credential_name: str | None = None
     columns: list[BoardColumnResponse]
     cards: list[BoardCardResponse]
     has_active_runs: bool
@@ -55,11 +62,15 @@ class BoardStateResponse(BaseModel):
 class BoardCreateRequest(BaseModel):
     name: str = "Board"
     description: str | None = None
+    mapper_model: str | None = None
+    mapper_credential_id: uuid.UUID | None = None
 
 
 class BoardUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+    mapper_model: str | None = None
+    mapper_credential_id: uuid.UUID | None = None
 
 
 class ColumnCreateRequest(BaseModel):
@@ -72,6 +83,7 @@ class ColumnUpdateRequest(BaseModel):
     name: str | None = None
     color: str | None = None
     position: int | None = None
+    ai_instructions: str | None = None
     workflow_ids: list[uuid.UUID] | None = None
 
 

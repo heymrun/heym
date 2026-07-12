@@ -1835,6 +1835,10 @@ class Board(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Board")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mapper_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mapper_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -1861,6 +1865,7 @@ class BoardColumn(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

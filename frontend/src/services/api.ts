@@ -121,6 +121,7 @@ import type {
   BoardCard,
   BoardColumn,
   BoardCreatePayload,
+  BoardUpdatePayload,
   BoardState,
   BoardSummary,
   CardActivity,
@@ -1481,7 +1482,7 @@ export const boardApi = {
     const response = await api.get<BoardState>(`/boards/${boardId}`);
     return response.data;
   },
-  update: async (boardId: string, payload: BoardCreatePayload): Promise<BoardSummary> => {
+  update: async (boardId: string, payload: BoardUpdatePayload): Promise<BoardSummary> => {
     const response = await api.patch<BoardSummary>(`/boards/${boardId}`, payload);
     return response.data;
   },

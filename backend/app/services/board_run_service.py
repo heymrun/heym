@@ -25,6 +25,7 @@ from app.db.models import (
     Workflow,
 )
 from app.db.session import async_session_maker
+from app.services.board_mapper_service import board_mapper_is_configured, build_workflow_inputs
 from app.services.execution_cancellation import clear_execution, register_execution
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
@@ -212,6 +213,37 @@ async def _run_chain(
                     previous_workflow_outputs=chain_outputs,
                     rerun=rerun,
                 )
+
+                if board_mapper_is_configured(board):
+                    mapper_column = await db.get(BoardColumn, column_id)
+                    try:
+                        inputs = await build_workflow_inputs(
+                            db,
+                            board=board,
+                            column_ai_instructions=(
+                                mapper_column.ai_instructions if mapper_column else None
+                            ),
+                            available_context=inputs,
+                            workflow=workflow,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - a mapper failure fails this link
+                        run.status = "failed"
+                        run.error = f"Input mapping failed: {exc}"
+                        run.finished_at = datetime.now(timezone.utc)
+                        db.add(
+                            BoardCardActivity(
+                                card_id=card_id,
+                                kind="event",
+                                author_type="system",
+                                content=f"{link['workflow_name']} input mapping failed",
+                                data={"error": str(exc)},
+                                run_id=run.id,
+                            )
+                        )
+                        await _abort_remaining(db, card_id, column_id, links, index + 1)
+                        await _set_card_status(db, card_id, "failed")
+                        await db.commit()
+                        return
 
                 workflow_cache = await collect_referenced_workflows(
                     db, workflow.nodes, actor_user_id=board.owner_id

@@ -4,6 +4,9 @@ export interface BoardSummary {
   description: string | null;
   column_count: number;
   card_count: number;
+  mapper_model: string | null;
+  mapper_credential_id: string | null;
+  mapper_credential_name: string | null;
   updated_at: string;
 }
 
@@ -19,6 +22,7 @@ export interface BoardColumn {
   name: string;
   position: number;
   color: string | null;
+  ai_instructions: string | null;
   workflows: BoardColumnWorkflow[];
 }
 
@@ -41,6 +45,9 @@ export interface BoardState {
   id: string;
   name: string;
   description: string | null;
+  mapper_model: string | null;
+  mapper_credential_id: string | null;
+  mapper_credential_name: string | null;
   columns: BoardColumn[];
   cards: BoardCard[];
   has_active_runs: boolean;
@@ -84,10 +91,18 @@ export interface BoardCreatePayload {
   description?: string | null;
 }
 
+export interface BoardUpdatePayload {
+  name?: string;
+  description?: string | null;
+  mapper_model?: string | null;
+  mapper_credential_id?: string | null;
+}
+
 export interface ColumnUpdatePayload {
   name?: string;
   color?: string | null;
   position?: number;
+  ai_instructions?: string | null;
   workflow_ids?: string[];
 }
 

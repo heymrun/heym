@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, ExternalLink, Trash2, X } from "lucide-vue-next";
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
+import Textarea from "@/components/ui/Textarea.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { boardApi, workflowApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
@@ -25,6 +26,7 @@ const COLORS = ["#8b5cf6", "#22d3ee", "#10d9a0", "#f59e0b", "#ef4444", null];
 const boardStore = useBoardStore();
 const name = ref("");
 const color = ref<string | null>(null);
+const aiInstructions = ref("");
 const chain = ref<{ id: string; name: string }[]>([]);
 const available = ref<{ id: string; name: string }[]>([]);
 const saving = ref(false);
@@ -39,6 +41,7 @@ watch(
     if (!open || !column.value) return;
     name.value = column.value.name;
     color.value = column.value.color;
+    aiInstructions.value = column.value.ai_instructions ?? "";
     chain.value = column.value.workflows.map((w) => ({
       id: w.workflow_id,
       name: w.workflow_name,
@@ -78,6 +81,7 @@ async function save(): Promise<void> {
     await boardApi.updateColumn(board.id, props.columnId, {
       name: name.value.trim() || undefined,
       color: color.value,
+      ai_instructions: aiInstructions.value.trim() || null,
       workflow_ids: chain.value.map((w) => w.id),
     });
     await boardStore.refreshActiveBoard();
@@ -184,6 +188,17 @@ async function removeColumn(): Promise<void> {
             @update:model-value="addToChain"
           />
         </div>
+      </div>
+      <div>
+        <span class="mb-1 block text-xs font-semibold uppercase text-muted-foreground">
+          AI Instructions
+        </span>
+        <Textarea
+          v-model="aiInstructions"
+          :rows="3"
+          placeholder="Command for the AI mapper when this column runs (e.g. what this column should achieve)"
+          data-testid="column-ai-instructions"
+        />
       </div>
       <div class="flex items-center justify-between">
         <Button

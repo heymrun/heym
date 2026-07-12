@@ -14,6 +14,7 @@ from app.db.models import (
     BoardCardRun,
     BoardColumn,
     BoardColumnWorkflow,
+    Credential,
     User,
     Workflow,
 )
@@ -121,6 +122,41 @@ def _card_response(card: BoardCard) -> BoardCardResponse:
     )
 
 
+async def _validate_owned_credential(
+    db: AsyncSession, credential_id: uuid.UUID, user: User
+) -> None:
+    result = await db.execute(
+        select(Credential.id).where(Credential.id == credential_id, Credential.owner_id == user.id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credential not found")
+
+
+async def _mapper_credential_name(db: AsyncSession, board: Board) -> str | None:
+    if board.mapper_credential_id is None:
+        return None
+    result = await db.execute(
+        select(Credential.name).where(Credential.id == board.mapper_credential_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def _board_summary(
+    board: Board, *, column_count: int, card_count: int, cred_name: str | None
+) -> BoardSummaryResponse:
+    return BoardSummaryResponse(
+        id=board.id,
+        name=board.name,
+        description=board.description,
+        column_count=column_count,
+        card_count=card_count,
+        mapper_model=board.mapper_model,
+        mapper_credential_id=board.mapper_credential_id,
+        mapper_credential_name=cred_name,
+        updated_at=board.updated_at,
+    )
+
+
 @router.get("", response_model=list[BoardSummaryResponse])
 async def list_boards(
     db: AsyncSession = Depends(get_db),
@@ -140,14 +176,10 @@ async def list_boards(
         card_count = (
             await db.execute(select(func.count(BoardCard.id)).where(BoardCard.board_id == board.id))
         ).scalar() or 0
+        cred_name = await _mapper_credential_name(db, board)
         summaries.append(
-            BoardSummaryResponse(
-                id=board.id,
-                name=board.name,
-                description=board.description,
-                column_count=column_count,
-                card_count=card_count,
-                updated_at=board.updated_at,
+            _board_summary(
+                board, column_count=column_count, card_count=card_count, cred_name=cred_name
             )
         )
     return summaries
@@ -159,20 +191,24 @@ async def create_board(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardSummaryResponse:
-    board = Board(owner_id=current_user.id, name=request.name, description=request.description)
+    if request.mapper_credential_id is not None:
+        await _validate_owned_credential(db, request.mapper_credential_id, current_user)
+    board = Board(
+        owner_id=current_user.id,
+        name=request.name,
+        description=request.description,
+        mapper_model=request.mapper_model,
+        mapper_credential_id=request.mapper_credential_id,
+    )
     db.add(board)
     await db.flush()
     for index, column_name in enumerate(DEFAULT_COLUMNS):
         db.add(BoardColumn(board_id=board.id, name=column_name, position=index))
     await db.commit()
     await db.refresh(board)
-    return BoardSummaryResponse(
-        id=board.id,
-        name=board.name,
-        description=board.description,
-        column_count=len(DEFAULT_COLUMNS),
-        card_count=0,
-        updated_at=board.updated_at,
+    cred_name = await _mapper_credential_name(db, board)
+    return _board_summary(
+        board, column_count=len(DEFAULT_COLUMNS), card_count=0, cred_name=cred_name
     )
 
 
@@ -195,10 +231,14 @@ async def get_board_state(
     )
     cards = cards_result.scalars().all()
     workflows_by_column = await _column_workflow_responses(db, [c.id for c in columns])
+    cred_name = await _mapper_credential_name(db, board)
     return BoardStateResponse(
         id=board.id,
         name=board.name,
         description=board.description,
+        mapper_model=board.mapper_model,
+        mapper_credential_id=board.mapper_credential_id,
+        mapper_credential_name=cred_name,
         columns=[
             BoardColumnResponse(
                 id=column.id,
@@ -206,6 +246,7 @@ async def get_board_state(
                 name=column.name,
                 position=column.position,
                 color=column.color,
+                ai_instructions=column.ai_instructions,
                 workflows=workflows_by_column.get(column.id, []),
             )
             for column in columns
@@ -223,20 +264,21 @@ async def update_board(
     current_user: User = Depends(get_current_user),
 ) -> BoardSummaryResponse:
     board = await _get_owned_board(db, board_id, current_user)
+    fields_set = request.model_fields_set
     if request.name is not None:
         board.name = request.name
     if request.description is not None:
         board.description = request.description
+    if "mapper_model" in fields_set:
+        board.mapper_model = request.mapper_model
+    if "mapper_credential_id" in fields_set:
+        if request.mapper_credential_id is not None:
+            await _validate_owned_credential(db, request.mapper_credential_id, current_user)
+        board.mapper_credential_id = request.mapper_credential_id
     await db.commit()
     await db.refresh(board)
-    return BoardSummaryResponse(
-        id=board.id,
-        name=board.name,
-        description=board.description,
-        column_count=0,
-        card_count=0,
-        updated_at=board.updated_at,
-    )
+    cred_name = await _mapper_credential_name(db, board)
+    return _board_summary(board, column_count=0, card_count=0, cred_name=cred_name)
 
 
 @router.delete("/{board_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -292,12 +334,15 @@ async def update_column(
 ) -> BoardColumnResponse:
     board = await _get_owned_board(db, board_id, current_user)
     column = await _get_board_column(db, board, column_id)
+    fields_set = request.model_fields_set
     if request.name is not None:
         column.name = request.name
     if request.color is not None:
         column.color = request.color
     if request.position is not None:
         column.position = request.position
+    if "ai_instructions" in fields_set:
+        column.ai_instructions = request.ai_instructions
     if request.workflow_ids is not None:
         owned = (
             (
@@ -341,6 +386,7 @@ async def update_column(
         name=column.name,
         position=column.position,
         color=column.color,
+        ai_instructions=column.ai_instructions,
         workflows=workflows_by_column.get(column.id, []),
     )
 
