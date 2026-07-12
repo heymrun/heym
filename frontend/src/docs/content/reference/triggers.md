@@ -25,6 +25,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Webhook/API** | `POST /api/workflows/{id}/execute` | `anonymous` / `jwt` / `header_auth` |
 | **MCP** | `POST /api/mcp/tools/call`, `/message`, `/sse` | `X-MCP-Key` header or Bearer token |
 | **Portal** | `POST /api/portal/{slug}/execute` | Portal session token |
+| **Board** | [Board](../tabs/board-tab.md) card move / follow-up run into a column with a workflow chain (`trigger_source="board"`) | JWT (board owner) |
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
 | **IMAP** | IMAP trigger manager (leader worker, per-node polling interval) | IMAP username/password |
 | **WebSocket** | Outbound WebSocket trigger manager (leader worker, persistent client connections) | Optional per-node headers |

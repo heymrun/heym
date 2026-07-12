@@ -128,4 +128,5 @@ The `review` output handle is available only when `hitlEnabled` is turned on for
 - [Agent Node](../nodes/agent-node.md) - Configure HITL on an agent
 - [Agent Architecture](./agent-architecture.md) - How agents, tools, sub-agents, and HITL fit together
 - [Execution History](./execution-history.md) - Inspect pending and resumed runs
+- [Board](../tabs/board-tab.md) - Board chain runs pause the card in a pending (amber) state on HITL
 - [Portal](./portal.md) - Public chat flows and HITL review links

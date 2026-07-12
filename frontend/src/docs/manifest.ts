@@ -139,6 +139,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
     label: "Tabs",
     items: [
       { slug: "workflows-tab", title: "Workflows" },
+      { slug: "board-tab", title: "Board" },
       { slug: "templates-tab", title: "Templates" },
       { slug: "global-variables-tab", title: "Variables" },
       { slug: "chat-tab", title: "Chat" },

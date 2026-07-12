@@ -57,6 +57,7 @@ Press **Ctrl+K** (or **Cmd+K**) to open the command palette. You can:
 - [Workflow Structure](../reference/workflow-structure.md) – JSON format for workflows
 - [Download & Import](../reference/download-import.md) – Export and import workflows as JSON
 - [Portal](../reference/portal.md) – Expose workflows as public chat UIs
+- [Board](./board-tab.md) – Run workflows from kanban cards via column chains
 - [Core Concepts](../getting-started/core-concepts.md) – Workflows, nodes, and execution
 - [Execution History](../reference/execution-history.md) – View past runs and Bring to Canvas
 - [Quick Drawer](../reference/quick-drawer.md) – Pin and run workflows from dashboard, docs, and other non-editor pages

@@ -632,6 +632,17 @@ See also [Workflow Organization](./workflow-organization.md), [Download & Import
 <video src="/features/showcase/workflows.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/workflows.webm">▶ Watch Workflows demo</a></p>
 
+### [Board](../tabs/board-tab.md)
+
+An agentic kanban board where cards are persistent jobs. Configure each column with an ordered workflow chain; moving a card into the column runs the chain with the card's full context (content, comments, history, previous outputs). Results are written back to the card — green on success, red on failure, amber while running. Follow-up rounds re-run the current column's chain with everything accumulated so far, which powers iterative planning. Runs are recorded in [Execution History](./execution-history.md) with the `board` trigger source.
+
+See also [Workflows](../tabs/workflows-tab.md), [Execution History](./execution-history.md), and [Human-in-the-Loop](./human-in-the-loop.md).
+
+<!-- TODO(board-demo): enable when board.webm is recorded
+<video src="/features/showcase/board.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
+<p class="github-video-link"><a href="../../../../public/features/showcase/board.webm">▶ Watch Board demo</a></p>
+-->
+
 ### [Templates](../tabs/templates-tab.md)
 
 The Templates tab lets you save and reuse workflow templates (full workflows) and node templates (single configured nodes). Create workflow templates from the editor (Share as Template) and node templates by right-clicking a node. Browse by visibility (Everyone or Specific users/[teams](./teams.md)), apply a template to create a new workflow or add a node to the canvas, and manage your shared templates.

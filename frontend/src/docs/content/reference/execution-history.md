@@ -135,7 +135,7 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 
 ## Related
 
-- [Triggers](./triggers.md) – How workflows are started; history records `trigger_source`
+- [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pending review URLs and resume behavior
 - [Edit History](./edit-history.md) – Version control for workflow saves (revert, diff)
 - [Quick Start](../getting-started/quick-start.md) – Build and run your first workflow
