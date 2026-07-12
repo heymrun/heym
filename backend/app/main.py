@@ -17,6 +17,7 @@ from app.api import (
     analytics,
     auth,
     bigquery_oauth,
+    boards,
     chats,
     codex_followups,
     codex_oauth,
@@ -326,6 +327,7 @@ app.include_router(file_intake.router, prefix="/api", tags=["File Intake"])
 app.include_router(portal.router, prefix="/api/workflows", tags=["Portal Settings"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["Dashboards"])
+app.include_router(boards.router, prefix="/api/boards", tags=["Boards"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(plugins.router, prefix="/api/plugins", tags=["Plugins"])
 app.include_router(evals.router, prefix="/api/evals", tags=["Evals"])
