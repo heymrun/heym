@@ -33,6 +33,7 @@ export async function prepareAuthenticatedPage(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const showcaseKeys = [
       "dashboard_workflows",
+      "dashboard_board",
       "dashboard_templates",
       "dashboard_globalvariables",
       "dashboard_chat",
@@ -80,6 +81,15 @@ export async function createWorkflow(
 export async function deleteWorkflow(page: Page, workflowId: string): Promise<void> {
   const response = await page.request.delete(`/api/workflows/${workflowId}`);
   expect([204, 404]).toContain(response.status());
+}
+
+export async function deleteAllBoards(page: Page): Promise<void> {
+  const response = await page.request.get("/api/boards");
+  if (!response.ok()) return;
+  const boards = (await response.json()) as { id: string }[];
+  for (const board of boards) {
+    await page.request.delete(`/api/boards/${board.id}`);
+  }
 }
 
 export interface TestDataTable {
