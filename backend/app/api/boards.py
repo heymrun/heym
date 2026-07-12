@@ -10,6 +10,8 @@ from app.api.deps import get_current_user
 from app.db.models import (
     Board,
     BoardCard,
+    BoardCardActivity,
+    BoardCardRun,
     BoardColumn,
     BoardColumnWorkflow,
     User,
@@ -24,8 +26,14 @@ from app.models.board_schemas import (
     BoardStateResponse,
     BoardSummaryResponse,
     BoardUpdateRequest,
+    CardActivityResponse,
+    CardCreateRequest,
+    CardDetailResponse,
+    CardRunResponse,
+    CardUpdateRequest,
     ColumnCreateRequest,
     ColumnUpdateRequest,
+    CommentCreateRequest,
 )
 
 router = APIRouter()
@@ -354,3 +362,192 @@ async def delete_column(
         )
     await db.delete(column)
     await db.commit()
+
+
+@router.post(
+    "/{board_id}/cards", response_model=BoardCardResponse, status_code=status.HTTP_201_CREATED
+)
+async def create_card(
+    board_id: uuid.UUID,
+    request: CardCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardCardResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    if request.column_id is not None:
+        column = await _get_board_column(db, board, request.column_id)
+    else:
+        result = await db.execute(
+            select(BoardColumn)
+            .where(BoardColumn.board_id == board.id)
+            .order_by(BoardColumn.position)
+            .limit(1)
+        )
+        column = result.scalar_one_or_none()
+        if column is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Board has no columns"
+            )
+    if request.position is not None:
+        position = request.position
+    else:
+        count = (
+            await db.execute(
+                select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id)
+            )
+        ).scalar() or 0
+        position = count
+    card = BoardCard(
+        board_id=board.id,
+        column_id=column.id,
+        title=request.title,
+        content=request.content,
+        position=position,
+    )
+    db.add(card)
+    await db.flush()
+    db.add(
+        BoardCardActivity(
+            card_id=card.id,
+            kind="event",
+            author_type="system",
+            content=f"Card created in {column.name}",
+            data={"column_id": str(column.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(card)
+    return _card_response(card)
+
+
+@router.get("/{board_id}/cards/{card_id}", response_model=CardDetailResponse)
+async def get_card_detail(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CardDetailResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    activities_result = await db.execute(
+        select(BoardCardActivity)
+        .where(BoardCardActivity.card_id == card.id)
+        .order_by(BoardCardActivity.created_at)
+        .offset(offset)
+        .limit(limit)
+    )
+    runs_result = await db.execute(
+        select(BoardCardRun)
+        .where(BoardCardRun.card_id == card.id)
+        .order_by(BoardCardRun.started_at.desc())
+        .limit(50)
+    )
+    return CardDetailResponse(
+        card=_card_response(card),
+        activities=[
+            CardActivityResponse(
+                id=a.id,
+                kind=a.kind,
+                author_type=a.author_type,
+                author_user_id=a.author_user_id,
+                content=a.content,
+                data=a.data or {},
+                run_id=a.run_id,
+                created_at=a.created_at,
+            )
+            for a in activities_result.scalars().all()
+        ],
+        runs=[
+            CardRunResponse(
+                id=r.id,
+                card_id=r.card_id,
+                column_id=r.column_id,
+                workflow_id=r.workflow_id,
+                workflow_name=r.workflow_name,
+                chain_position=r.chain_position,
+                chain_length=r.chain_length,
+                status=r.status,
+                execution_history_id=r.execution_history_id,
+                output=r.output or {},
+                error=r.error,
+                started_at=r.started_at,
+                finished_at=r.finished_at,
+            )
+            for r in runs_result.scalars().all()
+        ],
+    )
+
+
+@router.patch("/{board_id}/cards/{card_id}", response_model=BoardCardResponse)
+async def update_card(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    request: CardUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardCardResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    if request.title is not None:
+        card.title = request.title
+    if request.content is not None:
+        card.content = request.content
+    if request.card_metadata is not None:
+        card.card_metadata = request.card_metadata
+    if request.position is not None:
+        card.position = request.position
+        await _reindex_cards(db, card.column_id)
+    await db.commit()
+    await db.refresh(card)
+    return _card_response(card)
+
+
+@router.delete("/{board_id}/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_card(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    await db.delete(card)
+    await db.commit()
+
+
+@router.post(
+    "/{board_id}/cards/{card_id}/comments",
+    response_model=CardActivityResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_card_comment(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    request: CommentCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CardActivityResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    card = await _get_board_card(db, board, card_id)
+    activity = BoardCardActivity(
+        card_id=card.id,
+        kind="comment",
+        author_type="user",
+        author_user_id=current_user.id,
+        content=request.content,
+    )
+    db.add(activity)
+    await db.commit()
+    await db.refresh(activity)
+    return CardActivityResponse(
+        id=activity.id,
+        kind=activity.kind,
+        author_type=activity.author_type,
+        author_user_id=activity.author_user_id,
+        content=activity.content,
+        data=activity.data or {},
+        run_id=activity.run_id,
+        created_at=activity.created_at,
+    )

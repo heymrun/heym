@@ -8,7 +8,9 @@ from fastapi import HTTPException
 from app.api import boards as boards_api
 from app.models.board_schemas import (
     BoardCreateRequest,
+    CardCreateRequest,
     ColumnUpdateRequest,
+    CommentCreateRequest,
 )
 
 
@@ -154,3 +156,66 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
                 board_id=board.id, column_id=column.id, db=db, current_user=user
             )
         self.assertEqual(ctx.exception.status_code, 409)
+
+
+class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
+    async def test_create_card_defaults_to_first_column_bottom(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        first_column = MagicMock()
+        first_column.id = uuid.uuid4()
+        first_column.board_id = board.id
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        # 1: board, 2: first column by position, 3: card count in column
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=first_column),
+                _result_with(scalar_one=2),
+            ]
+        )
+
+        response = await boards_api.create_card(
+            board_id=board.id,
+            request=CardCreateRequest(title="Ship the launch email"),
+            db=db,
+            current_user=user,
+        )
+
+        self.assertEqual(response.column_id, first_column.id)
+        self.assertEqual(response.position, 2)
+        self.assertEqual(response.run_status, "idle")
+
+    async def test_comment_creates_user_activity(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        card = MagicMock()
+        card.id = uuid.uuid4()
+        card.board_id = board.id
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        db.execute = AsyncMock(side_effect=[_result_with(scalar=board), _result_with(scalar=card)])
+
+        await boards_api.create_card_comment(
+            board_id=board.id,
+            card_id=card.id,
+            request=CommentCreateRequest(content="Use the Q3 tone guide"),
+            db=db,
+            current_user=user,
+        )
+
+        added = [call.args[0] for call in db.add.call_args_list]
+        activities = [obj for obj in added if type(obj).__name__ == "BoardCardActivity"]
+        self.assertEqual(len(activities), 1)
+        self.assertEqual(activities[0].kind, "comment")
+        self.assertEqual(activities[0].author_type, "user")
+        self.assertEqual(activities[0].author_user_id, user.id)
