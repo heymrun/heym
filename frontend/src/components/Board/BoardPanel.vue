@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
+import Select from "@/components/ui/Select.vue";
 import { useBoardStore } from "@/stores/board";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import BoardCanvas from "./BoardCanvas.vue";
@@ -37,8 +38,11 @@ onUnmounted(() => {
   removeOverlayDismiss?.();
 });
 
-async function selectBoard(event: Event): Promise<void> {
-  const boardId = (event.target as HTMLSelectElement).value;
+const boardOptions = computed(() =>
+  boardStore.boards.map((board) => ({ value: board.id, label: board.name })),
+);
+
+async function selectBoard(boardId: string | undefined): Promise<void> {
   if (boardId) await boardStore.openBoard(boardId);
 }
 
@@ -64,21 +68,15 @@ async function onBoardCreated(boardId: string): Promise<void> {
       <h2 class="text-sm font-semibold">
         Board
       </h2>
-      <select
+      <Select
         v-if="boardStore.boards.length"
-        class="rounded-md border border-border bg-background px-2 py-1 text-sm"
-        :value="boardStore.activeBoard?.id ?? ''"
+        class="min-w-40"
+        :model-value="boardStore.activeBoard?.id ?? ''"
+        :options="boardOptions"
+        placeholder="Select board"
         aria-label="Select board"
-        @change="selectBoard"
-      >
-        <option
-          v-for="board in boardStore.boards"
-          :key="board.id"
-          :value="board.id"
-        >
-          {{ board.name }}
-        </option>
-      </select>
+        @update:model-value="selectBoard"
+      />
       <Button
         size="sm"
         variant="outline"

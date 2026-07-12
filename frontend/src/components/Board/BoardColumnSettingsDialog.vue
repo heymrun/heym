@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Trash2, X } from "lucide-vue-next";
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { boardApi, workflowApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
 
@@ -40,9 +41,14 @@ watch(
   { immediate: true },
 );
 
-function addToChain(event: Event): void {
-  const workflowId = (event.target as HTMLSelectElement).value;
-  (event.target as HTMLSelectElement).value = "";
+const availableOptions = computed(() =>
+  available.value
+    .filter((w) => !chain.value.some((c) => c.id === w.id))
+    .map((w) => ({ value: w.id, label: w.name })),
+);
+
+function addToChain(workflowId: string | undefined): void {
+  if (!workflowId) return;
   const workflow = available.value.find((w) => w.id === workflowId);
   if (!workflow || chain.value.some((w) => w.id === workflowId)) return;
   chain.value.push(workflow);
@@ -153,22 +159,14 @@ async function removeColumn(): Promise<void> {
               <X class="h-3.5 w-3.5" />
             </button>
           </div>
-          <select
-            class="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          <SearchableSelect
+            :model-value="''"
+            :options="availableOptions"
+            placeholder="Add workflow…"
+            search-placeholder="Search workflows…"
             aria-label="Add workflow to chain"
-            @change="addToChain"
-          >
-            <option value="">
-              Add workflow…
-            </option>
-            <option
-              v-for="workflow in available"
-              :key="workflow.id"
-              :value="workflow.id"
-            >
-              {{ workflow.name }}
-            </option>
-          </select>
+            @update:model-value="addToChain"
+          />
         </div>
       </div>
       <div class="flex items-center justify-between">
