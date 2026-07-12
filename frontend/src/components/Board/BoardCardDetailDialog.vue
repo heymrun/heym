@@ -85,9 +85,9 @@ function formatTime(iso: string): string {
     </div>
     <div
       v-else-if="detail"
-      class="flex max-h-[70vh] flex-col gap-4 overflow-y-auto p-1 text-sm"
+      class="flex flex-col gap-3 p-1 text-sm"
     >
-      <div class="flex items-center gap-2">
+      <div class="flex items-center justify-between gap-2">
         <span
           class="rounded-full px-2 py-0.5 text-xs font-medium"
           :class="{
@@ -117,7 +117,7 @@ function formatTime(iso: string): string {
         </h3>
         <Textarea
           v-model="editedContent"
-          :rows="4"
+          :rows="3"
           placeholder="Describe the job for this card"
         />
         <div class="mt-2 flex justify-end">
@@ -135,35 +135,41 @@ function formatTime(iso: string): string {
         <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
           Activity
         </h3>
-        <div class="flex flex-col gap-2">
-          <div
-            v-for="activity in detail.activities"
-            :key="activity.id"
-            class="rounded-lg border border-border/50 p-2"
-            :class="activity.kind === 'output' ? 'bg-primary/5' : ''"
-          >
-            <div class="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <UserIcon
-                v-if="activity.author_type === 'user'"
-                class="h-3.5 w-3.5"
-              />
-              <Bot
-                v-else-if="activity.author_type === 'agent'"
-                class="h-3.5 w-3.5"
-              />
-              <span class="capitalize">{{ activity.kind }}</span>
-              <span>· {{ formatTime(activity.created_at) }}</span>
+        <div class="relative">
+          <div class="flex max-h-[286px] flex-col gap-2 overflow-y-auto pr-1">
+            <div
+              v-for="activity in detail.activities"
+              :key="activity.id"
+              class="rounded-lg border border-border/50 p-2"
+              :class="activity.kind === 'output' ? 'bg-primary/5' : ''"
+            >
+              <div class="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <UserIcon
+                  v-if="activity.author_type === 'user'"
+                  class="h-3.5 w-3.5"
+                />
+                <Bot
+                  v-else-if="activity.author_type === 'agent'"
+                  class="h-3.5 w-3.5"
+                />
+                <span class="capitalize">{{ activity.kind }}</span>
+                <span>· {{ formatTime(activity.created_at) }}</span>
+              </div>
+              <p class="whitespace-pre-wrap">
+                {{ activity.content }}
+              </p>
             </div>
-            <p class="whitespace-pre-wrap">
-              {{ activity.content }}
+            <p
+              v-if="!detail.activities.length"
+              class="text-xs text-muted-foreground"
+            >
+              No activity yet.
             </p>
           </div>
-          <p
-            v-if="!detail.activities.length"
-            class="text-xs text-muted-foreground"
-          >
-            No activity yet.
-          </p>
+          <div
+            v-if="detail.activities.length > 5"
+            class="pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-lg bg-gradient-to-t from-card to-transparent"
+          />
         </div>
         <div class="mt-2 flex flex-col gap-2">
           <Textarea

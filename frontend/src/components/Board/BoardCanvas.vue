@@ -38,10 +38,11 @@ async function addColumn(): Promise<void> {
     <div class="flex w-64 shrink-0 flex-col">
       <button
         v-if="!addingColumn"
-        class="flex h-full w-full items-start gap-2 rounded-xl border border-dashed border-border/60 px-3 py-2.5 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground"
+        class="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground"
         @click="addingColumn = true"
       >
-        <Plus class="h-4 w-4" /> Add column
+        <Plus class="h-5 w-5" />
+        <span>Add column</span>
       </button>
       <div
         v-else

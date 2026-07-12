@@ -32,6 +32,23 @@ test("creates a board with default columns and adds a card", async ({ page }) =>
   await expect(backlog.getByText("Write launch email")).toBeVisible();
 });
 
+test("reflects the selected board in the URL and deep-links to it", async ({ page }) => {
+  await page.goto("/?tab=board");
+  await page.getByTestId("board-empty-create").click();
+  await page.getByPlaceholder("Board name").fill("URL board");
+  await page.getByRole("button", { name: "Create board" }).click();
+
+  await expect(page.getByTestId("board-column-Backlog")).toBeVisible();
+  await expect(page).toHaveURL(/[?&]board=[0-9a-f-]{36}/);
+  const boardId = new URL(page.url()).searchParams.get("board");
+  expect(boardId).toBeTruthy();
+
+  // Deep-link: reloading the board URL opens the same board.
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await expect(page.getByTestId("board-column-Backlog")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`board=${boardId}`));
+});
+
 test("closes the new board dialog on Escape", async ({ page }) => {
   await page.goto("/?tab=board");
   await page.getByTestId("board-empty-create").click();

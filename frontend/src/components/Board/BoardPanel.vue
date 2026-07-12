@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
@@ -12,9 +13,18 @@ import BoardColumnSettingsDialog from "./BoardColumnSettingsDialog.vue";
 import BoardCreateDialog from "./BoardCreateDialog.vue";
 
 const boardStore = useBoardStore();
+const route = useRoute();
+const router = useRouter();
 const createOpen = ref(false);
 const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
+
+async function openBoardWithUrl(boardId: string): Promise<void> {
+  await boardStore.openBoard(boardId);
+  if (route.query.board !== boardId) {
+    await router.replace({ query: { ...route.query, tab: "board", board: boardId } });
+  }
+}
 
 // The app's global Escape handler dispatches a dismiss-overlays event (and
 // preventDefaults, which defeats each Dialog's own Esc handler), so overlays
@@ -28,9 +38,12 @@ onMounted(async () => {
     settingsColumnId.value = null;
   });
   await boardStore.fetchBoards();
-  if (!boardStore.activeBoard && boardStore.boards.length > 0) {
-    await boardStore.openBoard(boardStore.boards[0].id);
-  }
+  const urlBoardId = typeof route.query.board === "string" ? route.query.board : null;
+  const target =
+    urlBoardId && boardStore.boards.some((b) => b.id === urlBoardId)
+      ? urlBoardId
+      : boardStore.boards[0]?.id;
+  if (target) await openBoardWithUrl(target);
 });
 
 onUnmounted(() => {
@@ -43,7 +56,7 @@ const boardOptions = computed(() =>
 );
 
 async function selectBoard(boardId: string | undefined): Promise<void> {
-  if (boardId) await boardStore.openBoard(boardId);
+  if (boardId) await openBoardWithUrl(boardId);
 }
 
 async function removeActiveBoard(): Promise<void> {
@@ -51,10 +64,17 @@ async function removeActiveBoard(): Promise<void> {
   if (!board) return;
   if (!window.confirm(`Delete board "${board.name}" and all of its cards?`)) return;
   await boardStore.deleteBoard(board.id);
+  if (boardStore.boards.length > 0) {
+    await openBoardWithUrl(boardStore.boards[0].id);
+  } else {
+    const query = { ...route.query };
+    delete query.board;
+    await router.replace({ query });
+  }
 }
 
 async function onBoardCreated(boardId: string): Promise<void> {
-  await boardStore.openBoard(boardId);
+  await openBoardWithUrl(boardId);
 }
 </script>
 
@@ -64,8 +84,8 @@ async function onBoardCreated(boardId: string): Promise<void> {
     data-testid="board-panel"
   >
     <div class="flex items-center gap-3 border-b border-border/60 px-4 py-2.5">
-      <SquareKanban class="h-5 w-5 text-primary" />
-      <h2 class="text-sm font-semibold">
+      <SquareKanban class="h-6 w-6 text-primary" />
+      <h2 class="text-xl md:text-2xl font-bold tracking-tight">
         Board
       </h2>
       <SearchableSelect
