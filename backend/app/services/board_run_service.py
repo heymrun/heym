@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.workflows import (
@@ -382,6 +382,13 @@ async def _run_chain(
 
             await _set_card_status(db, card_id, "success")
             await db.commit()
+        if not rerun:
+            await _auto_advance(
+                card_id=card_id,
+                board_id=board_id,
+                from_column_id=column_id,
+                session_factory=session_factory,
+            )
     except Exception as exc:  # noqa: BLE001 - chain must never crash the server
         logger.exception("Board chain failed for card %s: %s", card_id, exc)
         try:
@@ -470,11 +477,32 @@ async def enqueue_card_chain(db, *, card, column, board, move: dict | None, reru
     ]
     card.run_status = "running"
     await db.commit()
+    _spawn_chain(
+        card_id=card.id,
+        board_id=board.id,
+        column_id=column.id,
+        links=links,
+        move=move,
+        rerun=rerun,
+    )
+    return True
+
+
+def _spawn_chain(
+    *,
+    card_id: uuid.UUID,
+    board_id: uuid.UUID,
+    column_id: uuid.UUID,
+    links: list[dict],
+    move: dict | None,
+    rerun: bool,
+) -> None:
+    """Start a chain run as a background task, holding a strong reference to it."""
     task = asyncio.create_task(
         _run_chain(
-            card_id=card.id,
-            board_id=board.id,
-            column_id=column.id,
+            card_id=card_id,
+            board_id=board_id,
+            column_id=column_id,
             links=links,
             move=move,
             rerun=rerun,
@@ -482,7 +510,107 @@ async def enqueue_card_chain(db, *, card, column, board, move: dict | None, reru
     )
     _BACKGROUND_CHAIN_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_CHAIN_TASKS.discard)
-    return True
+
+
+async def _reindex_column(db, column_id: uuid.UUID) -> None:
+    result = await db.execute(
+        select(BoardCard)
+        .where(BoardCard.column_id == column_id)
+        .order_by(BoardCard.position, BoardCard.updated_at)
+    )
+    for index, card in enumerate(result.scalars().all()):
+        card.position = index
+
+
+async def _auto_advance(
+    *,
+    card_id: uuid.UUID,
+    board_id: uuid.UUID,
+    from_column_id: uuid.UUID,
+    session_factory=async_session_maker,
+) -> None:
+    """After a successful chain, move the card to the next column (to the right) and run
+    that column's chain. Empty columns are passed through; the cascade continues until the
+    last column. Never raises (best-effort automation)."""
+    try:
+        async with session_factory() as db:
+            columns = (
+                (
+                    await db.execute(
+                        select(BoardColumn)
+                        .where(BoardColumn.board_id == board_id)
+                        .order_by(BoardColumn.position)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            ids = [c.id for c in columns]
+            if from_column_id not in ids:
+                return
+            prev_name = columns[ids.index(from_column_id)].name
+            for target in columns[ids.index(from_column_id) + 1 :]:
+                card = await db.get(BoardCard, card_id)
+                if card is None:
+                    return
+                old_column_id = card.column_id
+                count = (
+                    await db.execute(
+                        select(func.count(BoardCard.id)).where(
+                            BoardCard.column_id == target.id, BoardCard.id != card_id
+                        )
+                    )
+                ).scalar() or 0
+                card.column_id = target.id
+                card.position = count
+                await _reindex_column(db, old_column_id)
+                await _reindex_column(db, target.id)
+                db.add(
+                    BoardCardActivity(
+                        card_id=card_id,
+                        kind="event",
+                        author_type="system",
+                        content=f"Auto-advanced from {prev_name} to {target.name}",
+                        data={
+                            "from_column_id": str(old_column_id),
+                            "to_column_id": str(target.id),
+                            "auto": True,
+                        },
+                    )
+                )
+
+                link_rows = (
+                    await db.execute(
+                        select(BoardColumnWorkflow, Workflow.name)
+                        .join(Workflow, Workflow.id == BoardColumnWorkflow.workflow_id)
+                        .where(BoardColumnWorkflow.column_id == target.id)
+                        .order_by(BoardColumnWorkflow.position)
+                    )
+                ).all()
+                if link_rows:
+                    links = [
+                        {
+                            "workflow_id": link.workflow_id,
+                            "workflow_name": name,
+                            "position": link.position,
+                        }
+                        for link, name in link_rows
+                    ]
+                    card.run_status = "running"
+                    await db.commit()
+                    _spawn_chain(
+                        card_id=card_id,
+                        board_id=board_id,
+                        column_id=target.id,
+                        links=links,
+                        move={"from_column": prev_name, "to_column": target.name},
+                        rerun=False,
+                    )
+                    return
+                await db.commit()
+                prev_name = target.name
+    except Exception:  # noqa: BLE001 - auto-advance must never break a completed chain
+        logger.exception("Board auto-advance failed for card %s", card_id)
 
 
 async def reconcile_orphaned_board_runs() -> None:

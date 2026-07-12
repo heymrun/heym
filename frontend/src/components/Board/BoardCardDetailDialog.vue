@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { Bot, Check, Copy, Loader2, Play, User as UserIcon } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
@@ -20,6 +20,11 @@ const editedContent = ref("");
 const savingContent = ref(false);
 const activityScroll = ref<HTMLElement | null>(null);
 const activityAtBottom = ref(false);
+
+// Activity is stored oldest-first; the dialog always shows newest at the top.
+const activitiesNewestFirst = computed(() =>
+  detail.value ? [...detail.value.activities].slice().reverse() : [],
+);
 
 function onActivityScroll(): void {
   const el = activityScroll.value;
@@ -205,7 +210,7 @@ async function copyRun(run: CardRun): Promise<void> {
             @scroll="onActivityScroll"
           >
             <div
-              v-for="activity in detail.activities"
+              v-for="activity in activitiesNewestFirst"
               :key="activity.id"
               class="rounded-lg border border-border/50 p-2"
               :class="activity.kind === 'output' ? 'bg-primary/5' : ''"

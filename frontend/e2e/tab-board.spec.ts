@@ -147,6 +147,69 @@ test("runs a column workflow chain to completion when a card enters", async ({ p
   }
 });
 
+test("auto-advances a card through columns to the last one", async ({ page }) => {
+  const wf = await createWorkflow(
+    page,
+    `Advance WF ${Date.now()}`,
+    [
+      {
+        id: "s1",
+        type: "set",
+        position: { x: 100, y: 100 },
+        data: { label: "greet", mappings: [{ key: "text", value: "ok" }] },
+      },
+      {
+        id: "o1",
+        type: "output",
+        position: { x: 400, y: 100 },
+        data: { label: "out", message: "$greet.text" },
+      },
+    ],
+    [{ id: "e1", source: "s1", target: "o1" }],
+  );
+
+  try {
+    const board = await (await page.request.post("/api/boards", { data: { name: "Flow" } })).json();
+    const state = await (await page.request.get(`/api/boards/${board.id}`)).json();
+    const col = (name: string) => state.columns.find((c: { name: string }) => c.name === name);
+    // Chain the same workflow on Planning and To Do; the rest are empty.
+    for (const name of ["Planning", "To Do"]) {
+      await page.request.patch(`/api/boards/${board.id}/columns/${col(name).id}`, {
+        data: { workflow_ids: [wf.id] },
+      });
+    }
+    const card = await (
+      await page.request.post(`/api/boards/${board.id}/cards`, {
+        data: { title: "flow me", column_id: col("Backlog").id },
+      })
+    ).json();
+    await page.request.post(`/api/boards/${board.id}/cards/${card.id}/move`, {
+      data: { to_column_id: col("Planning").id },
+    });
+
+    let columnName = "";
+    let status = "";
+    for (let i = 0; i < 60; i += 1) {
+      const s = await (await page.request.get(`/api/boards/${board.id}`)).json();
+      const c = (s.cards as { id: string; column_id: string; run_status: string }[]).find(
+        (x) => x.id === card.id,
+      );
+      const columns: { id: string; name: string }[] = s.columns;
+      columnName = columns.find((x) => x.id === c?.column_id)?.name ?? "";
+      status = c?.run_status ?? "";
+      // Done is the last column and has no chain, so the card should end there, green.
+      if (columnName === "Done" && status === "success") break;
+      if (status === "failed") break;
+      await page.waitForTimeout(500);
+    }
+    expect(status).toBe("success");
+    expect(columnName).toBe("Done");
+  } finally {
+    await deleteAllBoards(page);
+    await deleteWorkflow(page, wf.id);
+  }
+});
+
 test("opens card detail and posts a comment", async ({ page }) => {
   await page.goto("/?tab=board");
   await page.getByTestId("board-empty-create").click();
