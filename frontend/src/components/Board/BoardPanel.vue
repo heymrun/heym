@@ -4,6 +4,7 @@ import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import { useBoardStore } from "@/stores/board";
+import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import BoardCanvas from "./BoardCanvas.vue";
 import BoardCardDetailDialog from "./BoardCardDetailDialog.vue";
 import BoardColumnSettingsDialog from "./BoardColumnSettingsDialog.vue";
@@ -14,7 +15,17 @@ const createOpen = ref(false);
 const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
 
+// The app's global Escape handler dispatches a dismiss-overlays event (and
+// preventDefaults, which defeats each Dialog's own Esc handler), so overlays
+// close by subscribing here.
+let removeOverlayDismiss: (() => void) | null = null;
+
 onMounted(async () => {
+  removeOverlayDismiss = onDismissOverlays(() => {
+    createOpen.value = false;
+    openCardId.value = null;
+    settingsColumnId.value = null;
+  });
   await boardStore.fetchBoards();
   if (!boardStore.activeBoard && boardStore.boards.length > 0) {
     await boardStore.openBoard(boardStore.boards[0].id);
@@ -23,6 +34,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   boardStore.stopPolling();
+  removeOverlayDismiss?.();
 });
 
 async function selectBoard(event: Event): Promise<void> {
@@ -88,10 +100,10 @@ async function onBoardCreated(boardId: string): Promise<void> {
 
     <div
       v-if="!boardStore.loading && boardStore.boards.length === 0"
-      class="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+      class="flex flex-1 flex-col items-center justify-start gap-3 px-4 pt-16 text-center"
     >
       <SquareKanban class="h-10 w-10 text-muted-foreground" />
-      <p class="text-sm text-muted-foreground">
+      <p class="max-w-md text-sm text-muted-foreground">
         No boards yet. Cards are agentic jobs — moving one into a column runs that column's
         workflows with the card's full context.
       </p>

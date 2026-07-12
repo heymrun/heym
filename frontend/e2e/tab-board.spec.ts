@@ -32,6 +32,15 @@ test("creates a board with default columns and adds a card", async ({ page }) =>
   await expect(backlog.getByText("Write launch email")).toBeVisible();
 });
 
+test("closes the new board dialog on Escape", async ({ page }) => {
+  await page.goto("/?tab=board");
+  await page.getByTestId("board-empty-create").click();
+  await expect(page.getByPlaceholder("Board name")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByPlaceholder("Board name")).not.toBeVisible();
+});
+
 test("opens card detail and posts a comment", async ({ page }) => {
   await page.goto("/?tab=board");
   await page.getByTestId("board-empty-create").click();
