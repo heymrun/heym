@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useBoardStore } from "@/stores/board";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import BoardCanvas from "./BoardCanvas.vue";
@@ -68,12 +68,13 @@ async function onBoardCreated(boardId: string): Promise<void> {
       <h2 class="text-sm font-semibold">
         Board
       </h2>
-      <Select
+      <SearchableSelect
         v-if="boardStore.boards.length"
-        class="min-w-40"
+        class="w-56 shrink-0"
         :model-value="boardStore.activeBoard?.id ?? ''"
         :options="boardOptions"
         placeholder="Select board"
+        search-placeholder="Search boards…"
         aria-label="Select board"
         @update:model-value="selectBoard"
       />

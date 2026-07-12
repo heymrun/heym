@@ -41,6 +41,31 @@ test("closes the new board dialog on Escape", async ({ page }) => {
   await expect(page.getByPlaceholder("Board name")).not.toBeVisible();
 });
 
+test("clones and deletes a card from the hover actions", async ({ page }) => {
+  await page.goto("/?tab=board");
+  await page.getByTestId("board-empty-create").click();
+  await page.getByPlaceholder("Board name").fill("Hover board");
+  await page.getByRole("button", { name: "Create board" }).click();
+
+  const backlog = page.getByTestId("board-column-Backlog");
+  await backlog.getByPlaceholder("Add a card").fill("Draft brief");
+  await backlog.getByPlaceholder("Add a card").press("Enter");
+  await expect(backlog.getByText("Draft brief")).toHaveCount(1);
+
+  // Clone -> two identical cards.
+  const card = backlog.locator("[data-board-card]").first();
+  await card.hover();
+  await card.locator('[data-testid^="board-card-clone-"]').click();
+  await expect(backlog.getByText("Draft brief")).toHaveCount(2);
+
+  // Delete -> confirm dialog accepted -> back to one card.
+  page.once("dialog", (dialog) => dialog.accept());
+  const firstCard = backlog.locator("[data-board-card]").first();
+  await firstCard.hover();
+  await firstCard.locator('[data-testid^="board-card-delete-"]').click();
+  await expect(backlog.getByText("Draft brief")).toHaveCount(1);
+});
+
 test("opens card detail and posts a comment", async ({ page }) => {
   await page.goto("/?tab=board");
   await page.getByTestId("board-empty-create").click();

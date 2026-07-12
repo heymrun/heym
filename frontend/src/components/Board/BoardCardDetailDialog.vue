@@ -120,10 +120,9 @@ function formatTime(iso: string): string {
           :rows="4"
           placeholder="Describe the job for this card"
         />
-        <div class="mt-1 flex justify-end">
+        <div class="mt-2 flex justify-end">
           <Button
             size="sm"
-            variant="ghost"
             :disabled="savingContent"
             @click="saveContent"
           >
@@ -166,7 +165,7 @@ function formatTime(iso: string): string {
             No activity yet.
           </p>
         </div>
-        <div class="mt-2 flex gap-2">
+        <div class="mt-2 flex flex-col gap-2">
           <Textarea
             v-model="comment"
             :rows="2"
@@ -174,14 +173,16 @@ function formatTime(iso: string): string {
             data-testid="card-comment-input"
             @keydown.meta.enter="submitComment"
           />
-          <Button
-            size="sm"
-            data-testid="card-comment-submit"
-            :disabled="!comment.trim()"
-            @click="submitComment"
-          >
-            Comment
-          </Button>
+          <div class="flex justify-end">
+            <Button
+              size="sm"
+              data-testid="card-comment-submit"
+              :disabled="!comment.trim()"
+              @click="submitComment"
+            >
+              Comment
+            </Button>
+          </div>
         </div>
       </section>
 

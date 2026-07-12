@@ -124,6 +124,25 @@ export const useBoardStore = defineStore("board", () => {
     await refreshActiveBoard();
   }
 
+  async function deleteCard(cardId: string): Promise<void> {
+    if (!activeBoard.value) return;
+    await boardApi.deleteCard(activeBoard.value.id, cardId);
+    await refreshActiveBoard();
+  }
+
+  async function cloneCard(cardId: string): Promise<void> {
+    const board = activeBoard.value;
+    if (!board) return;
+    const card = board.cards.find((c) => c.id === cardId);
+    if (!card) return;
+    await boardApi.createCard(board.id, {
+      title: card.title,
+      content: card.content,
+      column_id: card.column_id,
+    });
+    await refreshActiveBoard();
+  }
+
   return {
     boards,
     activeBoard,
@@ -138,6 +157,8 @@ export const useBoardStore = defineStore("board", () => {
     createCard,
     moveCard,
     runFollowUp,
+    deleteCard,
+    cloneCard,
     stopPolling,
   };
 });

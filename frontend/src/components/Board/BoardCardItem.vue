@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Loader2, CheckCircle2, XCircle, PauseCircle } from "lucide-vue-next";
+import { Loader2, CheckCircle2, Copy, XCircle, PauseCircle, Trash2 } from "lucide-vue-next";
 
 import type { BoardCard } from "@/types/board";
 
 const props = defineProps<{ card: BoardCard }>();
 const emit = defineEmits<{
   (e: "open", cardId: string): void;
+  (e: "clone", cardId: string): void;
+  (e: "delete", cardId: string): void;
 }>();
 
 const statusClasses = computed<string>(() => {
@@ -41,22 +43,48 @@ function onDragStart(event: DragEvent): void {
   >
     <div class="flex items-start justify-between gap-2">
       <span class="line-clamp-2 font-medium">{{ card.title }}</span>
-      <Loader2
-        v-if="card.run_status === 'running'"
-        class="h-4 w-4 shrink-0 animate-spin text-amber-500"
-      />
-      <PauseCircle
-        v-else-if="card.run_status === 'pending'"
-        class="h-4 w-4 shrink-0 text-amber-500"
-      />
-      <CheckCircle2
-        v-else-if="card.run_status === 'success'"
-        class="h-4 w-4 shrink-0 text-emerald-500"
-      />
-      <XCircle
-        v-else-if="card.run_status === 'failed'"
-        class="h-4 w-4 shrink-0 text-red-500"
-      />
+      <div class="shrink-0">
+        <div class="group-hover:hidden">
+          <Loader2
+            v-if="card.run_status === 'running'"
+            class="h-4 w-4 animate-spin text-amber-500"
+          />
+          <PauseCircle
+            v-else-if="card.run_status === 'pending'"
+            class="h-4 w-4 text-amber-500"
+          />
+          <CheckCircle2
+            v-else-if="card.run_status === 'success'"
+            class="h-4 w-4 text-emerald-500"
+          />
+          <XCircle
+            v-else-if="card.run_status === 'failed'"
+            class="h-4 w-4 text-red-500"
+          />
+          <span
+            v-else
+            class="block h-4 w-4"
+          />
+        </div>
+        <div class="hidden items-center gap-0.5 group-hover:flex">
+          <button
+            class="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-primary"
+            aria-label="Clone card"
+            :data-testid="`board-card-clone-${card.id}`"
+            @click.stop="emit('clone', card.id)"
+          >
+            <Copy class="h-3.5 w-3.5" />
+          </button>
+          <button
+            class="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-red-500"
+            aria-label="Delete card"
+            :data-testid="`board-card-delete-${card.id}`"
+            @click.stop="emit('delete', card.id)"
+          >
+            <Trash2 class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
     <p
       v-if="card.content"

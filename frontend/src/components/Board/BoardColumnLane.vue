@@ -49,6 +49,12 @@ async function addCard(): Promise<void> {
   newCardTitle.value = "";
   await boardStore.createCard(title, props.column.id);
 }
+
+async function deleteCard(cardId: string): Promise<void> {
+  const card = cards.value.find((c) => c.id === cardId);
+  if (!window.confirm(`Delete card "${card?.title ?? ""}"?`)) return;
+  await boardStore.deleteCard(cardId);
+}
 </script>
 
 <template>
@@ -69,7 +75,7 @@ async function addCard(): Promise<void> {
       <span class="text-xs text-muted-foreground">{{ cards.length }}</span>
       <span
         v-if="column.workflows.length"
-        class="ml-auto inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+        class="ml-auto inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary dark:text-violet-300"
         :title="column.workflows.map((w) => w.workflow_name).join(' → ')"
       >
         <Workflow class="h-3 w-3" />
@@ -96,6 +102,8 @@ async function addCard(): Promise<void> {
         <BoardCardItem
           :card="card"
           @open="emit('openCard', $event)"
+          @clone="boardStore.cloneCard"
+          @delete="deleteCard"
         />
       </div>
     </div>
