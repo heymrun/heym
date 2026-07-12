@@ -1824,3 +1824,173 @@ class Plugin(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Board(Base):
+    __tablename__ = "boards"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="Board")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    columns: Mapped[list["BoardColumn"]] = relationship(
+        "BoardColumn",
+        back_populates="board",
+        cascade="all, delete-orphan",
+        order_by="BoardColumn.position",
+    )
+    cards: Mapped[list["BoardCard"]] = relationship(
+        "BoardCard", back_populates="board", cascade="all, delete-orphan"
+    )
+
+
+class BoardColumn(Base):
+    __tablename__ = "board_columns"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    board_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("boards.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    board: Mapped["Board"] = relationship("Board", back_populates="columns")
+    workflows: Mapped[list["BoardColumnWorkflow"]] = relationship(
+        "BoardColumnWorkflow",
+        back_populates="column",
+        cascade="all, delete-orphan",
+        order_by="BoardColumnWorkflow.position",
+    )
+
+
+class BoardColumnWorkflow(Base):
+    __tablename__ = "board_column_workflows"
+    __table_args__ = (
+        UniqueConstraint("column_id", "workflow_id", name="uq_board_column_workflow"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    column_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("board_columns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    column: Mapped["BoardColumn"] = relationship("BoardColumn", back_populates="workflows")
+    workflow: Mapped["Workflow"] = relationship("Workflow")
+
+
+class BoardCard(Base):
+    __tablename__ = "board_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    board_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("boards.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    column_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("board_columns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    run_status: Mapped[str] = mapped_column(String(20), nullable=False, default="idle")
+    card_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    board: Mapped["Board"] = relationship("Board", back_populates="cards")
+    activities: Mapped[list["BoardCardActivity"]] = relationship(
+        "BoardCardActivity",
+        back_populates="card",
+        cascade="all, delete-orphan",
+        order_by="BoardCardActivity.created_at",
+        foreign_keys="BoardCardActivity.card_id",
+    )
+    runs: Mapped[list["BoardCardRun"]] = relationship(
+        "BoardCardRun",
+        back_populates="card",
+        cascade="all, delete-orphan",
+        order_by="BoardCardRun.started_at",
+    )
+
+
+class BoardCardRun(Base):
+    __tablename__ = "board_card_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    card_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("board_cards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    column_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("board_columns.id", ondelete="CASCADE"), nullable=False
+    )
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True
+    )
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    chain_position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chain_length: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running", index=True)
+    execution_history_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True
+    )
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    card: Mapped["BoardCard"] = relationship("BoardCard", back_populates="runs")
+
+
+class BoardCardActivity(Base):
+    __tablename__ = "board_card_activities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    card_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("board_cards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="event")
+    author_type: Mapped[str] = mapped_column(String(20), nullable=False, default="system")
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("board_card_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    card: Mapped["BoardCard"] = relationship(
+        "BoardCard", back_populates="activities", foreign_keys=[card_id]
+    )
