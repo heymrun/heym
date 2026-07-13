@@ -81,26 +81,35 @@ async function onBoardCreated(boardId: string): Promise<void> {
 
 <template>
   <div
-    class="flex h-full flex-col -mt-4 md:-mt-6"
+    class="flex h-full flex-col"
     data-testid="board-panel"
   >
-    <div class="flex items-center gap-3 border-b border-border/60 px-4 pb-2.5 pt-0">
-      <h2 class="text-xl md:text-2xl font-bold tracking-tight">
+    <!-- pt-0 so the title sits at the same height as the Workflows tab heading. -->
+    <div class="flex items-center gap-3 border-b border-border/60 pb-2.5 pt-0">
+      <h2 class="shrink-0 text-xl md:text-2xl font-bold tracking-tight">
         Board
       </h2>
-      <SearchableSelect
+
+      <BoardMapperControls v-if="boardStore.activeBoard" />
+
+      <!-- SearchableSelect's root is w-full, so it needs a fixed-width wrapper. -->
+      <div
         v-if="boardStore.boards.length"
         class="ml-auto w-56 shrink-0"
-        :model-value="boardStore.activeBoard?.id ?? ''"
-        :options="boardOptions"
-        placeholder="Select board"
-        search-placeholder="Search boards…"
-        aria-label="Select board"
-        @update:model-value="selectBoard"
-      />
+      >
+        <SearchableSelect
+          :model-value="boardStore.activeBoard?.id ?? ''"
+          :options="boardOptions"
+          placeholder="Select board"
+          search-placeholder="Search boards…"
+          aria-label="Select board"
+          @update:model-value="selectBoard"
+        />
+      </div>
       <Button
         size="sm"
         variant="outline"
+        class="shrink-0"
         data-testid="board-new"
         @click="createOpen = true"
       >
@@ -110,14 +119,13 @@ async function onBoardCreated(boardId: string): Promise<void> {
         v-if="boardStore.activeBoard"
         size="sm"
         variant="ghost"
+        class="shrink-0"
         aria-label="Delete board"
         @click="removeActiveBoard"
       >
         <Trash2 class="h-4 w-4 text-muted-foreground" />
       </Button>
     </div>
-
-    <BoardMapperControls v-if="boardStore.activeBoard" />
 
     <div
       v-if="!boardStore.loading && boardStore.boards.length === 0"

@@ -469,6 +469,10 @@ async def enqueue_card_chain(
         )
     ).all()
     if not link_rows:
+        # No chain on this column. A card moved forward must still keep flowing right,
+        # so pass it through to the next column (and the last one).
+        if allow_advance and not rerun:
+            await _auto_advance(card_id=card.id, board_id=board.id, from_column_id=column.id)
         return False
     links = [
         {

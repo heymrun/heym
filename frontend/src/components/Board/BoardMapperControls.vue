@@ -79,34 +79,36 @@ async function onModelChange(value: string | undefined): Promise<void> {
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2">
-    <span class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+  <!-- Inline in the board header. Each select is wrapped in a fixed-width box because
+       SearchableSelect's root is w-full and would otherwise take a whole row. -->
+  <div class="flex min-w-0 items-center gap-2">
+    <span
+      class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium"
+      :class="configured ? 'text-muted-foreground' : 'text-amber-500'"
+      :title="configured ? 'AI mapper' : 'Select a credential and model to enable AI mapping'"
+    >
       <Sparkles class="h-3.5 w-3.5 text-primary" /> AI Mapper
     </span>
-    <SearchableSelect
-      class="w-52 shrink-0"
-      :model-value="credentialId"
-      :options="credentialOptions"
-      placeholder="Credential (required)"
-      search-placeholder="Search credentials…"
-      aria-label="Mapper credential"
-      @update:model-value="onCredentialChange"
-    />
-    <SearchableSelect
-      class="w-52 shrink-0"
-      :model-value="model"
-      :options="modelOptions"
-      placeholder="Model (required)"
-      search-placeholder="Search models…"
-      :disabled="!credentialId || loadingModels"
-      aria-label="Mapper model"
-      @update:model-value="onModelChange"
-    />
-    <span
-      v-if="!configured"
-      class="text-xs text-amber-500"
-    >
-      Select a credential and model to enable AI mapping.
-    </span>
+    <div class="w-44 shrink-0">
+      <SearchableSelect
+        :model-value="credentialId"
+        :options="credentialOptions"
+        placeholder="Credential (required)"
+        search-placeholder="Search credentials…"
+        aria-label="Mapper credential"
+        @update:model-value="onCredentialChange"
+      />
+    </div>
+    <div class="w-44 shrink-0">
+      <SearchableSelect
+        :model-value="model"
+        :options="modelOptions"
+        placeholder="Model (required)"
+        search-placeholder="Search models…"
+        :disabled="!credentialId || loadingModels"
+        aria-label="Mapper model"
+        @update:model-value="onModelChange"
+      />
+    </div>
   </div>
 </template>
