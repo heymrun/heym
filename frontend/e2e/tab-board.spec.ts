@@ -295,7 +295,8 @@ test("opens card detail, saves the description and posts a comment", async ({ pa
 test("attaches a file to a card and removes it", async ({ page }) => {
   const { boardId } = await createBoardWithCard(page, "Needs a brief");
   await page.goto(`/?tab=board&board=${boardId}`);
-  await page.getByText("Needs a brief").click();
+  const card = page.getByTestId("board-column-Backlog").getByText("Needs a brief");
+  await card.click();
 
   await page.getByTestId("card-attachment-input").setInputFiles({
     name: "brief.txt",
@@ -306,8 +307,16 @@ test("attaches a file to a card and removes it", async ({ page }) => {
   const attachment = page.getByTestId("card-attachment-brief.txt");
   await expect(attachment).toBeVisible();
 
+  // The canvas card shows a paperclip with the attachment count.
+  await page.keyboard.press("Escape");
+  const badge = page.locator("[data-testid^='board-card-attachments-']");
+  await expect(badge).toHaveText("1");
+
+  await card.click();
   await attachment.getByRole("button", { name: "Remove brief.txt" }).click();
   await expect(page.getByTestId("card-attachment-brief.txt")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-testid^='board-card-attachments-']")).toHaveCount(0);
 });
 
 test("attaches a file dropped on the card's dropzone", async ({ page }) => {

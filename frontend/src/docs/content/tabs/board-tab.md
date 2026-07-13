@@ -41,10 +41,21 @@ Model, so collaborators never need their own.
 
 ## Card attachments
 
-Open a card and use **Attach file** to add files to it (remove them from the same list).
-Attachments are stored in [Drive](/docs/tabs/drive-tab) and reach the workflows as part
-of the card context, at `$input.card.metadata.attachments` — each entry has `file_id`,
-`name`, `url`, `mime_type` and `size`.
+Open a card and use **Attach file** to add files to it — drop them on the box or pick them
+with the button, and remove them from the same list. Attachments are stored in
+[Drive](/docs/tabs/drive-tab).
+
+Every run **resolves the attachments before the workflows start**, by type:
+
+- **Documents** (pdf, markdown, csv, json, text) are extracted to text, capped at 20,000
+  characters per file, in the attachment's `text` field.
+- **Images** are handed over as a `url` the vision path loads directly (an LLM node's image
+  input accepts it as-is).
+- **Anything else** is passed through as a plain reference (`name`, `url`, `mime_type`).
+
+Workflows read them at `$input.card.attachments` (and always at `$input.board.attachments`,
+whatever the mapper mapped). The Agentic Kanban Model sees the extracted text and the image
+URLs too, so it can map an attachment straight into the field a workflow expects.
 
 ## Column workflow chains
 

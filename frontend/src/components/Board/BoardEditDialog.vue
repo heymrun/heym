@@ -86,7 +86,7 @@ async function submit(): Promise<void> {
         :board-id="boardStore.activeBoard.id"
       />
 
-      <div class="flex justify-end gap-2">
+      <div class="flex justify-end gap-2 border-t border-border/60 pt-4">
         <Button
           variant="ghost"
           @click="emit('close')"

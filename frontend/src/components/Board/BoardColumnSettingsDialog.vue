@@ -154,7 +154,7 @@ async function removeColumn(): Promise<void> {
             </span>
             <span class="truncate">{{ workflow.name }}</span>
             <button
-              class="ml-auto p-0.5 text-muted-foreground hover:text-primary"
+              class="ml-auto p-0.5 text-foreground hover:text-primary"
               aria-label="Open workflow in new tab"
               title="Open workflow in new tab"
               @click="openWorkflow(workflow.id)"

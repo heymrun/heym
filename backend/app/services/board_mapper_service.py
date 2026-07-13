@@ -32,7 +32,13 @@ MAPPER_SYSTEM_PROMPT = (
     "instruction, and the full available task context. Decide how much of the task context "
     "to include based on the workflow: deterministic transforms usually need only the "
     "latest relevant value; agentic workflows (agent/llm/codex) benefit from history, "
-    "notes and comments. Return ONLY a JSON object whose keys are the workflow's input "
+    "notes and comments. "
+    "The card's attachments are already resolved in the context: a document attachment "
+    "carries its extracted text in its 'text' field, and an image attachment carries a "
+    "'url'. When the workflow needs a file, map that content into the matching field — the "
+    "extracted text for documents, and the image's url for an image field. Never invent a "
+    "file path and never claim a file is missing when an attachment is present. "
+    "Return ONLY a JSON object whose keys are the workflow's input "
     "field keys with the values you mapped. Do not use 'board' as a key; it is reserved. "
     "If there are no declared input fields, return a small JSON object with the fields the "
     "workflow most likely needs."
@@ -150,6 +156,8 @@ def _reserved_board_block(available_context: dict, board: Board) -> dict:
         "card_title": card.get("title"),
         "rerun": bool(available_context.get("rerun")),
         "move": move,
+        # Always reachable as $input.board.attachments, whatever the mapper chose to map.
+        "attachments": card.get("attachments") or [],
     }
 
 

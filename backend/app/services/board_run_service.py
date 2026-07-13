@@ -25,6 +25,7 @@ from app.db.models import (
     Workflow,
 )
 from app.db.session import async_session_maker
+from app.services.board_attachment_service import load_card_attachments
 from app.services.board_mapper_service import (
     board_mapper_is_configured,
     build_workflow_inputs,
@@ -73,6 +74,7 @@ def build_card_payload(
     chain_length: int,
     previous_workflow_outputs: list[dict],
     rerun: bool,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Build the standard workflow ``inputs`` payload for a board card run."""
     recent_history = history[-MAX_HISTORY_ENTRIES:]
@@ -84,6 +86,8 @@ def build_card_payload(
             "title": card.title,
             "content": card.content,
             "metadata": card.card_metadata or {},
+            # Resolved at run time: documents carry their extracted text, images their URL.
+            "attachments": attachments or [],
             "comments": [
                 {
                     "author": activity.author_type,
@@ -163,6 +167,7 @@ async def _load_card_context(db, card_id: uuid.UUID) -> dict[str, Any] | None:
         "comments": [a for a in activities if a.kind == "comment"],
         "history": list(activities),
         "previous_runs": previous_runs,
+        "attachments": await load_card_attachments(db, card),
         "from_column_name": None,
         "to_column_name": column.name if column is not None else "",
     }
@@ -295,6 +300,7 @@ async def _run_chain(
                     chain_length=total,
                     previous_workflow_outputs=chain_outputs,
                     rerun=rerun,
+                    attachments=context.get("attachments") or [],
                 )
 
                 if board_mapper_is_configured(board):

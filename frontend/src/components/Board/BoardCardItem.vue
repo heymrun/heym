@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Loader2, CheckCircle2, Copy, XCircle, PauseCircle, Trash2 } from "lucide-vue-next";
+import {
+  Loader2,
+  CheckCircle2,
+  Copy,
+  Paperclip,
+  XCircle,
+  PauseCircle,
+  Trash2,
+} from "lucide-vue-next";
 
 import type { BoardCard } from "@/types/board";
 import { useBoardStore } from "@/stores/board";
@@ -31,6 +39,11 @@ const statusClasses = computed<string>(() => {
   }
 });
 
+const attachmentCount = computed<number>(() => {
+  const raw = props.card.card_metadata?.attachments;
+  return Array.isArray(raw) ? raw.length : 0;
+});
+
 function onDragStart(event: DragEvent): void {
   event.dataTransfer?.setData("text/board-card", props.card.id);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -48,7 +61,16 @@ function onDragStart(event: DragEvent): void {
   >
     <div class="flex items-start justify-between gap-2">
       <span class="line-clamp-2 font-medium">{{ card.title }}</span>
-      <div class="shrink-0">
+      <span
+        v-if="attachmentCount"
+        class="mt-0.5 inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground"
+        :title="`${attachmentCount} attachment${attachmentCount > 1 ? 's' : ''}`"
+        :data-testid="`board-card-attachments-${card.id}`"
+      >
+        <Paperclip class="h-3 w-3" />
+        {{ attachmentCount }}
+      </span>
+      <div class="ml-auto shrink-0">
         <div class="group-hover:hidden">
           <Loader2
             v-if="card.run_status === 'running'"
