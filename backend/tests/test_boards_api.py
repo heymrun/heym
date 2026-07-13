@@ -84,7 +84,7 @@ class TestCreateBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(boards[0].name, "My Board")
         self.assertEqual(
             [c.name for c in sorted(columns, key=lambda c: c.position)],
-            ["Backlog", "Planning", "To Do", "Waiting", "Development", "Done"],
+            ["Backlog", "Planning", "Development", "Done"],
         )
         db.commit.assert_awaited()
 
@@ -201,20 +201,36 @@ class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
         card = MagicMock()
         card.id = uuid.uuid4()
         card.board_id = board.id
+        column = MagicMock()
+        column.id = uuid.uuid4()
+        column.board_id = board.id
+        card.column_id = column.id
 
         db = AsyncMock()
         db.add = MagicMock()
         _wire_db_inserts(db)
-        db.execute = AsyncMock(side_effect=[_result_with(scalar=board), _result_with(scalar=card)])
-
-        await boards_api.create_card_comment(
-            board_id=board.id,
-            card_id=card.id,
-            request=CommentCreateRequest(content="Use the Q3 tone guide"),
-            db=db,
-            current_user=user,
+        # 1: board, 2: card, 3: column (for the planning-gate answer hook)
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=column),
+            ]
         )
 
+        with patch.object(
+            boards_api.board_run_service, "answer_card_comment", AsyncMock(return_value=False)
+        ) as answer:
+            await boards_api.create_card_comment(
+                board_id=board.id,
+                card_id=card.id,
+                request=CommentCreateRequest(content="Use the Q3 tone guide"),
+                db=db,
+                current_user=user,
+            )
+
+        # Answering a card re-runs the gate column's chain (no-op past the gate).
+        answer.assert_awaited_once()
         added = [call.args[0] for call in db.add.call_args_list]
         activities = [obj for obj in added if type(obj).__name__ == "BoardCardActivity"]
         self.assertEqual(len(activities), 1)
@@ -371,3 +387,283 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
                     board_id=board.id, card_id=card.id, db=db, current_user=user
                 )
         self.assertEqual(ctx.exception.status_code, 409)
+
+
+class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
+    """Boards reach their owner, the users they are shared with, and those users' teams."""
+
+    def _board(self, owner_id):
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = owner_id
+        return board
+
+    async def test_owner_always_has_owner_permission(self):
+        user = _User()
+        board = self._board(user.id)
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_result_with(scalar=board)])
+
+        found, permission = await boards_api._get_board_for_user(db, board.id, user, write=True)
+
+        self.assertIs(found, board)
+        self.assertEqual(permission, "owner")
+        # The owner short-circuits: no share lookups at all.
+        self.assertEqual(db.execute.await_count, 1)
+
+    async def test_direct_share_grants_write(self):
+        user = _User()
+        board = self._board(uuid.uuid4())
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalars_list=["write"]),
+                _result_with(scalars_list=[]),
+            ]
+        )
+
+        _, permission = await boards_api._get_board_for_user(db, board.id, user, write=True)
+
+        self.assertEqual(permission, "write")
+
+    async def test_team_share_grants_read_and_blocks_writes(self):
+        user = _User()
+        board = self._board(uuid.uuid4())
+
+        def _db():
+            db = AsyncMock()
+            db.execute = AsyncMock(
+                side_effect=[
+                    _result_with(scalar=board),
+                    _result_with(scalars_list=[]),
+                    _result_with(scalars_list=["read"]),
+                ]
+            )
+            return db
+
+        _, permission = await boards_api._get_board_for_user(_db(), board.id, user, write=False)
+        self.assertEqual(permission, "read")
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api._get_board_for_user(_db(), board.id, user, write=True)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_unshared_board_is_not_found(self):
+        user = _User()
+        board = self._board(uuid.uuid4())
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalars_list=[]),
+                _result_with(scalars_list=[]),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api._get_board_for_user(db, board.id, user, write=False)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class TestCardAttachments(unittest.IsolatedAsyncioTestCase):
+    def _card(self, board, attachments=None):
+        card = MagicMock()
+        card.id = uuid.uuid4()
+        card.board_id = board.id
+        card.card_metadata = {"attachments": list(attachments)} if attachments else {}
+        return card
+
+    async def test_upload_appends_the_attachment_and_logs_it(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        card = self._card(board)
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute = AsyncMock(side_effect=[_result_with(scalar=board), _result_with(scalar=card)])
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), filename="brief.pdf", mime_type="application/pdf", size_bytes=12
+        )
+        upload = SimpleNamespace(filename="brief.pdf", content_type="application/pdf")
+
+        with (
+            patch.object(boards_api, "read_upload_file_limited", AsyncMock(return_value=b"pdf")),
+            patch.object(boards_api, "store_file", AsyncMock(return_value=stored)),
+            patch.object(
+                boards_api,
+                "create_access_token",
+                AsyncMock(return_value=SimpleNamespace(token="tok")),
+            ),
+            patch.object(boards_api, "build_public_base_url", MagicMock(return_value="http://x")),
+        ):
+            response = await boards_api.add_card_attachment(
+                board_id=board.id,
+                card_id=card.id,
+                request=MagicMock(),
+                file=upload,
+                db=db,
+                current_user=user,
+            )
+
+        self.assertEqual(response.name, "brief.pdf")
+        self.assertEqual(response.url, "http://x/api/files/dl/tok")
+        # The workflow payload reads attachments off the card metadata.
+        self.assertEqual(card.card_metadata["attachments"][0]["file_id"], str(stored.id))
+        activities = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "BoardCardActivity"
+        ]
+        self.assertEqual(len(activities), 1)
+
+    async def test_delete_removes_the_entry_and_the_file(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        file_id = uuid.uuid4()
+        card = self._card(board, [{"file_id": str(file_id), "name": "brief.pdf"}])
+
+        stored = SimpleNamespace(id=file_id, owner_id=board.owner_id)
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_result_with(scalar=board), _result_with(scalar=card)])
+        db.get = AsyncMock(return_value=stored)
+
+        with patch.object(boards_api, "delete_file", AsyncMock()) as delete:
+            await boards_api.delete_card_attachment(
+                board_id=board.id,
+                card_id=card.id,
+                file_id=file_id,
+                db=db,
+                current_user=user,
+            )
+
+        self.assertEqual(card.card_metadata["attachments"], [])
+        delete.assert_awaited_once()
+
+    async def test_delete_unknown_attachment_is_404(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        card = self._card(board)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_result_with(scalar=board), _result_with(scalar=card)])
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api.delete_card_attachment(
+                board_id=board.id,
+                card_id=card.id,
+                file_id=uuid.uuid4(),
+                db=db,
+                current_user=user,
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class TestDeleteCardActivity(unittest.IsolatedAsyncioTestCase):
+    async def test_deletes_an_activity_from_the_timeline(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        card = MagicMock()
+        card.id = uuid.uuid4()
+        card.board_id = board.id
+        activity = MagicMock()
+        activity.id = uuid.uuid4()
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=activity),
+            ]
+        )
+
+        await boards_api.delete_card_activity(
+            board_id=board.id,
+            card_id=card.id,
+            activity_id=activity.id,
+            db=db,
+            current_user=user,
+        )
+
+        db.delete.assert_awaited_once_with(activity)
+
+    async def test_unknown_activity_is_404(self):
+        user = _User()
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        board.owner_id = user.id
+        card = MagicMock()
+        card.id = uuid.uuid4()
+        card.board_id = board.id
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=None),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            await boards_api.delete_card_activity(
+                board_id=board.id,
+                card_id=card.id,
+                activity_id=uuid.uuid4(),
+                db=db,
+                current_user=user,
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class TestReorderColumns(unittest.IsolatedAsyncioTestCase):
+    """Column positions drive the planning gate, so they stay a dense 0..n-1 sequence."""
+
+    async def test_moving_a_column_renumbers_the_board(self):
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        columns = []
+        for position, name in enumerate(["Backlog", "Planning", "Development", "Done"]):
+            column = MagicMock()
+            column.id = uuid.uuid4()
+            column.name = name
+            column.position = position
+            columns.append(column)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_result_with(scalars_list=columns))
+
+        # Done (last) becomes the second column.
+        await boards_api._reorder_columns(db, board, columns[3], 1)
+
+        order = sorted(columns, key=lambda c: c.position)
+        self.assertEqual([c.name for c in order], ["Backlog", "Done", "Planning", "Development"])
+        self.assertEqual([c.position for c in order], [0, 1, 2, 3])
+
+    async def test_target_beyond_the_end_moves_the_column_last(self):
+        board = MagicMock()
+        board.id = uuid.uuid4()
+        columns = []
+        for position, name in enumerate(["A", "B", "C"]):
+            column = MagicMock()
+            column.id = uuid.uuid4()
+            column.name = name
+            column.position = position
+            columns.append(column)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_result_with(scalars_list=columns))
+
+        await boards_api._reorder_columns(db, board, columns[0], 99)
+
+        order = sorted(columns, key=lambda c: c.position)
+        self.assertEqual([c.name for c in order], ["B", "C", "A"])

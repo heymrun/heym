@@ -1,7 +1,13 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import type { BoardCard, BoardState, BoardSummary } from "@/types/board";
+import type {
+  BoardCard,
+  BoardCreatePayload,
+  BoardState,
+  BoardSummary,
+  BoardUpdatePayload,
+} from "@/types/board";
 import { boardApi } from "@/services/api";
 
 const POLL_INTERVAL_MS = 2500;
@@ -12,6 +18,15 @@ export const useBoardStore = defineStore("board", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  // The agentic model is mandatory: board actions stay disabled until it is chosen.
+  const mapperConfigured = computed<boolean>(() =>
+    Boolean(activeBoard.value?.mapper_credential_id && activeBoard.value?.mapper_model),
+  );
+  // A board shared read-only can be viewed but not changed; only its owner can open the
+  // board settings (name, model, sharing) or delete it.
+  const canWrite = computed<boolean>(() => activeBoard.value?.permission !== "read");
+  const isOwner = computed<boolean>(() => activeBoard.value?.permission === "owner");
 
   const cardsByColumn = computed<Record<string, BoardCard[]>>(() => {
     const grouped: Record<string, BoardCard[]> = {};
@@ -79,10 +94,16 @@ export const useBoardStore = defineStore("board", () => {
     }
   }
 
-  async function createBoard(name: string, description?: string): Promise<BoardSummary> {
-    const board = await boardApi.create({ name, description: description ?? null });
+  async function createBoard(payload: BoardCreatePayload): Promise<BoardSummary> {
+    const board = await boardApi.create(payload);
     await fetchBoards();
     return board;
+  }
+
+  async function updateBoard(boardId: string, payload: BoardUpdatePayload): Promise<void> {
+    await boardApi.update(boardId, payload);
+    await fetchBoards();
+    if (activeBoard.value?.id === boardId) await refreshActiveBoard();
   }
 
   async function deleteBoard(boardId: string): Promise<void> {
@@ -92,6 +113,13 @@ export const useBoardStore = defineStore("board", () => {
       stopPolling();
     }
     await fetchBoards();
+  }
+
+  async function moveColumn(columnId: string, toIndex: number): Promise<void> {
+    const board = activeBoard.value;
+    if (!board) return;
+    await boardApi.updateColumn(board.id, columnId, { position: toIndex });
+    await refreshActiveBoard();
   }
 
   async function createCard(title: string, columnId?: string): Promise<void> {
@@ -149,11 +177,16 @@ export const useBoardStore = defineStore("board", () => {
     loading,
     error,
     cardsByColumn,
+    mapperConfigured,
+    canWrite,
+    isOwner,
     fetchBoards,
     openBoard,
     refreshActiveBoard,
     createBoard,
+    updateBoard,
     deleteBoard,
+    moveColumn,
     createCard,
     moveCard,
     runFollowUp,

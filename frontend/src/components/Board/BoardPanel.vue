@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Plus, SquareKanban, Trash2 } from "lucide-vue-next";
+import { Plus, Settings, SquareKanban, Trash2 } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -11,12 +11,13 @@ import BoardCanvas from "./BoardCanvas.vue";
 import BoardCardDetailDialog from "./BoardCardDetailDialog.vue";
 import BoardColumnSettingsDialog from "./BoardColumnSettingsDialog.vue";
 import BoardCreateDialog from "./BoardCreateDialog.vue";
-import BoardMapperControls from "./BoardMapperControls.vue";
+import BoardEditDialog from "./BoardEditDialog.vue";
 
 const boardStore = useBoardStore();
 const route = useRoute();
 const router = useRouter();
 const createOpen = ref(false);
+const editOpen = ref(false);
 const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
 
@@ -35,6 +36,7 @@ let removeOverlayDismiss: (() => void) | null = null;
 onMounted(async () => {
   removeOverlayDismiss = onDismissOverlays(() => {
     createOpen.value = false;
+    editOpen.value = false;
     openCardId.value = null;
     settingsColumnId.value = null;
   });
@@ -86,18 +88,29 @@ async function onBoardCreated(boardId: string): Promise<void> {
   >
     <!-- pt-0 so the title sits at the same height as the Workflows tab heading. -->
     <div class="flex items-center gap-3 border-b border-border/60 pb-2.5 pt-0">
-      <h2 class="shrink-0 text-xl md:text-2xl font-bold tracking-tight">
-        Board
-      </h2>
-
-      <BoardMapperControls v-if="boardStore.activeBoard" />
+      <div class="flex min-w-0 shrink flex-col">
+        <h2 class="text-xl md:text-2xl font-bold tracking-tight">
+          Board
+        </h2>
+        <p
+          v-if="boardStore.activeBoard?.description"
+          class="truncate text-xs text-muted-foreground"
+          :title="boardStore.activeBoard.description"
+          data-testid="board-description"
+        >
+          {{ boardStore.activeBoard.description }}
+        </p>
+      </div>
 
       <!-- SearchableSelect's root is w-full, so it needs a fixed-width wrapper. -->
       <div
         v-if="boardStore.boards.length"
         class="ml-auto w-56 shrink-0"
       >
+        <!-- Keyed on the name: the combobox caches its display value, so a rename only
+             shows up if the select is rebuilt. -->
         <SearchableSelect
+          :key="boardStore.activeBoard?.name ?? ''"
           :model-value="boardStore.activeBoard?.id ?? ''"
           :options="boardOptions"
           placeholder="Select board"
@@ -116,7 +129,19 @@ async function onBoardCreated(boardId: string): Promise<void> {
         <Plus class="mr-1 h-4 w-4" /> New board
       </Button>
       <Button
-        v-if="boardStore.activeBoard"
+        v-if="boardStore.isOwner"
+        size="sm"
+        variant="ghost"
+        class="shrink-0"
+        aria-label="Board settings"
+        title="Board settings"
+        data-testid="board-edit"
+        @click="editOpen = true"
+      >
+        <Settings class="h-4 w-4 text-muted-foreground" />
+      </Button>
+      <Button
+        v-if="boardStore.isOwner"
         size="sm"
         variant="ghost"
         class="shrink-0"
@@ -154,6 +179,10 @@ async function onBoardCreated(boardId: string): Promise<void> {
       :open="createOpen"
       @close="createOpen = false"
       @created="onBoardCreated"
+    />
+    <BoardEditDialog
+      :open="editOpen"
+      @close="editOpen = false"
     />
     <BoardCardDetailDialog
       :open="openCardId !== null"

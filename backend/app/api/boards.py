@@ -1,9 +1,17 @@
-"""Agentic kanban board API: boards, columns, cards, moves, runs, comments."""
+"""Agentic kanban board API: boards, columns, cards, moves, runs, comments, sharing."""
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -14,7 +22,12 @@ from app.db.models import (
     BoardCardRun,
     BoardColumn,
     BoardColumnWorkflow,
+    BoardShare,
+    BoardTeamShare,
     Credential,
+    GeneratedFile,
+    Team,
+    TeamMember,
     User,
     Workflow,
 )
@@ -24,10 +37,15 @@ from app.models.board_schemas import (
     BoardColumnResponse,
     BoardColumnWorkflowResponse,
     BoardCreateRequest,
+    BoardShareRequest,
+    BoardShareResponse,
     BoardStateResponse,
     BoardSummaryResponse,
+    BoardTeamShareRequest,
+    BoardTeamShareResponse,
     BoardUpdateRequest,
     CardActivityResponse,
+    CardAttachmentResponse,
     CardCreateRequest,
     CardDetailResponse,
     CardMoveRequest,
@@ -38,20 +56,76 @@ from app.models.board_schemas import (
     CommentCreateRequest,
 )
 from app.services import board_run_service
+from app.services.file_storage import (
+    build_download_url,
+    create_access_token,
+    delete_file,
+    store_file,
+)
+from app.services.hitl_service import build_public_base_url
+from app.services.upload_limits import read_upload_file_limited
 
 router = APIRouter()
 
-DEFAULT_COLUMNS = ["Backlog", "Planning", "To Do", "Waiting", "Development", "Done"]
+DEFAULT_COLUMNS = ["Backlog", "Planning", "Development", "Done"]
 ACTIVE_RUN_STATUSES = ("running", "pending")
 MAX_BOARD_CARDS = 500
 
 
 async def _get_owned_board(db: AsyncSession, board_id: uuid.UUID, user: User) -> Board:
+    """Owner-only access: board settings, sharing and deletion."""
     result = await db.execute(select(Board).where(Board.id == board_id, Board.owner_id == user.id))
     board = result.scalar_one_or_none()
     if board is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
     return board
+
+
+async def _board_permission(db: AsyncSession, board: Board, user: User) -> str | None:
+    """The caller's access to a board: "owner", "write", "read", or None when it is not shared."""
+    if board.owner_id == user.id:
+        return "owner"
+    permissions = list(
+        (
+            await db.execute(
+                select(BoardShare.permission).where(
+                    BoardShare.board_id == board.id, BoardShare.user_id == user.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    permissions += list(
+        (
+            await db.execute(
+                select(BoardTeamShare.permission)
+                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
+                .where(BoardTeamShare.board_id == board.id, TeamMember.user_id == user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not permissions:
+        return None
+    # The most permissive share wins.
+    return "write" if "write" in permissions else "read"
+
+
+async def _get_board_for_user(
+    db: AsyncSession, board_id: uuid.UUID, user: User, *, write: bool
+) -> tuple[Board, str]:
+    """A board the caller owns or has been given access to (directly or through a team)."""
+    board = (await db.execute(select(Board).where(Board.id == board_id))).scalar_one_or_none()
+    permission = await _board_permission(db, board, user) if board is not None else None
+    if board is None or permission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+    if write and permission == "read":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Read-only access to this board"
+        )
+    return board, permission
 
 
 async def _get_board_column(db: AsyncSession, board: Board, column_id: uuid.UUID) -> BoardColumn:
@@ -72,6 +146,32 @@ async def _get_board_card(db: AsyncSession, board: Board, card_id: uuid.UUID) ->
     if card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
     return card
+
+
+async def _reorder_columns(
+    db: AsyncSession, board: Board, column: BoardColumn, target: int
+) -> None:
+    """Move a column to `target` and renumber the board's columns 0..n-1.
+
+    Positions drive the planning gate and the auto-advance cascade, so they must stay a
+    dense, ordered sequence — setting one column's position on its own would collide.
+    """
+    columns = list(
+        (
+            await db.execute(
+                select(BoardColumn)
+                .where(BoardColumn.board_id == board.id)
+                .order_by(BoardColumn.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ordered = [c for c in columns if c.id != column.id]
+    index = max(0, min(target, len(ordered)))
+    ordered.insert(index, column)
+    for position, item in enumerate(ordered):
+        item.position = position
 
 
 async def _reindex_cards(db: AsyncSession, column_id: uuid.UUID) -> None:
@@ -142,7 +242,12 @@ async def _mapper_credential_name(db: AsyncSession, board: Board) -> str | None:
 
 
 def _board_summary(
-    board: Board, *, column_count: int, card_count: int, cred_name: str | None
+    board: Board,
+    *,
+    column_count: int,
+    card_count: int,
+    cred_name: str | None,
+    permission: str = "owner",
 ) -> BoardSummaryResponse:
     return BoardSummaryResponse(
         id=board.id,
@@ -153,6 +258,7 @@ def _board_summary(
         mapper_model=board.mapper_model,
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
+        permission=permission,
         updated_at=board.updated_at,
     )
 
@@ -162,8 +268,29 @@ async def list_boards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[BoardSummaryResponse]:
+    shared_board_ids = set(
+        (await db.execute(select(BoardShare.board_id).where(BoardShare.user_id == current_user.id)))
+        .scalars()
+        .all()
+    ) | set(
+        (
+            await db.execute(
+                select(BoardTeamShare.board_id)
+                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
+                .where(TeamMember.user_id == current_user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     result = await db.execute(
-        select(Board).where(Board.owner_id == current_user.id).order_by(Board.created_at)
+        select(Board)
+        .where(
+            or_(Board.owner_id == current_user.id, Board.id.in_(shared_board_ids))
+            if shared_board_ids
+            else Board.owner_id == current_user.id
+        )
+        .order_by(Board.created_at)
     )
     boards = result.scalars().all()
     summaries: list[BoardSummaryResponse] = []
@@ -177,9 +304,14 @@ async def list_boards(
             await db.execute(select(func.count(BoardCard.id)).where(BoardCard.board_id == board.id))
         ).scalar() or 0
         cred_name = await _mapper_credential_name(db, board)
+        permission = await _board_permission(db, board, current_user) or "read"
         summaries.append(
             _board_summary(
-                board, column_count=column_count, card_count=card_count, cred_name=cred_name
+                board,
+                column_count=column_count,
+                card_count=card_count,
+                cred_name=cred_name,
+                permission=permission,
             )
         )
     return summaries
@@ -218,7 +350,7 @@ async def get_board_state(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardStateResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, permission = await _get_board_for_user(db, board_id, current_user, write=False)
     columns_result = await db.execute(
         select(BoardColumn).where(BoardColumn.board_id == board.id).order_by(BoardColumn.position)
     )
@@ -239,6 +371,7 @@ async def get_board_state(
         mapper_model=board.mapper_model,
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
+        permission=permission,
         columns=[
             BoardColumnResponse(
                 id=column.id,
@@ -303,7 +436,7 @@ async def create_column(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardColumnResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     count = (
         await db.execute(select(func.count(BoardColumn.id)).where(BoardColumn.board_id == board.id))
     ).scalar() or 0
@@ -332,7 +465,7 @@ async def update_column(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardColumnResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     column = await _get_board_column(db, board, column_id)
     fields_set = request.model_fields_set
     if request.name is not None:
@@ -340,7 +473,7 @@ async def update_column(
     if request.color is not None:
         column.color = request.color
     if request.position is not None:
-        column.position = request.position
+        await _reorder_columns(db, board, column, request.position)
     if "ai_instructions" in fields_set:
         column.ai_instructions = request.ai_instructions
     if request.workflow_ids is not None:
@@ -398,7 +531,7 @@ async def delete_column(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     column = await _get_board_column(db, board, column_id)
     card_count = (
         await db.execute(select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id))
@@ -421,7 +554,7 @@ async def create_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     if request.column_id is not None:
         column = await _get_board_column(db, board, request.column_id)
     else:
@@ -477,7 +610,7 @@ async def get_card_detail(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CardDetailResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=False)
     card = await _get_board_card(db, board, card_id)
     activities_result = await db.execute(
         select(BoardCardActivity)
@@ -536,7 +669,7 @@ async def update_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     if request.title is not None:
         card.title = request.title
@@ -559,7 +692,7 @@ async def delete_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     await db.delete(card)
     await db.commit()
@@ -577,7 +710,7 @@ async def create_card_comment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CardActivityResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     activity = BoardCardActivity(
         card_id=card.id,
@@ -589,6 +722,12 @@ async def create_card_comment(
     db.add(activity)
     await db.commit()
     await db.refresh(activity)
+
+    # Answering a card that is waiting at the planning gate re-runs its column chain with
+    # the answer, which releases the gate and lets the card flow on.
+    column = await _get_board_column(db, board, card.column_id)
+    await board_run_service.answer_card_comment(db, card=card, column=column, board=board)
+
     return CardActivityResponse(
         id=activity.id,
         kind=activity.kind,
@@ -601,6 +740,33 @@ async def create_card_comment(
     )
 
 
+@router.delete(
+    "/{board_id}/cards/{card_id}/activities/{activity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_card_activity(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    activity_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Remove one entry from a card's timeline (it also leaves the next run's context)."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    card = await _get_board_card(db, board, card_id)
+    activity = (
+        await db.execute(
+            select(BoardCardActivity).where(
+                BoardCardActivity.id == activity_id, BoardCardActivity.card_id == card.id
+            )
+        )
+    ).scalar_one_or_none()
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    await db.delete(activity)
+    await db.commit()
+
+
 @router.post("/{board_id}/cards/{card_id}/move", response_model=BoardCardResponse)
 async def move_card(
     board_id: uuid.UUID,
@@ -609,7 +775,7 @@ async def move_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     target = await _get_board_column(db, board, request.to_column_id)
     column_changed = card.column_id != target.id
@@ -660,7 +826,7 @@ async def run_card_chain(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board = await _get_owned_board(db, board_id, current_user)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     column = await _get_board_column(db, board, card.column_id)
     enqueued = await board_run_service.enqueue_card_chain(
@@ -673,3 +839,274 @@ async def run_card_chain(
         )
     await db.refresh(card)
     return _card_response(card)
+
+
+# ── Card attachments ─────────────────────────────────────────────────────────
+
+
+def _card_attachments(card: BoardCard) -> list[dict]:
+    metadata = card.card_metadata or {}
+    attachments = metadata.get("attachments")
+    return list(attachments) if isinstance(attachments, list) else []
+
+
+def _set_card_attachments(card: BoardCard, attachments: list[dict]) -> None:
+    # The JSON column is only persisted when it is reassigned, not mutated in place.
+    card.card_metadata = {**(card.card_metadata or {}), "attachments": attachments}
+
+
+@router.post(
+    "/{board_id}/cards/{card_id}/attachments",
+    response_model=CardAttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_card_attachment(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CardAttachmentResponse:
+    """Attach a file to a card. Workflows read it from `$input.card.metadata.attachments`."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    card = await _get_board_card(db, board, card_id)
+    file_bytes = await read_upload_file_limited(file)
+    try:
+        stored = await store_file(
+            db,
+            owner_id=board.owner_id,
+            file_bytes=file_bytes,
+            filename=file.filename or "attachment",
+            mime_type=file.content_type,
+            source_node_label="board attachment",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    token = await create_access_token(db, file_id=stored.id, created_by_id=current_user.id)
+    attachment = {
+        "file_id": str(stored.id),
+        "name": stored.filename,
+        "url": build_download_url(build_public_base_url(request), token.token),
+        "mime_type": stored.mime_type,
+        "size": stored.size_bytes,
+    }
+    _set_card_attachments(card, [*_card_attachments(card), attachment])
+    db.add(
+        BoardCardActivity(
+            card_id=card.id,
+            kind="event",
+            author_type="user",
+            content=f"Attached {stored.filename}",
+            data={"attachment": attachment},
+        )
+    )
+    await db.commit()
+    return CardAttachmentResponse(**attachment)
+
+
+@router.delete(
+    "/{board_id}/cards/{card_id}/attachments/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_card_attachment(
+    board_id: uuid.UUID,
+    card_id: uuid.UUID,
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    card = await _get_board_card(db, board, card_id)
+    attachments = _card_attachments(card)
+    remaining = [a for a in attachments if str(a.get("file_id")) != str(file_id)]
+    if len(remaining) == len(attachments):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    _set_card_attachments(card, remaining)
+    stored = await db.get(GeneratedFile, file_id)
+    if stored is not None and stored.owner_id == board.owner_id:
+        await delete_file(db, stored)
+    await db.commit()
+
+
+# ── Sharing ──────────────────────────────────────────────────────────────────
+
+
+def _validate_permission(permission: str) -> str:
+    if permission not in ("read", "write"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Permission must be read or write"
+        )
+    return permission
+
+
+@router.get("/{board_id}/shares", response_model=list[BoardShareResponse])
+async def list_board_shares(
+    board_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[BoardShareResponse]:
+    board = await _get_owned_board(db, board_id, current_user)
+    result = await db.execute(
+        select(BoardShare, User)
+        .join(User, BoardShare.user_id == User.id)
+        .where(BoardShare.board_id == board.id)
+    )
+    return [
+        BoardShareResponse(
+            id=share.id,
+            user_id=user.id,
+            email=user.email,
+            name=user.name,
+            permission=share.permission,
+            shared_at=share.created_at,
+        )
+        for share, user in result.all()
+    ]
+
+
+@router.post("/{board_id}/shares", response_model=BoardShareResponse)
+async def create_board_share(
+    board_id: uuid.UUID,
+    request: BoardShareRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardShareResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    permission = _validate_permission(request.permission)
+    target = (
+        await db.execute(select(User).where(User.email == request.email))
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot share with yourself"
+        )
+    share = (
+        await db.execute(
+            select(BoardShare).where(
+                BoardShare.board_id == board.id, BoardShare.user_id == target.id
+            )
+        )
+    ).scalar_one_or_none()
+    if share is None:
+        share = BoardShare(board_id=board.id, user_id=target.id, permission=permission)
+        db.add(share)
+    else:
+        share.permission = permission
+    await db.commit()
+    await db.refresh(share)
+    return BoardShareResponse(
+        id=share.id,
+        user_id=target.id,
+        email=target.email,
+        name=target.name,
+        permission=share.permission,
+        shared_at=share.created_at,
+    )
+
+
+@router.delete("/{board_id}/shares/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_board_share(
+    board_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    board = await _get_owned_board(db, board_id, current_user)
+    share = (
+        await db.execute(
+            select(BoardShare).where(BoardShare.board_id == board.id, BoardShare.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if share is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    await db.delete(share)
+    await db.commit()
+
+
+@router.get("/{board_id}/team-shares", response_model=list[BoardTeamShareResponse])
+async def list_board_team_shares(
+    board_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[BoardTeamShareResponse]:
+    board = await _get_owned_board(db, board_id, current_user)
+    result = await db.execute(
+        select(BoardTeamShare, Team)
+        .join(Team, BoardTeamShare.team_id == Team.id)
+        .where(BoardTeamShare.board_id == board.id)
+    )
+    return [
+        BoardTeamShareResponse(
+            id=share.id,
+            team_id=team.id,
+            team_name=team.name,
+            permission=share.permission,
+            shared_at=share.created_at,
+        )
+        for share, team in result.all()
+    ]
+
+
+@router.post("/{board_id}/team-shares", response_model=BoardTeamShareResponse)
+async def create_board_team_share(
+    board_id: uuid.UUID,
+    request: BoardTeamShareRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardTeamShareResponse:
+    board = await _get_owned_board(db, board_id, current_user)
+    permission = _validate_permission(request.permission)
+    team = (
+        await db.execute(
+            select(Team)
+            .join(TeamMember, TeamMember.team_id == Team.id)
+            .where(Team.id == request.team_id, TeamMember.user_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+    if team is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    share = (
+        await db.execute(
+            select(BoardTeamShare).where(
+                BoardTeamShare.board_id == board.id, BoardTeamShare.team_id == team.id
+            )
+        )
+    ).scalar_one_or_none()
+    if share is None:
+        share = BoardTeamShare(board_id=board.id, team_id=team.id, permission=permission)
+        db.add(share)
+    else:
+        share.permission = permission
+    await db.commit()
+    await db.refresh(share)
+    return BoardTeamShareResponse(
+        id=share.id,
+        team_id=team.id,
+        team_name=team.name,
+        permission=share.permission,
+        shared_at=share.created_at,
+    )
+
+
+@router.delete("/{board_id}/team-shares/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_board_team_share(
+    board_id: uuid.UUID,
+    team_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    board = await _get_owned_board(db, board_id, current_user)
+    share = (
+        await db.execute(
+            select(BoardTeamShare).where(
+                BoardTeamShare.board_id == board.id, BoardTeamShare.team_id == team_id
+            )
+        )
+    ).scalar_one_or_none()
+    if share is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    await db.delete(share)
+    await db.commit()

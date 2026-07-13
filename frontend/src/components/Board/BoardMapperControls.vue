@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { Sparkles } from "lucide-vue-next";
+import { computed, onMounted, ref, watch } from "vue";
 
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import type { CredentialType } from "@/types/credential";
-import { boardApi, credentialsApi } from "@/services/api";
-import { useBoardStore } from "@/stores/board";
+import { credentialsApi } from "@/services/api";
 
 // The mapper runs an LLM chat completion, so only chat-capable providers apply.
 const MAPPER_CREDENTIAL_TYPES: CredentialType[] = ["openai", "google", "custom"];
 
-const boardStore = useBoardStore();
-const credentialId = ref("");
-const model = ref("");
+const props = defineProps<{ credentialId: string; model: string }>();
+const emit = defineEmits<{
+  (e: "update:credentialId", value: string): void;
+  (e: "update:model", value: string): void;
+}>();
+
 const credentials = ref<{ id: string; name: string }[]>([]);
 const models = ref<{ id: string; name: string }[]>([]);
 const loadingModels = ref(false);
@@ -21,7 +22,7 @@ const credentialOptions = computed(() =>
   credentials.value.map((c) => ({ value: c.id, label: c.name })),
 );
 const modelOptions = computed(() => models.value.map((m) => ({ value: m.id, label: m.name })));
-const configured = computed(() => Boolean(credentialId.value && model.value));
+const configured = computed(() => Boolean(props.credentialId && props.model));
 
 async function loadModels(credId: string): Promise<void> {
   loadingModels.value = true;
@@ -35,80 +36,62 @@ async function loadModels(credId: string): Promise<void> {
   }
 }
 
+onMounted(async () => {
+  const creds = await credentialsApi.list();
+  credentials.value = creds
+    .filter((c) => MAPPER_CREDENTIAL_TYPES.includes(c.type))
+    .map((c) => ({ id: c.id, name: c.name }));
+});
+
 watch(
-  () => boardStore.activeBoard?.id,
-  async (boardId) => {
-    if (!boardId || !boardStore.activeBoard) return;
-    credentialId.value = boardStore.activeBoard.mapper_credential_id ?? "";
-    model.value = boardStore.activeBoard.mapper_model ?? "";
-    if (!credentials.value.length) {
-      const creds = await credentialsApi.list();
-      credentials.value = creds
-        .filter((c) => MAPPER_CREDENTIAL_TYPES.includes(c.type))
-        .map((c) => ({ id: c.id, name: c.name }));
-    }
+  () => props.credentialId,
+  async (credId) => {
     models.value = [];
-    if (credentialId.value) await loadModels(credentialId.value);
+    if (credId) await loadModels(credId);
   },
   { immediate: true },
 );
 
-async function persist(): Promise<void> {
-  const board = boardStore.activeBoard;
-  if (!board) return;
-  await boardApi.update(board.id, {
-    mapper_credential_id: credentialId.value || null,
-    mapper_model: model.value || null,
-  });
-  await boardStore.refreshActiveBoard();
-  await boardStore.fetchBoards();
+function onCredentialChange(value: string | undefined): void {
+  emit("update:credentialId", value ?? "");
+  emit("update:model", "");
 }
 
-async function onCredentialChange(value: string | undefined): Promise<void> {
-  credentialId.value = value ?? "";
-  model.value = "";
-  models.value = [];
-  if (credentialId.value) await loadModels(credentialId.value);
-  await persist();
-}
-
-async function onModelChange(value: string | undefined): Promise<void> {
-  model.value = value ?? "";
-  await persist();
+function onModelChange(value: string | undefined): void {
+  emit("update:model", value ?? "");
 }
 </script>
 
 <template>
-  <!-- Inline in the board header. Each select is wrapped in a fixed-width box because
-       SearchableSelect's root is w-full and would otherwise take a whole row. -->
-  <div class="flex min-w-0 items-center gap-2">
-    <span
-      class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium"
-      :class="configured ? 'text-muted-foreground' : 'text-amber-500'"
-      :title="configured ? 'AI mapper' : 'Select a credential and model to enable AI mapping'"
-    >
-      <Sparkles class="h-3.5 w-3.5 text-primary" /> AI Mapper
-    </span>
-    <div class="w-44 shrink-0">
-      <SearchableSelect
-        :model-value="credentialId"
-        :options="credentialOptions"
-        placeholder="Credential (required)"
-        search-placeholder="Search credentials…"
-        aria-label="Mapper credential"
-        @update:model-value="onCredentialChange"
-      />
+  <!-- The model is mandatory: without it the board's actions stay disabled. -->
+  <div class="flex flex-col gap-2">
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-semibold uppercase text-muted-foreground">
+        Agentic Kanban Model
+      </span>
+      <span
+        v-if="!configured"
+        class="text-xs font-medium text-amber-500"
+      >
+        Required
+      </span>
     </div>
-    <div class="w-44 shrink-0">
-      <SearchableSelect
-        :model-value="model"
-        :options="modelOptions"
-        placeholder="Model (required)"
-        search-placeholder="Search models…"
-        :disabled="!credentialId || loadingModels"
-        aria-label="Mapper model"
-        @update:model-value="onModelChange"
-      />
-    </div>
+    <SearchableSelect
+      :model-value="credentialId"
+      :options="credentialOptions"
+      placeholder="Credential"
+      search-placeholder="Search credentials…"
+      aria-label="Agentic Kanban Model credential"
+      @update:model-value="onCredentialChange"
+    />
+    <SearchableSelect
+      :model-value="model"
+      :options="modelOptions"
+      placeholder="Model"
+      search-placeholder="Search models…"
+      :disabled="!credentialId || loadingModels"
+      aria-label="Agentic Kanban Model model"
+      @update:model-value="onModelChange"
+    />
   </div>
 </template>

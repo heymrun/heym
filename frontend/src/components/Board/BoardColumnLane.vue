@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Plus, Settings2, Workflow } from "lucide-vue-next";
+import { GripVertical, Plus, Settings2, Workflow } from "lucide-vue-next";
 
 import type { BoardCard, BoardColumn } from "@/types/board";
 import { useBoardStore } from "@/stores/board";
 import BoardCardItem from "./BoardCardItem.vue";
 
-const props = defineProps<{ column: BoardColumn }>();
+const COLUMN_DRAG_TYPE = "text/board-column";
+
+const props = defineProps<{ column: BoardColumn; index: number }>();
 const emit = defineEmits<{
   (e: "openCard", cardId: string): void;
   (e: "openSettings", columnId: string): void;
@@ -14,10 +16,15 @@ const emit = defineEmits<{
 
 const boardStore = useBoardStore();
 const dragOver = ref(false);
+const columnDragOver = ref(false);
 const newCardTitle = ref("");
 const laneBody = ref<HTMLElement | null>(null);
 
 const cards = computed<BoardCard[]>(() => boardStore.cardsByColumn[props.column.id] ?? []);
+// The Agentic Kanban Model is mandatory for anything that runs a workflow (cards, moves).
+const canAct = computed<boolean>(() => boardStore.mapperConfigured && boardStore.canWrite);
+// Reordering columns runs nothing, so it only needs write access to the board.
+const canReorder = computed<boolean>(() => boardStore.canWrite);
 
 function dropIndexFromPointer(event: DragEvent): number {
   const container = laneBody.value;
@@ -30,20 +37,54 @@ function dropIndexFromPointer(event: DragEvent): number {
   return cardEls.length;
 }
 
+// A lane accepts two kinds of drag: a card (dropped into this column) and another column
+// (dropped at this column's place). Only the data *type* is readable during dragover.
+function isColumnDrag(event: DragEvent): boolean {
+  return event.dataTransfer?.types.includes(COLUMN_DRAG_TYPE) ?? false;
+}
+
+function onColumnDragStart(event: DragEvent): void {
+  if (!canReorder.value) return;
+  event.dataTransfer?.setData(COLUMN_DRAG_TYPE, props.column.id);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
 function onDragOver(event: DragEvent): void {
+  if (isColumnDrag(event)) {
+    if (!canReorder.value) return;
+    event.preventDefault();
+    columnDragOver.value = true;
+    return;
+  }
+  if (!canAct.value) return;
   event.preventDefault();
   dragOver.value = true;
+}
+
+function onDragLeave(): void {
+  dragOver.value = false;
+  columnDragOver.value = false;
 }
 
 function onDrop(event: DragEvent): void {
   event.preventDefault();
   dragOver.value = false;
+  columnDragOver.value = false;
+  const columnId = event.dataTransfer?.getData(COLUMN_DRAG_TYPE);
+  if (columnId) {
+    if (canReorder.value && columnId !== props.column.id) {
+      void boardStore.moveColumn(columnId, props.index);
+    }
+    return;
+  }
+  if (!canAct.value) return;
   const cardId = event.dataTransfer?.getData("text/board-card");
   if (!cardId) return;
   void boardStore.moveCard(cardId, props.column.id, dropIndexFromPointer(event));
 }
 
 async function addCard(): Promise<void> {
+  if (!canAct.value) return;
   const title = newCardTitle.value.trim();
   if (!title) return;
   newCardTitle.value = "";
@@ -60,13 +101,26 @@ async function deleteCard(cardId: string): Promise<void> {
 <template>
   <div
     class="flex w-72 shrink-0 flex-col rounded-xl border border-border/60 bg-muted/30"
-    :class="dragOver ? 'ring-2 ring-primary/50' : ''"
+    :class="[
+      dragOver ? 'ring-2 ring-primary/50' : '',
+      columnDragOver ? 'ring-2 ring-primary' : '',
+    ]"
     :data-testid="`board-column-${column.name}`"
     @dragover="onDragOver"
-    @dragleave="dragOver = false"
+    @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <div class="flex items-center gap-2 px-3 py-2.5">
+    <!-- The header is the column's drag handle; the body still takes card drops. -->
+    <div
+      class="group/header flex items-center gap-2 px-3 py-2.5"
+      :class="canReorder ? 'cursor-grab active:cursor-grabbing' : ''"
+      :draggable="canReorder"
+      :data-testid="`board-column-handle-${column.name}`"
+      @dragstart="onColumnDragStart"
+    >
+      <GripVertical
+        class="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100"
+      />
       <span
         class="h-2.5 w-2.5 rounded-full"
         :style="{ backgroundColor: column.color ?? 'var(--muted-foreground)' }"
@@ -95,8 +149,10 @@ async function deleteCard(cardId: string): Promise<void> {
       class="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2"
     >
       <div
-        v-for="card in cards"
+        v-for="(card, cardIndex) in cards"
         :key="card.id"
+        class="board-enter"
+        :style="{ animationDelay: `${cardIndex * 45}ms` }"
         data-board-card
       >
         <BoardCardItem
@@ -112,10 +168,30 @@ async function deleteCard(cardId: string): Promise<void> {
       <input
         v-model="newCardTitle"
         type="text"
-        placeholder="Add a card"
-        class="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        :disabled="!canAct"
+        :placeholder="canAct ? 'Add a card' : 'Set the Agentic Kanban Model in board settings first'"
+        :title="canAct ? '' : 'Pick a credential and model above to use the board'"
+        class="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         @keydown.enter="addCard"
       >
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Runs once when a lane/card first mounts (board open or switch), not on poll updates. */
+.board-enter {
+  animation: board-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes board-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+</style>

@@ -121,10 +121,13 @@ import type {
   BoardCard,
   BoardColumn,
   BoardCreatePayload,
+  BoardShare,
+  BoardTeamShare,
   BoardUpdatePayload,
   BoardState,
   BoardSummary,
   CardActivity,
+  CardAttachment,
   CardCreatePayload,
   CardDetail,
   CardUpdatePayload,
@@ -1554,6 +1557,70 @@ export const boardApi = {
       { content },
     );
     return response.data;
+  },
+  removeActivity: async (
+    boardId: string,
+    cardId: string,
+    activityId: string,
+  ): Promise<void> => {
+    await api.delete(`/boards/${boardId}/cards/${cardId}/activities/${activityId}`);
+  },
+  addAttachment: async (
+    boardId: string,
+    cardId: string,
+    file: File,
+  ): Promise<CardAttachment> => {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await api.post<CardAttachment>(
+      `/boards/${boardId}/cards/${cardId}/attachments`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return response.data;
+  },
+  removeAttachment: async (
+    boardId: string,
+    cardId: string,
+    fileId: string,
+  ): Promise<void> => {
+    await api.delete(`/boards/${boardId}/cards/${cardId}/attachments/${fileId}`);
+  },
+  listShares: async (boardId: string): Promise<BoardShare[]> => {
+    const response = await api.get<BoardShare[]>(`/boards/${boardId}/shares`);
+    return response.data;
+  },
+  addShare: async (
+    boardId: string,
+    email: string,
+    permission: "read" | "write",
+  ): Promise<BoardShare> => {
+    const response = await api.post<BoardShare>(`/boards/${boardId}/shares`, {
+      email,
+      permission,
+    });
+    return response.data;
+  },
+  removeShare: async (boardId: string, userId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/shares/${userId}`);
+  },
+  listTeamShares: async (boardId: string): Promise<BoardTeamShare[]> => {
+    const response = await api.get<BoardTeamShare[]>(`/boards/${boardId}/team-shares`);
+    return response.data;
+  },
+  addTeamShare: async (
+    boardId: string,
+    teamId: string,
+    permission: "read" | "write",
+  ): Promise<BoardTeamShare> => {
+    const response = await api.post<BoardTeamShare>(`/boards/${boardId}/team-shares`, {
+      team_id: teamId,
+      permission,
+    });
+    return response.data;
+  },
+  removeTeamShare: async (boardId: string, teamId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/team-shares/${teamId}`);
   },
 };
 

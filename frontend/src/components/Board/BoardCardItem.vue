@@ -3,6 +3,11 @@ import { computed } from "vue";
 import { Loader2, CheckCircle2, Copy, XCircle, PauseCircle, Trash2 } from "lucide-vue-next";
 
 import type { BoardCard } from "@/types/board";
+import { useBoardStore } from "@/stores/board";
+
+const boardStore = useBoardStore();
+// No board actions until the Agentic Kanban Model is selected.
+const canAct = computed<boolean>(() => boardStore.mapperConfigured && boardStore.canWrite);
 
 const props = defineProps<{ card: BoardCard }>();
 const emit = defineEmits<{
@@ -36,7 +41,7 @@ function onDragStart(event: DragEvent): void {
   <div
     class="group cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors hover:border-primary/60"
     :class="statusClasses"
-    draggable="true"
+    :draggable="canAct"
     :data-testid="`board-card-${card.id}`"
     @dragstart="onDragStart"
     @click="emit('open', card.id)"

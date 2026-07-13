@@ -25,7 +25,15 @@ from app.db.models import (
     Workflow,
 )
 from app.db.session import async_session_maker
-from app.services.board_mapper_service import board_mapper_is_configured, build_workflow_inputs
+from app.services.board_mapper_service import (
+    board_mapper_is_configured,
+    build_workflow_inputs,
+    humanize_output,
+)
+from app.services.codex_followup_service import (
+    is_codex_pending_execution,
+    persist_pending_codex_followup_execution,
+)
 from app.services.execution_cancellation import clear_execution, register_execution
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
@@ -36,6 +44,11 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_ENTRIES = 200
 ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
+
+# Cards only auto-advance once they are past the planning gate. Index 0 (Backlog) and
+# index 1 (Planning) run their chain but wait there for a human answer; from index 2 on
+# a successful column cascades the card to the right.
+GATE_COLUMN_INDEX = 2
 
 # The event loop only keeps weak references to tasks, so a fire-and-forget
 # ``create_task`` result can be garbage-collected mid-flight. Hold strong
@@ -161,6 +174,61 @@ async def _set_card_status(db, card_id: uuid.UUID, run_status: str) -> None:
         card.run_status = run_status
 
 
+async def _column_links(db, column_id: uuid.UUID) -> list[dict]:
+    """The column's workflow chain, in run order."""
+    rows = (
+        await db.execute(
+            select(BoardColumnWorkflow, Workflow.name)
+            .join(Workflow, Workflow.id == BoardColumnWorkflow.workflow_id)
+            .where(BoardColumnWorkflow.column_id == column_id)
+            .order_by(BoardColumnWorkflow.position)
+        )
+    ).all()
+    return [
+        {"workflow_id": link.workflow_id, "workflow_name": name, "position": link.position}
+        for link, name in rows
+    ]
+
+
+async def _record_output_activity(
+    db,
+    *,
+    card_id: uuid.UUID,
+    run: BoardCardRun,
+    board: Any,
+    workflow: Any,
+    workflow_name: str,
+    outputs: dict,
+    column_instructions: str | None,
+) -> None:
+    """Add the run's output as a card activity.
+
+    The activity shows readable prose/markdown (the board mapper humanizes it), not a raw
+    JSON dump. The raw output stays on the run row and in the activity's ``data``.
+    """
+    activity_text = _output_snippet(outputs)
+    if board_mapper_is_configured(board):
+        humanized = await humanize_output(
+            db,
+            board=board,
+            workflow=workflow,
+            outputs=outputs,
+            column_ai_instructions=column_instructions,
+        )
+        if humanized:
+            activity_text = humanized
+    db.add(
+        BoardCardActivity(
+            card_id=card_id,
+            kind="output",
+            author_type="agent",
+            content=activity_text,
+            data={"workflow_name": workflow_name, "output": outputs},
+            run_id=run.id,
+        )
+    )
+
+
 async def _run_chain(
     *,
     card_id: uuid.UUID,
@@ -171,19 +239,31 @@ async def _run_chain(
     rerun: bool,
     allow_advance: bool = True,
     session_factory=async_session_maker,
+    start_index: int = 0,
+    chain_length: int | None = None,
+    initial_outputs: list[dict] | None = None,
 ) -> None:
-    """Execute a column's workflow chain for a card, sequentially, off the request path."""
-    chain_outputs: list[dict] = []
+    """Execute a column's workflow chain for a card, sequentially, off the request path.
+
+    ``links`` may be the tail of a chain (when resuming after a HITL/Codex pause), in which
+    case ``start_index`` is the position of its first link and ``chain_length`` the length of
+    the full chain, so run rows keep reporting "step n of m" over the original chain.
+    """
+    total = chain_length if chain_length is not None else len(links)
+    chain_outputs: list[dict] = list(initial_outputs or [])
     try:
         async with session_factory() as db:
+            chain_column = await db.get(BoardColumn, column_id)
+            column_instructions = getattr(chain_column, "ai_instructions", None)
             for index, link in enumerate(links):
+                position = start_index + index
                 run = BoardCardRun(
                     card_id=card_id,
                     column_id=column_id,
                     workflow_id=link["workflow_id"],
                     workflow_name=link["workflow_name"],
-                    chain_position=index,
-                    chain_length=len(links),
+                    chain_position=position,
+                    chain_length=total,
                     status="running",
                 )
                 db.add(run)
@@ -195,7 +275,9 @@ async def _run_chain(
                     run.status = "failed"
                     run.error = "Card or workflow no longer exists"
                     run.finished_at = datetime.now(timezone.utc)
-                    await _abort_remaining(db, card_id, column_id, links, index + 1)
+                    await _abort_remaining(
+                        db, card_id, column_id, links, index + 1, start_index, total
+                    )
                     await _set_card_status(db, card_id, "failed")
                     await db.commit()
                     return
@@ -209,21 +291,18 @@ async def _run_chain(
                     comments=context["comments"],
                     history=context["history"],
                     previous_runs=context["previous_runs"],
-                    chain_position=index,
-                    chain_length=len(links),
+                    chain_position=position,
+                    chain_length=total,
                     previous_workflow_outputs=chain_outputs,
                     rerun=rerun,
                 )
 
                 if board_mapper_is_configured(board):
-                    mapper_column = await db.get(BoardColumn, column_id)
                     try:
                         inputs = await build_workflow_inputs(
                             db,
                             board=board,
-                            column_ai_instructions=(
-                                mapper_column.ai_instructions if mapper_column else None
-                            ),
+                            column_ai_instructions=column_instructions,
                             available_context=inputs,
                             workflow=workflow,
                         )
@@ -241,7 +320,9 @@ async def _run_chain(
                                 run_id=run.id,
                             )
                         )
-                        await _abort_remaining(db, card_id, column_id, links, index + 1)
+                        await _abort_remaining(
+                            db, card_id, column_id, links, index + 1, start_index, total
+                        )
                         await _set_card_status(db, card_id, "failed")
                         await db.commit()
                         return
@@ -289,7 +370,9 @@ async def _run_chain(
                             run_id=run.id,
                         )
                     )
-                    await _abort_remaining(db, card_id, column_id, links, index + 1)
+                    await _abort_remaining(
+                        db, card_id, column_id, links, index + 1, start_index, total
+                    )
                     await _set_card_status(db, card_id, "failed")
                     await db.commit()
                     return
@@ -299,7 +382,14 @@ async def _run_chain(
                     result.join_allow_downstream()
 
                 if result.status == "pending":
-                    history_entry, _ = await persist_pending_hitl_execution(
+                    # A Codex question and a HITL review are different pauses with different
+                    # answer UIs and resume paths; persist each as its own kind.
+                    persist_pending = (
+                        persist_pending_codex_followup_execution
+                        if is_codex_pending_execution(result)
+                        else persist_pending_hitl_execution
+                    )
+                    history_entry, _ = await persist_pending(
                         db=db,
                         workflow=workflow,
                         enriched_inputs=inputs,
@@ -312,6 +402,18 @@ async def _run_chain(
                     run.status = "pending"
                     run.execution_history_id = history_entry.id
                     run.finished_at = datetime.now(timezone.utc)
+                    db.add(
+                        BoardCardActivity(
+                            card_id=card_id,
+                            kind="event",
+                            author_type="system",
+                            content=f"{link['workflow_name']} is waiting for a human answer",
+                            data={"execution_history_id": str(history_entry.id)},
+                            run_id=run.id,
+                        )
+                    )
+                    # The chain resumes from the next link once the human answers; see
+                    # ``resume_card_chain``.
                     await _set_card_status(db, card_id, "pending")
                     await db.commit()
                     return
@@ -361,34 +463,39 @@ async def _run_chain(
                             run_id=run.id,
                         )
                     )
-                    await _abort_remaining(db, card_id, column_id, links, index + 1)
+                    await _abort_remaining(
+                        db, card_id, column_id, links, index + 1, start_index, total
+                    )
                     await _set_card_status(db, card_id, "failed")
                     await db.commit()
                     return
 
                 run.status = "success"
                 run.output = outputs
-                db.add(
-                    BoardCardActivity(
-                        card_id=card_id,
-                        kind="output",
-                        author_type="agent",
-                        content=_output_snippet(outputs),
-                        data={"workflow_name": link["workflow_name"], "output": outputs},
-                        run_id=run.id,
-                    )
+                await _record_output_activity(
+                    db,
+                    card_id=card_id,
+                    run=run,
+                    board=board,
+                    workflow=workflow,
+                    workflow_name=link["workflow_name"],
+                    outputs=outputs,
+                    column_instructions=column_instructions,
                 )
                 chain_outputs.append({"workflow_name": link["workflow_name"], "output": outputs})
                 await db.commit()
 
             await _set_card_status(db, card_id, "success")
             await db.commit()
-        if not rerun and allow_advance:
+        if allow_advance:
+            # A follow-up round means the human already answered, so it releases the
+            # planning gate and the card flows on.
             await _auto_advance(
                 card_id=card_id,
                 board_id=board_id,
                 from_column_id=column_id,
                 session_factory=session_factory,
+                ignore_gate=rerun,
             )
     except Exception as exc:  # noqa: BLE001 - chain must never crash the server
         logger.exception("Board chain failed for card %s: %s", card_id, exc)
@@ -402,8 +509,15 @@ async def _run_chain(
 
 
 async def _abort_remaining(
-    db, card_id: uuid.UUID, column_id: uuid.UUID, links: list[dict], start_index: int
+    db,
+    card_id: uuid.UUID,
+    column_id: uuid.UUID,
+    links: list[dict],
+    start_index: int,
+    position_offset: int = 0,
+    chain_length: int | None = None,
 ) -> None:
+    total = chain_length if chain_length is not None else len(links)
     for index in range(start_index, len(links)):
         db.add(
             BoardCardRun(
@@ -411,8 +525,8 @@ async def _abort_remaining(
                 column_id=column_id,
                 workflow_id=links[index]["workflow_id"],
                 workflow_name=links[index]["workflow_name"],
-                chain_position=index,
-                chain_length=len(links),
+                chain_position=position_offset + index,
+                chain_length=total,
                 status="skipped",
                 finished_at=datetime.now(timezone.utc),
             )
@@ -435,6 +549,172 @@ async def _fail_open_runs(db, card_id: uuid.UUID, error: str) -> None:
         run.status = "failed"
         run.error = error
         run.finished_at = datetime.now(timezone.utc)
+
+
+async def resume_card_chain(
+    execution_history_id: uuid.UUID, *, session_factory=async_session_maker
+) -> None:
+    """Continue a board chain that paused on a HITL review or a Codex question.
+
+    Called by the HITL / Codex follow-up resume paths once they finish re-running the
+    execution. Finds the paused ``BoardCardRun`` by its execution history, records the
+    outcome on the card, then runs the rest of that column's chain and auto-advances.
+    A no-op for executions that no board started. Never raises.
+    """
+    try:
+        async with session_factory() as db:
+            run = (
+                (
+                    await db.execute(
+                        select(BoardCardRun).where(
+                            BoardCardRun.execution_history_id == execution_history_id,
+                            BoardCardRun.status == "pending",
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if run is None:
+                return
+            history = await db.get(ExecutionHistory, execution_history_id)
+            card = await db.get(BoardCard, run.card_id)
+            column = await db.get(BoardColumn, run.column_id)
+            if history is None or card is None or column is None:
+                return
+            if history.status == "pending":
+                # The resume hit another question; the card keeps waiting.
+                return
+
+            board = await db.get(Board, card.board_id)
+            workflow = await db.get(Workflow, run.workflow_id)
+            links = await _column_links(db, column.id)
+            remaining = links[run.chain_position + 1 :]
+            run.finished_at = datetime.now(timezone.utc)
+
+            if history.status != "success":
+                run.status = "failed"
+                run.error = f"Workflow finished with status {history.status}"
+                db.add(
+                    BoardCardActivity(
+                        card_id=card.id,
+                        kind="event",
+                        author_type="system",
+                        content=f"{run.workflow_name} failed",
+                        data={"status": history.status},
+                        run_id=run.id,
+                    )
+                )
+                await _abort_remaining(
+                    db, card.id, column.id, remaining, 0, run.chain_position + 1, run.chain_length
+                )
+                card.run_status = "failed"
+                await db.commit()
+                return
+
+            outputs = history.outputs or {}
+            run.status = "success"
+            run.output = outputs
+            await _record_output_activity(
+                db,
+                card_id=card.id,
+                run=run,
+                board=board,
+                workflow=workflow,
+                workflow_name=run.workflow_name,
+                outputs=outputs,
+                column_instructions=getattr(column, "ai_instructions", None),
+            )
+
+            if remaining:
+                card.run_status = "running"
+                await db.commit()
+                _spawn_chain(
+                    card_id=card.id,
+                    board_id=card.board_id,
+                    column_id=column.id,
+                    links=remaining,
+                    move=None,
+                    rerun=False,
+                    start_index=run.chain_position + 1,
+                    chain_length=run.chain_length,
+                    initial_outputs=[{"workflow_name": run.workflow_name, "output": outputs}],
+                )
+                return
+
+            card.run_status = "success"
+            board_id = card.board_id
+            column_id = column.id
+            card_id = card.id
+            await db.commit()
+
+        await _auto_advance(
+            card_id=card_id,
+            board_id=board_id,
+            from_column_id=column_id,
+            session_factory=session_factory,
+        )
+    except Exception:  # noqa: BLE001 - a resume must never crash the answering request
+        logger.exception("Board chain resume failed for execution %s", execution_history_id)
+
+
+async def answer_card_comment(db, *, card, column, board) -> bool:
+    """A user comment on a card waiting at the planning gate is its answer.
+
+    The gate column's chain has already run and asked its questions, so the answer does not
+    re-run it: it releases the gate and the card flows on to the right. No-op for cards past
+    the gate, for cards whose chain never completed here, or while a run is still active.
+    """
+    columns = (
+        (
+            await db.execute(
+                select(BoardColumn.id)
+                .where(BoardColumn.board_id == board.id)
+                .order_by(BoardColumn.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if column.id not in columns or columns.index(column.id) >= GATE_COLUMN_INDEX:
+        return False
+
+    active = (
+        (
+            await db.execute(
+                select(BoardCardRun.id).where(
+                    BoardCardRun.card_id == card.id,
+                    BoardCardRun.status.in_(ACTIVE_RUN_STATUSES),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if active:
+        return False
+
+    # Only a card whose gate chain actually finished is waiting for an answer.
+    answered = (
+        await db.execute(
+            select(BoardCardRun.id).where(
+                BoardCardRun.card_id == card.id,
+                BoardCardRun.column_id == column.id,
+                BoardCardRun.status == "success",
+            )
+        )
+    ).first()
+    if answered is None:
+        return False
+
+    # Flip to running before the response returns so the board shows the card as active
+    # right away; the next column's chain takes over from there.
+    card.run_status = "running"
+    await db.commit()
+    await _auto_advance(
+        card_id=card.id, board_id=board.id, from_column_id=column.id, ignore_gate=True
+    )
+    return True
 
 
 async def enqueue_card_chain(
@@ -460,28 +740,13 @@ async def enqueue_card_chain(
     )
     if active:
         return False
-    link_rows = (
-        await db.execute(
-            select(BoardColumnWorkflow, Workflow.name)
-            .join(Workflow, Workflow.id == BoardColumnWorkflow.workflow_id)
-            .where(BoardColumnWorkflow.column_id == column.id)
-            .order_by(BoardColumnWorkflow.position)
-        )
-    ).all()
-    if not link_rows:
+    links = await _column_links(db, column.id)
+    if not links:
         # No chain on this column. A card moved forward must still keep flowing right,
         # so pass it through to the next column (and the last one).
         if allow_advance and not rerun:
             await _auto_advance(card_id=card.id, board_id=board.id, from_column_id=column.id)
         return False
-    links = [
-        {
-            "workflow_id": link.workflow_id,
-            "workflow_name": workflow_name,
-            "position": link.position,
-        }
-        for link, workflow_name in link_rows
-    ]
     card.run_status = "running"
     await db.commit()
     _spawn_chain(
@@ -505,6 +770,9 @@ def _spawn_chain(
     move: dict | None,
     rerun: bool,
     allow_advance: bool = True,
+    start_index: int = 0,
+    chain_length: int | None = None,
+    initial_outputs: list[dict] | None = None,
 ) -> None:
     """Start a chain run as a background task, holding a strong reference to it."""
     task = asyncio.create_task(
@@ -516,6 +784,9 @@ def _spawn_chain(
             move=move,
             rerun=rerun,
             allow_advance=allow_advance,
+            start_index=start_index,
+            chain_length=chain_length,
+            initial_outputs=initial_outputs,
         )
     )
     _BACKGROUND_CHAIN_TASKS.add(task)
@@ -538,10 +809,16 @@ async def _auto_advance(
     board_id: uuid.UUID,
     from_column_id: uuid.UUID,
     session_factory=async_session_maker,
+    ignore_gate: bool = False,
 ) -> None:
     """After a successful chain, move the card to the next column (to the right) and run
     that column's chain. Empty columns are passed through; the cascade continues until the
-    last column. Never raises (best-effort automation)."""
+    last column. Never raises (best-effort automation).
+
+    The planning gate: a card sitting in the first two columns (index 0 = Backlog,
+    index 1 = Planning) never cascades on its own. Planning runs its chain automatically,
+    but the card waits there for a human answer. Auto-advance only applies from index 2 on.
+    """
     try:
         async with session_factory() as db:
             columns = (
@@ -558,8 +835,12 @@ async def _auto_advance(
             ids = [c.id for c in columns]
             if from_column_id not in ids:
                 return
-            prev_name = columns[ids.index(from_column_id)].name
-            for target in columns[ids.index(from_column_id) + 1 :]:
+            from_index = ids.index(from_column_id)
+            if not ignore_gate and from_index < GATE_COLUMN_INDEX:
+                # Backlog/Planning: run, then wait for the human. No cascade.
+                return
+            prev_name = columns[from_index].name
+            for target in columns[from_index + 1 :]:
                 card = await db.get(BoardCard, card_id)
                 if card is None:
                     return
@@ -619,6 +900,13 @@ async def _auto_advance(
                     return
                 await db.commit()
                 prev_name = target.name
+
+            # The cascade ran out of columns without finding a chain to start, so the card
+            # is not executing anything and must not stay marked as running.
+            settled = await db.get(BoardCard, card_id)
+            if settled is not None and settled.run_status == "running":
+                settled.run_status = "success"
+                await db.commit()
     except Exception:  # noqa: BLE001 - auto-advance must never break a completed chain
         logger.exception("Board auto-advance failed for card %s", card_id)
 

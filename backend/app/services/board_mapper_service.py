@@ -39,6 +39,76 @@ MAPPER_SYSTEM_PROMPT = (
 )
 
 
+OUTPUT_SYSTEM_PROMPT = (
+    "You turn a workflow's raw output into a short, readable note on a kanban card. "
+    "Write plain prose or markdown (headings, lists, bold, links are fine). Never return "
+    "JSON, key/value dumps, or wrap the whole answer in a code fence. Preserve the meaning "
+    "and keep any questions the workflow asked, as a markdown list. Be concise."
+)
+
+
+async def _resolve_mapper_credential(db, board: Board) -> tuple[Credential, str, str | None]:
+    """Load the board's mapper credential and decrypt its api key/base url."""
+    credential = (
+        await db.execute(
+            select(Credential).where(
+                Credential.id == board.mapper_credential_id,
+                Credential.owner_id == board.owner_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if credential is None:
+        raise ValueError("Board mapper credential not found")
+    config = decrypt_config(credential.encrypted_config)
+    api_key = config.get("api_key", "")
+    base_url = config.get("base_url") if credential.type.value == "custom" else None
+    return credential, api_key, base_url
+
+
+async def humanize_output(
+    db,
+    *,
+    board: Board,
+    workflow: Any,
+    outputs: dict,
+    column_ai_instructions: str | None,
+) -> str | None:
+    """Render a workflow's raw output as plain text/markdown for the card activity.
+
+    Best-effort: returns None on any failure so the caller falls back to the raw snippet.
+    """
+    try:
+        credential, api_key, base_url = await _resolve_mapper_credential(db, board)
+        result = await execute_llm(
+            credential_type=credential.type.value,
+            api_key=api_key,
+            base_url=base_url,
+            model=board.mapper_model,
+            system_instruction=OUTPUT_SYSTEM_PROMPT,
+            user_message=json.dumps(
+                {
+                    "workflow": getattr(workflow, "name", ""),
+                    "column_instruction": column_ai_instructions or "",
+                    "output": outputs,
+                },
+                default=str,
+            ),
+            content_only=True,
+            trace_context=LLMTraceContext(
+                user_id=board.owner_id,
+                credential_id=credential.id,
+                workflow_id=getattr(workflow, "id", None),
+                node_label="board_output",
+                source="kanban_ai_mapper",
+            ),
+        )
+        text = (result.get("text") or "").strip()
+        return text or None
+    except Exception:  # noqa: BLE001 - cosmetic; never fail a run over output formatting
+        logger.exception("Board output humanization failed for board %s", board.id)
+        return None
+
+
 def board_mapper_is_configured(board: Board) -> bool:
     """True when the board has both a mapper model and a credential set."""
     return bool(getattr(board, "mapper_model", None)) and (
@@ -96,20 +166,7 @@ async def build_workflow_inputs(
     ``available_context`` is the full fixed payload (from ``build_card_payload``); it is
     the complete context the mapper may draw from. Raises on any failure (strict).
     """
-    credential = (
-        await db.execute(
-            select(Credential).where(
-                Credential.id == board.mapper_credential_id,
-                Credential.owner_id == board.owner_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if credential is None:
-        raise ValueError("Board mapper credential not found")
-
-    config = decrypt_config(credential.encrypted_config)
-    api_key = config.get("api_key", "")
-    base_url = config.get("base_url") if credential.type.value == "custom" else None
+    credential, api_key, base_url = await _resolve_mapper_credential(db, board)
 
     input_fields = _input_field_keys(workflow.nodes)
     payload_for_llm = {

@@ -13,10 +13,38 @@ and workflow runs.
 ## Boards and columns
 
 - You can create as many boards as you need. A new board starts with the default
-  columns **Backlog → Planning → To Do → Waiting → Development → Done**.
+  columns **Backlog → Planning → Development → Done**.
+- Every board needs an **Agentic Kanban Model** (a credential plus a model). It is
+  mandatory — the New board dialog will not create a board without one, and a board
+  that has none keeps its actions disabled — because it is the model that maps each
+  card into the inputs of the workflows it runs and turns their output back into
+  readable text.
+- The gear icon in the board header opens the board settings: name, description
+  (shown under the header) and the Agentic Kanban Model.
 - Columns are fully editable: add, rename, recolor, reorder, or delete them from the
   column settings (a column must be empty before it can be deleted).
 - Cards are ordered vertically by priority — drag to reorder.
+
+## Sharing a board
+
+Board settings also share the board with **users** (by email) and with **teams**, with
+`read` or `write` permission:
+
+- **read** — the board and its cards are visible, but nothing can be changed: no new
+  cards, no moves, no comments, no runs.
+- **write** — full use of the board: cards, moves, comments and runs.
+- Only the **owner** sees the gear and delete buttons, and only the owner can change the
+  board's settings, its Agentic Kanban Model or its shares.
+
+Chains on a shared board always run with the **owner's** credentials and Agentic Kanban
+Model, so collaborators never need their own.
+
+## Card attachments
+
+Open a card and use **Attach file** to add files to it (remove them from the same list).
+Attachments are stored in [Drive](/docs/tabs/drive-tab) and reach the workflows as part
+of the card context, at `$input.card.metadata.attachments` — each entry has `file_id`,
+`name`, `url`, `mime_type` and `size`.
 
 ## Column workflow chains
 
@@ -76,19 +104,29 @@ follow-up questions:
 
 1. Move a card into Planning — the workflow writes an enriched plan and its
    questions back to the card as an output.
-2. Answer in the card's comment thread.
-3. Press **Run follow-up round** on the card. The same chain runs again with all
-   accumulated context — the plan improves with every round.
+2. Answer in the card's comment thread. The answer releases the card: it moves on to
+   the next column, which picks it up with the answer in context. The Planning chain
+   is not run again.
+3. To improve the plan in place instead, press **Run follow-up round**. The same
+   chain runs again with all accumulated context, and the card flows on once it
+   succeeds.
 
-Follow-up rounds work on any column, not just Planning. A card can only have one
-active run at a time.
+Cards in the first two columns never move on by themselves — they run their chain and
+wait there for you. From the third column on, a successful chain advances the card to
+the right on its own, all the way to the last column. A card can only have one active
+run at a time.
 
-## Human-in-the-loop
+## Human-in-the-loop and Codex questions
 
-If a chain workflow pauses on a [Human-in-the-Loop](/docs/reference/human-in-the-loop)
-node, the run is persisted as pending and the card shows the amber pending state.
-Resolve the review from the HITL surface; the chain does not continue past a
-pending link.
+If a chain workflow pauses — on a [Human-in-the-Loop](/docs/reference/human-in-the-loop)
+node, on an agent's HITL tool, or because a [Codex](/docs/nodes/codex-node) node needs
+more information — the run is persisted as pending and the card shows the amber pending
+state. Each pause keeps its own answer surface: a HITL review link for HITL, the Codex
+follow-up screen for Codex.
+
+Once you answer, the chain resumes on its own: the paused workflow finishes, its output
+lands on the card, the rest of that column's chain runs, and the card advances as usual.
+If the resumed run fails, the card turns red and the remaining links are skipped.
 
 ## Related
 

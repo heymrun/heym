@@ -1,3 +1,6 @@
+/** The caller's access to a board. Shared boards can be read-only. */
+export type BoardPermission = "owner" | "write" | "read";
+
 export interface BoardSummary {
   id: string;
   name: string;
@@ -7,6 +10,7 @@ export interface BoardSummary {
   mapper_model: string | null;
   mapper_credential_id: string | null;
   mapper_credential_name: string | null;
+  permission: BoardPermission;
   updated_at: string;
 }
 
@@ -48,6 +52,7 @@ export interface BoardState {
   mapper_model: string | null;
   mapper_credential_id: string | null;
   mapper_credential_name: string | null;
+  permission: BoardPermission;
   columns: BoardColumn[];
   cards: BoardCard[];
   has_active_runs: boolean;
@@ -89,6 +94,8 @@ export interface CardDetail {
 export interface BoardCreatePayload {
   name: string;
   description?: string | null;
+  mapper_model?: string | null;
+  mapper_credential_id?: string | null;
 }
 
 export interface BoardUpdatePayload {
@@ -118,4 +125,29 @@ export interface CardUpdatePayload {
   content?: string;
   card_metadata?: Record<string, unknown>;
   position?: number;
+}
+
+export interface CardAttachment {
+  file_id: string;
+  name: string;
+  url: string;
+  mime_type: string | null;
+  size: number | null;
+}
+
+export interface BoardShare {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string | null;
+  permission: "read" | "write";
+  shared_at: string;
+}
+
+export interface BoardTeamShare {
+  id: string;
+  team_id: string;
+  team_name: string;
+  permission: "read" | "write";
+  shared_at: string;
 }

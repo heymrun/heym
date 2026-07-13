@@ -320,6 +320,7 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
             history_entry.outputs = {"error": str(exc)}
             history_entry.execution_time_ms = 0
             await db.commit()
+            await _resume_board_chain(history_entry.id)
             return
 
         if resumed_result.status == "pending":
@@ -366,3 +367,11 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
             resumed_result.sub_workflow_executions,
         )
         await db.commit()
+        await _resume_board_chain(history_entry.id)
+
+
+async def _resume_board_chain(execution_history_id: uuid.UUID) -> None:
+    """Let a board chain that paused on this execution carry on. No-op for other triggers."""
+    from app.services.board_run_service import resume_card_chain
+
+    await resume_card_chain(execution_history_id)

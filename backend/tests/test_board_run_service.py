@@ -189,6 +189,11 @@ def _runner_patches(context, execute_side_effect):
         ),
         patch.object(
             board_run_service,
+            "persist_pending_codex_followup_execution",
+            AsyncMock(return_value=(SimpleNamespace(id=uuid.uuid4()), None)),
+        ),
+        patch.object(
+            board_run_service,
             "build_default_public_base_url",
             MagicMock(return_value="http://localhost:10105"),
         ),
@@ -258,7 +263,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertIn("boom", runs[0].error)
         self.assertEqual(card.run_status, "failed")
 
-    async def test_pending_result_pauses_chain(self):
+    async def _run_pending_chain(self, pending_review):
         card, board, session, factory, links, context = _chain_env()
 
         def fake_execute(**kwargs):
@@ -270,6 +275,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 sub_workflow_executions=[],
                 allow_downstream_pending=False,
                 join_allow_downstream=lambda: None,
+                pending_review=pending_review,
             )
 
         patches = _runner_patches(context, fake_execute)
@@ -286,10 +292,265 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
             rerun=True,
             session_factory=factory,
         )
+        return card, session
+
+    async def test_pending_result_pauses_chain(self):
+        card, session = await self._run_pending_chain({"kind": "hitl"})
 
         runs = [o for o in session.added if type(o).__name__ == "BoardCardRun"]
         self.assertEqual(runs[0].status, "pending")
         self.assertEqual(card.run_status, "pending")
+        # A HITL pause is persisted as a review request, not a Codex follow-up.
+        board_run_service.persist_pending_hitl_execution.assert_awaited_once()
+        board_run_service.persist_pending_codex_followup_execution.assert_not_awaited()
+
+    async def test_codex_pending_is_persisted_as_a_codex_followup(self):
+        card, session = await self._run_pending_chain({"kind": "codex", "question": "Which repo?"})
+
+        runs = [o for o in session.added if type(o).__name__ == "BoardCardRun"]
+        self.assertEqual(runs[0].status, "pending")
+        self.assertEqual(card.run_status, "pending")
+        # A Codex question has its own answer UI and resume path.
+        board_run_service.persist_pending_codex_followup_execution.assert_awaited_once()
+        board_run_service.persist_pending_hitl_execution.assert_not_awaited()
+
+
+class TestResumeCardChain(unittest.IsolatedAsyncioTestCase):
+    """After a HITL / Codex answer, the paused board chain must carry on."""
+
+    def _env(self, *, history_status, outputs, chain_position, chain_length, remaining_links):
+        from app.db.models import Board, BoardCard, BoardColumn, ExecutionHistory, Workflow
+
+        history_id = uuid.uuid4()
+        card = SimpleNamespace(
+            id=uuid.uuid4(), board_id=uuid.uuid4(), column_id=uuid.uuid4(), run_status="pending"
+        )
+        column = SimpleNamespace(id=card.column_id, ai_instructions=None)
+        board = SimpleNamespace(id=card.board_id, name="B", owner_id=uuid.uuid4())
+        workflow = SimpleNamespace(id=uuid.uuid4(), name="WF1", nodes=[])
+        run = SimpleNamespace(
+            id=uuid.uuid4(),
+            card_id=card.id,
+            column_id=column.id,
+            workflow_id=workflow.id,
+            workflow_name="WF1",
+            chain_position=chain_position,
+            chain_length=chain_length,
+            status="pending",
+            output=None,
+            error=None,
+            finished_at=None,
+            execution_history_id=history_id,
+        )
+        history = SimpleNamespace(id=history_id, status=history_status, outputs=outputs)
+
+        session = _FakeSession(
+            {
+                (ExecutionHistory.__name__, history_id): history,
+                (BoardCard.__name__, card.id): card,
+                (BoardColumn.__name__, column.id): column,
+                (Board.__name__, board.id): board,
+                (Workflow.__name__, workflow.id): workflow,
+            }
+        )
+        run_res = MagicMock()
+        run_res.scalars.return_value.first.return_value = run
+        session.execute = AsyncMock(return_value=run_res)
+
+        # The full chain: the paused link plus whatever follows it.
+        links = [
+            {"workflow_id": workflow.id, "workflow_name": "WF1", "position": 0}
+        ] * chain_position
+        links.append({"workflow_id": workflow.id, "workflow_name": "WF1", "position": 0})
+        links.extend(remaining_links)
+
+        return history_id, card, run, session, links, (lambda: session)
+
+    async def test_success_records_output_and_advances_when_chain_is_done(self):
+        history_id, card, run, session, links, factory = self._env(
+            history_status="success",
+            outputs={"text": "shipped"},
+            chain_position=0,
+            chain_length=1,
+            remaining_links=[],
+        )
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertEqual(run.status, "success")
+        self.assertEqual(run.output, {"text": "shipped"})
+        self.assertEqual(card.run_status, "success")
+        outputs = [o for o in session.added if type(o).__name__ == "BoardCardActivity"]
+        self.assertEqual(outputs[0].kind, "output")
+        spawn.assert_not_called()
+        advance.assert_awaited_once()
+
+    async def test_success_runs_the_rest_of_the_chain(self):
+        remaining = [{"workflow_id": uuid.uuid4(), "workflow_name": "WF2", "position": 1}]
+        history_id, card, run, session, links, factory = self._env(
+            history_status="success",
+            outputs={"text": "answered"},
+            chain_position=0,
+            chain_length=2,
+            remaining_links=remaining,
+        )
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertEqual(run.status, "success")
+        self.assertEqual(card.run_status, "running")
+        spawn.assert_called_once()
+        kwargs = spawn.call_args.kwargs
+        # The tail of the chain keeps its original step numbering and carries the
+        # paused link's output forward.
+        self.assertEqual([link["workflow_name"] for link in kwargs["links"]], ["WF2"])
+        self.assertEqual(kwargs["start_index"], 1)
+        self.assertEqual(kwargs["chain_length"], 2)
+        self.assertEqual(kwargs["initial_outputs"][0]["output"], {"text": "answered"})
+        advance.assert_not_awaited()
+
+    async def test_failed_resume_fails_the_card_and_skips_the_rest(self):
+        remaining = [{"workflow_id": uuid.uuid4(), "workflow_name": "WF2", "position": 1}]
+        history_id, card, run, session, links, factory = self._env(
+            history_status="error",
+            outputs={"error": "boom"},
+            chain_position=0,
+            chain_length=2,
+            remaining_links=remaining,
+        )
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(card.run_status, "failed")
+        skipped = [
+            o for o in session.added if type(o).__name__ == "BoardCardRun" and o.status == "skipped"
+        ]
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0].chain_position, 1)
+        spawn.assert_not_called()
+        advance.assert_not_awaited()
+
+    async def test_still_pending_keeps_the_card_waiting(self):
+        history_id, card, run, session, links, factory = self._env(
+            history_status="pending",
+            outputs={},
+            chain_position=0,
+            chain_length=1,
+            remaining_links=[],
+        )
+
+        with (
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertEqual(run.status, "pending")
+        self.assertEqual(card.run_status, "pending")
+        spawn.assert_not_called()
+        advance.assert_not_awaited()
+
+    async def test_non_board_execution_is_a_no_op(self):
+        session = _FakeSession({})
+        empty = MagicMock()
+        empty.scalars.return_value.first.return_value = None
+        session.execute = AsyncMock(return_value=empty)
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            await board_run_service.resume_card_chain(uuid.uuid4(), session_factory=lambda: session)
+
+        advance.assert_not_awaited()
+        self.assertEqual(session.added, [])
+
+
+class TestAnswerCardComment(unittest.IsolatedAsyncioTestCase):
+    """A comment on a gated card releases the gate instead of re-running the column."""
+
+    @staticmethod
+    def _db(column_ids, *, active, answered):
+        columns_res = MagicMock()
+        columns_res.scalars.return_value.all.return_value = column_ids
+        active_res = MagicMock()
+        active_res.scalars.return_value.all.return_value = active
+        answered_res = MagicMock()
+        answered_res.first.return_value = answered
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[columns_res, active_res, answered_res])
+        return db
+
+    async def test_answer_advances_without_rerunning_the_column(self):
+        card = SimpleNamespace(id=uuid.uuid4(), run_status="success")
+        column = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=uuid.uuid4())
+        db = self._db([uuid.uuid4(), column.id, uuid.uuid4()], active=[], answered=(uuid.uuid4(),))
+
+        with (
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "enqueue_card_chain", AsyncMock()) as enqueue,
+        ):
+            result = await board_run_service.answer_card_comment(
+                db, card=card, column=column, board=board
+            )
+
+        self.assertTrue(result)
+        enqueue.assert_not_awaited()
+        advance.assert_awaited_once()
+        self.assertTrue(advance.await_args.kwargs["ignore_gate"])
+        # The card shows as active on the board as soon as the comment is posted.
+        self.assertEqual(card.run_status, "running")
+
+    async def test_answer_is_ignored_when_the_gate_chain_never_finished(self):
+        card = SimpleNamespace(id=uuid.uuid4(), run_status="idle")
+        column = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=uuid.uuid4())
+        db = self._db([uuid.uuid4(), column.id], active=[], answered=None)
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            result = await board_run_service.answer_card_comment(
+                db, card=card, column=column, board=board
+            )
+
+        self.assertFalse(result)
+        advance.assert_not_awaited()
+        self.assertEqual(card.run_status, "idle")
+
+    async def test_answer_is_ignored_past_the_gate(self):
+        card = SimpleNamespace(id=uuid.uuid4(), run_status="success")
+        column = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=uuid.uuid4())
+        columns_res = MagicMock()
+        columns_res.scalars.return_value.all.return_value = [
+            uuid.uuid4(),
+            uuid.uuid4(),
+            column.id,
+        ]
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[columns_res])
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            result = await board_run_service.answer_card_comment(
+                db, card=card, column=column, board=board
+            )
+
+        self.assertFalse(result)
+        advance.assert_not_awaited()
 
 
 class TestEnqueueHoldsTaskReference(unittest.IsolatedAsyncioTestCase):

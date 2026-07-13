@@ -147,7 +147,11 @@ async function removeColumn(): Promise<void> {
             :key="workflow.id"
             class="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5"
           >
-            <span class="text-xs text-muted-foreground">{{ index + 1 }}.</span>
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-foreground"
+            >
+              {{ index + 1 }}
+            </span>
             <span class="truncate">{{ workflow.name }}</span>
             <button
               class="ml-auto p-0.5 text-muted-foreground hover:text-primary"

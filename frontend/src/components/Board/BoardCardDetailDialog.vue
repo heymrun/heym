@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { Bot, Check, Copy, Loader2, Play, User as UserIcon } from "lucide-vue-next";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+import {
+  Bot,
+  Check,
+  Copy,
+  Loader2,
+  Paperclip,
+  Play,
+  Trash2,
+  User as UserIcon,
+} from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import type { CardDetail, CardRun } from "@/types/board";
+import type { CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
 import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
+import { playSuccessSound } from "@/utils/audio";
 
 const props = defineProps<{ open: boolean; cardId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -20,6 +32,55 @@ const editedContent = ref("");
 const savingContent = ref(false);
 const activityScroll = ref<HTMLElement | null>(null);
 const activityAtBottom = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
+const uploading = ref(false);
+const dragActive = ref(false);
+
+// Attachments live on the card metadata, which is what the workflows receive.
+const attachments = computed<CardAttachment[]>(() => {
+  const raw = detail.value?.card.card_metadata?.attachments;
+  return Array.isArray(raw) ? (raw as CardAttachment[]) : [];
+});
+
+async function uploadFiles(files: File[]): Promise<void> {
+  if (!files.length || !detail.value || !boardStore.activeBoard) return;
+  uploading.value = true;
+  try {
+    for (const file of files) {
+      await boardApi.addAttachment(boardStore.activeBoard.id, detail.value.card.id, file);
+    }
+    await reload();
+    await boardStore.refreshActiveBoard();
+  } finally {
+    uploading.value = false;
+  }
+}
+
+async function uploadAttachment(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  await uploadFiles(Array.from(input.files ?? []));
+  input.value = "";
+}
+
+function onDragOver(): void {
+  dragActive.value = true;
+}
+
+function onDragLeave(): void {
+  dragActive.value = false;
+}
+
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false;
+  await uploadFiles(Array.from(event.dataTransfer?.files ?? []));
+}
+
+async function removeAttachment(fileId: string): Promise<void> {
+  if (!detail.value || !boardStore.activeBoard) return;
+  await boardApi.removeAttachment(boardStore.activeBoard.id, detail.value.card.id, fileId);
+  await reload();
+  await boardStore.refreshActiveBoard();
+}
 
 // Activity is stored oldest-first; the dialog always shows newest at the top.
 const activitiesNewestFirst = computed(() =>
@@ -30,6 +91,18 @@ function onActivityScroll(): void {
   const el = activityScroll.value;
   if (!el) return;
   activityAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+}
+
+// While the dialog is open, the chime rings whenever a run finishes: the card leaves
+// "running" for whatever comes next (success, failed, pending or the next column's run).
+const lastStatus = ref<string | null>(null);
+
+function announceStatus(next: CardDetail): void {
+  const status = next.card.run_status;
+  if (lastStatus.value === "running" && status !== "running") {
+    playSuccessSound();
+  }
+  lastStatus.value = status;
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -60,13 +133,16 @@ watch(
   async ([open, cardId]) => {
     if (!open || !cardId || !boardStore.activeBoard) {
       stopPolling();
+      lastStatus.value = null;
       return;
     }
     loading.value = true;
     activityAtBottom.value = false;
     try {
-      detail.value = await boardApi.getCard(boardStore.activeBoard.id, cardId);
-      editedContent.value = detail.value.card.content;
+      const next = await boardApi.getCard(boardStore.activeBoard.id, cardId);
+      detail.value = next;
+      editedContent.value = next.card.content;
+      lastStatus.value = next.card.run_status;
       syncPolling();
     } finally {
       loading.value = false;
@@ -77,11 +153,18 @@ watch(
 
 async function reload(): Promise<void> {
   if (!props.cardId || !boardStore.activeBoard) return;
-  detail.value = await boardApi.getCard(boardStore.activeBoard.id, props.cardId);
+  const next = await boardApi.getCard(boardStore.activeBoard.id, props.cardId);
+  detail.value = next;
+  announceStatus(next);
   syncPolling();
 }
 
 onUnmounted(stopPolling);
+
+const descriptionDirty = computed<boolean>(
+  () => detail.value !== null && editedContent.value !== detail.value.card.content,
+);
+const descriptionSaved = ref(false);
 
 async function saveContent(): Promise<void> {
   if (!detail.value || !boardStore.activeBoard || savingContent.value) return;
@@ -91,6 +174,12 @@ async function saveContent(): Promise<void> {
       content: editedContent.value,
     });
     await reload();
+    // The board card shows the description snippet, so refresh it too.
+    await boardStore.refreshActiveBoard();
+    descriptionSaved.value = true;
+    setTimeout(() => {
+      descriptionSaved.value = false;
+    }, 2500);
   } finally {
     savingContent.value = false;
   }
@@ -102,6 +191,9 @@ async function submitComment(): Promise<void> {
   comment.value = "";
   await boardApi.addComment(boardStore.activeBoard.id, detail.value.card.id, content);
   await reload();
+  // The answer releases the planning gate, so the card starts running in the next
+  // column — refresh the board so the canvas card turns active right away.
+  await boardStore.refreshActiveBoard();
 }
 
 async function runFollowUp(): Promise<void> {
@@ -112,6 +204,32 @@ async function runFollowUp(): Promise<void> {
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString();
+}
+
+// Activity text (workflow output is humanized to markdown by the board mapper).
+function renderMarkdown(raw: string): string {
+  const html = marked(raw ?? "", { breaks: true, gfm: true }) as string;
+  return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel"] });
+}
+
+const copiedActivityId = ref<string | null>(null);
+
+async function copyActivity(activity: CardActivity): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(activity.content);
+    copiedActivityId.value = activity.id;
+    setTimeout(() => {
+      if (copiedActivityId.value === activity.id) copiedActivityId.value = null;
+    }, 1500);
+  } catch {
+    // clipboard unavailable; ignore
+  }
+}
+
+async function removeActivity(activityId: string): Promise<void> {
+  if (!detail.value || !boardStore.activeBoard) return;
+  await boardApi.removeActivity(boardStore.activeBoard.id, detail.value.card.id, activityId);
+  await reload();
 }
 
 const copiedRunId = ref<string | null>(null);
@@ -188,14 +306,96 @@ async function copyRun(run: CardRun): Promise<void> {
           :rows="3"
           placeholder="Describe the job for this card"
         />
-        <div class="mt-2 flex justify-end">
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <span
+            v-if="descriptionSaved"
+            class="inline-flex items-center gap-1 text-xs text-emerald-500"
+            data-testid="card-description-saved"
+          >
+            <Check class="h-3.5 w-3.5" /> Description saved
+          </span>
           <Button
+            v-if="descriptionDirty || savingContent"
             size="sm"
+            data-testid="card-description-save"
             :disabled="savingContent"
             @click="saveContent"
           >
             Save description
           </Button>
+        </div>
+      </section>
+
+      <section>
+        <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
+          Attachments
+        </h3>
+        <div class="flex flex-col gap-1.5">
+          <div
+            v-for="attachment in attachments"
+            :key="attachment.file_id"
+            class="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-sm"
+            :data-testid="`card-attachment-${attachment.name}`"
+          >
+            <Paperclip class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <a
+              :href="attachment.url"
+              target="_blank"
+              rel="noopener"
+              class="min-w-0 flex-1 truncate hover:underline"
+            >
+              {{ attachment.name }}
+            </a>
+            <button
+              class="rounded p-1 hover:bg-destructive/10"
+              :aria-label="`Remove ${attachment.name}`"
+              @click="removeAttachment(attachment.file_id)"
+            >
+              <Trash2 class="h-3.5 w-3.5 text-destructive" />
+            </button>
+          </div>
+          <!-- Files can be dropped anywhere on this box, or picked with the button. -->
+          <div
+            class="flex items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 text-xs transition-colors"
+            :class="
+              dragActive
+                ? 'border-primary bg-primary/5 text-foreground'
+                : 'border-border/70 text-muted-foreground'
+            "
+            data-testid="card-attachment-dropzone"
+            @dragover.prevent="onDragOver"
+            @dragenter.prevent="onDragOver"
+            @dragleave="onDragLeave"
+            @drop.prevent="onDrop"
+          >
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              class="hidden"
+              data-testid="card-attachment-input"
+              @change="uploadAttachment"
+            >
+            <Button
+              size="sm"
+              variant="outline"
+              class="shrink-0"
+              :disabled="uploading"
+              data-testid="card-attachment-add"
+              @click="fileInput?.click()"
+            >
+              <Loader2
+                v-if="uploading"
+                class="mr-1 h-3.5 w-3.5 animate-spin"
+              />
+              <Paperclip
+                v-else
+                class="mr-1 h-3.5 w-3.5"
+              />
+              Attach file
+            </Button>
+            <span>{{ dragActive ? "Drop to attach" : "or drop files here" }}</span>
+          </div>
         </div>
       </section>
 
@@ -212,7 +412,7 @@ async function copyRun(run: CardRun): Promise<void> {
             <div
               v-for="activity in activitiesNewestFirst"
               :key="activity.id"
-              class="rounded-lg border border-border/50 p-2"
+              class="group rounded-lg border border-border/50 p-2"
               :class="activity.kind === 'output' ? 'bg-primary/5' : ''"
             >
               <div class="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -226,10 +426,37 @@ async function copyRun(run: CardRun): Promise<void> {
                 />
                 <span class="capitalize">{{ activity.kind }}</span>
                 <span>· {{ formatTime(activity.created_at) }}</span>
+                <div class="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    class="rounded p-1 hover:text-foreground"
+                    :data-testid="`activity-copy-${activity.id}`"
+                    :aria-label="copiedActivityId === activity.id ? 'Copied' : 'Copy text'"
+                    @click="copyActivity(activity)"
+                  >
+                    <Check
+                      v-if="copiedActivityId === activity.id"
+                      class="h-3.5 w-3.5 text-emerald-500"
+                    />
+                    <Copy
+                      v-else
+                      class="h-3.5 w-3.5"
+                    />
+                  </button>
+                  <button
+                    class="rounded p-1 hover:bg-destructive/10"
+                    :data-testid="`activity-delete-${activity.id}`"
+                    aria-label="Delete activity"
+                    @click="removeActivity(activity.id)"
+                  >
+                    <Trash2 class="h-3.5 w-3.5 text-destructive" />
+                  </button>
+                </div>
               </div>
-              <p class="whitespace-pre-wrap">
-                {{ activity.content }}
-              </p>
+              <!-- eslint-disable vue/no-v-html -- sanitized with DOMPurify -->
+              <div
+                class="board-activity-md text-sm"
+                v-html="renderMarkdown(activity.content)"
+              />
             </div>
             <p
               v-if="!detail.activities.length"
@@ -338,3 +565,73 @@ async function copyRun(run: CardRun): Promise<void> {
     </div>
   </Dialog>
 </template>
+
+<style scoped>
+.board-activity-md :deep(p) {
+  margin: 0 0 0.4rem;
+  white-space: pre-wrap;
+}
+
+.board-activity-md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.board-activity-md :deep(h1),
+.board-activity-md :deep(h2),
+.board-activity-md :deep(h3) {
+  margin: 0.4rem 0 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.board-activity-md :deep(ul),
+.board-activity-md :deep(ol) {
+  margin: 0 0 0.4rem;
+  padding-left: 1.35rem;
+}
+
+.board-activity-md :deep(ul) {
+  list-style: disc;
+}
+
+.board-activity-md :deep(ol) {
+  list-style: decimal;
+}
+
+.board-activity-md :deep(li) {
+  margin: 0.1rem 0;
+}
+
+.board-activity-md :deep(li::marker) {
+  color: hsl(var(--foreground));
+  font-weight: 700;
+}
+
+.board-activity-md :deep(strong) {
+  font-weight: 600;
+}
+
+.board-activity-md :deep(a) {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.board-activity-md :deep(code) {
+  border-radius: 0.25rem;
+  background: hsl(var(--muted));
+  padding: 0.05rem 0.25rem;
+  font-size: 0.78rem;
+}
+
+.board-activity-md :deep(pre) {
+  overflow-x: auto;
+  border-radius: 0.375rem;
+  background: hsl(var(--muted));
+  padding: 0.5rem;
+}
+
+.board-activity-md :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+</style>

@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["098_add_board_mapper"])
+        self.assertEqual(self.script.get_heads(), ["099_add_board_shares"])
 
     def test_revision_ids_fit_default_alembic_version_column(self) -> None:
         for revision in self.script.walk_revisions():

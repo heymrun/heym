@@ -29,9 +29,12 @@ async function addColumn(): Promise<void> {
 <template>
   <div class="flex h-full gap-3 overflow-x-auto p-4">
     <BoardColumnLane
-      v-for="column in boardStore.activeBoard?.columns ?? []"
+      v-for="(column, index) in boardStore.activeBoard?.columns ?? []"
       :key="column.id"
+      class="lane-enter"
+      :style="{ animationDelay: `${index * 60}ms` }"
       :column="column"
+      :index="index"
       @open-card="emit('openCard', $event)"
       @open-settings="emit('openSettings', $event)"
     />
@@ -60,3 +63,21 @@ async function addColumn(): Promise<void> {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Staggered entrance, once per mount (board open or switch) — polling reuses the nodes. */
+.lane-enter {
+  animation: lane-enter 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes lane-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+</style>

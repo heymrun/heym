@@ -44,6 +44,8 @@ class BoardSummaryResponse(BaseModel):
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
     mapper_credential_name: str | None = None
+    # The caller's access: "owner", "write" or "read" (shared boards).
+    permission: str = "owner"
     updated_at: datetime
 
 
@@ -54,6 +56,7 @@ class BoardStateResponse(BaseModel):
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
     mapper_credential_name: str | None = None
+    permission: str = "owner"
     columns: list[BoardColumnResponse]
     cards: list[BoardCardResponse]
     has_active_runs: bool
@@ -141,3 +144,38 @@ class CardDetailResponse(BaseModel):
     card: BoardCardResponse
     activities: list[CardActivityResponse]
     runs: list[CardRunResponse]
+
+
+class BoardShareRequest(BaseModel):
+    email: str
+    permission: str = "read"
+
+
+class BoardShareResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    email: str
+    name: str | None = None
+    permission: str
+    shared_at: datetime
+
+
+class BoardTeamShareRequest(BaseModel):
+    team_id: uuid.UUID
+    permission: str = "read"
+
+
+class BoardTeamShareResponse(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    team_name: str
+    permission: str
+    shared_at: datetime
+
+
+class CardAttachmentResponse(BaseModel):
+    file_id: uuid.UUID
+    name: str
+    url: str
+    mime_type: str | None = None
+    size: int | None = None
