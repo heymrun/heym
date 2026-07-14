@@ -124,7 +124,7 @@ const anchorClass = computed(() =>
 
 const contentClass = computed(() =>
   cn(
-    "z-50 mt-1 max-h-72 min-w-[var(--radix-combobox-trigger-width)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
+    "z-50 mt-1 max-h-72 w-max max-w-[calc(100vw-1rem)] min-w-[var(--radix-combobox-trigger-width)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
     "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
     props.contentClass
   )
@@ -250,42 +250,44 @@ function clearValue(): void {
       </div>
     </ComboboxAnchor>
 
-    <ComboboxContent
-      position="popper"
-      side="bottom"
-      align="start"
-      :side-offset="4"
-      :class="contentClass"
-    >
-      <ComboboxViewport class="max-h-72 overflow-y-auto p-1">
-        <ComboboxEmpty class="px-3 py-6 text-center text-sm text-muted-foreground">
-          {{ emptyText }}
-        </ComboboxEmpty>
-        <ComboboxGroup
-          v-for="group in optionGroups"
-          :key="group.key"
-          class="py-1"
-        >
-          <ComboboxLabel
-            v-if="group.label"
-            class="mb-1 mt-2 rounded-md bg-muted/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground first:mt-0"
+    <Teleport to="body">
+      <ComboboxContent
+        position="popper"
+        side="bottom"
+        align="start"
+        :side-offset="4"
+        :class="contentClass"
+      >
+        <ComboboxViewport class="max-h-72 overflow-y-auto p-1">
+          <ComboboxEmpty class="px-3 py-6 text-center text-sm text-muted-foreground">
+            {{ emptyText }}
+          </ComboboxEmpty>
+          <ComboboxGroup
+            v-for="group in optionGroups"
+            :key="group.key"
+            class="py-1"
           >
-            {{ group.label }}
-          </ComboboxLabel>
-          <ComboboxItem
-            v-for="option in group.options"
-            :key="option.key"
-            :value="option.key"
-            class="relative flex min-h-9 cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-            @select="handleItemSelect($event, option)"
-          >
-            <ComboboxItemIndicator class="absolute left-2 flex h-4 w-4 items-center justify-center">
-              <Check class="h-4 w-4" />
-            </ComboboxItemIndicator>
-            <span class="truncate">{{ option.label }}</span>
-          </ComboboxItem>
-        </ComboboxGroup>
-      </ComboboxViewport>
-    </ComboboxContent>
+            <ComboboxLabel
+              v-if="group.label"
+              class="mb-1 mt-2 rounded-md bg-muted/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground first:mt-0"
+            >
+              {{ group.label }}
+            </ComboboxLabel>
+            <ComboboxItem
+              v-for="option in group.options"
+              :key="option.key"
+              :value="option.key"
+              class="relative flex min-h-9 max-w-[min(32rem,calc(100vw-1rem))] cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+              @select="handleItemSelect($event, option)"
+            >
+              <ComboboxItemIndicator class="absolute left-2 flex h-4 w-4 items-center justify-center">
+                <Check class="h-4 w-4" />
+              </ComboboxItemIndicator>
+              <span class="min-w-0 whitespace-normal break-words">{{ option.label }}</span>
+            </ComboboxItem>
+          </ComboboxGroup>
+        </ComboboxViewport>
+      </ComboboxContent>
+    </Teleport>
   </ComboboxRoot>
 </template>

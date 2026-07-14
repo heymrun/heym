@@ -73,6 +73,74 @@ test("creates, edits, saves, runs, reloads, and deletes a workflow", async ({ pa
   await expect(page.getByText("Workflow deleted successfully")).toBeVisible();
 });
 
+test("renders long model options outside the properties panel without clipping", async ({ page }) => {
+  const credentialResponse = await page.request.post("/api/credentials", {
+    data: {
+      name: `Long model credential ${Date.now()}`,
+      type: "openai",
+      config: { api_key: "sk-long-model-e2e" },
+    },
+  });
+  await expectOk(credentialResponse);
+  const credential = await credentialResponse.json() as { id: string };
+  const workflow = await createWorkflow(page, `Long model popup ${Date.now()}`, [
+    {
+      id: "llm-long-model",
+      type: "llm",
+      position: { x: 200, y: 150 },
+      data: {
+        label: "llm",
+        credentialId: credential.id,
+        model: "",
+        systemInstruction: "",
+        userMessage: "",
+        outputType: "text",
+      },
+    },
+  ]);
+  const longModel =
+    "A very long provider model name with deployment region version reasoning profile and an extended descriptive suffix that must remain fully readable";
+
+  await page.route(`**/api/credentials/${credential.id}/models`, async (route) => {
+    await route.fulfill({
+      json: [{ id: "long-model-id", name: longModel }],
+    });
+  });
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await page.locator('.vue-flow__node[data-id="llm-long-model"]').click();
+
+    await page.getByPlaceholder("Select model...").click();
+    const option = page.getByRole("option", { name: longModel });
+    await expect(option).toBeVisible();
+    expect(await option.evaluate((element) => element.closest(".properties-panel") === null)).toBe(
+      true,
+    );
+
+    const panelBox = await page.locator(".properties-panel").boundingBox();
+    const optionBox = await option.boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.width).toBeGreaterThan(panelBox!.width);
+    expect(optionBox!.x).toBeGreaterThanOrEqual(0);
+    expect(optionBox!.x + optionBox!.width).toBeLessThanOrEqual(
+      await page.evaluate(() => window.innerWidth),
+    );
+    expect(
+      await option.locator("span").last().evaluate(
+        (element) => window.getComputedStyle(element).textOverflow,
+      ),
+    ).not.toBe("ellipsis");
+    await option.click();
+    await expect(page.getByPlaceholder("Select model...")).toHaveValue(longModel);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+    await deleteCredential(page, credential.id);
+  }
+});
+
 test("creates a folder and filters workflows with search", async ({ page }) => {
   const workflowName = `Searchable Workflow ${Date.now()}`;
   const folderName = `E2E Folder ${Date.now()}`;

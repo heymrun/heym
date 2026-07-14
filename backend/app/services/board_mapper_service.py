@@ -15,9 +15,8 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import select
-
 from app.db.models import Board, Credential
+from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
@@ -55,14 +54,7 @@ OUTPUT_SYSTEM_PROMPT = (
 
 async def _resolve_mapper_credential(db, board: Board) -> tuple[Credential, str, str | None]:
     """Load the board's mapper credential and decrypt its api key/base url."""
-    credential = (
-        await db.execute(
-            select(Credential).where(
-                Credential.id == board.mapper_credential_id,
-                Credential.owner_id == board.owner_id,
-            )
-        )
-    ).scalar_one_or_none()
+    credential = await get_accessible_credential(db, board.mapper_credential_id, board.owner_id)
     if credential is None:
         raise ValueError("Board mapper credential not found")
     config = decrypt_config(credential.encrypted_config)

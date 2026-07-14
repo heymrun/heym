@@ -106,7 +106,7 @@ async function emptyColumn(): Promise<void> {
 
 <template>
   <div
-    class="flex w-72 shrink-0 flex-col rounded-xl border border-border/60 bg-muted/30"
+    class="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/30"
     :class="[
       dragOver ? 'ring-2 ring-primary/50' : '',
       columnDragOver ? 'ring-2 ring-primary' : '',
@@ -118,7 +118,7 @@ async function emptyColumn(): Promise<void> {
   >
     <!-- The header is the column's drag handle; the body still takes card drops. -->
     <div
-      class="group/header flex items-center gap-2 px-3 py-2.5"
+      class="group/header flex shrink-0 items-center gap-2 px-3 py-2.5"
       :class="canReorder ? 'cursor-grab active:cursor-grabbing' : ''"
       :draggable="canReorder"
       :data-testid="`board-column-handle-${column.name}`"
@@ -131,37 +131,42 @@ async function emptyColumn(): Promise<void> {
         class="h-2.5 w-2.5 rounded-full"
         :style="{ backgroundColor: column.color ?? 'var(--muted-foreground)' }"
       />
-      <span class="truncate text-sm font-semibold">{{ column.name }}</span>
-      <span class="text-xs text-muted-foreground">{{ cards.length }}</span>
-      <span
-        v-if="column.workflows.length"
-        class="ml-auto inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary dark:text-violet-300"
-        :title="column.workflows.map((w) => w.workflow_name).join(' → ')"
-      >
-        <Workflow class="h-3 w-3" />
-        {{ column.workflows.length }}
-      </span>
-      <button
-        v-if="boardStore.canWrite && cards.length > 0"
-        class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        :class="column.workflows.length ? '' : 'ml-auto'"
-        :aria-label="`Empty ${column.name}`"
-        @click="emptyColumn"
-      >
-        <Trash2 class="h-4 w-4" />
-      </button>
-      <button
-        v-if="boardStore.canWrite"
-        class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        :aria-label="`Configure ${column.name}`"
-        @click="emit('openSettings', column.id)"
-      >
-        <Settings2 class="h-4 w-4" />
-      </button>
+      <div class="flex min-w-0 items-center gap-2">
+        <span class="truncate text-sm font-semibold">{{ column.name }}</span>
+        <span class="shrink-0 text-xs text-muted-foreground">{{ cards.length }}</span>
+      </div>
+      <div class="ml-auto flex shrink-0 items-center gap-1">
+        <span
+          v-if="column.workflows.length"
+          class="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary dark:text-violet-300"
+          :title="column.workflows.map((w) => w.workflow_name).join(' → ')"
+        >
+          <Workflow class="h-3 w-3" />
+          {{ column.workflows.length }}
+        </span>
+        <button
+          v-if="boardStore.canWrite && cards.length > 0"
+          class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          :aria-label="`Empty ${column.name}`"
+          @click="emptyColumn"
+        >
+          <Trash2 class="h-4 w-4" />
+        </button>
+        <button
+          v-if="boardStore.canWrite"
+          class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          :aria-label="`Configure ${column.name}`"
+          :data-testid="`board-column-settings-${column.id}`"
+          @click="emit('openSettings', column.id)"
+        >
+          <Settings2 class="h-4 w-4" />
+        </button>
+      </div>
     </div>
     <div
       ref="laneBody"
       class="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2"
+      :data-testid="`board-column-cards-${column.id}`"
     >
       <div
         v-for="(card, cardIndex) in cards"

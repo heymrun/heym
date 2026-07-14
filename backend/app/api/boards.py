@@ -68,7 +68,13 @@ from app.services.upload_limits import read_upload_file_limited
 from app.services.workflow_access import get_accessible_workflow
 
 router = APIRouter()
-DEFAULT_COLUMNS = ["Backlog", "Planning", "Development", "Done"]
+
+DEFAULT_COLUMNS = (
+    ("Backlog", "#8b5cf6"),
+    ("Planning", "#22d3ee"),
+    ("Development", "#f59e0b"),
+    ("Done", "#10d9a0"),
+)
 ACTIVE_RUN_STATUSES = ("running", "pending")
 MAX_BOARD_CARDS = 500
 
@@ -333,8 +339,15 @@ async def create_board(
     )
     db.add(board)
     await db.flush()
-    for index, column_name in enumerate(DEFAULT_COLUMNS):
-        db.add(BoardColumn(board_id=board.id, name=column_name, position=index))
+    for index, (column_name, color) in enumerate(DEFAULT_COLUMNS):
+        db.add(
+            BoardColumn(
+                board_id=board.id,
+                name=column_name,
+                position=index,
+                color=color,
+            )
+        )
     await db.commit()
     await db.refresh(board)
     cred_name = await _mapper_credential_name(db, board)

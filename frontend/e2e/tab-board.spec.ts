@@ -204,6 +204,80 @@ test("clones and deletes a card from the hover actions", async ({ page }) => {
   await expect(backlog.getByText("Draft brief")).toHaveCount(1);
 });
 
+test("keeps columns within the viewport and scrolls only the card area", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { boardId, columns } = await createBoardWithCard(page, "Card 1");
+  const backlog = columns.find((column) => column.name === "Backlog")!;
+  for (let index = 2; index <= 18; index += 1) {
+    await page.request.post(`/api/boards/${boardId}/cards`, {
+      data: { title: `Card ${index}`, column_id: backlog.id },
+    });
+  }
+
+  await page.goto(`/?tab=board&board=${boardId}`);
+  const lane = page.getByTestId("board-column-Backlog");
+  const cardArea = page.getByTestId(`board-column-cards-${backlog.id}`);
+  const header = page.getByTestId("board-column-handle-Backlog");
+  const settings = page.getByTestId(`board-column-settings-${backlog.id}`);
+
+  await expect(lane).toBeVisible();
+  await page.waitForTimeout(500);
+  const layout = await Promise.all([
+    lane.boundingBox(),
+    header.boundingBox(),
+    settings.boundingBox(),
+  ]);
+  expect(layout[0]).not.toBeNull();
+  expect(layout[1]).not.toBeNull();
+  expect(layout[2]).not.toBeNull();
+  expect(layout[0]!.y + layout[0]!.height).toBeLessThanOrEqual(720);
+  expect(layout[0]!.x + layout[0]!.width - (layout[2]!.x + layout[2]!.width)).toBeLessThan(16);
+  const pageScroll = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    viewportHeight: window.innerHeight,
+  }));
+  expect(pageScroll.scrollHeight).toBeLessThanOrEqual(pageScroll.viewportHeight);
+
+  const scrollMetrics = await cardArea.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+
+  const headerY = layout[1]!.y;
+  await cardArea.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(header).toBeVisible();
+  expect((await header.boundingBox())!.y).toBe(headerY);
+});
+
+test("moves a card to the top whenever it is updated", async ({ page }) => {
+  const { boardId, cardId, columns } = await createBoardWithCard(page, "Older card");
+  const backlog = columns.find((column) => column.name === "Backlog")!;
+  await page.waitForTimeout(20);
+  const newerCard = await (
+    await page.request.post(`/api/boards/${boardId}/cards`, {
+      data: { title: "Newer card", column_id: backlog.id },
+    })
+  ).json() as { id: string };
+
+  await page.goto(`/?tab=board&board=${boardId}`);
+  const cards = page.getByTestId(`board-column-cards-${backlog.id}`).locator("[data-board-card]");
+  await expect(cards.nth(0)).toContainText("Newer card");
+  await expect(cards.nth(1)).toContainText("Older card");
+
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.getByPlaceholder("Describe the job for this card").fill("Recently updated");
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByTestId("card-description-saved")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(cards.nth(0)).toContainText("Older card");
+  await expect(cards.nth(1)).toContainText("Newer card");
+  await expect(page.getByTestId(`board-card-${newerCard.id}`)).toBeVisible();
+});
+
 test("runs a column workflow chain to completion when a card enters", async ({ page }) => {
   const wf = await createSetOutputWorkflow(page);
   try {

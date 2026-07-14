@@ -75,6 +75,32 @@ class TestWorkflowSummary(unittest.TestCase):
 
 
 class TestBuildWorkflowInputs(unittest.IsolatedAsyncioTestCase):
+    async def test_resolves_mapper_credential_shared_with_board_owner(self):
+        board = _board()
+        credential = _credential()
+        db = AsyncMock()
+
+        with (
+            patch.object(
+                board_mapper_service,
+                "get_accessible_credential",
+                AsyncMock(return_value=credential),
+            ) as get_credential,
+            patch.object(
+                board_mapper_service,
+                "decrypt_config",
+                return_value={"api_key": "shared-key"},
+            ),
+        ):
+            resolved, api_key, base_url = await board_mapper_service._resolve_mapper_credential(
+                db, board
+            )
+
+        self.assertIs(resolved, credential)
+        self.assertEqual(api_key, "shared-key")
+        self.assertIsNone(base_url)
+        get_credential.assert_awaited_once_with(db, board.mapper_credential_id, board.owner_id)
+
     async def test_maps_and_merges_reserved_board_block(self):
         board = _board()
         credential = _credential()

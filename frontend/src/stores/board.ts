@@ -37,7 +37,11 @@ export const useBoardStore = defineStore("board", () => {
       (grouped[card.column_id] ??= []).push(card);
     }
     for (const columnId of Object.keys(grouped)) {
-      grouped[columnId].sort((a, b) => a.position - b.position);
+      grouped[columnId].sort((a, b) => {
+        const updatedAtDifference =
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        return updatedAtDifference || a.position - b.position;
+      });
     }
     return grouped;
   });

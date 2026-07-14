@@ -83,8 +83,13 @@ class TestCreateBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(boards), 1)
         self.assertEqual(boards[0].name, "My Board")
         self.assertEqual(
-            [c.name for c in sorted(columns, key=lambda c: c.position)],
-            ["Backlog", "Planning", "Development", "Done"],
+            [(c.name, c.color) for c in sorted(columns, key=lambda c: c.position)],
+            [
+                ("Backlog", "#8b5cf6"),
+                ("Planning", "#22d3ee"),
+                ("Development", "#f59e0b"),
+                ("Done", "#10d9a0"),
+            ],
         )
         db.commit.assert_awaited()
 

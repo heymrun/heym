@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Plus } from "lucide-vue-next";
 
 import { useBoardStore } from "@/stores/board";
@@ -15,6 +15,38 @@ const emit = defineEmits<{
 const boardStore = useBoardStore();
 const addingColumn = ref(false);
 const newColumnName = ref("");
+const canvas = ref<HTMLElement | null>(null);
+const availableHeight = ref<number | null>(null);
+
+function updateAvailableHeight(): void {
+  const element = canvas.value;
+  if (!element) return;
+  const main = element.closest("main");
+  const bottomSpacing = main
+    ? Number.parseFloat(window.getComputedStyle(main).paddingBottom) || 0
+    : 0;
+  availableHeight.value = Math.max(
+    0,
+    window.innerHeight - element.getBoundingClientRect().top - bottomSpacing,
+  );
+}
+
+onMounted(() => {
+  updateAvailableHeight();
+  window.addEventListener("resize", updateAvailableHeight);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", updateAvailableHeight);
+});
+
+watch(
+  () => boardStore.activeBoard?.description,
+  async () => {
+    await nextTick();
+    updateAvailableHeight();
+  },
+);
 
 async function addColumn(): Promise<void> {
   const name = newColumnName.value.trim();
@@ -28,7 +60,12 @@ async function addColumn(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex h-full gap-3 overflow-x-auto p-4">
+  <div
+    ref="canvas"
+    class="flex min-h-0 gap-3 overflow-x-auto p-4"
+    :style="availableHeight === null ? undefined : { height: `${availableHeight}px` }"
+    data-testid="board-canvas"
+  >
     <BoardColumnLane
       v-for="(column, index) in boardStore.activeBoard?.columns ?? []"
       :key="column.id"
