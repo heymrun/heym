@@ -24,12 +24,23 @@ test("creates a conversation and renames it", async ({ page }) => {
   const item = page.getByTestId(`chat-list-item-${conversationId}`);
   await expect(item).toBeVisible();
 
-  // Rename via the hover action, commit with Enter.
+  // Rename via the hover action. Enter commits; blur also commits when focus moves
+  // (e.g. credential selectors re-rendering after the chat detail panel loads).
+  const renameResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/chats/${conversationId}`) &&
+      response.request().method() === "PUT" &&
+      response.ok(),
+  );
   await item.hover();
   await item.getByTitle("Rename").click();
   const renameInput = item.locator("input");
+  await expect(renameInput).toBeVisible();
   await renameInput.fill(renamedTitle);
-  await renameInput.press("Enter");
+  if (await renameInput.isVisible()) {
+    await renameInput.press("Enter");
+  }
+  await renameResponse;
   await expect(item).toContainText(renamedTitle);
 
   // The rename is server-persisted and survives a reload.
