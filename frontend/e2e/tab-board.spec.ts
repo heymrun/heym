@@ -204,6 +204,33 @@ test("clones and deletes a card from the hover actions", async ({ page }) => {
   await expect(backlog.getByText("Draft brief")).toHaveCount(1);
 });
 
+test("edits a card title inline on blur and cancels with Escape", async ({ page }) => {
+  const credentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Draft brief");
+  await page.request.patch(`/api/boards/${boardId}`, {
+    data: { mapper_credential_id: credentialId, mapper_model: "gpt-4o" },
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+
+  const title = page.getByTestId(`board-card-title-${cardId}`);
+  await title.dblclick();
+  const input = page.getByTestId(`board-card-title-input-${cardId}`);
+  await expect(input).toBeFocused();
+  await input.fill("Updated brief");
+  await input.blur();
+  await expect(title).toHaveText("Updated brief");
+
+  await title.dblclick();
+  await input.fill("Cancelled title");
+  await input.press("Escape");
+  await expect(title).toHaveText("Updated brief");
+
+  const card = await (
+    await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)
+  ).json();
+  expect(card.card.title).toBe("Updated brief");
+});
+
 test("runs a column workflow chain to completion when a card enters", async ({ page }) => {
   const wf = await createSetOutputWorkflow(page);
   try {

@@ -7,6 +7,7 @@ import type {
   BoardState,
   BoardSummary,
   BoardUpdatePayload,
+  CardUpdatePayload,
 } from "@/types/board";
 import { boardApi } from "@/services/api";
 
@@ -146,6 +147,20 @@ export const useBoardStore = defineStore("board", () => {
     }
   }
 
+  async function updateCard(cardId: string, payload: CardUpdatePayload): Promise<void> {
+    const board = activeBoard.value;
+    if (!board) return;
+    try {
+      const updatedCard = await boardApi.updateCard(board.id, cardId, payload);
+      const cardIndex = board.cards.findIndex((card) => card.id === cardId);
+      if (cardIndex !== -1) board.cards[cardIndex] = updatedCard;
+      error.value = null;
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : "Failed to update card";
+      throw err;
+    }
+  }
+
   async function runFollowUp(cardId: string): Promise<void> {
     if (!activeBoard.value) return;
     await boardApi.runCard(activeBoard.value.id, cardId);
@@ -188,6 +203,7 @@ export const useBoardStore = defineStore("board", () => {
     deleteBoard,
     moveColumn,
     createCard,
+    updateCard,
     moveCard,
     runFollowUp,
     deleteCard,
