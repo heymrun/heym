@@ -220,10 +220,13 @@ test("edits a card title inline on blur and cancels with Escape", async ({ page 
   await input.blur();
   await expect(title).toHaveText("Updated brief");
 
-  await title.dblclick();
-  await input.fill("Cancelled title");
-  await input.press("Escape");
-  await expect(title).toHaveText("Updated brief");
+  // Re-locate the title element after the component re-renders
+  const updatedTitle = page.getByTestId(`board-card-title-${cardId}`);
+  await updatedTitle.dblclick();
+  const updatedInput = page.getByTestId(`board-card-title-input-${cardId}`);
+  await updatedInput.fill("Cancelled title");
+  await updatedInput.press("Escape");
+  await expect(updatedTitle).toHaveText("Updated brief");
 
   const card = await (
     await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)
