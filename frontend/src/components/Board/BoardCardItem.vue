@@ -27,9 +27,9 @@ const emit = defineEmits<{
 }>();
 const editingTitle = ref(false);
 const editedTitle = ref(props.card.title);
-const titleInput = ref<HTMLInputElement | null>(null);
+const titleInput = ref<HTMLTextAreaElement | null>(null);
 const savingTitle = ref(false);
-const cancellingTitle = ref(false);
+let titleClickTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => props.card.title,
@@ -41,25 +41,32 @@ watch(
 async function startTitleEdit(): Promise<void> {
   if (!canAct.value || savingTitle.value) return;
   editedTitle.value = props.card.title;
-  cancellingTitle.value = false;
   editingTitle.value = true;
   await nextTick();
-  titleInput.value?.focus();
-  titleInput.value?.select();
+  const input = titleInput.value;
+  if (!input) return;
+  input.focus();
+  input.setSelectionRange(0, input.value.length);
 }
 
-function cancelTitleEdit(): void {
-  cancellingTitle.value = true;
-  editedTitle.value = props.card.title;
-  editingTitle.value = false;
+function onTitleClick(): void {
+  if (titleClickTimer) clearTimeout(titleClickTimer);
+  titleClickTimer = setTimeout(() => {
+    titleClickTimer = null;
+    emit("open", props.card.id);
+  }, 250);
+}
+
+function onTitleDblClick(): void {
+  if (titleClickTimer) {
+    clearTimeout(titleClickTimer);
+    titleClickTimer = null;
+  }
+  void startTitleEdit();
 }
 
 async function saveTitle(): Promise<void> {
   if (!editingTitle.value || savingTitle.value) return;
-  if (cancellingTitle.value) {
-    cancellingTitle.value = false;
-    return;
-  }
 
   const title = editedTitle.value.trim();
   if (!title) {
@@ -85,7 +92,7 @@ async function saveTitle(): Promise<void> {
     savingTitle.value = false;
     await nextTick();
     titleInput.value?.focus();
-    titleInput.value?.select();
+    titleInput.value?.setSelectionRange(0, titleInput.value.value.length);
   } finally {
     savingTitle.value = false;
   }
@@ -134,17 +141,17 @@ function onDragStart(event: DragEvent): void {
           @click.stop
           @dblclick.stop
         >
-          <input
+          <textarea
             ref="titleInput"
             v-model="editedTitle"
-            type="text"
-            class="w-full rounded border border-primary/60 bg-background px-1 py-0 font-medium leading-5 text-foreground outline-none ring-1 ring-primary/30 disabled:pr-6"
+            rows="3"
+            class="w-full resize-none rounded border border-primary/60 bg-background px-1 py-0.5 font-medium leading-5 text-foreground outline-none ring-1 ring-primary/30 disabled:pr-6"
             :disabled="savingTitle"
             :data-testid="`board-card-title-input-${card.id}`"
             :aria-label="`Edit title for ${card.title}`"
             @blur="saveTitle"
-            @keydown.esc.prevent.stop="cancelTitleEdit"
-          >
+            @click.stop
+          />
           <Loader2
             v-if="savingTitle"
             class="absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
@@ -153,11 +160,10 @@ function onDragStart(event: DragEvent): void {
         </div>
         <span
           v-else
-          class="line-clamp-2 font-medium"
-          :class="canAct ? 'cursor-text' : ''"
+          class="line-clamp-3 whitespace-pre-line font-medium"
           :data-testid="`board-card-title-${card.id}`"
-          @click.stop
-          @dblclick.stop="startTitleEdit"
+          @click.stop="onTitleClick"
+          @dblclick.stop="onTitleDblClick"
         >{{ card.title }}</span>
       </div>
       <span
