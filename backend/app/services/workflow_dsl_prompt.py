@@ -444,6 +444,7 @@ In workflow expressions:
   - `reasoningEffort`: "low" | "medium" | "high" (for reasoning models)
   - `jsonOutputEnabled`: Boolean to enable structured JSON output (default: false) - for text mode only
   - `jsonOutputSchema`: JSON Schema string for structured output (optional, use with jsonOutputEnabled)
+  - `outputContract`: JSON Schema string checked against the node output after execution (optional)
   - `guardrailsEnabled`: Boolean to enable content safety guardrails (default: false)
   - `guardrailsCategories`: Array of blocked category keys (see Guardrails section below)
   - `guardrailsSeverity`: "low" | "medium" | "high" — detection sensitivity (default: "medium")
@@ -4415,6 +4416,7 @@ Always include:
 9. For timestamps, use `$now` instead of JavaScript Date functions.
 10. **USE `set` NODE FOR TRANSFORMATIONS** - uppercase, lowercase, substring, concatenation, etc. The `execute` node is ONLY for calling other workflows!
 11. **OUTPUT NODE MUST REFERENCE BY LABEL** - Never use `$input` in output message. Always use `$previousNodeLabel.field`.
+    Output nodes may optionally set `outputContract` to a JSON Schema string; the resolved output must match it.
 12. **DON'T USE MERGE BY DEFAULT** - For parallel operations, use separate output nodes. Only use merge when user explicitly asks to "merge", "combine", or "join" results together.
 13. **ONLY USE LISTED FUNCTIONS** - Only use functions documented above. No JSON.parse, no made-up functions.
 14. **BOOLEAN CONDITIONS** - For booleans, write `$node.isValid` not `$node.isValid == true`. Use `not $node.isValid` for negation.

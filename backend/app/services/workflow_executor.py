@@ -36,6 +36,7 @@ from app.observability import tracing
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
+from app.services.data_contracts import DataContractViolationError, validate_node_output
 from app.services.execution_cancellation import (
     clear_execution as _clear_sub_execution,
 )
@@ -6896,7 +6897,7 @@ class WorkflowExecutor:
                 # GuardrailViolationError is an intentional block — never retry
                 from app.services.guardrails_service import GuardrailViolationError
 
-                if isinstance(e, GuardrailViolationError):
+                if isinstance(e, (GuardrailViolationError, DataContractViolationError)):
                     break
                 if attempt < retry_max_attempts:
                     pending_retry_result = self._record_retry_attempt_result(
@@ -6925,6 +6926,11 @@ class WorkflowExecutor:
         trace_id = getattr(last_error, "trace_id", None)
         if isinstance(trace_id, str) and trace_id:
             error_metadata["trace_id"] = trace_id
+        if isinstance(last_error, DataContractViolationError):
+            error_metadata["data_contract"] = {
+                "valid": False,
+                "errors": list(last_error.errors),
+            }
 
         if on_error_enabled:
             output_base["_errorBranch"] = True
@@ -7029,7 +7035,11 @@ class WorkflowExecutor:
                                 active_exclude_node_ids=loop_back_targets,
                                 inactive_stop_node_ids=loop_back_targets,
                             )
+                validate_node_output(output, node_data.get("outputContract"), node_label)
                 execution_time_ms = (time.time() - start_time) * 1000
+                metadata = {}
+                if node_data.get("outputContract"):
+                    metadata["data_contract"] = {"valid": True}
                 return NodeResult(
                     node_id=node_id,
                     node_label=node_label,
@@ -7037,6 +7047,7 @@ class WorkflowExecutor:
                     status="success",
                     output=output,
                     execution_time_ms=execution_time_ms,
+                    metadata=metadata,
                 )
             handler_output = execute_node_handler(
                 NodeExecutionContext(
@@ -7052,8 +7063,14 @@ class WorkflowExecutor:
                 )
             )
             if isinstance(handler_output, NodeResult):
+                validate_node_output(
+                    handler_output.output, node_data.get("outputContract"), node_label
+                )
+                if node_data.get("outputContract"):
+                    handler_output.metadata["data_contract"] = {"valid": True}
                 return handler_output
             output = handler_output
+            validate_node_output(output, node_data.get("outputContract"), node_label)
 
             execution_time = (time.time() - start_time) * 1000
             metadata: dict = {}
@@ -7066,6 +7083,8 @@ class WorkflowExecutor:
             trace_id = self._pop_internal_trace_id(output)
             if trace_id:
                 metadata["trace_id"] = trace_id
+            if node_data.get("outputContract"):
+                metadata["data_contract"] = {"valid": True}
 
             return NodeResult(
                 node_id=node_id,

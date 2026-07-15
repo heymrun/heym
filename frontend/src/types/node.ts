@@ -101,6 +101,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "output",
       message: "$input.text",
       allowDownstream: false,
+      outputContract: "",
     },
   },
   llm: {

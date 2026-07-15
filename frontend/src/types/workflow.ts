@@ -413,6 +413,8 @@ export interface NodeData {
   active?: boolean;
   allowDownstream?: boolean;
   outputSchema?: OutputSchemaField[];
+  /** Optional JSON Schema contract checked against this node's runtime output. */
+  outputContract?: string;
   inputCount?: number;
   mappings?: MappingField[];
   pinnedData?: Record<string, unknown> | null;

@@ -16,6 +16,8 @@ The **Output** node is the workflow endpoint that returns the response to the ca
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
 | `message` | expression | Output value. **Must** reference previous node: `$previousNodeLabel.field` |
+| `outputSchema` | key/value list | Optional legacy mapping for structured output. |
+| `outputContract` | JSON Schema | Optional runtime contract. The node fails if its output does not match. |
 | `allowDownstream` | boolean | If true, nodes after output run asynchronously after response is sent |
 
 ## Agent tool usage
@@ -32,6 +34,20 @@ When an Output node is connected to an [Agent Node](./agent-node.md) as a canvas
 ## Async Post-Processing
 
 When `allowDownstream: true`, the response is returned immediately. Nodes connected after the output run in the background (e.g. Slack notifications, logging).
+
+## Data contract
+
+`outputContract` accepts a JSON Schema object encoded as JSON. It is checked after
+the node resolves its message or mapping and before downstream nodes are scheduled.
+Validation errors stop the workflow and are included in the node result metadata.
+
+```json
+{
+  "type": "object",
+  "required": ["result"],
+  "properties": { "result": { "type": "string" } }
+}
+```
 
 ## Example
 
