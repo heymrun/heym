@@ -121,11 +121,12 @@ function handleContentDrop(event: DragEvent): void {
 
 <template>
   <div class="folder-tree-item">
+    <!-- Improved folder header with better drag feedback -->
     <div
       :class="cn(
         'folder-header flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer group',
         dragOverFolderId === folder.id
-          ? 'bg-primary/10 border-2 border-primary border-dashed'
+          ? 'bg-primary/10 border-2 border-primary border-dashed shadow-lg shadow-primary/20 scale-[1.01]'
           : 'hover:bg-muted/30'
       )"
       :style="{ paddingLeft: `${depth * 14 + 8}px` }"
@@ -177,16 +178,40 @@ function handleContentDrop(event: DragEvent): void {
       </Button>
     </div>
 
+    <!-- Improved folder content area with clear drop zone -->
     <div
       v-if="isExpanded && hasContent"
       :class="cn(
-        'folder-content',
-        dragOverFolderId === folder.id && 'rounded-lg border-2 border-primary border-dashed bg-primary/5 mt-0.5'
+        'folder-content transition-all duration-300',
+        dragOverFolderId === folder.id && 'rounded-lg border-2 border-primary border-dashed bg-primary/5 mt-0.5 shadow-lg shadow-primary/10'
       )"
       @dragover="handleContentDragOver"
       @dragleave="handleContentDragLeave"
       @drop="handleContentDrop"
     >
+      <!-- Clear drop zone indicator for folders -->
+      <Transition
+        enter-active-class="transition-all duration-300"
+        leave-active-class="transition-all duration-200"
+        enter-from-class="opacity-0 scale-95"
+        enter-to-class="opacity-100 scale-100"
+        leave-from-class="opacity-100 scale-100"
+        leave-to-class="opacity-0 scale-95"
+      >
+        <div
+          v-if="dragOverFolderId === folder.id && draggedWorkflowId"
+          class="mb-2 p-3 rounded-lg bg-primary/10 border-2 border-dashed border-primary text-center"
+          :style="{ paddingLeft: `${(depth + 1) * 14 + 8}px` }"
+        >
+          <div class="flex items-center justify-center gap-2 text-primary font-medium text-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+            </svg>
+            <span>Drop here to move to "{{ folder.name }}"</span>
+          </div>
+        </div>
+      </Transition>
+
       <FolderTreeItem
         v-for="child in folder.children"
         :key="child.id"
@@ -309,6 +334,7 @@ function handleContentDrop(event: DragEvent): void {
 <style scoped>
 .folder-header {
   border: 1px solid transparent;
+  transition: all 0.2s ease;
 }
 
 .folder-header:hover {
