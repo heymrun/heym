@@ -202,7 +202,6 @@ const showcaseContext = computed(() => {
     dashboardTab: activeTab.value as DashboardShowcaseTab,
   });
 });
-
 const longPressTargetWorkflow = ref<WorkflowListItem | null>(null);
 const { handlers: longPressHandlers } = useLongPress(() => {
   const w = longPressTargetWorkflow.value;
@@ -766,15 +765,54 @@ function countWorkflowsInFolder(folder: FolderTree): number {
   return count;
 }
 
+// Improved drag and drop with better visual feedback and scroll handling
 function onDragStartWorkflow(event: DragEvent, workflowId: string): void {
   event.dataTransfer?.setData("workflowId", workflowId);
   draggedWorkflowId.value = workflowId;
+  
+  // Set a custom drag image for better visibility
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.dropEffect = "move";
+    
+    // Create a custom drag ghost
+    const workflow = workflows.value.find((w) => w.id === workflowId);
+    if (workflow) {
+      const dragGhost = document.createElement("div");
+      dragGhost.className = "fixed pointer-events-none bg-primary text-primary-foreground px-3 py-2 rounded-lg shadow-lg text-sm font-medium z-[9999] flex items-center gap-2";
+      dragGhost.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+        ${workflow.name}
+      `;
+      dragGhost.style.transform = "translate(-50%, -50%)";
+      document.body.appendChild(dragGhost);
+      
+      // Position the ghost at the cursor
+      const moveGhost = (e: MouseEvent) => {
+        dragGhost.style.left = `${e.clientX}px`;
+        dragGhost.style.top = `${e.clientY}px`;
+      };
+      
+      document.addEventListener("mousemove", moveGhost);
+      
+      // Clean up ghost on drag end
+      const cleanup = () => {
+        document.removeEventListener("mousemove", moveGhost);
+        dragGhost.remove();
+        document.removeEventListener("dragend", cleanup);
+      };
+      document.addEventListener("dragend", cleanup);
+    }
+  }
 }
 
 function onDragEndWorkflow(): void {
   draggedWorkflowId.value = null;
   dragOverFolderId.value = null;
   dragOverRoot.value = false;
+  dragOverTrash.value = false;
 }
 
 function onDragOverFolder(_event: DragEvent, folderId: string): void {
@@ -1692,23 +1730,41 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 />
               </div>
 
+              <!-- Improved root drop zone with clear visual feedback -->
               <div
                 v-if="!isWorkflowSearchActive || displayedRootWorkflows.length > 0 || draggedWorkflowId"
                 :class="cn(
-                  'rounded-xl border-2 border-dashed p-3 transition-all',
-                  dragOverRoot ? 'border-primary bg-primary/5' : 'border-transparent'
+                  'rounded-xl border-2 p-3 transition-all duration-300',
+                  dragOverRoot 
+                    ? 'border-primary bg-primary/5 shadow-lg shadow-primary/20 scale-[1.01]' 
+                    : 'border-transparent'
                 )"
                 @dragenter="onDragEnterDropZone"
                 @dragover="onDragOverRoot"
                 @dragleave="onDragLeaveRoot"
                 @drop="onDropToRoot"
               >
-                <div
-                  v-if="draggedWorkflowId && workflows.find((w) => w.id === draggedWorkflowId)?.folder_id"
-                  class="text-center text-sm text-muted-foreground py-2"
+                <!-- Clear drop zone indicator -->
+                <Transition
+                  enter-active-class="transition-all duration-300"
+                  leave-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 scale-95"
+                  enter-to-class="opacity-100 scale-100"
+                  leave-from-class="opacity-100 scale-100"
+                  leave-to-class="opacity-0 scale-95"
                 >
-                  Drop here to move to root
-                </div>
+                  <div
+                    v-if="dragOverRoot"
+                    class="mb-4 p-4 rounded-xl bg-primary/10 border-2 border-dashed border-primary text-center"
+                  >
+                    <div class="flex items-center justify-center gap-2 text-primary font-medium">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                      </svg>
+                      <span>Drop here to move to root</span>
+                    </div>
+                  </div>
+                </Transition>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <Card
@@ -1818,11 +1874,14 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 </div>
               </div>
 
+              <!-- Improved trash drop zone with clear visual feedback -->
               <div
                 v-if="!isWorkflowSearchActive || displayedScheduledWorkflows.length > 0 || draggedWorkflowId"
                 :class="cn(
-                  'mt-6 rounded-xl border-2 border-dashed p-3 transition-all duration-300',
-                  dragOverTrash ? 'border-destructive bg-destructive/5' : 'border-border/40 bg-muted/5'
+                  'mt-6 rounded-xl border-2 p-3 transition-all duration-300',
+                  dragOverTrash 
+                    ? 'border-destructive bg-destructive/5 shadow-lg shadow-destructive/20 scale-[1.01]' 
+                    : 'border-border/40 bg-muted/5'
                 )"
                 @dragenter="onDragEnterDropZone"
                 @dragover="onDragOverTrash"
@@ -1846,12 +1905,27 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   </div>
                 </div>
 
-                <div
-                  v-if="draggedWorkflowId && !workflows.find((w) => w.id === draggedWorkflowId)?.scheduled_for_deletion"
-                  class="text-center text-sm text-destructive py-4 border border-dashed border-destructive/30 rounded-xl mb-4 mt-4"
+                <!-- Clear trash drop zone indicator -->
+                <Transition
+                  enter-active-class="transition-all duration-300"
+                  leave-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 scale-95"
+                  enter-to-class="opacity-100 scale-100"
+                  leave-from-class="opacity-100 scale-100"
+                  leave-to-class="opacity-0 scale-95"
                 >
-                  Drop here to schedule for deletion
-                </div>
+                  <div
+                    v-if="dragOverTrash && draggedWorkflowId && !workflows.find((w) => w.id === draggedWorkflowId)?.scheduled_for_deletion"
+                    class="mb-4 p-4 rounded-xl bg-destructive/10 border-2 border-dashed border-destructive text-center"
+                  >
+                    <div class="flex items-center justify-center gap-2 text-destructive font-medium">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                      </svg>
+                      <span>Drop here to schedule for deletion</span>
+                    </div>
+                  </div>
+                </Transition>
 
                 <div
                   v-if="displayedScheduledWorkflows.length > 0"
@@ -2325,7 +2399,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
     0 0 120px hsl(var(--primary) / 0.08);
 }
 
-/* ── Workflow Card ── */
+/* ─── Workflow Card ─── */
 
 .workflow-card {
   animation: fade-in-card 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -2352,7 +2426,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
   box-shadow: 0 4px 14px hsl(var(--primary) / 0.25);
 }
 
-/* ── Toast ── */
+/* ─── Toast ─── */
 
 .toast-notification {
   box-shadow:
@@ -2361,7 +2435,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
   animation: toast-enter 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ── Animations ── */
+/* ─── Animations ─── */
 
 @keyframes fade-in-card {
   from {
