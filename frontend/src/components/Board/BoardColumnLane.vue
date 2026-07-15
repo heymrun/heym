@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { GripVertical, Plus, Settings2, Trash2, Workflow } from "lucide-vue-next";
 
 import type { BoardCard, BoardColumn } from "@/types/board";
@@ -17,6 +17,8 @@ const emit = defineEmits<{
 
 const boardStore = useBoardStore();
 const dragOver = ref(false);
+const insertionIndex = ref<number | null>(null);
+const lastDragPosition = ref<{ x: number; y: number } | null>(null);
 const columnDragOver = ref(false);
 const newCardTitle = ref("");
 const laneBody = ref<HTMLElement | null>(null);
@@ -36,6 +38,16 @@ function dropIndexFromPointer(event: DragEvent): number {
     if (event.clientY < rect.top + rect.height / 2) return i;
   }
   return cardEls.length;
+}
+
+function clearCardDragState(): void {
+  dragOver.value = false;
+  insertionIndex.value = null;
+  lastDragPosition.value = null;
+}
+
+function updateInsertionIndex(event: DragEvent): void {
+  insertionIndex.value = dropIndexFromPointer(event);
 }
 
 // A lane accepts two kinds of drag: a card (dropped into this column) and another column
@@ -59,17 +71,38 @@ function onDragOver(event: DragEvent): void {
   }
   if (!canAct.value) return;
   event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   dragOver.value = true;
+  lastDragPosition.value = { x: event.clientX, y: event.clientY };
+  updateInsertionIndex(event);
 }
 
-function onDragLeave(): void {
-  dragOver.value = false;
+function onDragLeave(event: DragEvent): void {
+  const lane = event.currentTarget as HTMLElement | null;
+  const nextTarget = event.relatedTarget;
+  if (lane && nextTarget instanceof Node && lane.contains(nextTarget)) return;
+
+  // Browsers commonly report a null relatedTarget while an overflow container scrolls.
+  // Keep the target active when the pointer is still geometrically inside the lane.
+  if (lane) {
+    const rect = lane.getBoundingClientRect();
+    const pointer = lastDragPosition.value ?? { x: event.clientX, y: event.clientY };
+    const pointerIsInside =
+      pointer.x >= rect.left &&
+      pointer.x <= rect.right &&
+      pointer.y >= rect.top &&
+      pointer.y <= rect.bottom;
+    if (pointerIsInside) return;
+  }
+
+  clearCardDragState();
   columnDragOver.value = false;
 }
 
 function onDrop(event: DragEvent): void {
   event.preventDefault();
-  dragOver.value = false;
+  const targetIndex = insertionIndex.value ?? dropIndexFromPointer(event);
+  clearCardDragState();
   columnDragOver.value = false;
   const columnId = event.dataTransfer?.getData(COLUMN_DRAG_TYPE);
   if (columnId) {
@@ -81,8 +114,20 @@ function onDrop(event: DragEvent): void {
   if (!canAct.value) return;
   const cardId = event.dataTransfer?.getData("text/board-card");
   if (!cardId) return;
-  void boardStore.moveCard(cardId, props.column.id, dropIndexFromPointer(event));
+  void boardStore.moveCard(cardId, props.column.id, targetIndex);
 }
+
+function onCardDragStart(cardId: string): void {
+  if (!canAct.value) return;
+  dragOver.value = true;
+  insertionIndex.value = Math.max(
+    0,
+    cards.value.findIndex((card) => card.id === cardId),
+  );
+}
+
+onMounted(() => window.addEventListener("dragend", clearCardDragState));
+onUnmounted(() => window.removeEventListener("dragend", clearCardDragState));
 
 async function addCard(): Promise<void> {
   if (!canAct.value) return;
@@ -107,10 +152,7 @@ async function emptyColumn(): Promise<void> {
 <template>
   <div
     class="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/30"
-    :class="[
-      dragOver ? 'ring-2 ring-primary/50' : '',
-      columnDragOver ? 'ring-2 ring-primary' : '',
-    ]"
+    :class="columnDragOver ? 'ring-2 ring-primary' : ''"
     :data-testid="`board-column-${column.name}`"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -165,23 +207,48 @@ async function emptyColumn(): Promise<void> {
     </div>
     <div
       ref="laneBody"
-      class="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2"
+      class="flex min-h-24 flex-1 flex-col overflow-y-auto px-2 pb-2"
+      :class="dragOver ? 'bg-primary/[0.035]' : ''"
       :data-testid="`board-column-cards-${column.id}`"
     >
-      <div
+      <template
         v-for="(card, cardIndex) in cards"
         :key="card.id"
-        class="board-enter"
-        :style="{ animationDelay: `${cardIndex * 45}ms` }"
-        data-board-card
       >
-        <BoardCardItem
-          :card="card"
-          @open="emit('openCard', $event)"
-          @clone="boardStore.cloneCard"
-          @delete="deleteCard"
-          @open-error-history="emit('openErrorHistory', $event)"
-        />
+        <div
+          v-if="dragOver && insertionIndex === cardIndex"
+          class="drop-placeholder"
+          role="status"
+          aria-live="polite"
+          :aria-label="`Drop before ${card.title}`"
+          :data-testid="`board-drop-indicator-${column.id}-${cardIndex}`"
+        >
+          <span>Drop here</span>
+        </div>
+        <div
+          class="board-enter mb-2"
+          :style="{ animationDelay: `${cardIndex * 45}ms` }"
+          data-board-card
+        >
+          <BoardCardItem
+            :card="card"
+            @drag-start="onCardDragStart"
+            @open="emit('openCard', $event)"
+            @clone="boardStore.cloneCard"
+            @delete="deleteCard"
+            @open-error-history="emit('openErrorHistory', $event)"
+          />
+        </div>
+      </template>
+      <div
+        v-if="dragOver && insertionIndex === cards.length"
+        class="drop-placeholder"
+        role="status"
+        aria-live="polite"
+        :aria-label="cards.length ? 'Drop at end of column' : `Drop in ${column.name}`"
+        :data-testid="`board-drop-indicator-${column.id}-${cards.length}`"
+      >
+        <span>{{ cards.length ? "Drop here" : "Drop card here" }}</span>
       </div>
     </div>
     <div class="flex items-center gap-1 border-t border-border/40 p-2">
@@ -203,6 +270,29 @@ async function emptyColumn(): Promise<void> {
 /* Runs once when a lane/card first mounts (board open or switch), not on poll updates. */
 .board-enter {
   animation: board-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.drop-placeholder {
+  @apply mb-2 flex min-h-14 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary/10 text-xs font-semibold text-primary;
+  animation: drop-placeholder-in 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.16);
+}
+
+@keyframes drop-placeholder-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.35);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-placeholder {
+    animation: none;
+  }
 }
 
 @keyframes board-enter {

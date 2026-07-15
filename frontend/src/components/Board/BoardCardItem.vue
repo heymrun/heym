@@ -26,11 +26,13 @@ const emit = defineEmits<{
   (e: "clone", cardId: string): void;
   (e: "delete", cardId: string): void;
   (e: "openErrorHistory", cardId: string): void;
+  (e: "dragStart", cardId: string): void;
 }>();
 const editingTitle = ref(false);
 const editedTitle = ref(props.card.title);
 const titleInput = ref<HTMLTextAreaElement | null>(null);
 const savingTitle = ref(false);
+const dragging = ref(false);
 let titleClickTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
@@ -123,16 +125,23 @@ const attachmentCount = computed<number>(() => {
 function onDragStart(event: DragEvent): void {
   event.dataTransfer?.setData("text/board-card", props.card.id);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  dragging.value = true;
+  emit("dragStart", props.card.id);
+}
+
+function onDragEnd(): void {
+  dragging.value = false;
 }
 </script>
 
 <template>
   <div
     class="group cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors hover:border-primary/60"
-    :class="statusClasses"
+    :class="[statusClasses, dragging ? 'scale-[0.98] opacity-45' : '']"
     :draggable="canAct && !editingTitle"
     :data-testid="`board-card-${card.id}`"
     @dragstart="onDragStart"
+    @dragend="onDragEnd"
     @click="emit('open', card.id)"
   >
     <div class="flex items-start justify-between gap-2">
