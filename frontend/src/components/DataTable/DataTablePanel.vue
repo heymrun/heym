@@ -823,27 +823,29 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
     <template v-else>
       <!-- Header -->
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex min-w-0 flex-1 flex-col gap-1">
-          <div class="flex min-w-0 items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              class="shrink-0"
-              @click="goBack"
-            >
-              <ArrowLeft class="h-4 w-4" />
-            </Button>
-            <h2 class="min-w-0 text-lg font-semibold leading-tight">
-              {{ selectedTable.name }}
-            </h2>
-            <span class="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {{ rowTotal }} rows
-            </span>
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            class="shrink-0"
+            @click="goBack"
+          >
+            <ArrowLeft class="h-4 w-4" />
+          </Button>
+          <div class="flex min-w-0 flex-1 flex-col">
+            <div class="flex min-w-0 items-center gap-2">
+              <h2 class="min-w-0 text-lg font-semibold leading-tight">
+                {{ selectedTable.name }}
+              </h2>
+              <span class="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                {{ rowTotal }} rows
+              </span>
+            </div>
+            <p
+              v-if="selectedTable.description"
+              class="min-w-0 truncate text-sm leading-tight text-muted-foreground"
+            >{{ selectedTable.description }}</p>
           </div>
-          <p
-            v-if="selectedTable.description"
-            class="min-w-0 truncate pl-14 text-sm text-muted-foreground"
-          >{{ selectedTable.description }}</p>
         </div>
         <div class="flex max-w-full items-center gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] sm:overflow-visible sm:pb-0">
           <Button
