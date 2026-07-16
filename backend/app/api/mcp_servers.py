@@ -220,12 +220,55 @@ async def list_mcp_servers(
     db: AsyncSession = Depends(get_db),
 ) -> MCPServerListResponse:
     result = await db.execute(
-        select(MCPServer).where(MCPServer.user_id == current_user.id).order_by(MCPServer.created_at)
+        select(MCPServer).where(MCPServer.user_id == current_user.id)
     )
     servers = list(result.scalars().all())
-    items = []
+    
+    # Fetch workflow IDs for all servers
+    server_workflow_ids = {}
+    for server in servers:
+        workflow_ids = await _get_server_workflow_ids(db, server.id)
+        server_workflow_ids[server.id] = workflow_ids
+    
+    # Build server items with workflow information
+    server_items = []
     for s in servers:
-        workflow_ids = await _get_server_workflow_ids(db, s.id)
+        workflow_ids = server_workflow_ids.get(s.id, [])
+        server_items.append(
+            {
+                "server": s,
+                "workflow_ids": workflow_ids,
+                "has_workflows": len(workflow_ids) > 0
+            }
+        )
+    
+    # Sort servers based on the specified criteria:
+    # 1. Priority: Display items with workflows assigned (status 'on') first
+    # 2. Priority: Display recently created items next (using created_at as proxy for recently edited)
+    # 3. Priority: Display remaining items last
+    def sort_servers(server_item):
+        server = server_item["server"]
+        has_workflows = server_item["has_workflows"]
+        created_at = server.created_at or datetime.min
+        
+        # Primary sort: has_workflows (True first, then False)
+        primary_sort = not has_workflows  # False (0) for True, True (1) for False
+        
+        # Secondary sort: created_at descending (most recent first)
+        secondary_sort = -created_at.timestamp() if created_at else 0
+        
+        # Tertiary sort: name ascending for consistency
+        tertiary_sort = server.name.lower()
+        
+        return (primary_sort, secondary_sort, tertiary_sort)
+    
+    server_items.sort(key=sort_servers)
+    
+    # Build response items
+    items = []
+    for server_item in server_items:
+        s = server_item["server"]
+        workflow_ids = server_item["workflow_ids"]
         items.append(
             MCPServerResponse(
                 id=s.id,
@@ -235,6 +278,7 @@ async def list_mcp_servers(
                 workflow_ids=workflow_ids,
             )
         )
+    
     return MCPServerListResponse(servers=items)
 
 
