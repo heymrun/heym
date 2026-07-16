@@ -2465,6 +2465,16 @@ class WorkflowExecutor:
                 or edge["target"] in self.error_handler_nodes
             ):
                 continue
+            if (
+                edge["source"] == edge["target"]
+                and target_node.get("type") == "loop"
+                and edge.get("targetHandle") == "loop"
+            ):
+                # Some canvas workflows contain a visual loop-handle self-edge in
+                # addition to the body node's real back-connection. The self-edge is
+                # not an execution dependency: scheduling it advances the loop while
+                # the body is still running.
+                continue
             if source_node.get("type") == "jsonOutputMapper":
                 continue
             if source_node.get("type") == "output":

@@ -2,13 +2,97 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 import uuid
-from unittest.mock import MagicMock
+from collections.abc import Callable
+from unittest.mock import MagicMock, patch
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import agent_node, llm_node
-from app.services.workflow_executor import NodeTraceableExecutionError, WorkflowExecutor
+from app.services.workflow_executor import (
+    NodeResult,
+    NodeTraceableExecutionError,
+    WorkflowExecutor,
+    execute_workflow_streaming,
+)
+
+_ORIGINAL_EXECUTE_NODE_PARALLEL = WorkflowExecutor.execute_node_parallel
+
+
+def _execute_node_parallel_with_slow_set(
+    executor: WorkflowExecutor,
+    node_id: str,
+    inputs: dict,
+    on_retry: Callable[[NodeResult, int, int], None] | None = None,
+) -> NodeResult:
+    if node_id == "node_1784204114120_is6kul2q1":
+        time.sleep(0.02)
+    return _ORIGINAL_EXECUTE_NODE_PARALLEL(executor, node_id, inputs, on_retry)
+
+
+def _make_self_referential_loop_workflow() -> tuple[list[dict], list[dict]]:
+    nodes = [
+        {
+            "id": "var_numbers",
+            "type": "variable",
+            "data": {
+                "label": "createNumbers",
+                "variableName": "numbers",
+                "variableValue": "$array(1, 2, 3, 4, 5)",
+                "variableType": "array",
+            },
+        },
+        {
+            "id": "loop_1",
+            "type": "loop",
+            "data": {"label": "processNumbers", "arrayExpression": "$vars.numbers"},
+        },
+        {
+            "id": "output_done",
+            "type": "output",
+            "data": {"label": "finalOutput", "message": "Loop completed"},
+        },
+        {
+            "id": "node_1784204114120_is6kul2q1",
+            "type": "set",
+            "data": {
+                "label": "set",
+                "mappings": [{"key": "num", "value": "$processNumbers.item"}],
+            },
+        },
+    ]
+    edges = [
+        {"id": "edge_1", "source": "var_numbers", "target": "loop_1"},
+        {
+            "id": "edge_7",
+            "source": "loop_1",
+            "target": "output_done",
+            "sourceHandle": "done",
+        },
+        {
+            "id": "edge_loop_1_loop_1_1784204041004_1yec6",
+            "source": "loop_1",
+            "target": "loop_1",
+            "sourceHandle": "loop",
+            "targetHandle": "loop",
+        },
+        {
+            "id": "edge_loop_1_node_1784204114120_is6kul2q1_1784204114120",
+            "source": "loop_1",
+            "target": "node_1784204114120_is6kul2q1",
+            "sourceHandle": "loop",
+            "targetHandle": "input",
+        },
+        {
+            "id": "edge_node_1784204114120_is6kul2q1_loop_1_1784204141287",
+            "source": "node_1784204114120_is6kul2q1",
+            "target": "loop_1",
+            "sourceHandle": "output",
+            "targetHandle": "loop",
+        },
+    ]
+    return nodes, edges
 
 
 def _make_llm_ctx(
@@ -283,6 +367,95 @@ class LoopWithInputSnapshotTests(unittest.TestCase):
             if row["node_label"] == "itemLoop" and row["status"] == "success"
         ]
         self.assertEqual(len(loop_results), 4)  # 3 loop iterations + 1 done
+
+
+class LoopSelfEdgeExecutionTests(unittest.TestCase):
+    """Verify visual self-edges cannot advance a loop ahead of its body."""
+
+    def assert_sequential_loop_results(self, node_results: list[dict]) -> None:
+        """Assert every body result completes before the following loop iteration."""
+        loop_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "processNumbers" and row["status"] == "success"
+        ]
+        set_results = [
+            row for row in node_results if row["node_label"] == "set" and row["status"] == "success"
+        ]
+
+        self.assertEqual(
+            [row["output"].get("item") for row in loop_results[:-1]],
+            [1, 2, 3, 4, 5],
+        )
+        self.assertEqual([row["output"] for row in set_results], [{"num": i} for i in range(1, 6)])
+        self.assertEqual(loop_results[-1]["output"]["branch"], "done")
+        self.assertEqual(
+            loop_results[-1]["output"]["results"],
+            [{"num": i} for i in range(1, 6)],
+        )
+
+        for index, set_result in enumerate(set_results):
+            self.assertLess(
+                loop_results[index]["metadata"]["sequence"],
+                set_result["metadata"]["sequence"],
+            )
+            self.assertLess(
+                set_result["metadata"]["sequence"],
+                loop_results[index + 1]["metadata"]["sequence"],
+            )
+
+    def test_loop_self_edge_does_not_skip_body_iterations(self) -> None:
+        nodes, edges = _make_self_referential_loop_workflow()
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+
+        with patch.object(
+            WorkflowExecutor,
+            "execute_node_parallel",
+            _execute_node_parallel_with_slow_set,
+        ):
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs={})
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs, {"finalOutput": {"result": "Loop completed"}})
+        self.assert_sequential_loop_results(result.node_results)
+
+    def test_streaming_loop_self_edge_does_not_skip_body_iterations(self) -> None:
+        nodes, edges = _make_self_referential_loop_workflow()
+
+        with patch.object(
+            WorkflowExecutor,
+            "execute_node_parallel",
+            _execute_node_parallel_with_slow_set,
+        ):
+            events = list(
+                execute_workflow_streaming(
+                    workflow_id=uuid.uuid4(),
+                    nodes=nodes,
+                    edges=edges,
+                    inputs={},
+                )
+            )
+
+        node_results = [
+            {
+                "node_label": event["node_label"],
+                "status": event["status"],
+                "output": event["output"],
+                "metadata": event["metadata"],
+            }
+            for event in events
+            if event.get("type") == "node_complete"
+        ]
+        execution_complete = next(
+            event for event in events if event.get("type") == "execution_complete"
+        )
+
+        self.assertEqual(execution_complete["status"], "success")
+        self.assertEqual(
+            execution_complete["outputs"],
+            {"finalOutput": {"result": "Loop completed"}},
+        )
+        self.assert_sequential_loop_results(node_results)
 
 
 class OutputAllowDownstreamTests(unittest.TestCase):
