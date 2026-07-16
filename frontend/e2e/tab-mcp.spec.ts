@@ -17,6 +17,111 @@ test("shows the MCP connection config and named servers section", async ({ page 
   ).toBeVisible();
 });
 
+test("sorts only named servers by selected workflows and recent updates", async ({ page }) => {
+  const workflows = [
+    {
+      id: "workflow-unselected-newest",
+      name: "Unselected Newest Workflow",
+      description: null,
+      mcp_enabled: false,
+      input_fields: [],
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "workflow-selected-older",
+      name: "Selected Older Workflow",
+      description: null,
+      mcp_enabled: true,
+      input_fields: [],
+      updated_at: "2026-03-01T00:00:00Z",
+    },
+    {
+      id: "workflow-selected-newer",
+      name: "Selected Newer Workflow",
+      description: null,
+      mcp_enabled: true,
+      input_fields: [],
+      updated_at: "2026-05-01T00:00:00Z",
+    },
+    {
+      id: "workflow-unselected-older",
+      name: "Unselected Older Workflow",
+      description: null,
+      mcp_enabled: false,
+      input_fields: [],
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+  ];
+  const servers = [
+    {
+      id: "server-unselected-newest",
+      name: "Unselected Newest Server",
+      api_key: "unselected-newest-api-key",
+      created_at: "2026-01-01T00:00:00Z",
+      workflow_ids: ["workflow-unselected-newest"],
+      workflows: [],
+    },
+    {
+      id: "server-selected-older",
+      name: "Selected Older Server",
+      api_key: "selected-older-api-key",
+      created_at: "2026-01-02T00:00:00Z",
+      workflow_ids: ["workflow-selected-older"],
+      workflows: [],
+    },
+    {
+      id: "server-empty",
+      name: "Empty Server",
+      api_key: "empty-server-api-key",
+      created_at: "2026-01-03T00:00:00Z",
+      workflow_ids: [],
+      workflows: [],
+    },
+    {
+      id: "server-selected-newer",
+      name: "Selected Newer Server",
+      api_key: "selected-newer-api-key",
+      created_at: "2026-01-04T00:00:00Z",
+      workflow_ids: ["workflow-selected-newer"],
+      workflows: [],
+    },
+    {
+      id: "server-unselected-older",
+      name: "Unselected Older Server",
+      api_key: "unselected-older-api-key",
+      created_at: "2026-01-05T00:00:00Z",
+      workflow_ids: ["workflow-unselected-older"],
+      workflows: [],
+    },
+  ];
+
+  await page.route("**/api/mcp/config", async (route) => {
+    await route.fulfill({
+      json: {
+        mcp_api_key: "test-mcp-api-key",
+        mcp_endpoint_url: "http://localhost/api/mcp/sse",
+        workflows,
+      },
+    });
+  });
+  await page.route("**/api/mcp/servers", async (route) => {
+    await route.fulfill({ json: { servers } });
+  });
+
+  await page.goto("/?tab=mcp");
+
+  await expect(page.locator("p.font-medium.text-sm.truncate")).toHaveText([
+    "Selected Newer Server",
+    "Selected Older Server",
+    "Unselected Newest Server",
+    "Unselected Older Server",
+    "Empty Server",
+  ]);
+  await expect(page.locator("h4.font-medium.truncate")).toHaveText(
+    workflows.map((workflow) => workflow.name),
+  );
+});
+
 test("creates a named MCP server, reveals its endpoint, and deletes it", async ({ page }) => {
   const serverName = `E2E MCP ${Date.now()}`;
 

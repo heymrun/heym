@@ -2079,6 +2079,13 @@ export interface MCPServerItem {
   api_key: string;
   created_at: string;
   workflow_ids: string[];
+  workflows: MCPServerWorkflowItem[];
+}
+
+export interface MCPServerWorkflowItem {
+  id: string;
+  mcp_enabled: boolean;
+  updated_at: string;
 }
 
 export interface MCPServerListResponse {

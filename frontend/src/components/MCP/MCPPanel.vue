@@ -66,6 +66,36 @@ const serverWorkflowsSorted = computed(() => {
   });
 });
 
+const namedServersSorted = computed<MCPServerItem[]>(() => {
+  const workflowsById = new Map(
+    allWorkflows.value.map((workflow) => [workflow.id, workflow]),
+  );
+
+  return namedServers.value
+    .map((server, originalIndex) => {
+      const assignedWorkflows = server.workflow_ids
+        .map((workflowId) => workflowsById.get(workflowId))
+        .filter((workflow): workflow is MCPWorkflowItem => workflow !== undefined);
+      const hasSelectedWorkflow = assignedWorkflows.some((workflow) => workflow.mcp_enabled);
+      const mostRecentWorkflowUpdate = assignedWorkflows.reduce((mostRecent, workflow) => {
+        const updatedAt = workflow.updated_at ? Date.parse(workflow.updated_at) : 0;
+        return Number.isNaN(updatedAt) ? mostRecent : Math.max(mostRecent, updatedAt);
+      }, 0);
+
+      return { server, originalIndex, hasSelectedWorkflow, mostRecentWorkflowUpdate };
+    })
+    .sort((a, b) => {
+      if (a.hasSelectedWorkflow !== b.hasSelectedWorkflow) {
+        return Number(b.hasSelectedWorkflow) - Number(a.hasSelectedWorkflow);
+      }
+      if (a.mostRecentWorkflowUpdate !== b.mostRecentWorkflowUpdate) {
+        return b.mostRecentWorkflowUpdate - a.mostRecentWorkflowUpdate;
+      }
+      return a.originalIndex - b.originalIndex;
+    })
+    .map(({ server }) => server);
+});
+
 // Use browser's URL for SSE endpoint instead of backend-provided URL
 const sseEndpointUrl = computed(() => {
   return joinOriginAndPath(window.location.origin, "/api/mcp/sse");
@@ -745,7 +775,7 @@ function addToCursor(): void {
           class="space-y-3"
         >
           <Card
-            v-for="server in namedServers"
+            v-for="server in namedServersSorted"
             :key="server.id"
             class="overflow-hidden"
           >

@@ -31,6 +31,8 @@ def _make_workflow(owner_id: uuid.UUID) -> SimpleNamespace:
         id=uuid.uuid4(),
         owner_id=owner_id,
         name="My Workflow",
+        mcp_enabled=True,
+        updated_at=datetime.now(timezone.utc),
     )
 
 
@@ -62,6 +64,7 @@ class MCPServerCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.api_key)
         self.assertEqual(result.id, server_id)
         self.assertEqual(len(result.workflow_ids), 0)
+        self.assertEqual(len(result.workflows), 0)
         db.commit.assert_called_once()
 
 
@@ -69,21 +72,31 @@ class MCPServerListTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_returns_only_user_servers(self) -> None:
         user = SimpleNamespace(id=uuid.uuid4())
         server = _make_server(user.id)
+        workflow = _make_workflow(user.id)
 
         db = AsyncMock()
-        # First execute: list servers; second execute: workflow_ids per server
+        # First execute: list servers; second execute: assigned workflows per server
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(
                     scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[server])))
                 ),
-                MagicMock(all=MagicMock(return_value=[])),
+                MagicMock(
+                    scalars=MagicMock(
+                        return_value=MagicMock(all=MagicMock(return_value=[workflow]))
+                    )
+                ),
             ]
         )
 
         result = await list_mcp_servers(current_user=user, db=db)
         self.assertEqual(len(result.servers), 1)
         self.assertEqual(result.servers[0].name, "Test Server")
+        self.assertEqual(result.servers[0].workflow_ids, [workflow.id])
+        self.assertEqual(len(result.servers[0].workflows), 1)
+        self.assertEqual(result.servers[0].workflows[0].id, workflow.id)
+        self.assertTrue(result.servers[0].workflows[0].mcp_enabled)
+        self.assertEqual(result.servers[0].workflows[0].updated_at, workflow.updated_at)
 
 
 class MCPServerDeleteTests(unittest.IsolatedAsyncioTestCase):

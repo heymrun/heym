@@ -45,6 +45,7 @@ from app.models.schemas import (
     MCPServerCreate,
     MCPServerListResponse,
     MCPServerResponse,
+    MCPServerWorkflowItem,
     MCPServerWorkflowToggleRequest,
     MCPToolsListResponse,
 )
@@ -75,13 +76,6 @@ async def _fetch_server_for_user(
     return server
 
 
-async def _get_server_workflow_ids(db: AsyncSession, server_id: uuid.UUID) -> list[uuid.UUID]:
-    result = await db.execute(
-        select(MCPServerWorkflow.workflow_id).where(MCPServerWorkflow.mcp_server_id == server_id)
-    )
-    return [row[0] for row in result.all()]
-
-
 async def _get_server_workflows(db: AsyncSession, server_id: uuid.UUID) -> list[Workflow]:
     result = await db.execute(
         select(Workflow)
@@ -89,6 +83,24 @@ async def _get_server_workflows(db: AsyncSession, server_id: uuid.UUID) -> list[
         .where(MCPServerWorkflow.mcp_server_id == server_id)
     )
     return list(result.scalars().all())
+
+
+def _mcp_server_response(server: MCPServer, workflows: list[Workflow]) -> MCPServerResponse:
+    return MCPServerResponse(
+        id=server.id,
+        name=server.name,
+        api_key=server.api_key,
+        created_at=server.created_at,
+        workflow_ids=[workflow.id for workflow in workflows],
+        workflows=[
+            MCPServerWorkflowItem(
+                id=workflow.id,
+                mcp_enabled=workflow.mcp_enabled,
+                updated_at=workflow.updated_at,
+            )
+            for workflow in workflows
+        ],
+    )
 
 
 def _sanitize_tool_name(name: str) -> str:
@@ -224,17 +236,9 @@ async def list_mcp_servers(
     )
     servers = list(result.scalars().all())
     items = []
-    for s in servers:
-        workflow_ids = await _get_server_workflow_ids(db, s.id)
-        items.append(
-            MCPServerResponse(
-                id=s.id,
-                name=s.name,
-                api_key=s.api_key,
-                created_at=s.created_at,
-                workflow_ids=workflow_ids,
-            )
-        )
+    for server in servers:
+        workflows = await _get_server_workflows(db, server.id)
+        items.append(_mcp_server_response(server, workflows))
     return MCPServerListResponse(servers=items)
 
 
@@ -252,13 +256,7 @@ async def create_mcp_server(
     db.add(server)
     await db.commit()
     await db.refresh(server)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=[],
-    )
+    return _mcp_server_response(server, [])
 
 
 @router.delete("/{server_id}", status_code=204)
@@ -282,14 +280,8 @@ async def regenerate_server_key(
     server.api_key = secrets.token_urlsafe(48)
     await db.commit()
     await db.refresh(server)
-    workflow_ids = await _get_server_workflow_ids(db, server.id)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=workflow_ids,
-    )
+    workflows = await _get_server_workflows(db, server.id)
+    return _mcp_server_response(server, workflows)
 
 
 @router.patch("/{server_id}/workflows/{workflow_id}")

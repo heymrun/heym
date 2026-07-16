@@ -1081,12 +1081,19 @@ class MCPServerWorkflowToggleRequest(BaseModel):
     enabled: bool
 
 
+class MCPServerWorkflowItem(BaseModel):
+    id: uuid.UUID
+    mcp_enabled: bool
+    updated_at: datetime
+
+
 class MCPServerResponse(BaseModel):
     id: uuid.UUID
     name: str
     api_key: str
     created_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
+    workflows: list[MCPServerWorkflowItem] = Field(default_factory=list)
 
 
 class MCPServerListResponse(BaseModel):
