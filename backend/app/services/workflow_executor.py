@@ -2520,6 +2520,22 @@ class WorkflowExecutor:
             inputs[_EXECUTION_CONTEXT_INPUT_KEY] = execution_context
         return inputs
 
+    def get_loop_reexecution_inputs(
+        self,
+        loop_node_id: str,
+        feedback_source_node_id: str,
+        edges: list[dict],
+    ) -> dict:
+        """Return loop inputs with feedback only from the branch that just completed."""
+        relevant_edges = [
+            edge
+            for edge in edges
+            if edge.get("target") != loop_node_id
+            or edge.get("targetHandle") != "loop"
+            or edge.get("source") == feedback_source_node_id
+        ]
+        return self.get_node_inputs_for_edges(loop_node_id, relevant_edges)
+
     def get_node_inputs(self, node_id: str) -> dict:
         inputs = {}
         execution_context: dict[str, object] = {}
@@ -2678,6 +2694,11 @@ class WorkflowExecutor:
                 if edge["source"] != current:
                     continue
                 target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
                 if target not in reachable and target not in excluded:
                     queue.append(target)
 
@@ -2698,6 +2719,11 @@ class WorkflowExecutor:
         for edge in self.edges:
             if edge["source"] == node_id:
                 target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
                 if target in preserved or target in stopped:
                     continue
                 self.mark_branch_as_skipped(
@@ -7509,7 +7535,9 @@ class WorkflowExecutor:
                         ):
                             already_running = any(nid == target for nid in running_futures.values())
                             if not already_running:
-                                inputs = self.get_node_inputs_for_edges(target, active_edges)
+                                inputs = self.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                )
                                 new_future = _SHARED_EXECUTOR.submit(
                                     self.execute_node_parallel, target, inputs
                                 )
@@ -7672,8 +7700,8 @@ class WorkflowExecutor:
                                                             for n in remaining_futures.values()
                                                         )
                                                         if not already:
-                                                            inp = self.get_node_inputs_for_edges(
-                                                                tgt, active_edges
+                                                            inp = self.get_loop_reexecution_inputs(
+                                                                tgt, nid, active_edges
                                                             )
                                                             new_f = _SHARED_EXECUTOR.submit(
                                                                 self.execute_node_parallel,
@@ -8077,7 +8105,9 @@ def resume_workflow_execution(
                             new_future = _SHARED_EXECUTOR.submit(
                                 wf_executor.execute_node_parallel,
                                 target,
-                                wf_executor.get_node_inputs_for_edges(target, active_edges),
+                                wf_executor.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                ),
                             )
                             running_futures[new_future] = target
                     continue
@@ -8216,8 +8246,8 @@ def resume_workflow_execution(
                                                         new_future = _SHARED_EXECUTOR.submit(
                                                             wf_executor.execute_node_parallel,
                                                             tgt,
-                                                            wf_executor.get_node_inputs_for_edges(
-                                                                tgt, active_edges
+                                                            wf_executor.get_loop_reexecution_inputs(
+                                                                tgt, nid, active_edges
                                                             ),
                                                         )
                                                         remaining_futures[new_future] = tgt
@@ -8440,7 +8470,7 @@ def execute_llm_batch_notification_branch(
             }
         )
 
-    def _submit_node(node_id: str) -> None:
+    def _submit_node(node_id: str, node_inputs: dict | None = None) -> None:
         already_running = any(
             pending_node_id == node_id for pending_node_id in running_futures.values()
         )
@@ -8450,7 +8480,11 @@ def execute_llm_batch_notification_branch(
         new_future = _SHARED_EXECUTOR.submit(
             wf_executor.execute_node_parallel,
             node_id,
-            wf_executor.get_node_inputs_for_edges(node_id, branch_edges),
+            (
+                node_inputs
+                if node_inputs is not None
+                else wf_executor.get_node_inputs_for_edges(node_id, branch_edges)
+            ),
         )
         running_futures[new_future] = node_id
 
@@ -8504,7 +8538,10 @@ def execute_llm_batch_notification_branch(
                     completed_nodes=completed_nodes,
                     pending_count=pending_count,
                 ):
-                    _submit_node(target)
+                    _submit_node(
+                        target,
+                        wf_executor.get_loop_reexecution_inputs(target, source_id, branch_edges),
+                    )
                 continue
 
             if target not in pending_count or target in completed_nodes:
@@ -8710,7 +8747,9 @@ def execute_hitl_notification_branch(
                         new_future = _SHARED_EXECUTOR.submit(
                             wf_executor.execute_node_parallel,
                             target,
-                            wf_executor.get_node_inputs_for_edges(target, active_edges),
+                            wf_executor.get_loop_reexecution_inputs(
+                                target, source_node_id, active_edges
+                            ),
                         )
                         running_futures[new_future] = target
                 continue
@@ -9094,7 +9133,7 @@ def _execute_workflow_streaming_impl(
             }
         )
 
-    def execute_and_report(node_id: str) -> NodeResult:
+    def execute_and_report(node_id: str, node_inputs: dict | None = None) -> NodeResult:
         wf_executor.check_cancelled()
         node = wf_executor.nodes[node_id]
         node_label = node.get("data", {}).get("label", node_id)
@@ -9109,7 +9148,8 @@ def _execute_workflow_streaming_impl(
             node_start_event["message"] = start_message
         event_queue.put(node_start_event)
 
-        node_inputs = wf_executor.get_node_inputs_for_edges(node_id, active_edges)
+        if node_inputs is None:
+            node_inputs = wf_executor.get_node_inputs_for_edges(node_id, active_edges)
         result = wf_executor.execute_node_parallel(node_id, node_inputs, on_retry=on_retry_callback)
 
         output = result.output
@@ -9164,7 +9204,13 @@ def _execute_workflow_streaming_impl(
                     ):
                         already_running = any(nid == target for nid in running_futures.values())
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(execute_and_report, target)
+                            new_future = _SHARED_EXECUTOR.submit(
+                                execute_and_report,
+                                target,
+                                wf_executor.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                ),
+                            )
                             running_futures[new_future] = target
                     continue
 
