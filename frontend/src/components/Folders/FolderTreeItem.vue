@@ -1,33 +1,31 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
-  Clock,
-  Copy,
   Folder,
   FolderOpen,
   MoreHorizontal,
-  Settings,
-  Trash2,
-  Workflow,
 } from "lucide-vue-next";
 
-import Button from "@/components/ui/Button.vue";
-import Card from "@/components/ui/Card.vue";
-import { cn, formatDate } from "@/lib/utils";
-import { nodeIcons } from "@/lib/nodeIcons";
-import { useFolderStore } from "@/stores/folder";
 import type { FolderTree, WorkflowListItem } from "@/types/workflow";
+import Button from "@/components/ui/Button.vue";
+import { cn } from "@/lib/utils";
+import { useFolderStore } from "@/stores/folder";
+import FolderWorkflowCard from "./FolderWorkflowCard.vue";
+import WorkflowFolderDropPlaceholder from "./WorkflowFolderDropPlaceholder.vue";
 
 interface Props {
   folder: FolderTree;
   isExpanded: boolean;
   dragOverFolderId: string | null;
   draggedWorkflowId: string | null;
+  draggedWorkflowFolderId: string | null;
+  draggedWorkflowName: string;
   copyingId: string | null;
   forceExpandedFolderIds?: ReadonlySet<string>;
   depth?: number;
+  parentPath?: string;
   isMobile?: boolean;
   onWorkflowTouchStart?: (e: TouchEvent, workflow: WorkflowListItem) => void;
   onWorkflowTouchEnd?: () => void;
@@ -37,6 +35,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   forceExpandedFolderIds: undefined,
   depth: 0,
+  parentPath: "",
   isMobile: false,
   onWorkflowTouchStart: undefined,
   onWorkflowTouchEnd: undefined,
@@ -45,8 +44,9 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   toggle: [id: string];
+  expand: [id: string];
   dragOver: [event: DragEvent, id: string];
-  dragLeave: [];
+  dragLeave: [id: string];
   drop: [event: DragEvent, id: string];
   contextMenu: [event: MouseEvent, folder: FolderTree];
   createSubfolder: [parentId: string];
@@ -59,8 +59,19 @@ const emit = defineEmits<{
 }>();
 
 const folderStore = useFolderStore();
+const folderDropZone = ref<HTMLElement | null>(null);
+let expandTimer: ReturnType<typeof setTimeout> | null = null;
 
 const hasContent = computed(() => props.folder.children.length > 0 || props.folder.workflows.length > 0);
+const folderPath = computed((): string => {
+  return props.parentPath ? `${props.parentPath} / ${props.folder.name}` : props.folder.name;
+});
+const isActiveDropTarget = computed((): boolean => {
+  return props.draggedWorkflowId !== null && props.dragOverFolderId === props.folder.id;
+});
+const isValidDropTarget = computed((): boolean => {
+  return props.draggedWorkflowFolderId !== props.folder.id;
+});
 
 function handleToggle(event: MouseEvent): void {
   event.stopPropagation();
@@ -84,57 +95,80 @@ function handleMenuClick(event: MouseEvent): void {
   emit("contextMenu", event, props.folder);
 }
 
-function handleDragEnter(event: DragEvent): void {
-  event.preventDefault();
-}
-
-function handleDragOver(event: DragEvent): void {
-  event.preventDefault();
-  emit("dragOver", event, props.folder.id);
-}
-
-function handleDragLeave(): void {
-  emit("dragLeave");
-}
-
-function handleDrop(event: DragEvent): void {
-  emit("drop", event, props.folder.id);
-}
-
-function handleContentDragOver(event: DragEvent): void {
-  event.preventDefault();
-  emit("dragOver", event, props.folder.id);
-}
-
-function handleContentDragLeave(event: DragEvent): void {
-  const relatedTarget = event.relatedTarget as Node | null;
-  const contentEl = event.currentTarget as HTMLElement;
-  if (!relatedTarget || !contentEl.contains(relatedTarget)) {
-    emit("dragLeave");
+function clearExpandTimer(): void {
+  if (expandTimer) {
+    clearTimeout(expandTimer);
+    expandTimer = null;
   }
 }
 
-function handleContentDrop(event: DragEvent): void {
+function handleDragOver(event: DragEvent): void {
+  if (!props.draggedWorkflowId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = isValidDropTarget.value ? "move" : "none";
+  }
+  emit("dragOver", event, props.folder.id);
+  if (!props.isExpanded && !expandTimer) {
+    expandTimer = setTimeout(() => {
+      expandTimer = null;
+      emit("expand", props.folder.id);
+    }, 550);
+  }
+}
+
+function handleDragLeave(event: DragEvent): void {
+  if (!props.draggedWorkflowId) return;
+  event.stopPropagation();
+  const relatedTarget = event.relatedTarget;
+  const zone = folderDropZone.value;
+  if (relatedTarget instanceof Node && zone?.contains(relatedTarget)) return;
+
+  // Browsers may report no related target while the page scrolls under a stationary pointer.
+  // Keep the active destination until another lane takes over or the drag finishes.
+  if (!relatedTarget) return;
+
+  clearExpandTimer();
+  emit("dragLeave", props.folder.id);
+}
+
+function handleDrop(event: DragEvent): void {
+  if (!props.draggedWorkflowId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  clearExpandTimer();
   emit("drop", event, props.folder.id);
 }
+
+onUnmounted(clearExpandTimer);
 </script>
 
 <template>
-  <div class="folder-tree-item">
+  <div
+    ref="folderDropZone"
+    class="folder-tree-item rounded-xl transition-colors"
+    :class="isActiveDropTarget && (isValidDropTarget ? 'bg-primary/[0.035]' : 'bg-muted/15')"
+    :data-testid="`workflow-folder-drop-zone-${folder.id}`"
+    :data-drop-active="String(isActiveDropTarget)"
+    :data-drop-valid="String(isValidDropTarget)"
+    @dragover="handleDragOver"
+    @dragleave="handleDragLeave"
+    @drop="handleDrop"
+  >
     <div
+      :data-testid="`workflow-folder-header-${folder.id}`"
       :class="cn(
-        'folder-header flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer group',
-        dragOverFolderId === folder.id
-          ? 'bg-primary/10 border-2 border-primary border-dashed'
-          : 'hover:bg-muted/30'
+        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-transparent transition-all cursor-pointer group hover:border-border/30',
+        isActiveDropTarget && isValidDropTarget
+          ? 'bg-primary/10 border-2 border-primary border-dashed shadow-sm'
+          : isActiveDropTarget
+            ? 'bg-muted/40 border-2 border-border border-dashed'
+            : 'hover:bg-muted/30'
       )"
       :style="{ paddingLeft: `${depth * 14 + 8}px` }"
       @click="handleFolderClick"
       @contextmenu.prevent="handleContextMenu"
-      @dragenter="handleDragEnter"
-      @dragover="handleDragOver"
-      @dragleave="handleDragLeave"
-      @drop="handleDrop"
     >
       <button
         class="p-0.5 rounded hover:bg-muted/50 transition-colors"
@@ -150,7 +184,7 @@ function handleContentDrop(event: DragEvent): void {
         />
       </button>
 
-      <div class="folder-icon w-6 h-6 rounded-md bg-gradient-to-br from-amber-500/15 to-amber-500/5 ring-1 ring-inset ring-amber-500/20 flex items-center justify-center">
+      <div class="w-6 h-6 rounded-md bg-gradient-to-br from-amber-500/15 to-amber-500/5 ring-1 ring-inset ring-amber-500/20 flex items-center justify-center transition-transform duration-200 group-hover:scale-[1.03]">
         <FolderOpen
           v-if="isExpanded"
           class="w-3.5 h-3.5 text-amber-500"
@@ -178,14 +212,25 @@ function handleContentDrop(event: DragEvent): void {
     </div>
 
     <div
+      v-if="isActiveDropTarget"
+      class="grid grid-cols-1 gap-2 py-2 sm:grid-cols-2 lg:grid-cols-3"
+      :style="{ paddingLeft: `${(depth + 1) * 14 + 8}px`, paddingRight: '8px' }"
+    >
+      <WorkflowFolderDropPlaceholder
+        :target-id="folder.id"
+        :target-kind="depth > 0 ? 'Subfolder' : 'Folder'"
+        :target-label="folderPath"
+        :workflow-name="draggedWorkflowName"
+        :valid="isValidDropTarget"
+      />
+    </div>
+
+    <div
       v-if="isExpanded && hasContent"
       :class="cn(
         'folder-content',
-        dragOverFolderId === folder.id && 'rounded-lg border-2 border-primary border-dashed bg-primary/5 mt-0.5'
+        isActiveDropTarget && isValidDropTarget && 'rounded-lg border border-primary/40 bg-primary/[0.025] mt-0.5'
       )"
-      @dragover="handleContentDragOver"
-      @dragleave="handleContentDragLeave"
-      @drop="handleContentDrop"
     >
       <FolderTreeItem
         v-for="child in folder.children"
@@ -195,15 +240,19 @@ function handleContentDrop(event: DragEvent): void {
         :force-expanded-folder-ids="forceExpandedFolderIds"
         :drag-over-folder-id="dragOverFolderId"
         :dragged-workflow-id="draggedWorkflowId"
+        :dragged-workflow-folder-id="draggedWorkflowFolderId"
+        :dragged-workflow-name="draggedWorkflowName"
         :copying-id="copyingId"
         :depth="depth + 1"
+        :parent-path="folderPath"
         :is-mobile="isMobile"
         :on-workflow-touch-start="onWorkflowTouchStart"
         :on-workflow-touch-end="onWorkflowTouchEnd"
         :on-workflow-touch-move="onWorkflowTouchMove"
         @toggle="(id) => emit('toggle', id)"
+        @expand="(id) => emit('expand', id)"
         @drag-over="(e, id) => emit('dragOver', e, id)"
-        @drag-leave="emit('dragLeave')"
+        @drag-leave="(id) => emit('dragLeave', id)"
         @drop="(e, id) => emit('drop', e, id)"
         @context-menu="(e, f) => emit('contextMenu', e, f)"
         @create-subfolder="(id) => emit('createSubfolder', id)"
@@ -220,136 +269,25 @@ function handleContentDrop(event: DragEvent): void {
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1.5"
         :style="{ paddingLeft: `${(depth + 1) * 14 + 8}px` }"
       >
-        <Card
+        <FolderWorkflowCard
           v-for="(workflow, index) in folder.workflows"
           :key="workflow.id"
-          variant="interactive"
-          :class="cn(
-            'workflow-card p-3 cursor-pointer group relative',
-            draggedWorkflowId === workflow.id && 'opacity-50 scale-[0.98]'
-          )"
-          :style="{ animationDelay: `${index * 60}ms` }"
-          :hover="false"
-          draggable="true"
-          @click="emit('openWorkflow', workflow.id, $event)"
-          @touchstart.passive="isMobile && onWorkflowTouchStart?.(($event as TouchEvent), workflow)"
-          @touchend="isMobile && onWorkflowTouchEnd?.()"
-          @touchmove="isMobile && onWorkflowTouchMove?.()"
-          @dragstart="emit('dragStartWorkflow', $event, workflow.id)"
-          @dragend="emit('dragEndWorkflow')"
-        >
-          <div class="flex items-start justify-between mb-2 gap-1.5">
-            <div class="flex items-start gap-3 min-w-0 flex-1">
-              <div class="workflow-icon relative flex items-center justify-center w-9 h-9 rounded-lg text-primary shrink-0">
-                <div class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/15 via-primary/10 to-primary/5" />
-                <div class="absolute inset-0 rounded-lg ring-1 ring-inset ring-primary/20" />
-                <component
-                  :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-                  class="relative z-10 h-4 w-4"
-                />
-              </div>
-              <div class="min-w-0">
-                <h3 class="workflow-card-title font-semibold text-sm line-clamp-2 leading-snug transition-colors duration-200">
-                  {{ workflow.name }}
-                </h3>
-                <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                  <Clock class="w-3 h-3" />
-                  <span>{{ formatDate(workflow.updated_at) }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="flex items-center gap-0.5 shrink-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                title="Copy workflow"
-                :disabled="copyingId === workflow.id"
-                @click.stop="emit('copyWorkflow', workflow.id, $event)"
-              >
-                <Copy
-                  class="w-3.5 h-3.5"
-                  :class="{ 'animate-spin-slow': copyingId === workflow.id }"
-                />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                title="Edit workflow"
-                @click.stop="emit('editWorkflow', workflow, $event)"
-              >
-                <Settings class="w-3.5 h-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                title="Delete workflow"
-                @click.stop="emit('deleteWorkflow', workflow.id, $event)"
-              >
-                <Trash2 class="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          </div>
-          <div
-            v-if="workflow.description"
-            class="mt-0.5 pt-2 border-t border-border/40 ml-[48px]"
-          >
-            <p class="text-muted-foreground text-xs line-clamp-2 leading-relaxed">
-              {{ workflow.description }}
-            </p>
-          </div>
-        </Card>
+          :workflow="workflow"
+          :index="index"
+          :copying-id="copyingId"
+          :is-dragging="draggedWorkflowId === workflow.id"
+          :is-mobile="isMobile"
+          :on-workflow-touch-start="onWorkflowTouchStart"
+          :on-workflow-touch-end="onWorkflowTouchEnd"
+          :on-workflow-touch-move="onWorkflowTouchMove"
+          @open="(id, event) => emit('openWorkflow', id, event)"
+          @edit="(item, event) => emit('editWorkflow', item, event)"
+          @copy="(id, event) => emit('copyWorkflow', id, event)"
+          @delete="(id, event) => emit('deleteWorkflow', id, event)"
+          @drag-start="(event, id) => emit('dragStartWorkflow', event, id)"
+          @drag-end="emit('dragEndWorkflow')"
+        />
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.folder-header {
-  border: 1px solid transparent;
-}
-
-.folder-header:hover {
-  border-color: hsl(var(--border) / 0.3);
-}
-
-.folder-icon {
-  transition: all 0.2s ease;
-}
-
-.group:hover .folder-icon {
-  transform: scale(1.03);
-}
-
-.folder-workflow-card .workflow-icon {
-  transition: all 0.3s ease;
-}
-
-.folder-workflow-card:hover .workflow-icon {
-  transform: scale(1.03);
-  box-shadow: 0 0 8px hsl(var(--primary) / 0.2);
-}
-
-.workflow-card {
-  animation: fadeInUp 0.3s ease-out forwards;
-  opacity: 0;
-}
-
-.workflow-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-</style>

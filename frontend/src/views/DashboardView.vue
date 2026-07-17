@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import JSZip from "jszip";
 import { useRoute, useRouter } from "vue-router";
+import { useMediaQuery } from "@vueuse/core";
 import {
   AlertTriangle,
   Check,
@@ -25,53 +26,53 @@ import {
   X,
 } from "lucide-vue-next";
 
+import type { DashboardShowcaseTab } from "@/features/showcase/showcase.types";
+import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
+import type { CredentialListItem } from "@/types/credential";
+import type { FolderTree, NodeData, WorkflowEdge, WorkflowListItem, WorkflowNode } from "@/types/workflow";
 import AnalyticsDashboard from "@/components/Analytics/AnalyticsDashboard.vue";
-import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
 import BoardPanel from "@/components/Board/BoardPanel.vue";
 import CredentialsPanel from "@/components/Credentials/CredentialsPanel.vue";
-import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
-import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
-import GlobalVariablesPanel from "@/components/GlobalVariables/GlobalVariablesPanel.vue";
-import DockerLogsViewer from "@/components/LogsTab/DockerLogsViewer.vue";
-import FolderTreeItem from "@/components/Folders/FolderTreeItem.vue";
-import MCPPanel from "@/components/MCP/MCPPanel.vue";
-import TracesPanel from "@/components/Traces/TracesPanel.vue";
-import ScheduledView from "@/views/ScheduledView.vue";
-import TeamsPanel from "@/components/Teams/TeamsPanel.vue";
+import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
 import DataTablePanel from "@/components/DataTable/DataTablePanel.vue";
 import DrivePanel from "@/components/Drive/DrivePanel.vue";
-import VectorStoresPanel from "@/components/VectorStores/VectorStoresPanel.vue";
+import WorkflowActionSheet from "@/components/Dialogs/WorkflowActionSheet.vue";
+import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.vue";
+import DockerLogsViewer from "@/components/LogsTab/DockerLogsViewer.vue";
+import FolderTreeItem from "@/components/Folders/FolderTreeItem.vue";
+import WorkflowFolderDropPlaceholder from "@/components/Folders/WorkflowFolderDropPlaceholder.vue";
+import GlobalVariablesPanel from "@/components/GlobalVariables/GlobalVariablesPanel.vue";
 import AppHeader from "@/components/Layout/AppHeader.vue";
 import DashboardNav from "@/components/Layout/DashboardNav.vue";
 import WorkspaceShell from "@/components/Layout/WorkspaceShell.vue";
+import MCPPanel from "@/components/MCP/MCPPanel.vue";
 import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDialog.vue";
-import WorkflowActionSheet from "@/components/Dialogs/WorkflowActionSheet.vue";
-import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.vue";
+import TeamsPanel from "@/components/Teams/TeamsPanel.vue";
+import TracesPanel from "@/components/Traces/TracesPanel.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import VectorStoresPanel from "@/components/VectorStores/VectorStoresPanel.vue";
 import { useLongPress } from "@/composables/useLongPress";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
+import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { getDocPath } from "@/docs/manifest";
 import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
-import type { DashboardShowcaseTab } from "@/features/showcase/showcase.types";
-import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
+import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
+import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { nodeIcons } from "@/lib/nodeIcons";
 import { cn, formatDate } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { credentialsApi, folderApi, templatesApi, workflowApi } from "@/services/api";
-import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
-import { useMediaQuery } from "@vueuse/core";
 import { useAuthStore } from "@/stores/auth";
 import { useFolderStore } from "@/stores/folder";
 import { useQuickDrawerStore } from "@/stores/quickDrawer";
-import type { CredentialListItem } from "@/types/credential";
-import type { FolderTree, NodeData, WorkflowEdge, WorkflowListItem, WorkflowNode } from "@/types/workflow";
+import ScheduledView from "@/views/ScheduledView.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -182,6 +183,7 @@ const savingFolderRename = ref(false);
 const draggedWorkflowId = ref<string | null>(null);
 const dragOverFolderId = ref<string | null>(null);
 const dragOverRoot = ref(false);
+let workflowDragGhost: HTMLElement | null = null;
 
 const contextMenuFolder = ref<FolderTree | null>(null);
 const contextMenuPosition = ref({ x: 0, y: 0 });
@@ -189,6 +191,15 @@ const showContextMenu = ref(false);
 
 const isDraggingJsonFile = ref(false);
 const dragOverTrash = ref(false);
+
+const draggedWorkflow = computed<WorkflowListItem | null>(() => {
+  if (!draggedWorkflowId.value) return null;
+  return workflows.value.find((workflow) => workflow.id === draggedWorkflowId.value) ?? null;
+});
+
+const canDropDraggedWorkflowToRoot = computed<boolean>(() => {
+  return Boolean(draggedWorkflow.value?.folder_id || draggedWorkflow.value?.scheduled_for_deletion);
+});
 
 const showCommandPalette = ref(false);
 
@@ -559,6 +570,7 @@ onUnmounted(() => {
   window.removeEventListener("storage", onQuickDrawerPreferencesStorage);
   removeOverlayDismiss?.();
   removeOverlayDismiss = null;
+  removeWorkflowDragGhost();
 });
 
 async function loadWorkflows(): Promise<void> {
@@ -766,23 +778,63 @@ function countWorkflowsInFolder(folder: FolderTree): number {
   return count;
 }
 
-function onDragStartWorkflow(event: DragEvent, workflowId: string): void {
-  event.dataTransfer?.setData("workflowId", workflowId);
-  draggedWorkflowId.value = workflowId;
+function removeWorkflowDragGhost(): void {
+  workflowDragGhost?.remove();
+  workflowDragGhost = null;
 }
 
-function onDragEndWorkflow(): void {
+function createWorkflowDragGhost(event: DragEvent): void {
+  const source = event.currentTarget;
+  if (!(source instanceof HTMLElement) || !event.dataTransfer) return;
+
+  removeWorkflowDragGhost();
+  const sourceRect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true) as HTMLElement;
+  ghost.querySelectorAll<HTMLElement>("[data-testid]").forEach((element) => {
+    element.removeAttribute("data-testid");
+  });
+  ghost.removeAttribute("draggable");
+  ghost.dataset.testid = "workflow-drag-ghost";
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.classList.remove("workflow-card--dragging");
+  ghost.classList.add("workflow-drag-ghost");
+  ghost.style.width = `${sourceRect.width}px`;
+  document.body.appendChild(ghost);
+  workflowDragGhost = ghost;
+  event.dataTransfer.setDragImage(ghost, Math.min(28, sourceRect.width / 4), 24);
+}
+
+function resetWorkflowDragState(): void {
   draggedWorkflowId.value = null;
   dragOverFolderId.value = null;
   dragOverRoot.value = false;
+  dragOverTrash.value = false;
+  removeWorkflowDragGhost();
+}
+
+function onDragStartWorkflow(event: DragEvent, workflowId: string): void {
+  event.dataTransfer?.setData("workflowId", workflowId);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+  }
+  draggedWorkflowId.value = workflowId;
+  createWorkflowDragGhost(event);
+}
+
+function onDragEndWorkflow(): void {
+  resetWorkflowDragState();
 }
 
 function onDragOverFolder(_event: DragEvent, folderId: string): void {
   dragOverFolderId.value = folderId;
+  dragOverRoot.value = false;
+  dragOverTrash.value = false;
 }
 
-function onDragLeaveFolder(): void {
-  dragOverFolderId.value = null;
+function onDragLeaveFolder(folderId: string): void {
+  if (dragOverFolderId.value === folderId) {
+    dragOverFolderId.value = null;
+  }
 }
 
 function onDragEnterDropZone(event: DragEvent): void {
@@ -790,19 +842,35 @@ function onDragEnterDropZone(event: DragEvent): void {
 }
 
 function onDragOverRoot(event: DragEvent): void {
+  if (!draggedWorkflowId.value) return;
   event.preventDefault();
-  dragOverRoot.value = true;
+  event.stopPropagation();
+  dragOverFolderId.value = null;
+  dragOverTrash.value = false;
+  dragOverRoot.value = canDropDraggedWorkflowToRoot.value;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = canDropDraggedWorkflowToRoot.value ? "move" : "none";
+  }
 }
 
-function onDragLeaveRoot(): void {
+function onDragLeaveRoot(event: DragEvent): void {
+  const relatedTarget = event.relatedTarget;
+  const zone = event.currentTarget;
+  if (relatedTarget instanceof Node && zone instanceof HTMLElement && zone.contains(relatedTarget)) {
+    return;
+  }
+  if (!relatedTarget) return;
   dragOverRoot.value = false;
 }
 
 async function onDropToFolder(event: DragEvent, folderId: string): Promise<void> {
   event.preventDefault();
-  const workflowId = event.dataTransfer?.getData("workflowId");
+  event.stopPropagation();
+  const workflowId = event.dataTransfer?.getData("workflowId") || draggedWorkflowId.value;
+  const workflow = workflows.value.find((item) => item.id === workflowId);
+  resetWorkflowDragState();
 
-  if (workflowId) {
+  if (workflowId && workflow?.folder_id !== folderId) {
     try {
       await folderStore.moveWorkflowToFolder(folderId, workflowId);
       await loadWorkflows();
@@ -814,17 +882,17 @@ async function onDropToFolder(event: DragEvent, folderId: string): Promise<void>
       }
     }
   }
-
-  dragOverFolderId.value = null;
-  draggedWorkflowId.value = null;
 }
 
 async function onDropToRoot(event: DragEvent): Promise<void> {
+  if (!draggedWorkflowId.value) return;
   event.preventDefault();
-  const workflowId = event.dataTransfer?.getData("workflowId");
+  event.stopPropagation();
+  const workflowId = event.dataTransfer?.getData("workflowId") || draggedWorkflowId.value;
+  const workflow = workflows.value.find((item) => item.id === workflowId);
+  resetWorkflowDragState();
 
   if (workflowId) {
-    const workflow = workflows.value.find((w) => w.id === workflowId);
     if (workflow?.scheduled_for_deletion) {
       try {
         const updated = await workflowApi.unscheduleForDeletion(workflowId);
@@ -850,9 +918,6 @@ async function onDropToRoot(event: DragEvent): Promise<void> {
       }
     }
   }
-
-  dragOverRoot.value = false;
-  draggedWorkflowId.value = null;
 }
 
 function openContextMenu(event: MouseEvent, folder: FolderTree): void {
@@ -1208,17 +1273,33 @@ async function handleJsonDrop(event: DragEvent): Promise<void> {
 }
 
 function onDragOverTrash(event: DragEvent): void {
+  if (!draggedWorkflowId.value) return;
   event.preventDefault();
+  event.stopPropagation();
+  dragOverFolderId.value = null;
+  dragOverRoot.value = false;
   dragOverTrash.value = true;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
 }
 
-function onDragLeaveTrash(): void {
+function onDragLeaveTrash(event: DragEvent): void {
+  const relatedTarget = event.relatedTarget;
+  const zone = event.currentTarget;
+  if (relatedTarget instanceof Node && zone instanceof HTMLElement && zone.contains(relatedTarget)) {
+    return;
+  }
+  if (!relatedTarget) return;
   dragOverTrash.value = false;
 }
 
 async function onDropToTrash(event: DragEvent): Promise<void> {
+  if (!draggedWorkflowId.value) return;
   event.preventDefault();
-  const workflowId = event.dataTransfer?.getData("workflowId");
+  event.stopPropagation();
+  const workflowId = event.dataTransfer?.getData("workflowId") || draggedWorkflowId.value;
+  resetWorkflowDragState();
 
   if (workflowId) {
     const workflow = workflows.value.find((w) => w.id === workflowId);
@@ -1238,9 +1319,6 @@ async function onDropToTrash(event: DragEvent): Promise<void> {
       }
     }
   }
-
-  dragOverTrash.value = false;
-  draggedWorkflowId.value = null;
 }
 
 async function onActionSheetMoveToFolder(folderId: string): Promise<void> {
@@ -1566,7 +1644,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                       variant="interactive"
                       :class="cn(
                         'workflow-card cursor-pointer group relative p-3.5',
-                        draggedWorkflowId === workflow.id && 'opacity-50 scale-[0.98]'
+                        draggedWorkflowId === workflow.id && 'workflow-card--dragging'
                       )"
                       :style="{ animationDelay: `${index * 60}ms` }"
                       :hover="false"
@@ -1672,12 +1750,15 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   :force-expanded-folder-ids="workflowSearchExpandedFolderIds"
                   :drag-over-folder-id="dragOverFolderId"
                   :dragged-workflow-id="draggedWorkflowId"
+                  :dragged-workflow-folder-id="draggedWorkflow?.folder_id ?? null"
+                  :dragged-workflow-name="draggedWorkflow?.name ?? 'Workflow'"
                   :copying-id="copyingId"
                   :is-mobile="isMobile"
                   :on-workflow-touch-start="onWorkflowCardTouchStart"
                   :on-workflow-touch-end="onWorkflowCardTouchEnd"
                   :on-workflow-touch-move="onWorkflowCardTouchMove"
                   @toggle="toggleFolder"
+                  @expand="folderStore.expandFolder"
                   @drag-over="onDragOverFolder"
                   @drag-leave="onDragLeaveFolder"
                   @drop="onDropToFolder"
@@ -1694,6 +1775,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
               <div
                 v-if="!isWorkflowSearchActive || displayedRootWorkflows.length > 0 || draggedWorkflowId"
+                data-testid="workflow-root-drop-zone"
+                :data-drop-active="String(dragOverRoot)"
                 :class="cn(
                   'rounded-xl border-2 border-dashed p-3 transition-all',
                   dragOverRoot ? 'border-primary bg-primary/5' : 'border-transparent'
@@ -1703,14 +1786,15 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 @dragleave="onDragLeaveRoot"
                 @drop="onDropToRoot"
               >
-                <div
-                  v-if="draggedWorkflowId && workflows.find((w) => w.id === draggedWorkflowId)?.folder_id"
-                  class="text-center text-sm text-muted-foreground py-2"
-                >
-                  Drop here to move to root
-                </div>
-
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <WorkflowFolderDropPlaceholder
+                    v-if="dragOverRoot && draggedWorkflow"
+                    target-id="root"
+                    target-kind="Root"
+                    target-label="Workflows / Root"
+                    :workflow-name="draggedWorkflow.name"
+                    :valid="true"
+                  />
                   <Card
                     v-for="(workflow, index) in displayedRootWorkflows"
                     :key="workflow.id"
@@ -1718,7 +1802,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     variant="interactive"
                     :class="cn(
                       'workflow-card p-3.5 cursor-pointer group relative',
-                      draggedWorkflowId === workflow.id && 'opacity-50 scale-[0.98]'
+                      draggedWorkflowId === workflow.id && 'workflow-card--dragging'
                     )"
                     :style="{ animationDelay: `${index * 60}ms` }"
                     :hover="false"
@@ -1863,7 +1947,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     variant="interactive"
                     :class="cn(
                       'workflow-card p-3.5 cursor-pointer group relative border-destructive/20 bg-destructive/5 hover:border-destructive/40',
-                      draggedWorkflowId === workflow.id && 'opacity-50 scale-[0.98]'
+                      draggedWorkflowId === workflow.id && 'workflow-card--dragging'
                     )"
                     :style="{ animationDelay: `${index * 60}ms` }"
                     :hover="false"
@@ -2350,6 +2434,33 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 .workflow-card:hover .workflow-icon {
   transform: scale(1.05);
   box-shadow: 0 4px 14px hsl(var(--primary) / 0.25);
+}
+
+:global(.workflow-card--dragging) {
+  border-style: dashed !important;
+  opacity: 0.3 !important;
+  transform: scale(0.985) !important;
+  box-shadow: none !important;
+}
+
+:global(.workflow-drag-ghost) {
+  position: fixed !important;
+  top: -1000px !important;
+  left: -1000px !important;
+  z-index: 9999 !important;
+  max-width: 360px !important;
+  border-color: hsl(var(--primary) / 0.7) !important;
+  background: hsl(var(--card) / 0.96) !important;
+  opacity: 0.94 !important;
+  pointer-events: none !important;
+  transform: rotate(1.5deg) scale(0.98) !important;
+  box-shadow:
+    0 18px 42px hsl(0 0% 0% / 0.24),
+    0 0 0 3px hsl(var(--primary) / 0.12) !important;
+}
+
+:global(.workflow-drag-ghost button) {
+  display: none !important;
 }
 
 /* ── Toast ── */

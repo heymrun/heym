@@ -57,14 +57,20 @@ const enabledCount = computed(() => {
   return config.value?.workflows.filter((w) => w.mcp_enabled).length ?? 0;
 });
 
-const serverWorkflowsSorted = computed(() => {
+function getServerWorkflowsSorted(server: MCPServerItem): MCPWorkflowItem[] {
+  const selectedIds = new Set(server.workflow_ids);
+
   return [...allWorkflows.value].sort((a, b) => {
+    const aSelected = selectedIds.has(a.id);
+    const bSelected = selectedIds.has(b.id);
+    if (aSelected !== bSelected) return aSelected ? -1 : 1;
+
     const aTime = a.updated_at ?? "";
     const bTime = b.updated_at ?? "";
     if (aTime !== bTime) return bTime.localeCompare(aTime);
     return a.name.localeCompare(b.name);
   });
-});
+}
 
 // Use browser's URL for SSE endpoint instead of backend-provided URL
 const sseEndpointUrl = computed(() => {
@@ -884,7 +890,7 @@ function addToCursor(): void {
               <div>
                 <label class="text-xs font-medium text-muted-foreground block mb-2">Assigned Workflows</label>
                 <div
-                  v-if="serverWorkflowsSorted.length === 0"
+                  v-if="allWorkflows.length === 0"
                   class="text-xs text-muted-foreground italic"
                 >
                   No workflows available. Create workflows to assign them here.
@@ -894,7 +900,7 @@ function addToCursor(): void {
                   class="space-y-1 max-h-48 overflow-y-auto pr-1"
                 >
                   <div
-                    v-for="workflow in serverWorkflowsSorted"
+                    v-for="workflow in getServerWorkflowsSorted(server)"
                     :key="workflow.id"
                     class="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                     @click="toggleServerWorkflow(server, workflow.id)"

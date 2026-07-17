@@ -24,9 +24,16 @@ test("creates a conversation and renames it", async ({ page }) => {
   const item = page.getByTestId(`chat-list-item-${conversationId}`);
   await expect(item).toBeVisible();
 
-  // Rename via the hover action. Enter commits; blur also commits when focus moves
-  // (e.g. credential selectors re-rendering after the chat detail panel loads).
-  const renameResponse = page.waitForResponse(
+  // Settle after New Chat so credential/model bootstrap re-renders finish
+  // before rename. focusInputWhenReady also refuses to steal from other inputs,
+  // but waiting here avoids entering edit mode during the remount window.
+  await expect(page.getByTestId("chat-credential-selector")).toBeVisible();
+  await expect(page.getByPlaceholder("Type a message...")).toBeVisible();
+  await expect(
+    page.getByTestId("chat-model-selector").getByPlaceholder("Loading..."),
+  ).toHaveCount(0);
+
+  const renameResponsePromise = page.waitForResponse(
     (response) =>
       response.url().includes(`/api/chats/${conversationId}`) &&
       response.request().method() === "PUT" &&
@@ -37,10 +44,8 @@ test("creates a conversation and renames it", async ({ page }) => {
   const renameInput = item.locator("input");
   await expect(renameInput).toBeVisible();
   await renameInput.fill(renamedTitle);
-  if (await renameInput.isVisible()) {
-    await renameInput.press("Enter");
-  }
-  await renameResponse;
+  await renameInput.press("Enter");
+  await renameResponsePromise;
   await expect(item).toContainText(renamedTitle);
 
   // The rename is server-persisted and survives a reload.

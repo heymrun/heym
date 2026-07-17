@@ -1400,6 +1400,11 @@ export const dashboardApi = {
     return response.data;
   },
 
+  cloneWidget: async (id: string): Promise<DashboardWidget> => {
+    const response = await api.post<DashboardWidget>(`/dashboards/widgets/${id}/clone`);
+    return response.data;
+  },
+
   updateWidget: async (id: string, body: WidgetUpdateRequest): Promise<DashboardWidget> => {
     const response = await api.patch<DashboardWidget>(`/dashboards/widgets/${id}`, body);
     return response.data;

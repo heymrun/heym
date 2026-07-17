@@ -371,6 +371,71 @@ class GitHubService:
             payload["target_commitish"] = target_commitish
         return self._request_json("POST", f"/repos/{owner}/{repo}/releases", json=payload)
 
+    def get_release_by_tag(self, owner: str, repo: str, tag: str) -> dict[str, Any]:
+        """Fetch a release by git tag name."""
+        return self._request_json(
+            "GET", f"/repos/{owner}/{repo}/releases/tags/{quote(tag, safe='')}"
+        )
+
+    def delete_release_asset(self, owner: str, repo: str, asset_id: int) -> dict[str, Any]:
+        """Delete a release asset by id."""
+        self._request_no_content(
+            "DELETE",
+            f"/repos/{owner}/{repo}/releases/assets/{asset_id}",
+            success_codes=(204,),
+        )
+        return {"asset_id": asset_id, "deleted": True}
+
+    def upload_release_asset(
+        self,
+        owner: str,
+        repo: str,
+        release_id: int,
+        file_path: str,
+        *,
+        name: str | None = None,
+        label: str | None = None,
+        content_type: str = "application/octet-stream",
+        upload_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a binary asset onto an existing release (not committed to source)."""
+        path = file_path
+        asset_name = (name or path.rsplit("/", 1)[-1]).strip()
+        if not asset_name:
+            raise ValueError("GitHub uploadReleaseAsset requires a file name")
+        template = (upload_url or "").strip()
+        if template:
+            base = template.split("{", 1)[0]
+        else:
+            upload_base = self._uploads_base_url()
+            base = f"{upload_base}/repos/{owner}/{repo}/releases/{release_id}/assets"
+        params = [f"name={quote(asset_name)}"]
+        if label:
+            params.append(f"label={quote(label)}")
+        url = f"{base}?{'&'.join(params)}"
+        with open(path, "rb") as handle:
+            content = handle.read()
+        response = self._client.request(
+            "POST",
+            url,
+            content=content,
+            headers={
+                **self._auth_headers(),
+                "Accept": "application/vnd.github+json",
+                "Content-Type": content_type,
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        if response.status_code >= 400:
+            raise ValueError(self._build_error_message(response))
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError("GitHub API returned non-JSON response") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub uploadReleaseAsset returned an unexpected response")
+        return payload
+
     def update_release(
         self,
         owner: str,
@@ -915,6 +980,16 @@ class GitHubService:
     def _base_url(self) -> str:
         raw = str(self._config.get("base_url") or "").strip()
         return raw.rstrip("/") if raw else GITHUB_API_BASE_URL
+
+    def _uploads_base_url(self) -> str:
+        """Host used for release asset uploads (api.github.com → uploads.github.com)."""
+        base = self._base_url()
+        if base == GITHUB_API_BASE_URL or base.rstrip("/").endswith("://api.github.com"):
+            return "https://uploads.github.com"
+        # GitHub Enterprise: https://ghe.example/api/v3 → https://ghe.example/api/uploads
+        if base.rstrip("/").endswith("/api/v3"):
+            return base.rstrip("/").removesuffix("/api/v3") + "/api/uploads"
+        return base.replace("://api.", "://uploads.", 1)
 
     def _auth_headers(self) -> dict[str, str]:
         token = str(self._config.get("api_key") or self._config.get("token") or "").strip()

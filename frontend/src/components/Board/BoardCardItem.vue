@@ -128,7 +128,7 @@ function onDragStart(event: DragEvent): void {
 
 <template>
   <div
-    class="group cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors hover:border-primary/60"
+    class="group min-w-0 cursor-pointer rounded-lg border p-2.5 text-sm shadow-sm transition-colors hover:border-primary/60 sm:p-3"
     :class="statusClasses"
     :draggable="canAct && !editingTitle"
     :data-testid="`board-card-${card.id}`"
@@ -162,7 +162,7 @@ function onDragStart(event: DragEvent): void {
         </div>
         <span
           v-else
-          class="line-clamp-3 whitespace-pre-line font-medium"
+          class="line-clamp-3 whitespace-pre-line break-words font-medium sm:break-normal"
           :data-testid="`board-card-title-${card.id}`"
           @click.stop="onTitleClick"
           @dblclick.stop="onTitleDblClick"
@@ -233,7 +233,7 @@ function onDragStart(event: DragEvent): void {
     </div>
     <p
       v-if="card.content"
-      class="mt-1 line-clamp-2 text-xs text-muted-foreground"
+      class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground sm:break-normal"
     >
       {{ card.content }}
     </p>

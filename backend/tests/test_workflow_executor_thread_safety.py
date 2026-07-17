@@ -2,13 +2,189 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 import uuid
-from unittest.mock import MagicMock
+from collections.abc import Callable
+from unittest.mock import MagicMock, patch
+
+import httpx
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import agent_node, llm_node
-from app.services.workflow_executor import NodeTraceableExecutionError, WorkflowExecutor
+from app.services.workflow_executor import (
+    NodeResult,
+    NodeTraceableExecutionError,
+    WorkflowExecutor,
+    execute_workflow_streaming,
+)
+
+_ORIGINAL_EXECUTE_NODE_PARALLEL = WorkflowExecutor.execute_node_parallel
+
+
+def _execute_node_parallel_with_slow_set(
+    executor: WorkflowExecutor,
+    node_id: str,
+    inputs: dict,
+    on_retry: Callable[[NodeResult, int, int], None] | None = None,
+) -> NodeResult:
+    if node_id == "node_1784204114120_is6kul2q1":
+        time.sleep(0.02)
+    return _ORIGINAL_EXECUTE_NODE_PARALLEL(executor, node_id, inputs, on_retry)
+
+
+def _make_self_referential_loop_workflow() -> tuple[list[dict], list[dict]]:
+    nodes = [
+        {
+            "id": "var_numbers",
+            "type": "variable",
+            "data": {
+                "label": "createNumbers",
+                "variableName": "numbers",
+                "variableValue": "$array(1, 2, 3, 4, 5)",
+                "variableType": "array",
+            },
+        },
+        {
+            "id": "loop_1",
+            "type": "loop",
+            "data": {"label": "processNumbers", "arrayExpression": "$vars.numbers"},
+        },
+        {
+            "id": "output_done",
+            "type": "output",
+            "data": {"label": "finalOutput", "message": "Loop completed"},
+        },
+        {
+            "id": "node_1784204114120_is6kul2q1",
+            "type": "set",
+            "data": {
+                "label": "set",
+                "mappings": [{"key": "num", "value": "$processNumbers.item"}],
+            },
+        },
+    ]
+    edges = [
+        {"id": "edge_1", "source": "var_numbers", "target": "loop_1"},
+        {
+            "id": "edge_7",
+            "source": "loop_1",
+            "target": "output_done",
+            "sourceHandle": "done",
+        },
+        {
+            "id": "edge_loop_1_loop_1_1784204041004_1yec6",
+            "source": "loop_1",
+            "target": "loop_1",
+            "sourceHandle": "loop",
+            "targetHandle": "loop",
+        },
+        {
+            "id": "edge_loop_1_node_1784204114120_is6kul2q1_1784204114120",
+            "source": "loop_1",
+            "target": "node_1784204114120_is6kul2q1",
+            "sourceHandle": "loop",
+            "targetHandle": "input",
+        },
+        {
+            "id": "edge_node_1784204114120_is6kul2q1_loop_1_1784204141287",
+            "source": "node_1784204114120_is6kul2q1",
+            "target": "loop_1",
+            "sourceHandle": "output",
+            "targetHandle": "loop",
+        },
+    ]
+    return nodes, edges
+
+
+def _make_branched_loop_workflow() -> tuple[list[dict], list[dict]]:
+    nodes = [
+        {
+            "id": "var_numbers",
+            "type": "variable",
+            "data": {
+                "label": "createNumbers",
+                "variableName": "numbers",
+                "variableValue": "$array(1, 2, 3, 4, 5)",
+                "variableType": "array",
+            },
+        },
+        {
+            "id": "loop_1",
+            "type": "loop",
+            "data": {"label": "processNumbers", "arrayExpression": "$vars.numbers"},
+        },
+        {
+            "id": "condition_1",
+            "type": "condition",
+            "data": {"label": "checkIsThree", "condition": "$processNumbers.item == 3"},
+        },
+        {
+            "id": "console_log",
+            "type": "consoleLog",
+            "data": {"label": "printNumber", "logMessage": "$processNumbers.item"},
+        },
+        {
+            "id": "wait_1",
+            "type": "wait",
+            "data": {"label": "wait", "duration": 20},
+        },
+        {
+            "id": "http_1",
+            "type": "http",
+            "data": {
+                "label": "httpRequest",
+                "curl": "curl -X GET https://example.test/$processNumbers.item",
+                "onErrorEnabled": True,
+            },
+        },
+        {
+            "id": "output_done",
+            "type": "output",
+            "data": {"label": "finalOutput", "message": "Loop completed"},
+        },
+    ]
+    edges = [
+        {"id": "e1", "source": "var_numbers", "target": "loop_1"},
+        {
+            "id": "e2",
+            "source": "loop_1",
+            "target": "condition_1",
+            "sourceHandle": "loop",
+        },
+        {
+            "id": "e3",
+            "source": "condition_1",
+            "target": "console_log",
+            "sourceHandle": "false",
+        },
+        {"id": "e4", "source": "console_log", "target": "wait_1"},
+        {
+            "id": "e5",
+            "source": "wait_1",
+            "target": "loop_1",
+            "targetHandle": "loop",
+        },
+        {
+            "id": "e6",
+            "source": "condition_1",
+            "target": "http_1",
+            "sourceHandle": "true",
+        },
+        {
+            "id": "e7",
+            "source": "http_1",
+            "target": "loop_1",
+            "targetHandle": "loop",
+        },
+        {
+            "id": "e8",
+            "source": "loop_1",
+            "target": "output_done",
+            "sourceHandle": "done",
+        },
+    ]
+    return nodes, edges
 
 
 def _make_llm_ctx(
@@ -283,6 +459,246 @@ class LoopWithInputSnapshotTests(unittest.TestCase):
             if row["node_label"] == "itemLoop" and row["status"] == "success"
         ]
         self.assertEqual(len(loop_results), 4)  # 3 loop iterations + 1 done
+
+
+class LoopSelfEdgeExecutionTests(unittest.TestCase):
+    """Verify visual self-edges cannot advance a loop ahead of its body."""
+
+    def assert_sequential_loop_results(self, node_results: list[dict]) -> None:
+        """Assert every body result completes before the following loop iteration."""
+        loop_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "processNumbers" and row["status"] == "success"
+        ]
+        set_results = [
+            row for row in node_results if row["node_label"] == "set" and row["status"] == "success"
+        ]
+
+        self.assertEqual(
+            [row["output"].get("item") for row in loop_results[:-1]],
+            [1, 2, 3, 4, 5],
+        )
+        self.assertEqual([row["output"] for row in set_results], [{"num": i} for i in range(1, 6)])
+        self.assertEqual(loop_results[-1]["output"]["branch"], "done")
+        self.assertEqual(
+            loop_results[-1]["output"]["results"],
+            [{"num": i} for i in range(1, 6)],
+        )
+
+        for index, set_result in enumerate(set_results):
+            self.assertLess(
+                loop_results[index]["metadata"]["sequence"],
+                set_result["metadata"]["sequence"],
+            )
+            self.assertLess(
+                set_result["metadata"]["sequence"],
+                loop_results[index + 1]["metadata"]["sequence"],
+            )
+
+    def test_loop_self_edge_does_not_skip_body_iterations(self) -> None:
+        nodes, edges = _make_self_referential_loop_workflow()
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+
+        with patch.object(
+            WorkflowExecutor,
+            "execute_node_parallel",
+            _execute_node_parallel_with_slow_set,
+        ):
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs={})
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs, {"finalOutput": {"result": "Loop completed"}})
+        self.assert_sequential_loop_results(result.node_results)
+
+    def test_streaming_loop_self_edge_does_not_skip_body_iterations(self) -> None:
+        nodes, edges = _make_self_referential_loop_workflow()
+
+        with patch.object(
+            WorkflowExecutor,
+            "execute_node_parallel",
+            _execute_node_parallel_with_slow_set,
+        ):
+            events = list(
+                execute_workflow_streaming(
+                    workflow_id=uuid.uuid4(),
+                    nodes=nodes,
+                    edges=edges,
+                    inputs={},
+                )
+            )
+
+        node_results = [
+            {
+                "node_label": event["node_label"],
+                "status": event["status"],
+                "output": event["output"],
+                "metadata": event["metadata"],
+            }
+            for event in events
+            if event.get("type") == "node_complete"
+        ]
+        execution_complete = next(
+            event for event in events if event.get("type") == "execution_complete"
+        )
+
+        self.assertEqual(execution_complete["status"], "success")
+        self.assertEqual(
+            execution_complete["outputs"],
+            {"finalOutput": {"result": "Loop completed"}},
+        )
+        self.assert_sequential_loop_results(node_results)
+
+
+class LoopBranchExecutionTests(unittest.TestCase):
+    """Verify each loop iteration waits for only its selected condition branch."""
+
+    def _assert_branched_loop_results(self, node_results: list[dict]) -> None:
+        loop_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "processNumbers" and row["status"] == "success"
+        ]
+        condition_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "checkIsThree" and row["status"] == "success"
+        ]
+        console_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "printNumber" and row["status"] == "success"
+        ]
+        wait_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "wait" and row["status"] == "success"
+        ]
+        http_results = [
+            row
+            for row in node_results
+            if row["node_label"] == "httpRequest" and row["status"] == "success"
+        ]
+
+        self.assertEqual(
+            [row["output"].get("item") for row in loop_results[:-1]],
+            [1, 2, 3, 4, 5],
+        )
+        self.assertEqual(
+            [row["output"]["branch"] for row in condition_results],
+            ["false", "false", "true", "false", "false"],
+        )
+        self.assertEqual(
+            [row["output"]["logMessage"] for row in console_results],
+            [1, 2, 4, 5],
+        )
+        self.assertEqual(
+            [row["output"]["logMessage"] for row in wait_results],
+            [1, 2, 4, 5],
+        )
+        self.assertEqual(len(http_results), 1)
+        if "request" in http_results[0]["output"]:
+            self.assertEqual(http_results[0]["output"]["request"]["url"], "https://example.test/3")
+        self.assertEqual(
+            loop_results[-1]["output"]["results"],
+            [
+                {"branch": "false", "logMessage": 1},
+                {"branch": "false", "logMessage": 2},
+                http_results[0]["output"],
+                {"branch": "false", "logMessage": 4},
+                {"branch": "false", "logMessage": 5},
+            ],
+        )
+
+        selected_branch_results = [
+            wait_results[0],
+            wait_results[1],
+            http_results[0],
+            wait_results[2],
+            wait_results[3],
+        ]
+        for index, branch_result in enumerate(selected_branch_results):
+            self.assertLess(
+                loop_results[index]["metadata"]["sequence"],
+                branch_result["metadata"]["sequence"],
+            )
+            self.assertLess(
+                branch_result["metadata"]["sequence"],
+                loop_results[index + 1]["metadata"]["sequence"],
+            )
+
+    @staticmethod
+    def _mock_http_response(method: str, url: str, **_kwargs: object) -> httpx.Response:
+        request = httpx.Request(method, url)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    def test_loop_waits_for_selected_condition_branch(self) -> None:
+        nodes, edges = _make_branched_loop_workflow()
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+
+        with patch("app.services.workflow_executor.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request.side_effect = self._mock_http_response
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs={})
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs, {"finalOutput": {"result": "Loop completed"}})
+        self._assert_branched_loop_results(result.node_results)
+
+    def test_loop_waits_for_selected_branch_when_http_returns_error_output(self) -> None:
+        nodes, edges = _make_branched_loop_workflow()
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+
+        with patch("app.services.workflow_executor.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request.side_effect = httpx.ConnectError(
+                "Name or service not known"
+            )
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs={})
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs, {"finalOutput": {"result": "Loop completed"}})
+        self._assert_branched_loop_results(result.node_results)
+
+        http_result = next(
+            row
+            for row in result.node_results
+            if row["node_label"] == "httpRequest" and row["status"] == "success"
+        )
+        self.assertTrue(http_result["output"]["_errorBranch"])
+
+    def test_streaming_loop_waits_for_selected_condition_branch(self) -> None:
+        nodes, edges = _make_branched_loop_workflow()
+
+        with patch("app.services.workflow_executor.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request.side_effect = self._mock_http_response
+            events = list(
+                execute_workflow_streaming(
+                    workflow_id=uuid.uuid4(),
+                    nodes=nodes,
+                    edges=edges,
+                    inputs={},
+                )
+            )
+
+        node_results = [
+            {
+                "node_label": event["node_label"],
+                "status": event["status"],
+                "output": event["output"],
+                "metadata": event["metadata"],
+            }
+            for event in events
+            if event.get("type") == "node_complete"
+        ]
+        execution_complete = next(
+            event for event in events if event.get("type") == "execution_complete"
+        )
+
+        self.assertEqual(execution_complete["status"], "success")
+        self.assertEqual(
+            execution_complete["outputs"],
+            {"finalOutput": {"result": "Loop completed"}},
+        )
+        self._assert_branched_loop_results(node_results)
 
 
 class OutputAllowDownstreamTests(unittest.TestCase):

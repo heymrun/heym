@@ -72,7 +72,14 @@ If any start node is still active, the workflow stays until the next run.
 - **Sidebar** – New Folder, recursive folder tree with expand/collapse
 - **Context menu** – New Subfolder, Rename, Download as ZIP, Delete per folder
 - **Main area** – Root workflows (no folder, not scheduled) and Scheduled for Deletion
-- **Drop zones** – "Drop here to move to root" and "Drop here to schedule for deletion"
+- **Folder drop preview** – Dragging a workflow highlights the exact folder or sub-folder and
+  shows its full path in a card-sized preview. A collapsed folder expands after a short hover.
+- **Stable drag feedback** – The source card uses a drag ghost, and the active drop target stays
+  selected while scrolling or crossing controls inside the same folder.
+- **Destination check** – The current folder is shown as **Already in Folder** and does not accept
+  a redundant move.
+- **Other drop zones** – Root and "Scheduled for Deletion" highlight when they can accept the
+  dragged workflow.
 - **ZIP drop** – Drop a ZIP file onto the workflow area to import a folder structure at root level
 
 ## Related

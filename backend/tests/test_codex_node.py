@@ -220,7 +220,8 @@ class TestCodexNodeHandler(unittest.TestCase):
                     "baseBranch": "main",
                     "taskPrompt": "$input.text",
                     "publishMode": "diff_only",
-                    "codexModel": "gpt-5.4",
+                    "codexModel": "gpt-5.6-sol",
+                    "codexReasoningEffort": "high",
                 }
             )
         )
@@ -231,7 +232,8 @@ class TestCodexNodeHandler(unittest.TestCase):
         request = runner.run_task.call_args.args[0]
         self.assertEqual(request.task_prompt, "Fix the bug")
         self.assertEqual(request.repository_url, "https://github.com/acme/app")
-        self.assertEqual(request.model, "gpt-5.4")
+        self.assertEqual(request.model, "gpt-5.6-sol")
+        self.assertEqual(request.reasoning_effort, "high")
         # Regression: an unset setupCommand must stay empty, not become str(inputs).
         self.assertEqual(request.setup_command, "")
 

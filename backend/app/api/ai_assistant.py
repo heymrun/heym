@@ -63,6 +63,7 @@ from app.services.hitl_service import (
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.openai_client import create_openai_client
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
 from app.services.timezone_utils import get_configured_timezone
@@ -902,15 +903,17 @@ def get_openai_client(
 ) -> tuple[OpenAI, str]:
     """Build an OpenAI client and provider label for the given credential type."""
     if credential_type == CredentialType.google:
-        return OpenAI(api_key=config.get("api_key"), base_url=GOOGLE_OPENAI_BASE_URL), "Google"
+        return create_openai_client(
+            api_key=config.get("api_key"), base_url=GOOGLE_OPENAI_BASE_URL
+        ), "Google"
 
     if credential_type == CredentialType.custom:
         base_url = config.get("base_url", "").rstrip("/")
         if not base_url.endswith("/v1"):
             base_url = base_url + "/v1"
-        return OpenAI(api_key=config.get("api_key"), base_url=base_url), "Custom"
+        return create_openai_client(api_key=config.get("api_key"), base_url=base_url), "Custom"
 
-    return OpenAI(api_key=config.get("api_key")), "OpenAI"
+    return create_openai_client(api_key=config.get("api_key")), "OpenAI"
 
 
 async def get_workflows_for_user_with_inputs(

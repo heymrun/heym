@@ -110,6 +110,8 @@ const METHOD_RETURN_TYPES: Record<string, PropertyType> = {
   strip: "string",
   capitalize: "string",
   title: "string",
+  base64Encode: "string",
+  base64Decode: "string",
   charAt: "string",
   replace: "string",
   replaceAll: "string",

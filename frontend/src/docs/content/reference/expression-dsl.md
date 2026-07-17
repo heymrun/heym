@@ -213,6 +213,8 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `join(separator, list)` - Join list
 - `replace(text, old, new)` - Replace text
 - `regexReplace(text, pattern, replacement)` - Replace with regex pattern
+- `base64Encode(text)` - Encode UTF-8 text as standard Base64
+- `base64Decode(text)` - Decode standard Base64 into UTF-8 text
 
 ## String Methods (on string values)
 - `.orEmpty()` - Return the string value, or `""` when the value is null/missing
@@ -229,6 +231,8 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `.replaceAll(old, new)` - Replace all occurrences
 - `.regexReplace(pattern, replacement)` - Replace with regex pattern
 - `.hash()` - MD5 hash of the string
+- `.base64Encode()` - Encode UTF-8 text as standard Base64
+- `.base64Decode()` - Decode standard Base64 into UTF-8 text
 - `.urlEncode()` - URL encode string
 - `.urlDecode()` - URL decode string
 - `.escape()` - JSON escape string (convert special characters to JSON format)
@@ -244,6 +248,8 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `$text.length` - Get string length
 - `$text.escape()` - Escape special JSON characters (e.g., quotes, newlines)
 - `$escapedText.unescape()` - Unescape JSON formatted string back to original
+- `$base64Encode("Héym 🌍")` - Return `SMOpeW0g8J+MjQ==`
+- `$encodedText.base64Decode()` - Decode Base64 into UTF-8 text
 - `$text.urlEncode()` - URL encode for API parameters
 - `$encodedText.urlDecode()` - Decode URL encoded text
 
@@ -338,6 +344,7 @@ Use ONLY:
 - `randomInt()`, `range()`, `array()`, `notNull()`
 - `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`
 - `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`
+- `base64Encode()`, `base64Decode()`
 - documented string/array/object methods
 
 If a function is not listed above, it does not exist.

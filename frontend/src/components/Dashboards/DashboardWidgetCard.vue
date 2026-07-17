@@ -2,7 +2,17 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { Component } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { ExternalLink, Loader2, MoreVertical, Pencil, RefreshCw, Settings, Sparkles, Trash2 } from "lucide-vue-next";
+import {
+  Copy,
+  ExternalLink,
+  Loader2,
+  MoreVertical,
+  Pencil,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Trash2,
+} from "lucide-vue-next";
 
 import type { ChartPayload, DashboardWidget } from "@/types/dashboard";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
@@ -12,11 +22,13 @@ import { dashboardApi } from "@/services/api";
 const props = defineProps<{
   widget: DashboardWidget;
   editMode: boolean;
+  cloning: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "edit", workflowId: string): void;
   (e: "delete", widgetId: string): void;
+  (e: "clone", widgetId: string): void;
   (e: "refine", widget: DashboardWidget): void;
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
@@ -48,15 +60,44 @@ interface WidgetAction {
   icon: Component;
   label: string;
   danger?: boolean;
+  disabled?: () => boolean;
   run: () => void;
 }
 
 const actions: WidgetAction[] = [
-  { key: "refine", icon: Sparkles, label: "Fine-tune with AI", run: () => emit("refine", props.widget) },
+  {
+    key: "refine",
+    icon: Sparkles,
+    label: "Fine-tune with AI",
+    run: () => emit("refine", props.widget),
+  },
   { key: "refresh", icon: RefreshCw, label: "Refresh", run: () => void loadData(true) },
-  { key: "edit", icon: Pencil, label: "Edit workflow", run: () => emit("edit", props.widget.workflow_id) },
-  { key: "settings", icon: Settings, label: "Settings", run: () => emit("settings", props.widget) },
-  { key: "delete", icon: Trash2, label: "Delete widget", danger: true, run: () => emit("delete", props.widget.id) },
+  {
+    key: "edit",
+    icon: Pencil,
+    label: "Edit workflow",
+    run: () => emit("edit", props.widget.workflow_id),
+  },
+  {
+    key: "clone",
+    icon: Copy,
+    label: "Clone widget",
+    disabled: () => props.cloning,
+    run: () => emit("clone", props.widget.id),
+  },
+  {
+    key: "settings",
+    icon: Settings,
+    label: "Settings",
+    run: () => emit("settings", props.widget),
+  },
+  {
+    key: "delete",
+    icon: Trash2,
+    label: "Delete widget",
+    danger: true,
+    run: () => emit("delete", props.widget.id),
+  },
 ];
 
 const menuOpen = ref(false);
@@ -244,8 +285,13 @@ onBeforeUnmount(() => {
           v-for="action in actions"
           :key="action.key"
           class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          :class="action.danger ? 'hover:bg-destructive/10 hover:text-destructive' : ''"
+          :class="[
+            action.danger ? 'hover:bg-destructive/10 hover:text-destructive' : '',
+            action.disabled?.() ? 'cursor-not-allowed opacity-50' : '',
+          ]"
           :title="action.label"
+          :aria-label="action.label"
+          :disabled="action.disabled?.()"
           @click="action.run()"
         >
           <component
@@ -281,6 +327,7 @@ onBeforeUnmount(() => {
             :key="action.key"
             class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
             :class="action.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground'"
+            :disabled="action.disabled?.()"
             @click.stop="runAction(action)"
           >
             <component

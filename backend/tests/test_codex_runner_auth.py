@@ -90,6 +90,7 @@ class TestCodexRunnerAuth(unittest.TestCase):
     def _run_exec_with(
         self,
         model: str = "",
+        reasoning_effort: str = "",
         *,
         returncode: int = 0,
         stdout: str = "{}",
@@ -113,6 +114,7 @@ class TestCodexRunnerAuth(unittest.TestCase):
                 resume_thread_id=resume_thread_id,
                 codex_access_token="",
                 model=model,
+                reasoning_effort=reasoning_effort,
             )
         return captured["cmd"]
 
@@ -133,6 +135,18 @@ class TestCodexRunnerAuth(unittest.TestCase):
 
     def test_model_flag_omitted_when_empty(self) -> None:
         self.assertNotIn("--model", self._run_exec_with(""))
+
+    def test_reasoning_effort_config_added_when_set(self) -> None:
+        cmd = self._run_exec_with("", reasoning_effort="xhigh")
+        self.assertIn('model_reasoning_effort="xhigh"', cmd)
+
+    def test_reasoning_effort_omitted_when_empty(self) -> None:
+        self.assertNotIn("model_reasoning_effort", self._run_exec_with(""))
+
+    def test_reasoning_effort_rejects_invalid_values(self) -> None:
+        self.assertNotIn(
+            "model_reasoning_effort", self._run_exec_with("", reasoning_effort="bogus")
+        )
 
     def test_exec_uses_valid_flags(self) -> None:
         # codex exec has no --ask-for-approval flag; approval is set via config override.

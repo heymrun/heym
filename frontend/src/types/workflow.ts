@@ -248,6 +248,8 @@ export interface ExecuteInputMapping {
 
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
 
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+
 export type GuardrailCategory =
   | "violence"
   | "hate_speech"
@@ -434,6 +436,7 @@ export interface NodeData {
   branchName?: string;
   setupCommand?: string;
   codexModel?: string;
+  codexReasoningEffort?: CodexReasoningEffort;
   systemInstruction?: string;
   userMessage?: string;
   batchModeEnabled?: boolean;

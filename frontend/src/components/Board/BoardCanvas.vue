@@ -62,7 +62,7 @@ async function addColumn(): Promise<void> {
 <template>
   <div
     ref="canvas"
-    class="flex min-h-0 gap-3 overflow-x-auto p-4"
+    class="flex min-h-0 w-full min-w-0 gap-3 overflow-x-auto overscroll-x-contain p-2 sm:p-4"
     :style="availableHeight === null ? undefined : { height: `${availableHeight}px` }"
     data-testid="board-canvas"
   >
@@ -77,7 +77,7 @@ async function addColumn(): Promise<void> {
       @open-settings="emit('openSettings', $event)"
       @open-error-history="emit('openErrorHistory', $event)"
     />
-    <div class="flex w-64 shrink-0 flex-col">
+    <div class="flex w-[calc(100vw-2.5rem)] max-w-[16rem] shrink-0 flex-col sm:w-64">
       <button
         v-if="!addingColumn"
         class="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground"

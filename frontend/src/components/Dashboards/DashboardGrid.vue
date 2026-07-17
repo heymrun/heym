@@ -12,11 +12,13 @@ interface GridLayoutItem extends WidgetLayout {
 const props = defineProps<{
   widgets: DashboardWidget[];
   editMode: boolean;
+  cloningWidgetId: string | null;
 }>();
 
 const emit = defineEmits<{
   (e: "edit", workflowId: string): void;
   (e: "delete", widgetId: string): void;
+  (e: "clone", widgetId: string): void;
   (e: "refine", widget: DashboardWidget): void;
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
@@ -70,9 +72,11 @@ function emitItemLayout(id: string): void {
         v-if="widgetById[item.i]"
         :widget="widgetById[item.i]"
         :edit-mode="editMode"
+        :cloning="cloningWidgetId === item.i"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"
         @edit="emit('edit', $event)"
         @delete="emit('delete', $event)"
+        @clone="emit('clone', $event)"
         @refine="emit('refine', $event)"
         @settings="emit('settings', $event)"
         @title-change="emit('title-change', $event)"

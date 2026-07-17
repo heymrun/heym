@@ -5,6 +5,7 @@ import re
 import time
 from importlib import import_module
 
+from app.services.codex_catalog import CODEX_REASONING_EFFORTS
 from app.services.codex_runner_service import (
     CODEX_PUBLISH_MODES,
     CodexResumeRequest,
@@ -40,6 +41,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     codex_model = self.evaluate_nonempty_message_template(
         str(node_data.get("codexModel") or ""), inputs, node_id
     ).strip()
+    codex_reasoning_effort = _resolve_reasoning_effort(node_data.get("codexReasoningEffort"))
     if resume_context:
         answer_text = str(resume_context.get("answerText") or resume_context.get("answer") or "")
         resolved_repository_url = str(resume_context.get("repositoryUrl") or "").strip()
@@ -62,6 +64,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 timeout_seconds=timeout_seconds,
                 codex_auth=codex_config,
                 model=codex_model,
+                reasoning_effort=codex_reasoning_effort,
             )
         )
     else:
@@ -102,6 +105,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 github_config=github_config,
                 codex_auth=codex_config,
                 model=codex_model,
+                reasoning_effort=codex_reasoning_effort,
             )
         )
 
@@ -262,6 +266,14 @@ def _refresh_chatgpt_tokens_if_needed(db: object, credential: object, codex_conf
     credential.encrypted_config = encrypt_config(updated)
     db.commit()
     return updated
+
+
+def _resolve_reasoning_effort(value: object) -> str:
+    """Normalize Codex reasoning effort; empty or invalid values use Codex default (medium)."""
+    effort = str(value or "medium").strip().lower()
+    if effort in CODEX_REASONING_EFFORTS:
+        return effort
+    return "medium"
 
 
 def _coerce_timeout(value: object) -> float:

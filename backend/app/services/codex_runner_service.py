@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
 from app.config import settings
+from app.services.codex_catalog import CODEX_REASONING_EFFORTS
 from app.services.github_service import GitHubService
 
 # OpenAI strict structured output requires every property to appear in `required` when
@@ -62,8 +63,23 @@ _CODEX_LOCAL_ONLY_RULES = (
     "do NOT commit, push, or create branches; and do NOT use the GitHub API, a GitHub connector, "
     "or any remote/network tool to modify the repository — Heym performs every git and GitHub "
     "operation after you finish. If network access is available, use it only for read-only "
-    "downloads or dependency lookups needed to complete the local file edits."
+    "downloads or dependency lookups needed to complete the local file edits. For UI/frontend "
+    "visual changes, save at least one PNG screenshot under a gitignored path such as "
+    "`frontend/.e2e-artifacts/`; Heym uploads those images onto the pull request after you finish "
+    "(do not commit screenshot binaries into source)."
 )
+
+_PR_SCREENSHOT_RELEASE_TAG = "codex-pr-assets"
+_PR_SCREENSHOT_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
+_PR_SCREENSHOT_MAX_FILES = 5
+_PR_SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024
+_PR_SCREENSHOT_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,7 @@ class CodexRunRequest:
     github_config: dict
     codex_auth: dict = field(default_factory=dict)
     model: str = ""
+    reasoning_effort: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,6 +116,7 @@ class CodexResumeRequest:
     timeout_seconds: float
     codex_auth: dict = field(default_factory=dict)
     model: str = ""
+    reasoning_effort: str = ""
 
 
 @dataclass
@@ -300,6 +318,7 @@ class CodexRunnerService:
             resume_thread_id=None,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         return self._finalize_result(result, workspace, request)
 
@@ -321,6 +340,7 @@ class CodexRunnerService:
             resume_thread_id=request.thread_id,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         run_request = CodexRunRequest(
             repository_url=request.repository_url,
@@ -334,6 +354,7 @@ class CodexRunnerService:
             github_config=request.github_config,
             codex_auth=request.codex_auth,
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         return self._finalize_result(result, workspace, run_request)
 
@@ -479,6 +500,7 @@ class CodexRunnerService:
         resume_thread_id: str | None,
         codex_access_token: str,
         model: str = "",
+        reasoning_effort: str = "",
     ) -> CodexRunResult:
         # Write the schema outside the repo (in CODEX_HOME) so it is never a git candidate.
         codex_home = self._codex_home_dir(workspace)
@@ -490,6 +512,9 @@ class CodexRunnerService:
             cmd.append("resume")
         if model.strip():
             cmd.extend(["--model", model.strip()])
+        effort = reasoning_effort.strip().lower()
+        if effort in CODEX_REASONING_EFFORTS:
+            cmd.extend(["-c", f'model_reasoning_effort="{effort}"'])
         cmd.extend(["--json", "--output-schema", str(schema_path)])
         # `codex exec` has no --ask-for-approval flag; set the policy via config override so it
         # runs autonomously without prompting.
@@ -604,9 +629,16 @@ class CodexRunnerService:
             self._commit_changes(workspace, request.branch_name, result, new_branch=not on_existing)
             self._push_branch(workspace, request, request.branch_name)
             result.pushed_branch = request.branch_name
-            result.pull_request_url = self._open_pr_url_for_head(
-                request, request.branch_name
-            ) or self._create_pr(request, result, request.branch_name, draft=False)
+            existing_url = self._open_pr_url_for_head(request, request.branch_name)
+            if existing_url:
+                result.pull_request_url = existing_url
+                pr_number = self._pr_number_from_url(existing_url)
+                if pr_number is not None:
+                    self._attach_pr_screenshots(workspace, request, result, pr_number)
+            else:
+                result.pull_request_url = self._create_pr(
+                    workspace, request, result, request.branch_name, draft=False
+                )
             return
 
         # draft_pr / open_pr / commit_push all create and push a fresh working branch.
@@ -615,11 +647,11 @@ class CodexRunnerService:
         result.pushed_branch = request.branch_name
         if mode == "draft_pr":
             result.pull_request_url = self._create_pr(
-                request, result, request.branch_name, draft=True
+                workspace, request, result, request.branch_name, draft=True
             )
         elif mode == "open_pr":
             result.pull_request_url = self._create_pr(
-                request, result, request.branch_name, draft=False
+                workspace, request, result, request.branch_name, draft=False
             )
 
     def _commit_changes(
@@ -657,8 +689,18 @@ class CodexRunnerService:
         )
         if remote_branch.strip():
             try:
+                # During a rebase Git names the fetched branch "ours" and the commit being
+                # replayed "theirs". Prefer the just-completed Codex change for overlapping
+                # hunks while still retaining every non-conflicting remote update.
                 self._run_command(
-                    ["git", "pull", "--rebase", "origin", branch],
+                    [
+                        "git",
+                        "pull",
+                        "--rebase",
+                        "--strategy-option=theirs",
+                        "origin",
+                        branch,
+                    ],
                     cwd=workspace,
                     sensitive_values=sensitive_values,
                 )
@@ -683,6 +725,7 @@ class CodexRunnerService:
 
     def _create_pr(
         self,
+        workspace: Path,
         request: CodexRunRequest,
         result: CodexRunResult,
         head: str,
@@ -691,25 +734,197 @@ class CodexRunnerService:
     ) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
         pr_body = str(result.pull_request_body or "").strip() or result.summary or None
-        pr = GitHubService(request.github_config).create_pull_request(
-            owner,
-            repo,
-            self._commit_title(result),
-            head,
-            request.base_branch,
-            body=pr_body,
-            draft=draft,
-        )
-        return str(pr.get("html_url") or "").strip() or None
+        gh = GitHubService(request.github_config)
+        try:
+            pr = gh.create_pull_request(
+                owner,
+                repo,
+                self._commit_title(result),
+                head,
+                request.base_branch,
+                body=pr_body,
+                draft=draft,
+            )
+        finally:
+            gh.close()
+        url = str(pr.get("html_url") or "").strip() or None
+        pr_number = pr.get("number")
+        if url and isinstance(pr_number, int):
+            self._attach_pr_screenshots(workspace, request, result, pr_number)
+        return url
 
     def _open_pr_url_for_head(self, request: CodexRunRequest, head: str) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
-        for pr in GitHubService(request.github_config).list_pull_requests(
-            owner, repo, state="open", per_page=100
-        ):
+        gh = GitHubService(request.github_config)
+        try:
+            pulls = gh.list_pull_requests(owner, repo, state="open", per_page=100)
+        finally:
+            gh.close()
+        for pr in pulls:
             if str((pr.get("head") or {}).get("ref") or "") == head:
                 return str(pr.get("html_url") or "").strip() or None
         return None
+
+    def _discover_pr_screenshots(self, workspace: Path) -> list[Path]:
+        """Find local UI screenshots that Codex left on disk (gitignored / untracked only)."""
+        root = workspace.resolve()
+        tracked = {
+            line.strip().replace("\\", "/")
+            for line in self._git_output(["git", "ls-files"], workspace).splitlines()
+            if line.strip()
+        }
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+
+        def consider(path: Path) -> None:
+            if not path.is_file() or path in seen:
+                return
+            suffix = path.suffix.lower()
+            if suffix not in _PR_SCREENSHOT_SUFFIXES:
+                return
+            try:
+                resolved = path.resolve()
+                relative = resolved.relative_to(root).as_posix()
+            except ValueError:
+                return
+            if relative in tracked:
+                return
+            try:
+                if path.stat().st_size > _PR_SCREENSHOT_MAX_BYTES:
+                    return
+            except OSError:
+                return
+            seen.add(path)
+            candidates.append(resolved)
+
+        artifact_dirs = [
+            root / "frontend" / ".e2e-artifacts",
+            root / ".e2e-artifacts",
+        ]
+        for artifact_dir in artifact_dirs:
+            if artifact_dir.is_dir():
+                for path in artifact_dir.rglob("*"):
+                    consider(path)
+
+        # Codex sometimes drops a screenshot beside the working tree root.
+        for path in root.glob("*screenshot*"):
+            consider(path)
+        for path in root.glob("*/*screenshot*"):
+            consider(path)
+
+        candidates.sort(key=lambda item: item.as_posix())
+        return candidates[:_PR_SCREENSHOT_MAX_FILES]
+
+    def _attach_pr_screenshots(
+        self,
+        workspace: Path,
+        request: CodexRunRequest,
+        result: CodexRunResult,
+        pr_number: int,
+    ) -> None:
+        """Upload discovered screenshots as a GitHub release asset set and embed them in the PR."""
+        try:
+            screenshots = self._discover_pr_screenshots(workspace)
+            if not screenshots:
+                return
+            owner, repo = self._parse_github_owner_repo(request.repository_url)
+            gh = GitHubService(request.github_config)
+            try:
+                release = self._ensure_pr_screenshot_release(gh, owner, repo, request.base_branch)
+                release_id = int(release["id"])
+                upload_url = str(release.get("upload_url") or "") or None
+                existing_assets = {
+                    str(asset.get("name") or ""): int(asset["id"])
+                    for asset in (release.get("assets") or [])
+                    if isinstance(asset, dict) and asset.get("id") is not None
+                }
+                uploaded: list[tuple[str, str]] = []
+                for index, shot in enumerate(screenshots):
+                    asset_name = self._release_asset_name(shot, pr_number, index)
+                    existing_id = existing_assets.get(asset_name)
+                    if existing_id is not None:
+                        gh.delete_release_asset(owner, repo, existing_id)
+                    content_type = _PR_SCREENSHOT_CONTENT_TYPES.get(
+                        shot.suffix.lower(), "application/octet-stream"
+                    )
+                    asset = gh.upload_release_asset(
+                        owner,
+                        repo,
+                        release_id,
+                        str(shot),
+                        name=asset_name,
+                        content_type=content_type,
+                        upload_url=upload_url,
+                    )
+                    download = str(asset.get("browser_download_url") or "").strip()
+                    if download:
+                        uploaded.append((asset_name, download))
+                if not uploaded:
+                    return
+                base_body = (
+                    str(result.pull_request_body or "").strip()
+                    or str(result.summary or "").strip()
+                    or ""
+                )
+                updated_body = self._inject_screenshot_markdown(base_body, uploaded)
+                gh.update_issue(owner, repo, pr_number, body=updated_body)
+                result.pull_request_body = updated_body
+            finally:
+                gh.close()
+        except Exception:
+            # Screenshot attach is best-effort; never fail the Codex publish path for it.
+            return
+
+    @staticmethod
+    def _ensure_pr_screenshot_release(
+        gh: GitHubService,
+        owner: str,
+        repo: str,
+        target_commitish: str,
+    ) -> dict:
+        """Return the shared screenshot bucket release, creating it once if missing."""
+        try:
+            return gh.get_release_by_tag(owner, repo, _PR_SCREENSHOT_RELEASE_TAG)
+        except ValueError:
+            return gh.create_release(
+                owner,
+                repo,
+                _PR_SCREENSHOT_RELEASE_TAG,
+                name="Codex PR screenshots",
+                body=(
+                    "Shared bucket for Heym Codex UI screenshots attached to pull requests. "
+                    "Assets are named pr-<number>-… and are not part of source."
+                ),
+                target_commitish=target_commitish or None,
+                draft=False,
+                prerelease=True,
+            )
+
+    @staticmethod
+    def _release_asset_name(path: Path, pr_number: int, index: int) -> str:
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem).strip("-._") or "screenshot"
+        suffix = path.suffix.lower() if path.suffix.lower() in _PR_SCREENSHOT_SUFFIXES else ".png"
+        if index == 0:
+            return f"pr-{pr_number}-{stem}{suffix}"
+        return f"pr-{pr_number}-{stem}-{index}{suffix}"
+
+    @staticmethod
+    def _inject_screenshot_markdown(body: str, images: list[tuple[str, str]]) -> str:
+        section = "## Screenshots\n\n" + "\n\n".join(f"![{name}]({url})" for name, url in images)
+        text = (body or "").strip()
+        if not text:
+            return section + "\n"
+        pattern = re.compile(r"## Screenshots?\b.*?(?=\n## |\Z)", re.IGNORECASE | re.DOTALL)
+        if pattern.search(text):
+            return pattern.sub(section + "\n\n", text).rstrip() + "\n"
+        return text + "\n\n" + section + "\n"
+
+    @staticmethod
+    def _pr_number_from_url(url: str) -> int | None:
+        match = re.search(r"/pull/(\d+)(?:/|$)", str(url or ""))
+        if not match:
+            return None
+        return int(match.group(1))
 
     def _run_command(
         self,

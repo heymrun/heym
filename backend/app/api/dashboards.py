@@ -1,3 +1,4 @@
+import copy
 import uuid
 from typing import Any
 
@@ -149,6 +150,38 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
     ]
     edges = [{"id": str(uuid.uuid4()), "source": src_id, "target": chart_id}]
     return nodes, edges
+
+
+def _clone_workflow_graph(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Deep-copy a workflow graph while assigning fresh node and edge IDs."""
+    node_id_map: dict[str, str] = {}
+    cloned_nodes = copy.deepcopy(nodes)
+    for node in cloned_nodes:
+        old_id = str(node.get("id") or "")
+        if not old_id or old_id in node_id_map:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Widget workflow contains invalid node IDs",
+            )
+        new_id = str(uuid.uuid4())
+        node_id_map[old_id] = new_id
+        node["id"] = new_id
+
+    cloned_edges = copy.deepcopy(edges)
+    for edge in cloned_edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source not in node_id_map or target not in node_id_map:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Widget workflow contains an edge with an invalid node reference",
+            )
+        edge["id"] = str(uuid.uuid4())
+        edge["source"] = node_id_map[source]
+        edge["target"] = node_id_map[target]
+    return cloned_nodes, cloned_edges
 
 
 def _widget_to_response(widget: DashboardWidget) -> DashboardWidgetResponse:
@@ -303,6 +336,52 @@ async def create_widget(
     await db.commit()
     await db.refresh(widget)
     return _widget_to_response(widget)
+
+
+@router.post(
+    "/widgets/{widget_id}/clone",
+    response_model=DashboardWidgetResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def clone_widget(
+    widget_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DashboardWidgetResponse:
+    """Clone a dashboard widget and its private workflow graph."""
+    widget = await _load_widget(db, widget_id, current_user)
+    workflow = await _load_widget_workflow(db, widget)
+    cloned_nodes, cloned_edges = _clone_workflow_graph(
+        list(workflow.nodes or []), list(workflow.edges or [])
+    )
+    clone_title = f"{widget.title[:248]} (Copy)"
+    cloned_workflow = Workflow(
+        name=clone_title,
+        description=workflow.description,
+        owner_id=current_user.id,
+        kind="dashboard_widget",
+        nodes=cloned_nodes,
+        edges=cloned_edges,
+    )
+    db.add(cloned_workflow)
+    await db.flush()
+
+    layout = copy.deepcopy(widget.layout or {"x": 0, "y": 0, "w": 4, "h": 4})
+    layout["y"] = int(layout.get("y", 0)) + int(layout.get("h", 4))
+    cloned_widget = DashboardWidget(
+        dashboard_id=widget.dashboard_id,
+        workflow_id=cloned_workflow.id,
+        title=clone_title,
+        description=widget.description,
+        chart_type=widget.chart_type,
+        layout=layout,
+        cache_ttl_seconds=widget.cache_ttl_seconds,
+        position=widget.position + 1,
+    )
+    db.add(cloned_widget)
+    await db.commit()
+    await db.refresh(cloned_widget)
+    return _widget_to_response(cloned_widget)
 
 
 @router.patch("/widgets/{widget_id}", response_model=DashboardWidgetResponse)
