@@ -12,8 +12,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import HTTPException, status
+from jsonschema import SchemaError
 
 from app.api.templates import (
+    _validate_node_template_schema,
     get_node_template,
     get_workflow_template,
     use_node_template,
@@ -155,6 +157,15 @@ class NodeTemplateGetAuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_node_template(template.id, db=db, current_user=caller)
         self.assertEqual(result.node_data, {"secret": "node"})
+
+
+class NodeTemplateSchemaValidationTests(unittest.TestCase):
+    def test_node_template_schema_is_validated_before_storage(self) -> None:
+        with self.assertRaises(SchemaError):
+            _validate_node_template_schema(
+                "llm",
+                {"jsonOutputSchema": '{"type":"object","nullable":true}'},
+            )
 
 
 class UsePathAuthorizationTests(unittest.IsolatedAsyncioTestCase):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from jsonschema import SchemaError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -19,6 +20,7 @@ from app.models.schemas import (
     WorkflowTemplateResponse,
 )
 from app.services import template_service
+from app.services.data_contracts import validate_workflow_node_schemas
 
 router = APIRouter()
 
@@ -60,6 +62,11 @@ def _nd_response(t: NodeTemplate) -> NodeTemplateResponse:
     )
 
 
+def _validate_node_template_schema(node_type: str, node_data: dict) -> None:
+    """Validate schema-bearing fields before storing a node template."""
+    validate_workflow_node_schemas([{"id": node_type, "type": node_type, "data": node_data}])
+
+
 @router.get("", response_model=TemplateListResponse)
 async def list_templates(
     type: str | None = Query(None, description="'workflow' or 'node'; omit for both"),
@@ -96,6 +103,12 @@ async def create_template(
                 detail="'workflow' field is required for kind='workflow'",
             )
         wf = payload.workflow
+        try:
+            validate_workflow_node_schemas(wf.nodes)
+        except SchemaError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         template = await template_service.create_workflow_template(
             db=db,
             author_id=current_user.id,
@@ -133,6 +146,12 @@ async def create_template(
                 detail="'node' field is required for kind='node'",
             )
         nd = payload.node
+        try:
+            _validate_node_template_schema(nd.node_type, nd.node_data)
+        except SchemaError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         template = await template_service.create_node_template(
             db=db,
             author_id=current_user.id,

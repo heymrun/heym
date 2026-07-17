@@ -4,6 +4,7 @@ import copy
 from importlib import import_module
 from typing import Any
 
+from app.services.data_contracts import DataContractViolationError, validate_json_output
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -155,19 +156,48 @@ def execute(ctx: NodeExecutionContext) -> object:
     if json_output_enabled:
         llm_output = output
         if batch_mode_enabled:
+            raw_results = llm_output.get("results")
+            if not isinstance(raw_results, list) or not raw_results:
+                raise DataContractViolationError(
+                    node_label=node_label,
+                    errors=("batch provider returned no results",),
+                    trace_id=trace_id,
+                )
             parsed_results: list[dict[str, Any]] = []
             parsed_values: list[object] = []
-            for raw_item in llm_output.get("results") or []:
+            item_errors: list[str] = []
+            for item_index, raw_item in enumerate(raw_results):
+                if not isinstance(raw_item, dict):
+                    item_errors.append(
+                        f"item[{item_index}]: provider returned a malformed batch item"
+                    )
+                    continue
                 item = copy.deepcopy(raw_item)
-                if item.get("status") == "success":
+                if item.get("status") != "success":
+                    item_errors.append(
+                        f"item[{item_index}]: {item.get('error') or 'provider returned a failed item'}"
+                    )
+                else:
                     try:
                         parsed_item = self._parse_json_output(str(item.get("text", "")))
+                        validate_json_output(parsed_item, json_output_schema, node_label)
                         item["parsed"] = parsed_item
                         parsed_values.append(parsed_item)
+                    except DataContractViolationError as exc:
+                        item_errors.extend(f"item[{item_index}]: {error}" for error in exc.errors)
+                        item["status"] = "error"
+                        item["error"] = str(exc)
                     except Exception as exc:
+                        item_errors.append(f"item[{item_index}]: {exc}")
                         item["status"] = "error"
                         item["error"] = str(exc)
                 parsed_results.append(item)
+            if item_errors:
+                raise DataContractViolationError(
+                    node_label=node_label,
+                    errors=tuple(item_errors),
+                    trace_id=trace_id,
+                )
             output = dict(llm_output)
             output["results"] = parsed_results
             output["parsedResults"] = parsed_values
@@ -184,6 +214,14 @@ def execute(ctx: NodeExecutionContext) -> object:
                         f"LLM JSON parse error: {exc}", trace_id
                     ) from exc
                 raise ValueError(f"LLM JSON parse error: {exc}") from exc
+            try:
+                validate_json_output(parsed, json_output_schema, node_label)
+            except DataContractViolationError as exc:
+                raise DataContractViolationError(
+                    node_label=exc.node_label,
+                    errors=exc.errors,
+                    trace_id=trace_id,
+                ) from exc
             if isinstance(parsed, dict):
                 output = dict(parsed)
             else:

@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from jsonschema import SchemaError
 from sqlalchemy import String, case, cast, func, literal, or_, select, text, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -68,6 +69,7 @@ from app.services.codex_followup_service import (
     persist_pending_codex_followup_execution,
 )
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.data_contracts import validate_workflow_node_schemas
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     cancel_execution as cancel_active_execution,
@@ -1110,6 +1112,13 @@ async def update_workflow(
     sanitized_edges = _sanitize_invalid_unicode(workflow_data.edges)
     sanitized_sse_node_config = _sanitize_invalid_unicode(workflow_data.sse_node_config)
 
+    try:
+        validate_workflow_node_schemas(sanitized_nodes)
+    except SchemaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
     if getattr(workflow, "kind", None) == "dashboard_widget" and (
         sanitized_nodes is not None or sanitized_edges is not None
     ):
@@ -1606,6 +1615,12 @@ async def revert_workflow_to_version(
 
     reverted_nodes = _sanitize_invalid_unicode(version.nodes)
     reverted_edges = _sanitize_invalid_unicode(version.edges)
+    try:
+        validate_workflow_node_schemas(reverted_nodes)
+    except SchemaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     if getattr(workflow, "kind", None) == "dashboard_widget":
         blocked_error = dashboard_widget_blocked_nodes_error(reverted_nodes)
         if blocked_error is not None:

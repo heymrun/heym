@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
+from jsonschema import SchemaError
 from simpleeval import DEFAULT_FUNCTIONS, EvalWithCompoundTypes, SimpleEval
 
 from app.api.data_tables import (
@@ -36,7 +37,11 @@ from app.observability import tracing
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
-from app.services.data_contracts import DataContractViolationError, validate_node_output
+from app.services.data_contracts import (
+    DataContractViolationError,
+    validate_node_output,
+    validate_provider_json_schema,
+)
 from app.services.execution_cancellation import (
     clear_execution as _clear_sub_execution,
 )
@@ -70,6 +75,20 @@ _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
+_INTERNAL_OUTPUT_KEYS = frozenset(
+    {
+        "_skip_source_handles",
+        "_skip_loop_source_handles",
+        "_trace_id",
+    }
+)
+_RUNTIME_OUTPUT_METADATA_KEYS = frozenset(
+    {
+        "_generated_files",
+        "fallbackUsed",
+        "model",
+    }
+)
 
 
 def _slugify_tool_name(label: str) -> str:
@@ -342,23 +361,52 @@ def _fetch_drive_download_url(source_url: str) -> httpx.Response:
 
 
 def _ensure_additional_properties(schema: dict) -> dict:
+    """Make a schema compatible with providers requiring strict object schemas."""
     if not isinstance(schema, dict):
         return schema
 
-    schema = schema.copy()
+    schema = copy.deepcopy(schema)
+    single_schema_keys = {
+        "additionalProperties",
+        "contains",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+    }
+    single_schema_keys.update({"allOf", "anyOf", "oneOf", "prefixItems"})
+    schema_map_keys = {"$defs", "dependentSchemas", "patternProperties"}
 
     if schema.get("type") == "object":
-        if "additionalProperties" not in schema:
-            schema["additionalProperties"] = False
-
-        if "properties" in schema and isinstance(schema["properties"], dict):
-            for key, prop_schema in schema["properties"].items():
-                schema["properties"][key] = _ensure_additional_properties(prop_schema)
-
-    if "items" in schema:
-        schema["items"] = _ensure_additional_properties(schema["items"])
-
+        schema.setdefault("additionalProperties", False)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        schema["properties"] = {
+            key: _ensure_additional_properties(value) for key, value in properties.items()
+        }
+    for key in single_schema_keys:
+        value = schema.get(key)
+        if isinstance(value, dict):
+            schema[key] = _ensure_additional_properties(value)
+        elif isinstance(value, list):
+            schema[key] = [_ensure_additional_properties(child) for child in value]
+    for key in schema_map_keys:
+        value = schema.get(key)
+        if isinstance(value, dict):
+            schema[key] = {
+                child_key: _ensure_additional_properties(child_value)
+                for child_key, child_value in value.items()
+            }
     return schema
+
+
+def _parse_structured_output_schema(
+    value: Any, provider: str | None = None
+) -> dict[str, Any] | None:
+    """Validate a structured-output schema before sending it to an LLM provider."""
+    return validate_provider_json_schema(value, provider=provider)
 
 
 def _normalize_js_logical_ops_for_eval(processed: str) -> str:
@@ -1384,7 +1432,7 @@ class NodeResult:
     node_label: str
     node_type: str
     status: str
-    output: dict
+    output: Any
     execution_time_ms: float
     error: str | None = None
     metadata: dict = field(default_factory=dict)
@@ -2300,6 +2348,18 @@ class WorkflowExecutor:
         if trace_id:
             output["_trace_id"] = trace_id
 
+    @staticmethod
+    def _output_for_contract_validation(output: Any, node_type: str | None = None) -> Any:
+        """Return a non-mutating business-payload view for contract validation."""
+        if node_type not in {"llm", "agent"} or not isinstance(output, dict):
+            return (
+                {key: value for key, value in output.items() if key not in _INTERNAL_OUTPUT_KEYS}
+                if isinstance(output, dict)
+                else output
+            )
+        excluded_keys = _INTERNAL_OUTPUT_KEYS | _RUNTIME_OUTPUT_METADATA_KEYS
+        return {key: value for key, value in output.items() if key not in excluded_keys}
+
     def get_input_nodes(self) -> list[str]:
         error_flow_nodes = self.get_error_flow_nodes()
         target_ids = {edge["target"] for edge in self.get_active_edges()}
@@ -3176,6 +3236,13 @@ class WorkflowExecutor:
                 "error": "No credential or model configured",
             }
 
+        structured_output_schema: dict[str, Any] | None = None
+        if json_output_enabled and json_output_schema:
+            try:
+                structured_output_schema = _parse_structured_output_schema(json_output_schema)
+            except SchemaError as exc:
+                return {"text": "", "model": model, "error": str(exc)}
+
         attempts: list[tuple[str, str]] = [(credential_id, model)]
         if fallback_credential_id and fallback_model:
             attempts.append((fallback_credential_id, fallback_model))
@@ -3268,20 +3335,7 @@ class WorkflowExecutor:
         response_format = None
         if json_output_enabled:
             if json_output_schema:
-                try:
-                    schema = json.loads(json_output_schema)
-                except json.JSONDecodeError as exc:
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": f"Invalid JSON output schema: {str(exc)}",
-                    }
-                if not isinstance(schema, dict):
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": "JSON output schema must be an object",
-                    }
+                schema = structured_output_schema
                 schema = _ensure_additional_properties(schema)
                 response_format = {
                     "type": "json_schema",
@@ -3360,6 +3414,25 @@ class WorkflowExecutor:
                 last_model = mod
                 continue
 
+            attempt_response_format = response_format
+            if json_output_enabled and json_output_schema:
+                try:
+                    attempt_schema = _parse_structured_output_schema(
+                        json_output_schema, credential_type.value
+                    )
+                except SchemaError as exc:
+                    last_error = exc
+                    last_model = mod
+                    continue
+                attempt_response_format = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "output",
+                        "schema": _ensure_additional_properties(attempt_schema),
+                        "strict": True,
+                    },
+                }
+
             trace_context = self._build_llm_trace_context(cid, node_id)
 
             if output_type == "image":
@@ -3430,7 +3503,7 @@ class WorkflowExecutor:
                             temperature=temperature,
                             reasoning_effort=reasoning_effort,
                             max_tokens=max_tokens,
-                            response_format=response_format,
+                            response_format=attempt_response_format,
                             trace_context=trace_context,
                             conversation_history=self.conversation_history,
                             on_status_update=on_batch_status_update,
@@ -3452,7 +3525,7 @@ class WorkflowExecutor:
                             temperature=temperature,
                             reasoning_effort=reasoning_effort,
                             max_tokens=max_tokens,
-                            response_format=response_format,
+                            response_format=attempt_response_format,
                             image_input=image_input,
                             trace_context=trace_context,
                             conversation_history=self.conversation_history,
@@ -4528,6 +4601,12 @@ class WorkflowExecutor:
         image_input_template = node_data.get("imageInput", "")
         json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
         json_output_schema = node_data.get("jsonOutputSchema", "")
+        structured_output_schema: dict[str, Any] | None = None
+        if json_output_enabled and json_output_schema:
+            try:
+                structured_output_schema = _parse_structured_output_schema(json_output_schema)
+            except SchemaError as exc:
+                return {"text": "", "model": model, "error": str(exc)}
         hitl_enabled = bool(node_data.get("hitlEnabled", False))
         hitl_resolution = copy.deepcopy(self.hitl_resume_context.get(node_id or "") or {})
         hitl_agent_state = copy.deepcopy(hitl_resolution.get("_agent_state") or {})
@@ -5043,20 +5122,7 @@ class WorkflowExecutor:
         agent_response_format: dict | None = None
         if json_output_enabled:
             if json_output_schema:
-                try:
-                    schema = json.loads(json_output_schema)
-                except json.JSONDecodeError as exc:
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": f"Invalid JSON output schema: {str(exc)}",
-                    }
-                if not isinstance(schema, dict):
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": "JSON output schema must be an object",
-                    }
+                schema = structured_output_schema
                 schema = _ensure_additional_properties(schema)
                 agent_response_format = {
                     "type": "json_schema",
@@ -5100,6 +5166,25 @@ class WorkflowExecutor:
                 agent_last_error = ValueError("Credential has no API key")
                 agent_last_model = mod
                 continue
+
+            attempt_response_format = agent_response_format
+            if json_output_enabled and json_output_schema:
+                try:
+                    attempt_schema = _parse_structured_output_schema(
+                        json_output_schema, credential_type.value
+                    )
+                except SchemaError as exc:
+                    agent_last_error = exc
+                    agent_last_model = mod
+                    continue
+                attempt_response_format = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "output",
+                        "schema": _ensure_additional_properties(attempt_schema),
+                        "strict": True,
+                    },
+                }
 
             trace_context = self._build_llm_trace_context(cid, node_id)
             effective_hitl_mcp_policy = fallback_hitl_mcp_policy
@@ -5162,7 +5247,7 @@ class WorkflowExecutor:
                             temperature=temperature,
                             reasoning_effort=reasoning_effort,
                             max_tokens=max_tokens,
-                            response_format=agent_response_format,
+                            response_format=attempt_response_format,
                             image_input=image_input,
                             trace_context=trace_context,
                             conversation_history=conversation_history,
@@ -5190,7 +5275,7 @@ class WorkflowExecutor:
                             temperature=temperature,
                             reasoning_effort=reasoning_effort,
                             max_tokens=max_tokens,
-                            response_format=agent_response_format,
+                            response_format=attempt_response_format,
                             image_input=image_input,
                             trace_context=trace_context,
                             conversation_history=conversation_history,
@@ -6897,7 +6982,9 @@ class WorkflowExecutor:
                 # GuardrailViolationError is an intentional block — never retry
                 from app.services.guardrails_service import GuardrailViolationError
 
-                if isinstance(e, (GuardrailViolationError, DataContractViolationError)):
+                if isinstance(
+                    e, (GuardrailViolationError, DataContractViolationError, SchemaError)
+                ):
                     break
                 if attempt < retry_max_attempts:
                     pending_retry_result = self._record_retry_attempt_result(
@@ -6930,6 +7017,11 @@ class WorkflowExecutor:
             error_metadata["data_contract"] = {
                 "valid": False,
                 "errors": list(last_error.errors),
+            }
+        elif isinstance(last_error, SchemaError):
+            error_metadata["data_contract"] = {
+                "valid": False,
+                "errors": [str(last_error)],
             }
 
         if on_error_enabled:
@@ -7035,7 +7127,11 @@ class WorkflowExecutor:
                                 active_exclude_node_ids=loop_back_targets,
                                 inactive_stop_node_ids=loop_back_targets,
                             )
-                validate_node_output(output, node_data.get("outputContract"), node_label)
+                validate_node_output(
+                    self._output_for_contract_validation(output, node_type),
+                    node_data.get("outputContract"),
+                    node_label,
+                )
                 execution_time_ms = (time.time() - start_time) * 1000
                 metadata = {}
                 if node_data.get("outputContract"):
@@ -7064,25 +7160,32 @@ class WorkflowExecutor:
             )
             if isinstance(handler_output, NodeResult):
                 validate_node_output(
-                    handler_output.output, node_data.get("outputContract"), node_label
+                    self._output_for_contract_validation(handler_output.output, node_type),
+                    node_data.get("outputContract"),
+                    node_label,
                 )
                 if node_data.get("outputContract"):
                     handler_output.metadata["data_contract"] = {"valid": True}
                 return handler_output
             output = handler_output
-            validate_node_output(output, node_data.get("outputContract"), node_label)
+            validate_node_output(
+                self._output_for_contract_validation(output, node_type),
+                node_data.get("outputContract"),
+                node_label,
+            )
 
             execution_time = (time.time() - start_time) * 1000
             metadata: dict = {}
-            skip_source_handles = output.pop("_skip_source_handles", None)
-            if isinstance(skip_source_handles, list):
-                metadata["skip_source_handles"] = skip_source_handles
-            skip_loop_source_handles = output.pop("_skip_loop_source_handles", None)
-            if isinstance(skip_loop_source_handles, list):
-                metadata["skip_loop_source_handles"] = skip_loop_source_handles
-            trace_id = self._pop_internal_trace_id(output)
-            if trace_id:
-                metadata["trace_id"] = trace_id
+            if isinstance(output, dict):
+                skip_source_handles = output.pop("_skip_source_handles", None)
+                if isinstance(skip_source_handles, list):
+                    metadata["skip_source_handles"] = skip_source_handles
+                skip_loop_source_handles = output.pop("_skip_loop_source_handles", None)
+                if isinstance(skip_loop_source_handles, list):
+                    metadata["skip_loop_source_handles"] = skip_loop_source_handles
+                trace_id = self._pop_internal_trace_id(output)
+                if trace_id:
+                    metadata["trace_id"] = trace_id
             if node_data.get("outputContract"):
                 metadata["data_contract"] = {"valid": True}
 

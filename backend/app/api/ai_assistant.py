@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from jsonschema import SchemaError
 from openai import OpenAI
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -52,6 +53,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.services import template_service
 from app.services.credential_access import get_accessible_credential
+from app.services.data_contracts import validate_workflow_node_schemas
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import (
     build_hitl_resolved_output,
@@ -76,6 +78,19 @@ from app.services.workflow_executor import WorkflowCancelledError, execute_workf
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _workflow_schema_error_response(error: SchemaError) -> str:
+    """Serialize generated-workflow schema failures with explicit 422 semantics."""
+    detail = str(error)
+    return json.dumps(
+        {
+            "status": "error",
+            "status_code": 422,
+            "error": detail,
+            "detail": detail,
+        }
+    )
 
 
 async def _await_chat_completions(
@@ -1381,6 +1396,7 @@ async def create_and_run_generated_workflow_tool(
             selected_model=selected_model,
             user_id=user.id,
         )
+        validate_workflow_node_schemas(nodes)
         edges = workflow_config["edges"]
         workflow = Workflow(
             id=uuid.uuid4(),
@@ -1412,6 +1428,9 @@ async def create_and_run_generated_workflow_tool(
             None,
             status_value="created",
         )
+    except SchemaError as exc:
+        logger.warning("Dashboard chat create_workflow rejected invalid schema: %s", exc)
+        return _workflow_schema_error_response(exc)
     except Exception as exc:
         logger.exception("Dashboard chat create_workflow failed")
         return json.dumps({"status": "error", "error": str(exc)})
@@ -1508,6 +1527,7 @@ async def edit_and_run_generated_workflow_tool(
             selected_model=selected_model,
             user_id=user.id,
         )
+        validate_workflow_node_schemas(nodes)
         edges = workflow_config["edges"]
         workflow.name = workflow_config["name"]
         workflow.description = workflow_config["description"]
@@ -1542,6 +1562,9 @@ async def edit_and_run_generated_workflow_tool(
             None,
             status_value="edited",
         )
+    except SchemaError as exc:
+        logger.warning("Dashboard chat edit_workflow rejected invalid schema: %s", exc)
+        return _workflow_schema_error_response(exc)
     except Exception as exc:
         logger.exception("Dashboard chat edit_workflow failed")
         return json.dumps({"status": "error", "error": str(exc)})

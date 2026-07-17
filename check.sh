@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 # Shared with the CI "check" job (see .github/workflows/pr-checks.yml) so the
 # line-limit guard stays identical in both places.
 sh "$REPO_ROOT/scripts/check-file-line-limits.sh"
+sh "$REPO_ROOT/scripts/sync-json-schema-vocabulary.sh" --check
 
 echo "Running frontend checks..."
 cd "$REPO_ROOT/frontend"

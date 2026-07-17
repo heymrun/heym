@@ -4,7 +4,6 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
-import Textarea from "@/components/ui/Textarea.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -143,20 +142,6 @@ const {
       </div>
       <p class="text-xs text-muted-foreground">
         Build custom JSON output. Values support $ expressions.
-      </p>
-    </div>
-
-    <div class="space-y-2 pt-2 border-t">
-      <Label>Output contract (JSON Schema)</Label>
-      <Textarea
-        :model-value="selectedNode.data.outputContract || ''"
-        placeholder="{ &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;result&quot;] }"
-        :rows="4"
-        class="font-mono text-xs"
-        @update:model-value="updateNodeData('outputContract', $event)"
-      />
-      <p class="text-xs text-muted-foreground">
-        The node fails with a contract error when its output does not match this schema.
       </p>
     </div>
   </template>

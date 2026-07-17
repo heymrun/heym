@@ -6,6 +6,7 @@ import unittest
 import uuid
 from unittest.mock import MagicMock
 
+from app.services.data_contracts import DataContractViolationError
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import agent_node, llm_node
 from app.services.workflow_executor import NodeTraceableExecutionError, WorkflowExecutor
@@ -87,8 +88,8 @@ class LlmJsonParseErrorTests(unittest.TestCase):
 
         self.assertIn("LLM JSON parse error", str(cm.exception))
 
-    def test_batch_mode_handles_per_item_parse_errors(self) -> None:
-        """Batch mode should handle parse errors per-item (unchanged behavior)."""
+    def test_batch_mode_fails_node_on_per_item_parse_errors(self) -> None:
+        """Batch mode must fail the node when any item is not valid JSON."""
         executor = WorkflowExecutor(nodes=[], edges=[])
         executor._execute_llm_node = MagicMock(
             return_value={
@@ -106,14 +107,10 @@ class LlmJsonParseErrorTests(unittest.TestCase):
 
         ctx = _make_llm_ctx(executor, batch_mode_enabled=True)
 
-        result = llm_node.execute(ctx)
+        with self.assertRaises(DataContractViolationError) as raised:
+            llm_node.execute(ctx)
 
-        self.assertIsInstance(result, dict)
-        self.assertIn("results", result)
-        self.assertEqual(len(result["results"]), 3)
-        self.assertEqual(result["completed"], 2)
-        self.assertEqual(result["failed"], 1)
-        self.assertIn("parsedResults", result)
+        self.assertIn("item[1]", str(raised.exception))
 
 
 class AgentJsonParseErrorTests(unittest.TestCase):

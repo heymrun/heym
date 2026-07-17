@@ -1,8 +1,10 @@
 import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
+import axios from "axios";
 
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
+import { findWorkflowSchemaError } from "@/lib/jsonSchemaValidation";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
@@ -574,6 +576,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
   async function saveWorkflow(): Promise<void> {
     if (!currentWorkflow.value) return;
 
+    const schemaError = findWorkflowSchemaError(nodes.value);
+    if (schemaError) {
+      showToast(schemaError, "error", 5000);
+      return;
+    }
+
     isSaving.value = true;
     try {
       await workflowApi.update(currentWorkflow.value.id, {
@@ -581,6 +589,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
         edges: edges.value,
       });
       hasUnsavedChanges.value = false;
+    } catch (error: unknown) {
+      const detail = axios.isAxiosError(error) ? error.response?.data?.detail : null;
+      const message = typeof detail === "string" && detail.trim()
+        ? detail
+        : "Failed to save workflow";
+      showToast(message, "error", 5000);
     } finally {
       isSaving.value = false;
     }

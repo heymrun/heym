@@ -4,6 +4,7 @@ import copy
 import time
 from importlib import import_module
 
+from app.services.data_contracts import DataContractViolationError, validate_json_output
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -96,6 +97,14 @@ def execute(ctx: NodeExecutionContext) -> object:
                     f"Agent JSON parse error: {exc}", trace_id
                 ) from exc
             raise ValueError(f"Agent JSON parse error: {exc}") from exc
+        try:
+            validate_json_output(parsed, node_data.get("jsonOutputSchema"), node_label)
+        except DataContractViolationError as exc:
+            raise DataContractViolationError(
+                node_label=exc.node_label,
+                errors=exc.errors,
+                trace_id=trace_id,
+            ) from exc
         if agent_output.get("fallbackUsed") is not None:
             output["fallbackUsed"] = agent_output["fallbackUsed"]
         if agent_output.get("model"):

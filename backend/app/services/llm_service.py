@@ -14,6 +14,7 @@ from openai import OpenAI
 
 from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
+from app.services.data_contracts import is_valid_json_instance
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 
@@ -453,22 +454,7 @@ def _has_complete_structured_content(
     if not isinstance(schema, dict):
         return True
 
-    expected_type = schema.get("type")
-    if expected_type == "object":
-        return isinstance(parsed, dict)
-    if expected_type == "array":
-        return isinstance(parsed, list)
-    if expected_type == "string":
-        return isinstance(parsed, str)
-    if expected_type == "number":
-        return isinstance(parsed, (int, float)) and not isinstance(parsed, bool)
-    if expected_type == "integer":
-        return isinstance(parsed, int) and not isinstance(parsed, bool)
-    if expected_type == "boolean":
-        return isinstance(parsed, bool)
-    if expected_type == "null":
-        return parsed is None
-    return True
+    return is_valid_json_instance(parsed, schema)
 
 
 class LLMService:

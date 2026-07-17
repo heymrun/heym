@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import { AlertTriangle, Braces, Brain, ShieldAlert } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
@@ -7,6 +8,7 @@ import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { validateJsonOutputSchema } from "@/lib/jsonSchemaValidation";
 import type { GuardrailCategory, ReasoningEffort } from "@/types/workflow";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -53,6 +55,29 @@ const {
   formatJsonSchema,
   updateNodeData,
 } = usePropertiesPanelContext();
+const jsonOutputSchemaDraft = ref("");
+
+watch(
+  () => selectedNode.value?.data.jsonOutputSchema,
+  (value) => {
+    if (value !== jsonOutputSchemaDraft.value) {
+      jsonOutputSchemaDraft.value = value || "";
+    }
+  },
+  { immediate: true },
+);
+
+const jsonSchemaError = computed<string | null>(() => {
+  const value = jsonOutputSchemaDraft.value.trim();
+  return value ? validateJsonOutputSchema(value) : null;
+});
+
+function updateJsonOutputSchema(value: string): void {
+  jsonOutputSchemaDraft.value = value;
+  if (!value.trim() || !validateJsonOutputSchema(value)) {
+    updateNodeData("jsonOutputSchema", value);
+  }
+}
 </script>
 
 <template>
@@ -425,12 +450,18 @@ const {
         </div>
         <Textarea
           v-if="selectedNode.data.jsonOutputEnabled"
-          :model-value="selectedNode.data.jsonOutputSchema || ''"
+          :model-value="jsonOutputSchemaDraft"
           placeholder="{ &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;answer&quot;: { &quot;type&quot;: &quot;string&quot; } }, &quot;required&quot;: [&quot;answer&quot;] }"
           :rows="6"
           class="font-mono text-xs"
-          @update:model-value="updateNodeData('jsonOutputSchema', $event)"
+          @update:model-value="updateJsonOutputSchema($event)"
         />
+        <p
+          v-if="jsonSchemaError"
+          class="text-xs text-destructive"
+        >
+          {{ jsonSchemaError }}
+        </p>
         <p class="text-xs text-muted-foreground">
           Provide a JSON schema to shape the response.
         </p>

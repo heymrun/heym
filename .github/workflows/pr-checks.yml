@@ -22,6 +22,9 @@ jobs:
       - name: File line-limit check
         run: sh ./scripts/check-file-line-limits.sh
 
+      - name: JSON Schema vocabulary sync check
+        run: sh ./scripts/sync-json-schema-vocabulary.sh --check
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:

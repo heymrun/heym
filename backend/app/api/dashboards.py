@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from jsonschema import SchemaError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -28,6 +29,7 @@ from app.models.dashboard_schemas import (
 )
 from app.services.dashboard_data import compute_widget_data
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.data_contracts import validate_workflow_node_schemas
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -457,6 +459,12 @@ async def ai_generate_widget(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="AI did not produce a chartOutput node",
         )
+    try:
+        validate_workflow_node_schemas(nodes)
+    except SchemaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     chart_type = chart_nodes[-1].get("data", {}).get("chartType", "bar")
     title = (dsl.get("name") or body.prompt[:60]).strip()[:255]
     description = dsl.get("description") or None
@@ -542,6 +550,12 @@ async def ai_refine_widget(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="AI did not produce a chartOutput node",
         )
+    try:
+        validate_workflow_node_schemas(nodes)
+    except SchemaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
     # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
     await _record_chat_workflow_edit_version(
