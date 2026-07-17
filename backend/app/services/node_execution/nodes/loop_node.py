@@ -13,7 +13,11 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     is_loop_back = False
     for edge in self.edges:
-        if edge.get("target") == node_id and edge.get("targetHandle") == "loop":
+        if (
+            edge.get("source") != node_id
+            and edge.get("target") == node_id
+            and edge.get("targetHandle") == "loop"
+        ):
             source_id = edge.get("source", "")
             source_label = self.get_node_label(source_id)
             if source_label in inputs and source_id in self.node_outputs:
@@ -46,7 +50,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         self.loop_states[node_id]["current_index"] += 1
         loop_back_input = None
         for edge in self.edges:
-            if edge.get("target") == node_id and edge.get("targetHandle") == "loop":
+            if (
+                edge.get("source") != node_id
+                and edge.get("target") == node_id
+                and edge.get("targetHandle") == "loop"
+            ):
                 source_label = self.get_node_label(edge.get("source", ""))
                 if source_label in inputs:
                     loop_back_input = inputs[source_label]

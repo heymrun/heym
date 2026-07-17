@@ -27,7 +27,9 @@ Each widget loads its data asynchronously when you open the tab, so the page sta
 3. Build the workflow so the node feeding **Chart Output** produces an array of rows, then configure the Chart Output node's field mapping (label field, value field, etc.).
 4. Save, return to the Dashboard tab, and the widget renders.
 
-Double-click a widget (or use its edit button) to reopen its workflow at any time.
+Double-click a widget (or use its edit button) to reopen its workflow at any time. Use **Clone
+widget** in the widget header to duplicate both the widget and its complete workflow. The copy is
+placed below the original and labeled with **(Copy)** so you can edit it independently.
 
 ## Generating a widget with AI
 

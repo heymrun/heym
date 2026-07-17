@@ -442,9 +442,21 @@ function handleChatScrollbarPointerUp(): void {
 
 function focusInputWhenReady(): void {
   nextTick(() => {
-    if (canFocusInput.value) {
-      chatInputRef.value?.focus();
+    if (!canFocusInput.value) return;
+    // Do not steal focus from sidebar rename/edit fields (or any other input).
+    // Credential/model bootstrap flips canFocusInput after New Chat and would
+    // otherwise blur an in-progress list rename and cancel the edit.
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== chatInputRef.value &&
+      (active.tagName === "INPUT" ||
+        active.tagName === "TEXTAREA" ||
+        active.isContentEditable)
+    ) {
+      return;
     }
+    chatInputRef.value?.focus();
   });
 }
 
@@ -936,7 +948,7 @@ onUnmounted(() => {
       <div class="flex flex-col sm:flex-row gap-2 sm:gap-2 sm:flex-nowrap sm:items-end">
         <div class="grid grid-cols-2 gap-2 sm:flex sm:items-end sm:gap-2 flex-1 min-w-0">
           <div
-            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[140px]"
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[200px]"
             data-testid="chat-credential-selector"
           >
             <SearchableSelect
@@ -953,7 +965,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[160px]"
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[200px]"
             data-testid="chat-model-selector"
           >
             <SearchableSelect

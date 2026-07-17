@@ -84,6 +84,34 @@ class TestSeedWidgetNodes(unittest.TestCase):
         self.assertEqual(edges[0]["target"], nodes[1]["id"])
 
 
+class TestCloneWorkflowGraph(unittest.TestCase):
+    def test_deep_copies_graph_and_remaps_connections(self):
+        nodes = [
+            {"id": "source", "type": "set", "data": {"nested": ["value"]}},
+            {"id": "chart", "type": "chartOutput", "data": {}},
+        ]
+        edges = [{"id": "edge", "source": "source", "target": "chart", "data": {"x": 1}}]
+
+        cloned_nodes, cloned_edges = dash_api._clone_workflow_graph(nodes, edges)
+
+        self.assertNotEqual(cloned_nodes[0]["id"], "source")
+        self.assertNotEqual(cloned_nodes[1]["id"], "chart")
+        self.assertNotEqual(cloned_edges[0]["id"], "edge")
+        self.assertEqual(cloned_edges[0]["source"], cloned_nodes[0]["id"])
+        self.assertEqual(cloned_edges[0]["target"], cloned_nodes[1]["id"])
+        cloned_nodes[0]["data"]["nested"].append("changed")
+        self.assertEqual(nodes[0]["data"]["nested"], ["value"])
+
+    def test_rejects_dangling_edge(self):
+        with self.assertRaises(HTTPException) as context:
+            dash_api._clone_workflow_graph(
+                [{"id": "source", "type": "set"}],
+                [{"id": "edge", "source": "source", "target": "missing"}],
+            )
+
+        self.assertEqual(context.exception.status_code, 422)
+
+
 class TestGenerateWidgetDsl(unittest.IsolatedAsyncioTestCase):
     async def test_generate_widget_dsl_passes_trace_context_to_llm(self):
         user = _User()
@@ -182,6 +210,63 @@ class TestCreateWidget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.chart_type, "bar")
         added_kinds = [getattr(c.args[0], "kind", None) for c in db.add.call_args_list]
         self.assertIn("dashboard_widget", added_kinds)
+
+
+class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
+    async def test_clone_widget_creates_widget_and_remapped_workflow(self):
+        user = _User()
+        db = MagicMock()
+        widget = MagicMock(
+            id=uuid.uuid4(),
+            dashboard_id=uuid.uuid4(),
+            workflow_id=uuid.uuid4(),
+            title="Sales",
+            description="Quarterly sales",
+            chart_type="bar",
+            layout={"x": 2, "y": 3, "w": 4, "h": 5},
+            cache_ttl_seconds=120,
+            position=2,
+        )
+        workflow = MagicMock(
+            description="Quarterly sales",
+            nodes=[
+                {"id": "source", "type": "set", "data": {}},
+                {"id": "chart", "type": "chartOutput", "data": {}},
+            ],
+            edges=[{"id": "edge", "source": "source", "target": "chart"}],
+        )
+        widget_result = MagicMock()
+        widget_result.scalar_one_or_none.return_value = widget
+        workflow_result = MagicMock()
+        workflow_result.scalar_one_or_none.return_value = workflow
+        db.execute = AsyncMock(side_effect=[widget_result, workflow_result])
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        _wire_db_inserts(db)
+
+        response = await dash_api.clone_widget(widget.id, current_user=user, db=db)
+
+        self.assertEqual(response.title, "Sales (Copy)")
+        self.assertEqual(response.layout.y, 8)
+        cloned_workflow = db.add.call_args_list[0].args[0]
+        cloned_widget = db.add.call_args_list[1].args[0]
+        self.assertEqual(cloned_workflow.name, "Sales (Copy)")
+        self.assertEqual(cloned_workflow.owner_id, user.id)
+        self.assertNotEqual(cloned_workflow.nodes[0]["id"], "source")
+        self.assertEqual(cloned_workflow.edges[0]["source"], cloned_workflow.nodes[0]["id"])
+        self.assertEqual(cloned_widget.workflow_id, cloned_workflow.id)
+        self.assertEqual(cloned_widget.dashboard_id, widget.dashboard_id)
+
+    async def test_clone_widget_returns_not_found_for_another_users_widget(self):
+        db = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=result)
+
+        with self.assertRaises(HTTPException) as context:
+            await dash_api.clone_widget(uuid.uuid4(), current_user=_User(), db=db)
+
+        self.assertEqual(context.exception.status_code, 404)
 
 
 class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):

@@ -64,8 +64,10 @@ class TestChartOutputNode(unittest.TestCase):
 
     def test_return_on_chart_output_does_not_wait_for_side_branch(self):
         side_gate = threading.Event()
+        side_started = threading.Event()
 
         def blocking_wait_handler(_ctx):
+            side_started.set()
             side_gate.wait()
             return {"value": "side-complete"}
 
@@ -100,9 +102,11 @@ class TestChartOutputNode(unittest.TestCase):
                 "data": {"label": "sideEffect", "duration": 350},
             },
         ]
+        # Side edge first: previously this could starve chartOutput on a saturated
+        # shared pool and prevent return_on_chart_output from completing early.
         edges = [
-            {"id": "e1", "source": "src", "target": "chart"},
             {"id": "e2", "source": "src", "target": "side"},
+            {"id": "e1", "source": "src", "target": "chart"},
         ]
 
         with patch.dict(node_registry._HANDLER_CACHE, {"wait": blocking_wait_handler}):
@@ -116,11 +120,15 @@ class TestChartOutputNode(unittest.TestCase):
                     test_run=True,
                     return_on_chart_output=True,
                 )
+                self.assertTrue(
+                    side_started.wait(timeout=30),
+                    "side branch should start while chart early-return is pending",
+                )
                 try:
-                    result = future.result(timeout=15)
+                    result = future.result(timeout=30)
                 except concurrent.futures.TimeoutError as exc:
                     side_gate.set()
-                    future.result(timeout=5)
+                    future.result(timeout=10)
                     raise AssertionError(
                         "chart output should return while downstream side branch is still pending"
                     ) from exc

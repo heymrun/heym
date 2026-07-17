@@ -21,7 +21,12 @@ Use the workflow search field beside **New Folder**, or press **Ctrl+F** (or **C
 
 - Organize workflows into [folders and sub-folders](../reference/workflow-organization.md)
 - Create folders with the **New Folder** button
-- Drag and drop workflows between folders or to the root
+- Drag a workflow over a folder or sub-folder to see a card-sized destination preview. The
+  highlighted preview shows the full folder path before you drop, and hovering a collapsed
+  folder briefly expands it so you can reach nested folders.
+- Drag workflows between folders or to the root. The dragged card stays visible as a ghost,
+  and the active destination remains highlighted while you scroll.
+- Dropping a workflow back into its current folder is disabled and marked **Already in Folder**.
 - Rename folders from the context menu
 
 ## Creating Workflows

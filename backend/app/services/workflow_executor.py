@@ -1,5 +1,7 @@
 import ast
 import asyncio
+import base64
+import binascii
 import copy
 import gc
 import hashlib
@@ -72,6 +74,8 @@ _DOTDICT_BUILTIN_METHOD_NAMES: frozenset[str] = frozenset(
 )
 _ITEM_DOT_PATH_RE = re.compile(r"^item(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
+_DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
+_ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
@@ -212,6 +216,24 @@ def _build_agent_execution_log_output(agent_result: dict) -> dict:
 
 class ExpressionFunctionError(ValueError):
     """Raised by expression functions to stop workflow execution."""
+
+
+def _base64_encode_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ExpressionFunctionError("$base64Encode(text) requires a string")
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")
+
+
+def _base64_decode_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ExpressionFunctionError("$base64Decode(text) requires a string")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+        return decoded.decode("utf-8")
+    except (binascii.Error, UnicodeError) as exc:
+        raise ExpressionFunctionError(
+            "$base64Decode(text) requires valid Base64-encoded UTF-8 text"
+        ) from exc
 
 
 class NodeTraceableExecutionError(ValueError):
@@ -455,6 +477,87 @@ def _normalize_js_logical_ops_for_eval(processed: str) -> str:
 _SHARED_EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
 _HTTP_CLIENT_LOCK = Lock()
+_EXPRESSION_EVAL_CONTEXT_LOCAL = local()
+
+
+def _submit_allow_downstream_work(work: Callable[[], None]) -> Future:
+    """Run allowDownstream finalization off the shared node pool.
+
+    The waiter must not occupy a ``_SHARED_EXECUTOR`` worker: it blocks on other
+    pool futures, and scheduling it on the same pool can deadlock when workers
+    are saturated by long-running / blocked side branches.
+    """
+    future: Future = Future()
+
+    def _runner() -> None:
+        if future.set_running_or_notify_cancel():
+            try:
+                work()
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(None)
+
+    Thread(target=_runner, daemon=True, name="heym-allow-downstream").start()
+    return future
+
+
+@dataclass(frozen=True)
+class _ExpressionEvalContext:
+    names: dict[str, Any]
+    functions: dict[str, Any]
+    item_scope_depth: int
+
+
+def _get_expression_eval_context_stack() -> list[_ExpressionEvalContext]:
+    stack = getattr(_EXPRESSION_EVAL_CONTEXT_LOCAL, "stack", None)
+    if stack is None:
+        stack = []
+        _EXPRESSION_EVAL_CONTEXT_LOCAL.stack = stack
+    return stack
+
+
+def _current_expression_eval_context() -> _ExpressionEvalContext | None:
+    stack = getattr(_EXPRESSION_EVAL_CONTEXT_LOCAL, "stack", None)
+    if not stack:
+        return None
+    return stack[-1]
+
+
+def _is_inside_item_expression_string(text: str, index: int) -> bool:
+    """Return whether ``index`` is inside a quoted map/filter-style expression argument."""
+    quote: str | None = None
+    quote_start = -1
+    cursor = 0
+    while cursor < index:
+        char = text[cursor]
+        if quote is not None:
+            if char == "\\" and cursor + 1 < index:
+                cursor += 2
+                continue
+            if char == quote:
+                quote = None
+                quote_start = -1
+            cursor += 1
+            continue
+        if char in ('"', "'"):
+            quote = char
+            quote_start = cursor
+        cursor += 1
+
+    if quote is None or quote_start < 0:
+        return False
+    return bool(_ITEM_EXPRESSION_STRING_START_RE.search(text[:quote_start]))
+
+
+def _rewrite_item_expression_dollar_refs(expr: str, item_scope_name: str) -> str:
+    """Make DSL ``$`` references valid names inside a local item expression."""
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return item_scope_name if name == "item" else name
+
+    return _DOLLAR_NAME_RE.sub(replace, expr)
 
 
 def _build_playwright_script(
@@ -845,6 +948,14 @@ class DotList(list):
 
         try:
             wrapped_item = _wrap_value(item)
+            inherited_context = _current_expression_eval_context()
+            inherited_names = dict(inherited_context.names) if inherited_context else {}
+            inherited_functions = (
+                dict(inherited_context.functions) if inherited_context else dict(DEFAULT_FUNCTIONS)
+            )
+            item_scope_depth = inherited_context.item_scope_depth if inherited_context else 0
+            item_scope_name = f"heymItemScope{item_scope_depth}"
+            expr = _rewrite_item_expression_dollar_refs(expr, item_scope_name)
 
             def resolve_item_ref(arg):
                 if not isinstance(arg, str):
@@ -881,15 +992,17 @@ class DotList(list):
                     return obj.get(key, default)
                 return getattr(obj, key, default) if hasattr(obj, key) else default
 
-            evaluator = HeymExpressionEval(
-                names={
+            inherited_names.update(
+                {
+                    item_scope_name: wrapped_item,
                     "item": wrapped_item,
                     "true": True,
                     "false": False,
                     "null": None,
-                },
-                functions={
-                    **DEFAULT_FUNCTIONS,
+                }
+            )
+            inherited_functions.update(
+                {
                     "len": len,
                     "str": str,
                     "int": int,
@@ -901,8 +1014,13 @@ class DotList(list):
                     "round": round,
                     "concat": concat_func,
                     "get": get_func,
-                },
+                }
             )
+            evaluator = HeymExpressionEval(
+                names=inherited_names,
+                functions=inherited_functions,
+            )
+            evaluator.item_scope_depth = item_scope_depth + 1
             return evaluator.eval(expr)
         except Exception:
             return None
@@ -920,7 +1038,9 @@ class DotList(list):
             isinstance(expr, str)
             and "item." in expr
             and not expr.strip().startswith("concat(")
-            and not _is_valid_expression_syntax(expr)
+            and not _is_valid_expression_syntax(
+                _rewrite_item_expression_dollar_refs(expr, "heymItemScope")
+            )
         ):
             # Keep supporting template-like strings such as
             # "- item.source (Page: item.page): item.snippet".
@@ -1121,6 +1241,18 @@ class DotStr(str):
 
     def hash(self) -> "DotStr":
         return DotStr(hashlib.md5(self.encode("utf-8")).hexdigest())
+
+    def base64Encode(self) -> "DotStr":  # noqa: N802
+        return DotStr(_base64_encode_text(self))
+
+    def base64_encode(self) -> "DotStr":
+        return self.base64Encode()
+
+    def base64Decode(self) -> "DotStr":  # noqa: N802
+        return DotStr(_base64_decode_text(self))
+
+    def base64_decode(self) -> "DotStr":
+        return self.base64Decode()
 
     def urlEncode(self) -> "DotStr":  # noqa: N802
         return DotStr(quote(self, safe=""))
@@ -1371,6 +1503,22 @@ class DotDateTime:
 
 class HeymExpressionEval(EvalWithCompoundTypes):
     """simpleeval blocks ``.format`` on all objects; allow it only for ``DotDateTime``."""
+
+    item_scope_depth = 0
+
+    def eval(self, expr: str, previously_parsed: ast.AST | None = None) -> object:
+        """Evaluate while exposing names to nested ``map``/``filter`` item expressions."""
+        context = _ExpressionEvalContext(
+            names=dict(self.names) if isinstance(self.names, dict) else {},
+            functions=dict(self.functions),
+            item_scope_depth=self.item_scope_depth,
+        )
+        stack = _get_expression_eval_context_stack()
+        stack.append(context)
+        try:
+            return super().eval(expr, previously_parsed=previously_parsed)
+        finally:
+            stack.pop()
 
     def _eval_attribute(self, node: ast.Attribute):
         if node.attr == "orEmpty":
@@ -2360,6 +2508,20 @@ class WorkflowExecutor:
         excluded_keys = _INTERNAL_OUTPUT_KEYS | _RUNTIME_OUTPUT_METADATA_KEYS
         return {key: value for key, value in output.items() if key not in excluded_keys}
 
+    def _is_early_return_node(self, node_id: str) -> bool:
+        """True when this node may complete the workflow before siblings finish."""
+        node = self.nodes.get(node_id, {})
+        node_type = node.get("type")
+        if node_type == "chartOutput" and self.return_on_chart_output:
+            return True
+        if node_type == "output" and node.get("data", {}).get("allowDownstream"):
+            return True
+        return False
+
+    def _prioritize_ready_node_ids(self, node_ids: list[str]) -> list[str]:
+        """Schedule early-return nodes ahead of siblings so they are not starved."""
+        return sorted(node_ids, key=lambda nid: 0 if self._is_early_return_node(nid) else 1)
+
     def get_input_nodes(self) -> list[str]:
         error_flow_nodes = self.get_error_flow_nodes()
         target_ids = {edge["target"] for edge in self.get_active_edges()}
@@ -2399,6 +2561,16 @@ class WorkflowExecutor:
                 edge["source"] in self.error_handler_nodes
                 or edge["target"] in self.error_handler_nodes
             ):
+                continue
+            if (
+                edge["source"] == edge["target"]
+                and target_node.get("type") == "loop"
+                and edge.get("targetHandle") == "loop"
+            ):
+                # Some canvas workflows contain a visual loop-handle self-edge in
+                # addition to the body node's real back-connection. The self-edge is
+                # not an execution dependency: scheduling it advances the loop while
+                # the body is still running.
                 continue
             if source_node.get("type") == "jsonOutputMapper":
                 continue
@@ -2444,6 +2616,22 @@ class WorkflowExecutor:
         if execution_context:
             inputs[_EXECUTION_CONTEXT_INPUT_KEY] = execution_context
         return inputs
+
+    def get_loop_reexecution_inputs(
+        self,
+        loop_node_id: str,
+        feedback_source_node_id: str,
+        edges: list[dict],
+    ) -> dict:
+        """Return loop inputs with feedback only from the branch that just completed."""
+        relevant_edges = [
+            edge
+            for edge in edges
+            if edge.get("target") != loop_node_id
+            or edge.get("targetHandle") != "loop"
+            or edge.get("source") == feedback_source_node_id
+        ]
+        return self.get_node_inputs_for_edges(loop_node_id, relevant_edges)
 
     def get_node_inputs(self, node_id: str) -> dict:
         inputs = {}
@@ -2603,6 +2791,11 @@ class WorkflowExecutor:
                 if edge["source"] != current:
                     continue
                 target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
                 if target not in reachable and target not in excluded:
                     queue.append(target)
 
@@ -2623,6 +2816,11 @@ class WorkflowExecutor:
         for edge in self.edges:
             if edge["source"] == node_id:
                 target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
                 if target in preserved or target in stopped:
                     continue
                 self.mark_branch_as_skipped(
@@ -5758,6 +5956,8 @@ class WorkflowExecutor:
             "strip": lambda s: s.strip() if isinstance(s, str) else s,
             "capitalize": lambda s: s.capitalize() if isinstance(s, str) else s,
             "title": lambda s: s.title() if isinstance(s, str) else s,
+            "base64Encode": lambda s: DotStr(_base64_encode_text(s)),
+            "base64Decode": lambda s: DotStr(_base64_decode_text(s)),
             "split": lambda s, sep=None: (
                 DotList(list(s) if sep == "" else s.split(sep)) if isinstance(s, str) else s
             ),
@@ -5863,7 +6063,10 @@ class WorkflowExecutor:
             spans = self._find_expressions(expr)
             if not spans:
                 break
+            replaced = False
             for start, end, dollar_expr in sorted(spans, key=lambda t: t[0], reverse=True):
+                if _is_inside_item_expression_string(expr, start):
+                    continue
                 resolved = self.resolve_expression(
                     dollar_expr, inputs, current_node_id, preserve_type=True
                 )
@@ -5878,6 +6081,9 @@ class WorkflowExecutor:
                 else:
                     replacement = str(resolved)
                 expr = expr[:start] + replacement + expr[end:]
+                replaced = True
+            if not replaced:
+                break
         return expr
 
     def resolve_expression(
@@ -6007,6 +6213,8 @@ class WorkflowExecutor:
                     "notNull": lambda lst: (
                         DotList([x for x in lst if x is not None]) if isinstance(lst, list) else lst
                     ),
+                    "base64Encode": lambda value: DotStr(_base64_encode_text(value)),
+                    "base64Decode": lambda value: DotStr(_base64_decode_text(value)),
                 }
                 if func_name in functions:
                     args = []
@@ -6031,6 +6239,8 @@ class WorkflowExecutor:
                 "capitalize": lambda s: s.capitalize(),
                 "title": lambda s: s.title(),
                 "length": lambda s: len(s),
+                "base64Encode": _base64_encode_text,
+                "base64Decode": _base64_decode_text,
                 "urlEncode": lambda s: quote(s, safe=""),
                 "urlDecode": lambda s: unquote(s),
                 "escape": lambda s: json.dumps(s),
@@ -7462,6 +7672,7 @@ class WorkflowExecutor:
                     completed_nodes=completed_nodes,
                     pending_count=pending_count,
                 )
+            ready_targets: list[str] = []
             for edge in active_edges:
                 if edge["source"] == source_node_id:
                     if self._source_handle_is_skipped(edge, skip_source_handles):
@@ -7483,7 +7694,9 @@ class WorkflowExecutor:
                         ):
                             already_running = any(nid == target for nid in running_futures.values())
                             if not already_running:
-                                inputs = self.get_node_inputs_for_edges(target, active_edges)
+                                inputs = self.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                )
                                 new_future = _SHARED_EXECUTOR.submit(
                                     self.execute_node_parallel, target, inputs
                                 )
@@ -7515,13 +7728,19 @@ class WorkflowExecutor:
                         else:
                             already_running = any(nid == target for nid in running_futures.values())
                             if not already_running:
-                                inputs = self.get_node_inputs_for_edges(target, active_edges)
-                                new_future = _SHARED_EXECUTOR.submit(
-                                    self.execute_node_parallel, target, inputs
-                                )
-                                running_futures[new_future] = target
+                                ready_targets.append(target)
 
-        root_nodes = [nid for nid, count in pending_count.items() if count == 0]
+            for target in self._prioritize_ready_node_ids(ready_targets):
+                already_running = any(nid == target for nid in running_futures.values())
+                if already_running:
+                    continue
+                inputs = self.get_node_inputs_for_edges(target, active_edges)
+                new_future = _SHARED_EXECUTOR.submit(self.execute_node_parallel, target, inputs)
+                running_futures[new_future] = target
+
+        root_nodes = self._prioritize_ready_node_ids(
+            [nid for nid, count in pending_count.items() if count == 0]
+        )
         for node_id in root_nodes:
             self.check_cancelled()
             if node_id in self.skipped_nodes:
@@ -7646,8 +7865,8 @@ class WorkflowExecutor:
                                                             for n in remaining_futures.values()
                                                         )
                                                         if not already:
-                                                            inp = self.get_node_inputs_for_edges(
-                                                                tgt, active_edges
+                                                            inp = self.get_loop_reexecution_inputs(
+                                                                tgt, nid, active_edges
                                                             )
                                                             new_f = _SHARED_EXECUTOR.submit(
                                                                 self.execute_node_parallel,
@@ -7681,7 +7900,9 @@ class WorkflowExecutor:
                                     completed_nodes.add(nid)
                         self.drain_bg_futures()
 
-                    allow_downstream_future = _SHARED_EXECUTOR.submit(run_remaining_downstream)
+                    allow_downstream_future = _submit_allow_downstream_work(
+                        run_remaining_downstream
+                    )
                     break
 
         if pending_result is not None:
@@ -8024,6 +8245,7 @@ def resume_workflow_execution(
                 completed_nodes=completed_nodes,
                 pending_count=pending_count,
             )
+        ready_targets: list[str] = []
         for edge in active_edges:
             if edge["source"] == source_node_id:
                 if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
@@ -8051,7 +8273,9 @@ def resume_workflow_execution(
                             new_future = _SHARED_EXECUTOR.submit(
                                 wf_executor.execute_node_parallel,
                                 target,
-                                wf_executor.get_node_inputs_for_edges(target, active_edges),
+                                wf_executor.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                ),
                             )
                             running_futures[new_future] = target
                     continue
@@ -8082,12 +8306,20 @@ def resume_workflow_execution(
                             for pending_node_id in running_futures.values()
                         )
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(
-                                wf_executor.execute_node_parallel,
-                                target,
-                                wf_executor.get_node_inputs_for_edges(target, active_edges),
-                            )
-                            running_futures[new_future] = target
+                            ready_targets.append(target)
+
+        for target in wf_executor._prioritize_ready_node_ids(ready_targets):
+            already_running = any(
+                pending_node_id == target for pending_node_id in running_futures.values()
+            )
+            if already_running:
+                continue
+            new_future = _SHARED_EXECUTOR.submit(
+                wf_executor.execute_node_parallel,
+                target,
+                wf_executor.get_node_inputs_for_edges(target, active_edges),
+            )
+            running_futures[new_future] = target
 
     with pending_lock:
         if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
@@ -8190,8 +8422,8 @@ def resume_workflow_execution(
                                                         new_future = _SHARED_EXECUTOR.submit(
                                                             wf_executor.execute_node_parallel,
                                                             tgt,
-                                                            wf_executor.get_node_inputs_for_edges(
-                                                                tgt, active_edges
+                                                            wf_executor.get_loop_reexecution_inputs(
+                                                                tgt, nid, active_edges
                                                             ),
                                                         )
                                                         remaining_futures[new_future] = tgt
@@ -8219,7 +8451,7 @@ def resume_workflow_execution(
                             if not skip_add_to_completed:
                                 completed_nodes.add(nid)
 
-                _SHARED_EXECUTOR.submit(run_remaining_downstream)
+                _submit_allow_downstream_work(run_remaining_downstream)
                 break
 
     if pending_result is not None:
@@ -8414,7 +8646,7 @@ def execute_llm_batch_notification_branch(
             }
         )
 
-    def _submit_node(node_id: str) -> None:
+    def _submit_node(node_id: str, node_inputs: dict | None = None) -> None:
         already_running = any(
             pending_node_id == node_id for pending_node_id in running_futures.values()
         )
@@ -8424,7 +8656,11 @@ def execute_llm_batch_notification_branch(
         new_future = _SHARED_EXECUTOR.submit(
             wf_executor.execute_node_parallel,
             node_id,
-            wf_executor.get_node_inputs_for_edges(node_id, branch_edges),
+            (
+                node_inputs
+                if node_inputs is not None
+                else wf_executor.get_node_inputs_for_edges(node_id, branch_edges)
+            ),
         )
         running_futures[new_future] = node_id
 
@@ -8478,7 +8714,10 @@ def execute_llm_batch_notification_branch(
                     completed_nodes=completed_nodes,
                     pending_count=pending_count,
                 ):
-                    _submit_node(target)
+                    _submit_node(
+                        target,
+                        wf_executor.get_loop_reexecution_inputs(target, source_id, branch_edges),
+                    )
                 continue
 
             if target not in pending_count or target in completed_nodes:
@@ -8684,7 +8923,9 @@ def execute_hitl_notification_branch(
                         new_future = _SHARED_EXECUTOR.submit(
                             wf_executor.execute_node_parallel,
                             target,
-                            wf_executor.get_node_inputs_for_edges(target, active_edges),
+                            wf_executor.get_loop_reexecution_inputs(
+                                target, source_node_id, active_edges
+                            ),
                         )
                         running_futures[new_future] = target
                 continue
@@ -9068,7 +9309,7 @@ def _execute_workflow_streaming_impl(
             }
         )
 
-    def execute_and_report(node_id: str) -> NodeResult:
+    def execute_and_report(node_id: str, node_inputs: dict | None = None) -> NodeResult:
         wf_executor.check_cancelled()
         node = wf_executor.nodes[node_id]
         node_label = node.get("data", {}).get("label", node_id)
@@ -9083,7 +9324,8 @@ def _execute_workflow_streaming_impl(
             node_start_event["message"] = start_message
         event_queue.put(node_start_event)
 
-        node_inputs = wf_executor.get_node_inputs_for_edges(node_id, active_edges)
+        if node_inputs is None:
+            node_inputs = wf_executor.get_node_inputs_for_edges(node_id, active_edges)
         result = wf_executor.execute_node_parallel(node_id, node_inputs, on_retry=on_retry_callback)
 
         output = result.output
@@ -9138,7 +9380,13 @@ def _execute_workflow_streaming_impl(
                     ):
                         already_running = any(nid == target for nid in running_futures.values())
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(execute_and_report, target)
+                            new_future = _SHARED_EXECUTOR.submit(
+                                execute_and_report,
+                                target,
+                                wf_executor.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                ),
+                            )
                             running_futures[new_future] = target
                     continue
 

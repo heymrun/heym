@@ -46,6 +46,16 @@ function cancelEdit(): void {
   isEditing.value = false;
 }
 
+function onEditBlur(): void {
+  // Defer so Enter/Escape can cancel first, and so we ignore transient focus
+  // loss while the action-button row unmounts when isEditing flips to true.
+  requestAnimationFrame(() => {
+    if (!isEditing.value) return;
+    if (editInputRef.value && document.activeElement === editInputRef.value) return;
+    commitEdit();
+  });
+}
+
 function onEditKeydown(e: KeyboardEvent): void {
   if (e.key === "Enter") commitEdit();
   if (e.key === "Escape") cancelEdit();
@@ -100,7 +110,7 @@ function handleSelect(): void {
           v-model="editTitle"
           class="w-full text-sm bg-background border border-border rounded px-1 py-0.5 outline-none"
           @keydown="onEditKeydown"
-          @blur="commitEdit"
+          @blur="onEditBlur"
           @click.stop
         >
       </template>

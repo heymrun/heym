@@ -107,6 +107,10 @@ const hasValue = computed<boolean>(() => {
   return typeof props.modelValue === "string" && props.modelValue.length > 0;
 });
 
+const triggerSizingText = computed<string>(() => {
+  return selectedOption.value?.label ?? props.placeholder;
+});
+
 const wrapperClass = computed(() =>
   cn("relative group min-w-0 w-full", props.class)
 );
@@ -218,6 +222,13 @@ function clearValue(): void {
     @update:model-value="handleUpdateSelectedKey"
   >
     <ComboboxAnchor :class="wrapperClass">
+      <span
+        aria-hidden="true"
+        class="invisible block h-0 overflow-hidden whitespace-nowrap pl-12 text-sm"
+        :class="clearable && hasValue ? 'pr-16' : 'pr-9'"
+      >
+        {{ triggerSizingText }}
+      </span>
       <div
         :class="anchorClass"
         @click="openOptions"
@@ -225,7 +236,7 @@ function clearValue(): void {
         <Search class="ml-3.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <ComboboxInput
           :id="id"
-          class="h-full min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
+          class="h-full w-0 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
           :placeholder="open ? searchPlaceholder : placeholder"
           :disabled="disabled"
         />

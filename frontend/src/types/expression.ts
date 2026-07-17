@@ -569,6 +569,20 @@ export const BUILTIN_FUNCTIONS: CompletionSuggestion[] = [
     description: "title($text)",
   },
   {
+    label: "base64Encode",
+    insertText: "base64Encode()",
+    type: "function",
+    detail: "Encode UTF-8 text as Base64",
+    description: "base64Encode($text)",
+  },
+  {
+    label: "base64Decode",
+    insertText: "base64Decode()",
+    type: "function",
+    detail: "Decode Base64 as UTF-8 text",
+    description: "base64Decode($text)",
+  },
+  {
     label: "split",
     insertText: "split()",
     type: "function",
@@ -751,6 +765,20 @@ export const STRING_METHODS: CompletionSuggestion[] = [
     insertText: "hash()",
     type: "function",
     detail: "MD5 hash",
+    propertyType: "string",
+  },
+  {
+    label: "base64Encode",
+    insertText: "base64Encode()",
+    type: "function",
+    detail: "Encode UTF-8 text as Base64",
+    propertyType: "string",
+  },
+  {
+    label: "base64Decode",
+    insertText: "base64Decode()",
+    type: "function",
+    detail: "Decode Base64 as UTF-8 text",
     propertyType: "string",
   },
   {

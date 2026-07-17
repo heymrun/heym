@@ -106,7 +106,7 @@ async function emptyColumn(): Promise<void> {
 
 <template>
   <div
-    class="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/30"
+    class="flex h-full min-h-0 w-[calc(100vw-2.5rem)] max-w-[18rem] shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/30 md:w-72"
     :class="[
       dragOver ? 'ring-2 ring-primary/50' : '',
       columnDragOver ? 'ring-2 ring-primary' : '',
@@ -125,7 +125,7 @@ async function emptyColumn(): Promise<void> {
       @dragstart="onColumnDragStart"
     >
       <GripVertical
-        class="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100"
+        class="-ml-1.5 hidden h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100 md:block"
       />
       <span
         class="h-2.5 w-2.5 rounded-full"
@@ -192,7 +192,7 @@ async function emptyColumn(): Promise<void> {
         :disabled="!canAct"
         :placeholder="canAct ? 'Add a card' : 'Set the Agentic Kanban Model in board settings first'"
         :title="canAct ? '' : 'Pick a credential and model above to use the board'"
-        class="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+        class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         @keydown.enter="addCard"
       >
     </div>

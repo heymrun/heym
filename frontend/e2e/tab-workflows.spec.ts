@@ -174,6 +174,87 @@ test("creates a folder and filters workflows with search", async ({ page }) => {
   }
 });
 
+test("keeps precise folder and subfolder drop feedback active while dragging", async ({ page }) => {
+  const workflow = await createWorkflow(page, `Folder drag workflow ${Date.now()}`);
+  const parentResponse = await page.request.post("/api/folders", {
+    data: { name: `Drag target ${Date.now()}` },
+  });
+  await expectOk(parentResponse);
+  const parent = await parentResponse.json() as { id: string; name: string };
+  const childResponse = await page.request.post("/api/folders", {
+    data: { name: "Nested target", parent_id: parent.id },
+  });
+  await expectOk(childResponse);
+  const child = await childResponse.json() as { id: string };
+
+  try {
+    await page.goto("/");
+
+    const workflowCard = page.getByTestId(`workflow-card-${workflow.id}`);
+    const parentZone = page.getByTestId(`workflow-folder-drop-zone-${parent.id}`);
+    const childZone = page.getByTestId(`workflow-folder-drop-zone-${child.id}`);
+    const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+
+    await workflowCard.dispatchEvent("dragstart", { dataTransfer });
+    await expect(workflowCard).toHaveClass(/workflow-card--dragging/);
+    await expect(page.getByTestId("workflow-drag-ghost")).toHaveCount(1);
+
+    await parentZone.dispatchEvent("dragover", { dataTransfer });
+    const parentPlaceholder = page.getByTestId(
+      `workflow-folder-drop-placeholder-${parent.id}`,
+    );
+    await expect(parentZone).toHaveAttribute("data-drop-active", "true");
+    await expect(parentPlaceholder).toHaveAttribute("data-drop-valid", "true");
+    await expect(parentPlaceholder).toContainText("Move to Folder");
+    await expect(parentPlaceholder).toContainText(parent.name);
+    await expect(childZone).toBeVisible({ timeout: 1_500 });
+
+    // Moving between children and a scroll-style dragleave with no related target must not
+    // clear the lane that is still under the pointer.
+    await parentZone.evaluate((zone) => {
+      const internalTarget = zone.querySelector<HTMLElement>("[data-testid^='workflow-folder-header-']");
+      zone.dispatchEvent(new DragEvent("dragleave", {
+        bubbles: true,
+        relatedTarget: internalTarget,
+      }));
+      zone.dispatchEvent(new DragEvent("dragleave", { bubbles: true }));
+    });
+    await expect(parentZone).toHaveAttribute("data-drop-active", "true");
+    await expect(parentPlaceholder).toBeVisible();
+
+    await childZone.dispatchEvent("dragover", { dataTransfer });
+    const childPlaceholder = page.getByTestId(
+      `workflow-folder-drop-placeholder-${child.id}`,
+    );
+    await expect(parentZone).toHaveAttribute("data-drop-active", "false");
+    await expect(childZone).toHaveAttribute("data-drop-active", "true");
+    await expect(childPlaceholder).toContainText("Move to Subfolder");
+    await expect(childPlaceholder).toContainText(`${parent.name} / Nested target`);
+
+    const moveResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        new URL(response.url()).pathname === `/api/folders/${child.id}/workflows/${workflow.id}`,
+    );
+    await childZone.dispatchEvent("drop", { dataTransfer });
+    await expectOk(await moveResponsePromise);
+
+    await expect(page.getByTestId("workflow-drag-ghost")).toHaveCount(0);
+    await expect(childZone.getByTestId(`workflow-card-${workflow.id}`)).toBeVisible();
+
+    const movedCard = childZone.getByTestId(`workflow-card-${workflow.id}`);
+    const sameFolderTransfer = await page.evaluateHandle(() => new DataTransfer());
+    await movedCard.dispatchEvent("dragstart", { dataTransfer: sameFolderTransfer });
+    await childZone.dispatchEvent("dragover", { dataTransfer: sameFolderTransfer });
+    await expect(childPlaceholder).toHaveAttribute("data-drop-valid", "false");
+    await expect(childPlaceholder).toContainText("Already in Subfolder");
+    await movedCard.dispatchEvent("dragend", { dataTransfer: sameFolderTransfer });
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+    await expectOk(await page.request.delete(`/api/folders/${parent.id}`));
+  }
+});
+
 test("imports and exports a workflow JSON file", async ({ page }) => {
   const importedName = `Imported Workflow ${Date.now()}`;
   const importPayload = {

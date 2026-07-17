@@ -119,13 +119,16 @@ function closeErrorHistory(): void {
 
 <template>
   <div
-    class="flex h-full flex-col"
+    class="flex h-full w-full min-w-0 flex-col"
     data-testid="board-panel"
   >
     <!-- pt-0 so the title sits at the same height as the Workflows tab heading. -->
-    <div class="flex items-center gap-3 border-b border-border/60 pb-2.5 pt-0">
-      <div class="flex min-w-0 shrink flex-col">
-        <h2 class="text-xl md:text-2xl font-bold tracking-tight">
+    <div
+      class="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-border/60 pb-2.5 pt-0 sm:flex-nowrap sm:gap-3"
+      data-testid="board-header"
+    >
+      <div class="mr-auto flex min-w-0 flex-1 flex-col sm:mr-0 sm:flex-initial sm:shrink">
+        <h2 class="text-xl font-bold tracking-tight md:text-2xl">
           Board
         </h2>
         <p
@@ -138,10 +141,10 @@ function closeErrorHistory(): void {
         </p>
       </div>
 
-      <!-- SearchableSelect's root is w-full, so it needs a fixed-width wrapper. -->
+      <!-- SearchableSelect's root is w-full, so its wrapper controls the responsive width. -->
       <div
         v-if="boardStore.boards.length"
-        class="ml-auto w-56 shrink-0"
+        class="order-last w-full shrink-0 sm:order-none sm:ml-auto sm:w-auto sm:min-w-[200px]"
       >
         <!-- Keyed on the name: the combobox caches its display value, so a rename only
              shows up if the select is rebuilt. -->
@@ -158,17 +161,19 @@ function closeErrorHistory(): void {
       <Button
         size="sm"
         variant="outline"
-        class="shrink-0"
+        class="shrink-0 px-3 sm:px-4"
+        aria-label="New board"
         data-testid="board-new"
         @click="createOpen = true"
       >
-        <Plus class="mr-1 h-4 w-4" /> New board
+        <Plus class="h-4 w-4 sm:mr-1" />
+        <span>New<span class="hidden sm:inline"> board</span></span>
       </Button>
       <Button
         v-if="boardStore.isOwner"
         size="sm"
         variant="ghost"
-        class="shrink-0"
+        class="w-11 shrink-0 px-0 sm:w-auto sm:px-4"
         aria-label="Board settings"
         title="Board settings"
         data-testid="board-edit"
@@ -180,7 +185,7 @@ function closeErrorHistory(): void {
         v-if="boardStore.isOwner"
         size="sm"
         variant="ghost"
-        class="shrink-0"
+        class="w-11 shrink-0 px-0 sm:w-auto sm:px-4"
         aria-label="Delete board"
         @click="removeActiveBoard"
       >

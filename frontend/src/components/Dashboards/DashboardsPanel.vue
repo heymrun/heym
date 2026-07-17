@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import axios from "axios";
 import { useRouter } from "vue-router";
 import { LayoutGrid, Loader2, Pencil, Plus, RefreshCw, Sparkles } from "lucide-vue-next";
 
@@ -28,6 +29,8 @@ const showAi = ref(false);
 const refineWidget = ref<DashboardWidget | null>(null);
 const settingsWidget = ref<DashboardWidget | null>(null);
 const reloadKey = ref(0);
+const cloningWidgetId = ref<string | null>(null);
+const cloneError = ref<string | null>(null);
 
 async function loadDashboard(): Promise<void> {
   loading.value = true;
@@ -72,6 +75,25 @@ async function handleGenerate(payload: {
 async function handleDelete(widgetId: string): Promise<void> {
   await dashboardApi.deleteWidget(widgetId);
   widgets.value = widgets.value.filter((w) => w.id !== widgetId);
+}
+
+async function handleClone(widgetId: string): Promise<void> {
+  if (cloningWidgetId.value) return;
+  cloningWidgetId.value = widgetId;
+  cloneError.value = null;
+  try {
+    await dashboardApi.cloneWidget(widgetId);
+    await loadDashboard();
+    playSuccessSound();
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") {
+      cloneError.value = error.response.data.detail;
+    } else {
+      cloneError.value = error instanceof Error ? error.message : "Failed to clone widget";
+    }
+  } finally {
+    cloningWidgetId.value = null;
+  }
 }
 
 async function handleRefine(payload: {
@@ -250,6 +272,13 @@ onMounted(() => {
 
     <div class="flex-1 overflow-auto p-4">
       <div
+        v-if="cloneError"
+        class="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        role="alert"
+      >
+        {{ cloneError }}
+      </div>
+      <div
         v-if="loading"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
@@ -281,8 +310,10 @@ onMounted(() => {
         :key="reloadKey"
         :widgets="widgets"
         :edit-mode="editMode"
+        :cloning-widget-id="cloningWidgetId"
         @edit="openEditor"
         @delete="handleDelete"
+        @clone="handleClone"
         @refine="refineWidget = $event"
         @settings="settingsWidget = $event"
         @title-change="handleTitleChange"

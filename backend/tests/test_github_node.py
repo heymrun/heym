@@ -1,8 +1,10 @@
 """Unit tests for GitHubService and the workflow executor GitHub branch."""
 
 import base64
+import tempfile
 import unittest
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -375,6 +377,61 @@ class GitHubServiceTests(unittest.TestCase):
                 "prerelease": False,
             },
         )
+
+    def test_upload_release_asset_posts_binary_to_upload_host(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _make_response(
+            201,
+            {
+                "name": "ui.png",
+                "browser_download_url": "https://github.com/octo/repo/releases/download/t/ui.png",
+            },
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ui.png"
+            path.write_bytes(b"png-bytes")
+            service = GitHubService(_make_config(), client=client)
+            result = service.upload_release_asset(
+                "octo",
+                "repo",
+                99,
+                str(path),
+                name="ui.png",
+                content_type="image/png",
+                upload_url="https://uploads.github.com/repos/octo/repo/releases/99/assets{?name,label}",
+            )
+
+        self.assertEqual(result["name"], "ui.png")
+        args, kwargs = client.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(
+            args[1],
+            "https://uploads.github.com/repos/octo/repo/releases/99/assets?name=ui.png",
+        )
+        self.assertEqual(kwargs["content"], b"png-bytes")
+        self.assertEqual(kwargs["headers"]["Content-Type"], "image/png")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer ghp_test_token")
+
+    def test_get_release_by_tag_uses_tags_endpoint(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _make_response(200, {"id": 5, "tag_name": "codex-pr-assets"})
+        service = GitHubService(_make_config(), client=client)
+        result = service.get_release_by_tag("octo", "repo", "codex-pr-assets")
+        self.assertEqual(result["id"], 5)
+        args, _kwargs = client.request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(str(args[1]).endswith("/repos/octo/repo/releases/tags/codex-pr-assets"))
+
+    def test_delete_release_asset_uses_assets_endpoint(self) -> None:
+        client = MagicMock()
+        request = httpx.Request("DELETE", "https://api.github.com/test")
+        client.request.return_value = httpx.Response(status_code=204, request=request)
+        service = GitHubService(_make_config(), client=client)
+        result = service.delete_release_asset("octo", "repo", 55)
+        self.assertTrue(result["deleted"])
+        args, _kwargs = client.request.call_args
+        self.assertEqual(args[0], "DELETE")
+        self.assertTrue(str(args[1]).endswith("/repos/octo/repo/releases/assets/55"))
 
     def test_dispatch_workflow_accepts_no_content_response(self) -> None:
         client = MagicMock()

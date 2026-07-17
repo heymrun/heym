@@ -5,6 +5,11 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import {
+  CODEX_MODEL_SUGGESTIONS,
+  CODEX_REASONING_EFFORT_OPTIONS,
+  type CodexReasoningEffort,
+} from "@/lib/codexCatalog";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -24,17 +29,6 @@ const {
   onCodexRegisterExpressionFieldIndex,
   updateNodeData,
 } = usePropertiesPanelContext();
-
-// Codex model suggestions (developers.openai.com/codex/models). Editable — any plan-supported
-// model can be typed; leave empty to use Codex's default.
-const codexModelOptions = [
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3-codex-spark",
-  "gpt-5.3-codex",
-  "gpt-5.2",
-];
 </script>
 
 <template>
@@ -138,15 +132,28 @@ const codexModelOptions = [
         />
         <datalist id="codex-model-options">
           <option
-            v-for="m in codexModelOptions"
+            v-for="m in CODEX_MODEL_SUGGESTIONS"
             :key="m"
             :value="m"
           />
         </datalist>
       </div>
       <p class="text-xs text-muted-foreground">
-        Leave empty for Codex's default. Pick a suggestion or type any model your ChatGPT plan
-        supports.
+        Leave empty for Codex's default (`gpt-5.6-sol` with medium reasoning). Pick a suggestion or
+        type any model your ChatGPT plan supports.
+      </p>
+    </div>
+
+    <div class="space-y-2">
+      <Label>Reasoning Effort</Label>
+      <Select
+        :model-value="(selectedNode.data.codexReasoningEffort as CodexReasoningEffort) || 'medium'"
+        :options="[...CODEX_REASONING_EFFORT_OPTIONS]"
+        @update:model-value="updateNodeData('codexReasoningEffort', $event as CodexReasoningEffort)"
+      />
+      <p class="text-xs text-muted-foreground">
+        Maps to Codex CLI <code class="text-xs">model_reasoning_effort</code>. Use the lowest level
+        that works; Max and Ultra consume more tokens.
       </p>
     </div>
 

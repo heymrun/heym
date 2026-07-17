@@ -2,7 +2,8 @@ import asyncio
 from dataclasses import dataclass
 
 import tiktoken
-from openai import OpenAI
+
+from app.services.openai_client import create_openai_client
 
 EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 1536
@@ -19,7 +20,7 @@ class EmbeddingResult:
 
 class EmbeddingService:
     def __init__(self, openai_api_key: str):
-        self.client = OpenAI(api_key=openai_api_key)
+        self.client = create_openai_client(api_key=openai_api_key)
         try:
             self.encoding = tiktoken.encoding_for_model("text-embedding-3-large")
         except KeyError:

@@ -230,6 +230,7 @@ test("keeps columns within the viewport and scrolls only the card area", async (
   expect(layout[0]).not.toBeNull();
   expect(layout[1]).not.toBeNull();
   expect(layout[2]).not.toBeNull();
+  expect(layout[0]!.width).toBe(288);
   expect(layout[0]!.y + layout[0]!.height).toBeLessThanOrEqual(720);
   expect(layout[0]!.x + layout[0]!.width - (layout[2]!.x + layout[2]!.width)).toBeLessThan(16);
   const pageScroll = await page.evaluate(() => ({
@@ -250,6 +251,66 @@ test("keeps columns within the viewport and scrolls only the card area", async (
   });
   await expect(header).toBeVisible();
   expect((await header.boundingBox())!.y).toBe(headerY);
+});
+
+test("fits board controls and lanes within a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  const { boardId } = await createBoardWithCard(
+    page,
+    "Mobile card with a long uninterruptedwordthatmustwrapwithoutoverflowing",
+  );
+
+  await page.goto(`/?tab=board&board=${boardId}`);
+
+  const panel = page.getByTestId("board-panel");
+  const header = page.getByTestId("board-header");
+  const canvas = page.getByTestId("board-canvas");
+  const lane = page.getByTestId("board-column-Backlog");
+  await expect(lane).toBeVisible();
+
+  const headerBox = await header.boundingBox();
+  expect(headerBox).not.toBeNull();
+  for (const control of [
+    header.getByRole("heading", { name: "Board" }),
+    header.getByPlaceholder("Select board"),
+    header.getByRole("button", { name: "New board" }),
+    header.getByRole("button", { name: "Board settings" }),
+    header.getByRole("button", { name: "Delete board" }),
+  ]) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox).not.toBeNull();
+    expect(controlBox!.x).toBeGreaterThanOrEqual(headerBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(
+      headerBox!.x + headerBox!.width,
+    );
+  }
+
+  const layout = await Promise.all([
+    panel.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    })),
+    canvas.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    })),
+    lane.boundingBox(),
+    lane.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    })),
+  ]);
+  expect(layout[0].scrollWidth).toBeLessThanOrEqual(layout[0].clientWidth);
+  expect(layout[1].scrollWidth).toBeGreaterThan(layout[1].clientWidth);
+  expect(layout[2]).not.toBeNull();
+  expect(layout[2]!.width).toBeLessThanOrEqual(layout[1].clientWidth);
+  expect(layout[3].scrollWidth).toBeLessThanOrEqual(layout[3].clientWidth);
+
+  const scrollLeft = await canvas.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+    return element.scrollLeft;
+  });
+  expect(scrollLeft).toBeGreaterThan(0);
 });
 
 test("moves a card to the top whenever it is updated", async ({ page }) => {
