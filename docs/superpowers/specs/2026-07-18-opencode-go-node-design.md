@@ -10,10 +10,12 @@ Add a new workflow node type **`opencodeGo`** ("OpenCode Go") that runs the
 mirroring the existing **Codex** node's publish flow and agent-tool integration. Two deliberate
 differences from Codex:
 
-1. **Model provider = OpenCode Go / zen gateway** — a single API key, with `opencode/<model>` model
-   ids (e.g. `opencode/grok-4.5`, `opencode/claude-opus-4-8`, `opencode/kimi-k2.7-code`). Because
-   zen's roster changes often, the node **fetches the live model list** and shows it in a searchable
-   dropdown, with a **hardcoded fallback** when the fetch fails.
+1. **Model provider = OpenCode Go gateway** (`https://opencode.ai/zen/go/v1/`), with `opencode/<model>`
+   model ids (e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`). Auth is
+   **optional** — the Go gateway's model listing is keyless and the API key may not be required; the
+   credential's `api_key` is optional, used only when present. Because the roster changes often, the
+   node **fetches the live model list** and shows it in a searchable dropdown, with a **hardcoded
+   fallback** when the fetch fails.
 2. **Isolation = hardened, throwaway Docker container, fail-closed.** OpenCode has no built-in OS
    sandbox (unlike Codex's `--sandbox workspace-write`), so the `opencode run` step executes inside a
    hardened sibling container. If Docker/the image is unavailable, the node errors (no silent
@@ -24,13 +26,15 @@ Scope: all 7 Codex publish modes + agent-tool + PR screenshots. **No** `needs_in
 
 ## 2. Credential
 
-New `CredentialType.opencode` = `"opencode"`, config `{ api_key: str, base_url?: str }`.
-- `api_key` — OpenCode Go / zen gateway key (required).
-- `base_url` — optional gateway override (default `https://opencode.ai/zen/v1`) for self-host/proxy.
+New `CredentialType.opencode` = `"opencode"`, config `{ api_key?: str, base_url?: str }`.
+- `api_key` — OpenCode Go gateway key, **optional** (the Go gateway may not require it; used only when
+  present).
+- `base_url` — optional gateway override (default `https://opencode.ai/zen/go/v1`) for self-host/proxy.
 
-The node also references an existing `github` credential via `githubCredentialId` (unchanged), exactly
-like Codex. This gives Heym first-class access to the zen model roster without per-provider credential
-types. Frontend adds the `opencode` type to credential dialog/panel/config unions.
+The opencode credential is **optional** on the node (`credentialId`); when omitted or keyless, the
+runner points OpenCode at the default Go base URL with no auth. The node also references an existing
+`github` credential via `githubCredentialId` (unchanged, **required**), exactly like Codex. Frontend
+adds the `opencode` type to credential dialog/panel/config unions.
 
 ## 3. Node fields
 
@@ -38,7 +42,7 @@ Mirror the Codex node (minus resume-specific fields):
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `credentialId` | — | opencode credential (required) |
+| `credentialId` | — | opencode credential (optional) |
 | `githubCredentialId` | — | github credential (required) |
 | `repositoryUrl` | — | expression-capable, required |
 | `baseBranch` | `main` | expression-capable |
@@ -47,24 +51,26 @@ Mirror the Codex node (minus resume-specific fields):
 | `publishMode` | `diff_only` | 7 modes: `diff_only`, `draft_pr`, `open_pr`, `commit_push`, `direct_commit`, `update_existing_pr`, `patch_artifact` |
 | `setupCommand` | `` | optional; runs on host before container exec |
 | `timeoutSeconds` | `3600` | clamped `[60, 21600]` |
-| `opencodeModel` | `opencode/grok-4.5` (fallback head) | dynamic dropdown; empty → runner default |
+| `opencodeModel` | `opencode/kimi-k3` (fallback head) | dynamic dropdown; empty → runner default |
 | `opencodeVariant` | `` | optional → `opencode run --variant` (model reasoning effort) |
 
 ## 4. Dynamic model list + fallback
 
 - **Backend endpoint** `GET /api/opencode-go/models` (optional `?credentialId=` to honor a
-  credential's `base_url`/key). Fetches `{base_url}/models` (default `https://opencode.ai/zen/v1/models`),
-  normalizes each entry to `{ id: "opencode/<id>", name, reasoning?, ... }`, caches in-memory briefly
-  (~10 min TTL). **On any error (network, non-200, parse) returns the hardcoded
-  `OPENCODE_MODEL_FALLBACK` catalog** with `source: "fallback"` so the UI degrades gracefully.
+  credential's `base_url`). Fetches `{base_url}/models` (default
+  `https://opencode.ai/zen/go/v1/models`), which is keyless and OpenAI-style
+  (`{"object":"list","data":[{"id":"kimi-k3"},…]}`). Each bare `id` is normalized to
+  `opencode/<id>`; result cached in-memory briefly (~10 min TTL). **On any error (network, non-200,
+  parse) returns the hardcoded `OPENCODE_MODEL_FALLBACK` catalog** with `source: "fallback"` so the UI
+  degrades gracefully.
 - **Frontend** `OpenCodeGoNodeProperties.vue` populates a searchable dropdown from that endpoint,
   itself falling back to the static `opencodeCatalog.ts` list on request error.
-- **Runner** default: empty `opencodeModel` → `opencode/grok-4.5`; the chosen id is passed verbatim to
-  `opencode run --model`.
+- **Runner** default: empty `opencodeModel` → `opencode/kimi-k3` (fallback head); the chosen id is
+  passed verbatim to `opencode run --model`.
 
 `OPENCODE_MODEL_FALLBACK` (backend catalog + mirrored `opencodeCatalog.ts`) seeds a small, known-good
-set, e.g. `opencode/grok-4.5`, `opencode/claude-opus-4-8`, `opencode/gpt-5.5`, `opencode/kimi-k2.7-code`,
-`opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`, `opencode/gemini-3.5-flash`.
+set of Go-gateway models, e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`,
+`opencode/minimax-m3`.
 
 ## 5. Execution — security core
 
@@ -75,8 +81,11 @@ Flow (`OpenCodeRunnerService`):
 1. Host clone of the repo into `HEYM_OPENCODE_WORKSPACE_DIR` (shared workspace helper — see §6),
    excluding runner scaffolding from git.
 2. Write an isolated OpenCode home into a per-run dir mounted into the container:
-   - `auth.json` → `{"opencode": {"type": "api", "key": "<key>"}}`.
-   - `opencode.json` → `permission.edit/bash = "allow"`, default model, and a local-only rules prompt.
+   - `opencode.json` → `provider.opencode.options.baseURL` = the Go gateway URL, optional inline
+     `apiKey` (only when the credential supplies one), `permission.edit/bash = "allow"`, and the
+     default model.
+   - `auth.json` → `{"opencode": {"type": "api", "key": "<key>"}}` **only when an api_key is present**;
+     omitted entirely for keyless runs.
 3. Host runs the optional `setupCommand` (bounded, host-side, not in container).
 4. Hardened `docker run --rm` executing `opencode run --format json --dir <ws> --model <id> [--variant …] --agent build <prompt>`:
    - `--read-only` root; the workspace bind is the only writable mount; `--tmpfs /tmp`;
@@ -113,15 +122,15 @@ opencode auth/config generation, and JSON-event parsing.
 ## 7. Handler, registry, config
 
 - `backend/app/services/node_execution/nodes/opencode_go_node.py` — mirrors `codex_node.py` minus the
-  `needs_input`/resume branch; reuses `patch_artifact` Drive storage; validates opencode + github
-  credentials; resolves expression fields; returns the normalized output.
+  `needs_input`/resume branch; reuses `patch_artifact` Drive storage; requires a github credential and
+  accepts an optional opencode credential; resolves expression fields; returns the normalized output.
 - Register `"opencodeGo": "opencode_go_node"` in `node_execution/registry.py`.
 - New settings (all env-aliased): `HEYM_OPENCODE_CLI_COMMAND` (default `opencode`),
   `HEYM_OPENCODE_WORKSPACE_DIR` (`./data/opencode-workspaces`), `HEYM_OPENCODE_IMAGE`,
   `HEYM_OPENCODE_SANDBOX` (`docker`|`subprocess`, default `docker`), `HEYM_OPENCODE_NETWORK` (`bridge`),
   `HEYM_OPENCODE_MEMORY`/`_CPUS`/`_PIDS`, `HEYM_OPENCODE_GIT_AUTHOR_NAME` (`Heym OpenCode`),
   `HEYM_OPENCODE_GIT_AUTHOR_EMAIL` (`support@heym.run`), `HEYM_OPENCODE_ZEN_BASE_URL`
-  (`https://opencode.ai/zen/v1`).
+  (`https://opencode.ai/zen/go/v1`).
 
 ## 8. DSL (source of truth per AGENTS.md)
 
