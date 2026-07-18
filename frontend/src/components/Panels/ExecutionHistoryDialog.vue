@@ -743,7 +743,7 @@ function bringToCanvas(): void {
               <Button
                 variant="outline"
                 size="sm"
-                class="!h-7 !min-h-7 !rounded-md !px-2 text-[10px]"
+                class="ml-auto !h-7 !min-h-7 !rounded-md !px-2 text-[10px]"
                 :data-testid="`open-live-execution-${active.execution_id}`"
                 @click="openActiveExecution(active)"
               >

@@ -38,6 +38,7 @@ const activityAtBottom = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const dragActive = ref(false);
+const DETAIL_POLL_INTERVAL_MS = 1000;
 
 // Attachments live on the card metadata, which is what the workflows receive.
 const attachments = computed<CardAttachment[]>(() => {
@@ -125,7 +126,7 @@ function syncPolling(): void {
   if (active && pollTimer === null) {
     pollTimer = setInterval(() => {
       void reload();
-    }, 2500);
+    }, DETAIL_POLL_INTERVAL_MS);
   } else if (!active) {
     stopPolling();
   }
@@ -161,6 +162,18 @@ async function reload(): Promise<void> {
   announceStatus(next);
   syncPolling();
 }
+
+const activeBoardCardStatus = computed(
+  () =>
+    boardStore.activeBoard?.cards.find((card) => card.id === props.cardId)?.run_status ?? null,
+);
+
+// A card can start from the board while this dialog is already mounted. Refresh immediately
+// when the board observes that transition instead of waiting for the detail poll to discover it.
+watch(activeBoardCardStatus, (status) => {
+  if (!props.open || !props.cardId || !status || status === detail.value?.card.run_status) return;
+  void reload();
+});
 
 onUnmounted(stopPolling);
 
@@ -237,9 +250,7 @@ async function removeActivity(activityId: string): Promise<void> {
 
 const copiedRunId = ref<string | null>(null);
 const activeLiveRun = computed<CardRun | null>(() =>
-  detail.value?.runs.find(
-    (run) => run.status === "running" && Boolean(run.active_execution_id),
-  ) ?? null,
+  detail.value?.runs.find((run) => Boolean(run.active_execution_id)) ?? null,
 );
 
 async function copyRun(run: CardRun): Promise<void> {
