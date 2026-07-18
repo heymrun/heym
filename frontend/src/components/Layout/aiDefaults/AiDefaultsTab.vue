@@ -6,7 +6,7 @@ import type { CodexUsage, CredentialListItem, LLMModel } from "@/types/credentia
 import CodexUsageCard from "@/components/Layout/aiDefaults/CodexUsageCard.vue";
 import Button from "@/components/ui/Button.vue";
 import Label from "@/components/ui/Label.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -110,9 +110,11 @@ onMounted(async () => {
         Used as the default for every AI feature (chat, assistant, board, widgets, and more)
         when a surface has no saved selection. You can always change it per surface.
       </p>
-      <Select
+      <SearchableSelect
         :model-value="selectedCredentialId"
         :options="credentialOptions"
+        placeholder="No preference"
+        search-placeholder="Search credentials…"
         @update:model-value="onCredentialChange"
       />
     </div>
@@ -122,9 +124,11 @@ onMounted(async () => {
       class="space-y-2"
     >
       <Label>Preferred model</Label>
-      <Select
+      <SearchableSelect
         v-model="selectedModel"
         :options="modelOptions"
+        placeholder="Select a model"
+        search-placeholder="Search models…"
         :disabled="loadingModels"
       />
     </div>

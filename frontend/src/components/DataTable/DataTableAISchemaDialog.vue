@@ -8,6 +8,7 @@ import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, dataTablesApi } from "@/services/api";
@@ -29,6 +30,10 @@ const credentialId = ref("");
 const modelName = ref("");
 const credentials = ref<CredentialListItem[]>([]);
 const models = ref<LLMModel[]>([]);
+const credentialOptions = computed(() =>
+  credentials.value.map((c) => ({ value: c.id, label: c.name })),
+);
+const modelOptions = computed(() => models.value.map((m) => ({ value: m.id, label: m.id })));
 const generating = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -187,39 +192,24 @@ async function handleSave(): Promise<void> {
         <div class="grid grid-cols-2 gap-3">
           <div>
             <Label>LLM Credential</Label>
-            <div class="relative mt-1">
-              <select
-                v-model="credentialId"
-                class="w-full appearance-none rounded border bg-background px-3 py-2 pr-8 text-sm"
-              >
-                <option
-                  v-for="cred in credentials"
-                  :key="cred.id"
-                  :value="cred.id"
-                >
-                  {{ cred.name }}
-                </option>
-              </select>
-              <ChevronDown class="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
+            <SearchableSelect
+              v-model="credentialId"
+              :options="credentialOptions"
+              placeholder="Credential"
+              search-placeholder="Search credentials…"
+              class="mt-1"
+            />
           </div>
           <div>
             <Label>Model</Label>
-            <div class="relative mt-1">
-              <select
-                v-model="modelName"
-                class="w-full appearance-none rounded border bg-background px-3 py-2 pr-8 text-sm"
-              >
-                <option
-                  v-for="m in models"
-                  :key="m.id"
-                  :value="m.id"
-                >
-                  {{ m.id }}
-                </option>
-              </select>
-              <ChevronDown class="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            </div>
+            <SearchableSelect
+              v-model="modelName"
+              :options="modelOptions"
+              placeholder="Model"
+              search-placeholder="Search models…"
+              :disabled="!credentialId"
+              class="mt-1"
+            />
           </div>
         </div>
 
