@@ -110,7 +110,8 @@ def main() -> int:
 
     name = f"heym-codex-{uuid.uuid4().hex}"
     entrypoint = _env_value("HEYM_CODEX_DOCKER_ENTRYPOINT") or "codex"
-    memory = _env_value("HEYM_CODEX_DOCKER_MEMORY") or "2g"
+    # Match OpenCode headroom so vue-tsc / Node tooling is less likely to OOM-kill the runner.
+    memory = _env_value("HEYM_CODEX_DOCKER_MEMORY") or "4g"
     network = _env_value("HEYM_CODEX_DOCKER_NETWORK") or "bridge"
     cmd = [
         "docker",

@@ -133,7 +133,7 @@ The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI 
 | `HEYM_CODEX_HOST_WORKSPACE_DIR` | Absolute host path for `HEYM_CODEX_WORKSPACE_DIR` when using bind mounts instead of a Docker volume. | — |
 | `HEYM_CODEX_DOCKER_NETWORK` | Docker network mode for Codex runner containers. | `bridge` |
 | `HEYM_CODEX_DOCKER_CPUS` | CPU limit passed to Codex runner containers. | `2` |
-| `HEYM_CODEX_DOCKER_MEMORY` | Memory limit passed to Codex runner containers. | `2g` |
+| `HEYM_CODEX_DOCKER_MEMORY` | Memory limit passed to Codex runner containers. | `4g` |
 | `HEYM_CODEX_DOCKER_PIDS` | PID limit passed to Codex runner containers. | `1024` |
 | `HEYM_CODEX_GIT_AUTHOR_NAME` | Author name for commits Codex creates. | `Heym Codex` |
 | `HEYM_CODEX_GIT_AUTHOR_EMAIL` | Author email for Codex commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
