@@ -25,11 +25,12 @@ import {
 } from "@/services/plugins";
 import { useAuthStore } from "@/stores/auth";
 
+import AiDefaultsTab from "@/components/Layout/aiDefaults/AiDefaultsTab.vue";
 import { clearPluginIconCache } from "@/components/Panels/PluginIcon.vue";
 
 import type { PluginSummary } from "@/types/workflow";
 
-type SettingsTab = "profile" | "security" | "voice" | "observability" | "plugins";
+type SettingsTab = "profile" | "security" | "voice" | "ai-defaults" | "observability" | "plugins";
 
 const props = defineProps<{
   open: boolean;
@@ -350,6 +351,14 @@ async function handleChangePassword(): Promise<void> {
         <button
           type="button"
           class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          :class="activeTab === 'ai-defaults' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+          @click="activeTab = 'ai-defaults'"
+        >
+          AI Defaults
+        </button>
+        <button
+          type="button"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
           :class="activeTab === 'observability' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'observability'"
         >
@@ -539,6 +548,11 @@ async function handleChangePassword(): Promise<void> {
           </Button>
         </div>
       </div>
+
+      <AiDefaultsTab
+        v-else-if="activeTab === 'ai-defaults'"
+        @close="emit('close')"
+      />
 
       <div
         v-else-if="activeTab === 'observability'"
