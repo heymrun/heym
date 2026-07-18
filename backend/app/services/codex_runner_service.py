@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, urlparse, urlunparse
 
 from app.config import settings
 from app.services.codex_catalog import CODEX_REASONING_EFFORTS
+from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
 
 # OpenAI strict structured output requires every property to appear in `required` when
@@ -70,16 +69,6 @@ _CODEX_LOCAL_ONLY_RULES = (
 )
 
 _PR_SCREENSHOT_RELEASE_TAG = "codex-pr-assets"
-_PR_SCREENSHOT_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
-_PR_SCREENSHOT_MAX_FILES = 5
-_PR_SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024
-_PR_SCREENSHOT_CONTENT_TYPES = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-}
 
 
 @dataclass(frozen=True)
@@ -767,53 +756,7 @@ class CodexRunnerService:
 
     def _discover_pr_screenshots(self, workspace: Path) -> list[Path]:
         """Find local UI screenshots that Codex left on disk (gitignored / untracked only)."""
-        root = workspace.resolve()
-        tracked = {
-            line.strip().replace("\\", "/")
-            for line in self._git_output(["git", "ls-files"], workspace).splitlines()
-            if line.strip()
-        }
-        candidates: list[Path] = []
-        seen: set[Path] = set()
-
-        def consider(path: Path) -> None:
-            if not path.is_file() or path in seen:
-                return
-            suffix = path.suffix.lower()
-            if suffix not in _PR_SCREENSHOT_SUFFIXES:
-                return
-            try:
-                resolved = path.resolve()
-                relative = resolved.relative_to(root).as_posix()
-            except ValueError:
-                return
-            if relative in tracked:
-                return
-            try:
-                if path.stat().st_size > _PR_SCREENSHOT_MAX_BYTES:
-                    return
-            except OSError:
-                return
-            seen.add(path)
-            candidates.append(resolved)
-
-        artifact_dirs = [
-            root / "frontend" / ".e2e-artifacts",
-            root / ".e2e-artifacts",
-        ]
-        for artifact_dir in artifact_dirs:
-            if artifact_dir.is_dir():
-                for path in artifact_dir.rglob("*"):
-                    consider(path)
-
-        # Codex sometimes drops a screenshot beside the working tree root.
-        for path in root.glob("*screenshot*"):
-            consider(path)
-        for path in root.glob("*/*screenshot*"):
-            consider(path)
-
-        candidates.sort(key=lambda item: item.as_posix())
-        return candidates[:_PR_SCREENSHOT_MAX_FILES]
+        return pr_publish.discover_pr_screenshots(workspace, self._git_output)
 
     def _attach_pr_screenshots(
         self,
@@ -830,43 +773,28 @@ class CodexRunnerService:
             owner, repo = self._parse_github_owner_repo(request.repository_url)
             gh = GitHubService(request.github_config)
             try:
-                release = self._ensure_pr_screenshot_release(gh, owner, repo, request.base_branch)
-                release_id = int(release["id"])
-                upload_url = str(release.get("upload_url") or "") or None
-                existing_assets = {
-                    str(asset.get("name") or ""): int(asset["id"])
-                    for asset in (release.get("assets") or [])
-                    if isinstance(asset, dict) and asset.get("id") is not None
-                }
-                uploaded: list[tuple[str, str]] = []
-                for index, shot in enumerate(screenshots):
-                    asset_name = self._release_asset_name(shot, pr_number, index)
-                    existing_id = existing_assets.get(asset_name)
-                    if existing_id is not None:
-                        gh.delete_release_asset(owner, repo, existing_id)
-                    content_type = _PR_SCREENSHOT_CONTENT_TYPES.get(
-                        shot.suffix.lower(), "application/octet-stream"
-                    )
-                    asset = gh.upload_release_asset(
-                        owner,
-                        repo,
-                        release_id,
-                        str(shot),
-                        name=asset_name,
-                        content_type=content_type,
-                        upload_url=upload_url,
-                    )
-                    download = str(asset.get("browser_download_url") or "").strip()
-                    if download:
-                        uploaded.append((asset_name, download))
-                if not uploaded:
-                    return
                 base_body = (
                     str(result.pull_request_body or "").strip()
                     or str(result.summary or "").strip()
                     or ""
                 )
-                updated_body = self._inject_screenshot_markdown(base_body, uploaded)
+                updated_body = pr_publish.upload_and_inject_screenshots(
+                    gh,
+                    screenshots=screenshots,
+                    owner=owner,
+                    repo=repo,
+                    base_branch=request.base_branch,
+                    pr_number=pr_number,
+                    base_body=base_body,
+                    release_tag=_PR_SCREENSHOT_RELEASE_TAG,
+                    release_name="Codex PR screenshots",
+                    release_body=(
+                        "Shared bucket for Heym Codex UI screenshots attached to pull requests. "
+                        "Assets are named pr-<number>-… and are not part of source."
+                    ),
+                )
+                if not updated_body:
+                    return
                 gh.update_issue(owner, repo, pr_number, body=updated_body)
                 result.pull_request_body = updated_body
             finally:
@@ -876,55 +804,16 @@ class CodexRunnerService:
             return
 
     @staticmethod
-    def _ensure_pr_screenshot_release(
-        gh: GitHubService,
-        owner: str,
-        repo: str,
-        target_commitish: str,
-    ) -> dict:
-        """Return the shared screenshot bucket release, creating it once if missing."""
-        try:
-            return gh.get_release_by_tag(owner, repo, _PR_SCREENSHOT_RELEASE_TAG)
-        except ValueError:
-            return gh.create_release(
-                owner,
-                repo,
-                _PR_SCREENSHOT_RELEASE_TAG,
-                name="Codex PR screenshots",
-                body=(
-                    "Shared bucket for Heym Codex UI screenshots attached to pull requests. "
-                    "Assets are named pr-<number>-… and are not part of source."
-                ),
-                target_commitish=target_commitish or None,
-                draft=False,
-                prerelease=True,
-            )
+    def _pr_number_from_url(url: str) -> int | None:
+        return pr_publish.pr_number_from_url(url)
 
     @staticmethod
     def _release_asset_name(path: Path, pr_number: int, index: int) -> str:
-        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem).strip("-._") or "screenshot"
-        suffix = path.suffix.lower() if path.suffix.lower() in _PR_SCREENSHOT_SUFFIXES else ".png"
-        if index == 0:
-            return f"pr-{pr_number}-{stem}{suffix}"
-        return f"pr-{pr_number}-{stem}-{index}{suffix}"
+        return pr_publish.release_asset_name(path, pr_number, index)
 
     @staticmethod
     def _inject_screenshot_markdown(body: str, images: list[tuple[str, str]]) -> str:
-        section = "## Screenshots\n\n" + "\n\n".join(f"![{name}]({url})" for name, url in images)
-        text = (body or "").strip()
-        if not text:
-            return section + "\n"
-        pattern = re.compile(r"## Screenshots?\b.*?(?=\n## |\Z)", re.IGNORECASE | re.DOTALL)
-        if pattern.search(text):
-            return pattern.sub(section + "\n\n", text).rstrip() + "\n"
-        return text + "\n\n" + section + "\n"
-
-    @staticmethod
-    def _pr_number_from_url(url: str) -> int | None:
-        match = re.search(r"/pull/(\d+)(?:/|$)", str(url or ""))
-        if not match:
-            return None
-        return int(match.group(1))
+        return pr_publish.inject_screenshot_markdown(body, images)
 
     def _run_command(
         self,
@@ -1037,56 +926,22 @@ class CodexRunnerService:
 
     @staticmethod
     def _commit_title(result: CodexRunResult) -> str:
-        # Prefer Codex's dedicated pull_request_title — a concise, complete one-line subject.
-        title = re.sub(r"\s+", " ", str(result.pull_request_title or "")).strip()
-        if title:
-            return title
-        summary = re.sub(r"\s+", " ", result.summary).strip()
-        if not summary:
-            return "Apply Codex changes"
-        # Fall back to the full first sentence of the summary (no length cap — GitHub itself
-        # elides overly long subjects in list views while keeping the complete text).
-        return re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0]
+        return pr_publish.commit_title(
+            result.pull_request_title, result.summary, fallback="Apply Codex changes"
+        )
 
     @staticmethod
     def _commit_body(result: CodexRunResult) -> str:
-        """Full commit body so the message is not lost when the subject is truncated to 72 chars."""
-        parts: list[str] = []
-        summary = str(result.summary or "").strip()
-        if summary:
-            parts.append(summary)
-        validation = str(result.validation or "").strip()
-        if validation:
-            parts.append(f"Validation:\n{validation}")
-        return "\n\n".join(parts)
+        return pr_publish.commit_body(result.summary, result.validation)
 
     @staticmethod
     def _clone_url_with_token(repository_url: str, github_config: dict) -> str:
-        token = str(github_config.get("api_key") or "").strip()
-        if not token:
-            return repository_url
-        parsed = urlparse(repository_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            return repository_url
-        if "@" in parsed.netloc:
-            return repository_url
-        netloc = f"x-access-token:{quote(token, safe='')}@{parsed.netloc}"
-        return urlunparse(parsed._replace(netloc=netloc))
+        return pr_publish.clone_url_with_token(repository_url, github_config)
 
     @staticmethod
     def _parse_github_owner_repo(repository_url: str) -> tuple[str, str]:
-        parsed = urlparse(repository_url)
-        path = parsed.path.removesuffix(".git").strip("/")
-        parts = [part for part in path.split("/") if part]
-        if len(parts) < 2:
-            raise ValueError("Repository URL must include owner and repository")
-        return parts[-2], parts[-1]
+        return pr_publish.parse_github_owner_repo(repository_url)
 
     @staticmethod
     def _mask_sensitive(text: str, values: list[object]) -> str:
-        masked = text
-        for value in values:
-            secret = str(value or "")
-            if secret:
-                masked = masked.replace(secret, "[masked]")
-        return masked
+        return pr_publish.mask_sensitive(text, values)
