@@ -53,6 +53,8 @@ class UserUpdate(BaseModel):
     user_rules: str | None = Field(None, max_length=4000)
     tts_credential_id: uuid.UUID | None = None
     tts_voice_id: str | None = Field(None, max_length=64)
+    preferred_credential_id: uuid.UUID | None = None
+    preferred_model: str | None = Field(None, max_length=128)
 
 
 class UserResponse(BaseModel):
@@ -62,6 +64,8 @@ class UserResponse(BaseModel):
     user_rules: str | None = None
     tts_credential_id: uuid.UUID | None = None
     tts_voice_id: str | None = None
+    preferred_credential_id: uuid.UUID | None = None
+    preferred_model: str | None = None
     created_at: datetime
 
     class Config:
