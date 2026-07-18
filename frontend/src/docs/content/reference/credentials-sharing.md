@@ -55,6 +55,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 |-----------|-------|-------------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md), Image Gen | `credentialId` | LLM API credential |
 | [Codex](../nodes/codex-node.md) | `credentialId`, `githubCredentialId` | Codex access token credential and GitHub credential |
+| [OpenCode Go](../nodes/opencode-go-node.md) | `credentialId`, `githubCredentialId` | OpenCode Go gateway credential and GitHub credential |
 | [Jira](../nodes/jira-node.md) | `credentialId` | Jira Cloud email/API token or Data Center username/password credential |
 | [Notion](../nodes/notion-node.md) | `credentialId` | Notion internal token or OAuth workspace credential |
 | [Sentry](../nodes/sentry-node.md) | `credentialId` | Sentry auth token and optional base URL |

@@ -35,6 +35,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
     items: [
       { slug: "agent-node", title: "Agent Node" },
       { slug: "codex-node", title: "Codex" },
+      { slug: "opencode-go-node", title: "OpenCode Go" },
       { slug: "mcp-call-node", title: "MCP Call Node" },
       { slug: "plugin-node", title: "Plugin" },
       { slug: "plugin-trigger-node", title: "Plugin Trigger" },

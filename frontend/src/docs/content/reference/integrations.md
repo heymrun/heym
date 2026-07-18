@@ -12,8 +12,9 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 |------|---------|------------|
 | **OpenAI** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [RAG](../nodes/rag-node.md) | `api_key` |
 | **OpenAI Codex** | [Codex](../nodes/codex-node.md) | `access_token` |
+| **OpenCode Go** | [OpenCode Go](../nodes/opencode-go-node.md) | `api_key`, optional `base_url` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
-| **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
+| **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [OpenCode Go](../nodes/opencode-go-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
 | **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, `deployment`, optional `api_version` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
@@ -102,6 +103,26 @@ The OpenAI Codex credential authenticates the [Codex node](../nodes/codex-node.m
 ### Used By
 
 - [Codex node](../nodes/codex-node.md)
+
+## OpenCode Go
+
+The OpenCode Go credential authenticates the [OpenCode Go node](../nodes/opencode-go-node.md). It stores an OpenCode Go gateway API key (from [opencode.ai/go](https://opencode.ai/go)) and an optional gateway base URL.
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| **API Key** | OpenCode Go gateway API key (required). |
+| **Gateway Base URL** | Optional; defaults to `https://opencode.ai/zen/go/v1`. Override only for a self-hosted or proxied gateway. |
+
+### Notes
+
+- The API key is passed only to the OpenCode CLI process inside a hardened container.
+- The OpenCode Go node also needs a GitHub credential for repository clone, branch push, and pull request creation. The GitHub token is never placed inside the sandbox container.
+
+### Used By
+
+- [OpenCode Go node](../nodes/opencode-go-node.md)
 
 ---
 

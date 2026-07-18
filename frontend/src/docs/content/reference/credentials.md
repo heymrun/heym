@@ -14,6 +14,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 |-----------|--------------------|---------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
+| [OpenCode Go](../nodes/opencode-go-node.md) | OpenCode Go + GitHub | An OpenCode Go gateway API key (optional base URL) for the runner, plus a GitHub PAT for repository operations |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
 | [Jira](../nodes/jira-node.md) | Jira | Cloud email/API token or Data Center username/password, Jira site base URL, deployment mode, and optional REST API version |
 | [Linear](../nodes/linear-node.md) | Linear | Personal API key or OAuth2 for teams, projects, issues, and comments |
