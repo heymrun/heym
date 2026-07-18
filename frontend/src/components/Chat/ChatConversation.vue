@@ -40,6 +40,7 @@ import {
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi, credentialsApi } from "@/services/api";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
@@ -70,6 +71,7 @@ const CHAT_SCROLLBAR_VERTICAL_INSET_PX = 12;
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
+const aiDefaults = useAiDefaults();
 const router = useRouter();
 
 const input = ref("");
@@ -752,8 +754,11 @@ function _applyConversationSession(): void {
     }
   }
   if (!selectedCredentialId.value) {
-    selectedCredentialId.value = credentials.value[0].id;
-    void loadModels(credentials.value[0].id);
+    const resolved = aiDefaults.resolveCredentialId(credentials.value, {});
+    if (resolved) {
+      selectedCredentialId.value = resolved;
+      void loadModels(resolved);
+    }
   }
 }
 
@@ -765,8 +770,11 @@ async function loadCredentials(): Promise<void> {
       if (chatStore.activeConversation) {
         _applyConversationSession();
       } else if (!selectedCredentialId.value) {
-        selectedCredentialId.value = credentials.value[0].id;
-        await loadModels(credentials.value[0].id);
+        const resolved = aiDefaults.resolveCredentialId(credentials.value, {});
+        if (resolved) {
+          selectedCredentialId.value = resolved;
+          await loadModels(resolved);
+        }
       }
     }
   } catch {
@@ -786,7 +794,11 @@ async function loadModels(credId: string, preferredModelId?: string): Promise<vo
       const match = preferredModelId
         ? models.value.find((m) => m.id === preferredModelId)
         : null;
-      selectedModel.value = match ? match.id : models.value[models.value.length - 1].id;
+      const preferredModel = aiDefaults.resolveModel(credId, models.value, {
+        savedModel: preferredModelId ?? null,
+      });
+      selectedModel.value =
+        preferredModel ?? (match ? match.id : models.value[models.value.length - 1].id);
     }
   } catch {
     modelsLoadFailed.value = true;
