@@ -11,11 +11,11 @@ mirroring the existing **Codex** node's publish flow and agent-tool integration.
 differences from Codex:
 
 1. **Model provider = OpenCode Go gateway** (`https://opencode.ai/zen/go/v1/`), with `opencode/<model>`
-   model ids (e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`). Auth is
-   **optional** — the Go gateway's model listing is keyless and the API key may not be required; the
-   credential's `api_key` is optional, used only when present. Because the roster changes often, the
-   node **fetches the live model list** and shows it in a searchable dropdown, with a **hardcoded
-   fallback** when the fetch fails.
+   model ids (e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`). Running
+   OpenCode **requires an API key** (the credential's `api_key` is required); the gateway's model
+   *listing* endpoint happens to be keyless, which is used only to populate the dropdown. Because the
+   roster changes often, the node **fetches the live model list** and shows it in a searchable
+   dropdown, with a **hardcoded fallback** when the fetch fails.
 2. **Isolation = hardened, throwaway Docker container, fail-closed.** OpenCode has no built-in OS
    sandbox (unlike Codex's `--sandbox workspace-write`), so the `opencode run` step executes inside a
    hardened sibling container. If Docker/the image is unavailable, the node errors (no silent
@@ -26,15 +26,13 @@ Scope: all 7 Codex publish modes + agent-tool + PR screenshots. **No** `needs_in
 
 ## 2. Credential
 
-New `CredentialType.opencode` = `"opencode"`, config `{ api_key?: str, base_url?: str }`.
-- `api_key` — OpenCode Go gateway key, **optional** (the Go gateway may not require it; used only when
-  present).
+New `CredentialType.opencode` = `"opencode"`, config `{ api_key: str, base_url?: str }`.
+- `api_key` — OpenCode Go gateway key, **required**.
 - `base_url` — optional gateway override (default `https://opencode.ai/zen/go/v1`) for self-host/proxy.
 
-The opencode credential is **optional** on the node (`credentialId`); when omitted or keyless, the
-runner points OpenCode at the default Go base URL with no auth. The node also references an existing
-`github` credential via `githubCredentialId` (unchanged, **required**), exactly like Codex. Frontend
-adds the `opencode` type to credential dialog/panel/config unions.
+The opencode credential is **required** on the node (`credentialId`). The node also references an
+existing `github` credential via `githubCredentialId` (unchanged, **required**), exactly like Codex.
+Frontend adds the `opencode` type to credential dialog/panel/config unions.
 
 ## 3. Node fields
 
@@ -42,7 +40,7 @@ Mirror the Codex node (minus resume-specific fields):
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `credentialId` | — | opencode credential (optional) |
+| `credentialId` | — | opencode credential (required) |
 | `githubCredentialId` | — | github credential (required) |
 | `repositoryUrl` | — | expression-capable, required |
 | `baseBranch` | `main` | expression-capable |
@@ -81,11 +79,9 @@ Flow (`OpenCodeRunnerService`):
 1. Host clone of the repo into `HEYM_OPENCODE_WORKSPACE_DIR` (shared workspace helper — see §6),
    excluding runner scaffolding from git.
 2. Write an isolated OpenCode home into a per-run dir mounted into the container:
-   - `opencode.json` → `provider.opencode.options.baseURL` = the Go gateway URL, optional inline
-     `apiKey` (only when the credential supplies one), `permission.edit/bash = "allow"`, and the
-     default model.
-   - `auth.json` → `{"opencode": {"type": "api", "key": "<key>"}}` **only when an api_key is present**;
-     omitted entirely for keyless runs.
+   - `opencode.json` → `provider.opencode.options.baseURL` = the Go gateway URL, inline `apiKey` from
+     the credential, `permission.edit/bash = "allow"`, and the default model.
+   - `auth.json` → `{"opencode": {"type": "api", "key": "<key>"}}`.
 3. Host runs the optional `setupCommand` (bounded, host-side, not in container).
 4. Hardened `docker run --rm` executing `opencode run --format json --dir <ws> --model <id> [--variant …] --agent build <prompt>`:
    - `--read-only` root; the workspace bind is the only writable mount; `--tmpfs /tmp`;
@@ -122,8 +118,8 @@ opencode auth/config generation, and JSON-event parsing.
 ## 7. Handler, registry, config
 
 - `backend/app/services/node_execution/nodes/opencode_go_node.py` — mirrors `codex_node.py` minus the
-  `needs_input`/resume branch; reuses `patch_artifact` Drive storage; requires a github credential and
-  accepts an optional opencode credential; resolves expression fields; returns the normalized output.
+  `needs_input`/resume branch; reuses `patch_artifact` Drive storage; validates the required opencode +
+  github credentials; resolves expression fields; returns the normalized output.
 - Register `"opencodeGo": "opencode_go_node"` in `node_execution/registry.py`.
 - New settings (all env-aliased): `HEYM_OPENCODE_CLI_COMMAND` (default `opencode`),
   `HEYM_OPENCODE_WORKSPACE_DIR` (`./data/opencode-workspaces`), `HEYM_OPENCODE_IMAGE`,
