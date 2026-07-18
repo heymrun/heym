@@ -19,13 +19,12 @@ The node also requires a **GitHub** credential for cloning private repositories,
 
 ## Isolation and security
 
-OpenCode has no built-in OS sandbox, so Heym runs `opencode run` inside a **hardened, throwaway Docker container** (fail-closed):
+Execution isolation is chosen by `HEYM_OPENCODE_CLI_COMMAND`, exactly like the Codex node:
 
-- read-only root filesystem, all Linux capabilities dropped, `no-new-privileges`, non-root user, and pid/memory/CPU limits
-- the cloned repository is the only writable bind mount; no Docker socket is mounted
-- network egress is allowed (OpenCode must reach the model gateway), but only the OpenCode API key and repository files are inside the container
+- **Local development (`run.sh`)** leaves it at the default `opencode`, so OpenCode runs as a host subprocess against the cloned workspace — no Docker required, no extra flags.
+- **Docker deployments (`deploy.sh` and the single GHCR image)** set it to `/usr/local/bin/heym-opencode-docker`, a wrapper that runs `opencode run` inside a **hardened, throwaway sibling container** sharing the OpenCode workspace named volume.
 
-If Docker or the runner image is unavailable, the node errors instead of silently running on the host. Operators who accept host execution can set `HEYM_OPENCODE_SANDBOX=subprocess`.
+The hardened runner container drops all Linux capabilities, sets `no-new-privileges`, uses a read-only root with a tmpfs `/tmp`, and applies pid/memory/CPU limits. Network egress is allowed (OpenCode must reach the model gateway). The **GitHub token is never placed inside the container** — all git and GitHub operations run host-side, so only the OpenCode API key and repository files are ever inside.
 
 OpenCode only edits files on disk; Heym owns every git/GitHub action.
 

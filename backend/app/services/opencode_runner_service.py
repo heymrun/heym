@@ -1,9 +1,11 @@
-"""Run the OpenCode Go CLI inside a hardened, throwaway container.
+"""Run the OpenCode Go CLI against a cloned repository.
 
-OpenCode has no built-in OS sandbox (unlike Codex's ``--sandbox``), so the ``opencode run`` step is
-executed inside a hardened sibling container (fail-closed). All git/GitHub work stays host-side and
-reuses the shared ``coding_agent.pr_publish`` helpers; the GitHub token is never placed inside the
-container. Network egress is allowed because OpenCode must reach the model API.
+OpenCode has no built-in OS sandbox (unlike Codex's ``--sandbox``). Isolation is selected by
+``HEYM_OPENCODE_CLI_COMMAND``: local dev (``run.sh``) uses the host ``opencode`` binary directly,
+while Docker deployments point it at ``heym-opencode-docker``, a wrapper that runs OpenCode inside a
+hardened, throwaway sibling container sharing the workspace named volume. Either way, all git/GitHub
+work stays host-side and reuses the shared ``coding_agent.pr_publish`` helpers, so the GitHub token
+is never placed inside the OpenCode process/container.
 """
 
 from __future__ import annotations
@@ -11,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import subprocess
 import uuid
 from dataclasses import dataclass, field
@@ -88,108 +89,27 @@ class OpenCodeRunResult:
 
 
 class OpenCodeRunnerService:
-    """Run OpenCode inside a hardened container; git/publish stays host-side."""
+    """Run the OpenCode CLI against a cloned repo; git/publish stays host-side.
+
+    Execution isolation is chosen by ``HEYM_OPENCODE_CLI_COMMAND`` (like the Codex node):
+
+    * ``run.sh`` / local dev leaves it at the default ``opencode`` — OpenCode runs as a host
+      subprocess against the cloned workspace.
+    * Docker deployments (``deploy.sh`` / the single GHCR image) set it to
+      ``/usr/local/bin/heym-opencode-docker``, a wrapper that runs OpenCode inside a hardened,
+      throwaway sibling container sharing the workspace named volume.
+
+    The runner itself is sandbox-agnostic: it clones the repo, writes the OpenCode config/auth into a
+    per-run home directory on the workspace volume, then execs ``<cli_command> run …``.
+    """
 
     def __init__(
         self,
         cli_command: str | None = None,
         workspace_root: str | None = None,
-        sandbox_mode: str | None = None,
     ) -> None:
         self.cli_command = cli_command or settings.opencode_cli_command
         self.workspace_root = Path(workspace_root or settings.opencode_workspace_dir)
-        self.sandbox_mode = (sandbox_mode or settings.opencode_sandbox or "docker").strip().lower()
-
-    # --- execution mode / docker ---
-    @staticmethod
-    def _docker_available() -> bool:
-        try:
-            result = subprocess.run(
-                ["docker", "version", "--format", "{{.Server.Version}}"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            return result.returncode == 0 and bool(result.stdout.strip())
-        except (OSError, subprocess.SubprocessError):
-            return False
-
-    def _resolve_image(self) -> str | None:
-        override = settings.opencode_image.strip()
-        if override:
-            return override
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            image = result.stdout.strip()
-            if result.returncode == 0 and image:
-                return image
-        except (OSError, subprocess.SubprocessError):
-            pass
-        return None
-
-    def _resolve_execution_mode(self) -> str:
-        if self.sandbox_mode == "subprocess":
-            return "subprocess"
-        if not self._docker_available() or not self._resolve_image():
-            raise ValueError(
-                "OpenCode Go requires a Docker sandbox but Docker or the runner image is "
-                "unavailable. Install/enable Docker, set HEYM_OPENCODE_IMAGE, or set "
-                "HEYM_OPENCODE_SANDBOX=subprocess to run on the host (weaker isolation)."
-            )
-        return "docker"
-
-    def build_docker_command(
-        self, *, image: str, name: str, workspace: str, config_dir: str
-    ) -> list[str]:
-        """Hardened, throwaway ``docker run`` for ``opencode run``; egress allowed for the model API."""
-        memory = settings.opencode_memory
-        return [
-            "docker",
-            "run",
-            "--rm",
-            "-i",
-            "--name",
-            name,
-            "--network",
-            settings.opencode_network,  # egress required for the model API (default "bridge")
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=256m",
-            "--mount",
-            f"type=bind,src={workspace},dst=/workspace",
-            "--mount",
-            f"type=bind,src={config_dir},dst=/oc-home",
-            "--workdir",
-            "/workspace",
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--pids-limit",
-            settings.opencode_pids,
-            "--memory",
-            memory,
-            "--memory-swap",
-            memory,
-            "--cpus",
-            settings.opencode_cpus,
-            "--env",
-            "HOME=/oc-home",
-            "--env",
-            "XDG_CONFIG_HOME=/oc-home/.config",
-            "--env",
-            "XDG_DATA_HOME=/oc-home/.local/share",
-            "--entrypoint",
-            self.cli_command,
-            image,
-        ]
 
     # --- auth / config ---
     def _resolve_model(self, model: str) -> str:
@@ -330,7 +250,6 @@ class OpenCodeRunnerService:
 
     # --- run orchestration ---
     def run_task(self, request: OpenCodeRunRequest) -> OpenCodeRunResult:
-        mode = self._resolve_execution_mode()
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         workspace = (self.workspace_root / str(uuid.uuid4())).resolve()
         home = Path(f"{workspace}.oc-home")
@@ -357,7 +276,7 @@ class OpenCodeRunnerService:
         self._write_opencode_config(
             home, api_key=request.api_key, base_url=request.base_url, model=model
         )
-        stdout = self._exec_opencode(mode, workspace, home, request, model)
+        stdout = self._exec_opencode(workspace, home, request, model)
         result = self.parse_events(stdout)
         result.workspace_path = str(workspace)
         result.branch_name = request.branch_name
@@ -367,43 +286,42 @@ class OpenCodeRunnerService:
             self._publish(workspace, request, result)
         return result
 
+    def build_run_command(self, model: str, request: OpenCodeRunRequest) -> list[str]:
+        """The ``<cli_command> run …`` argv (host binary locally, docker wrapper in deployments)."""
+        prompt = f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
+        cmd = [
+            self.cli_command,
+            "run",
+            "--format",
+            "json",
+            "--model",
+            model,
+            "--agent",
+            "build",
+        ]
+        if request.variant.strip():
+            cmd.extend(["--variant", request.variant.strip()])
+        cmd.append(prompt)
+        return cmd
+
     def _exec_opencode(
         self,
-        mode: str,
         workspace: Path,
         home: Path,
         request: OpenCodeRunRequest,
         model: str,
     ) -> str:
-        prompt = f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
-        run_args = ["run", "--format", "json", "--model", model, "--agent", "build"]
-        if request.variant.strip():
-            run_args.extend(["--variant", request.variant.strip()])
-        run_args.append(prompt)
-        if mode == "subprocess":
-            env = self._safe_env()
-            env["HOME"] = str(home)
-            env["XDG_CONFIG_HOME"] = str(home / ".config")
-            env["XDG_DATA_HOME"] = str(home / ".local" / "share")
-            cmd = [self.cli_command, *run_args]
-            cwd: Path | None = workspace
-        else:
-            image = self._resolve_image()
-            if not image:
-                raise ValueError("OpenCode Go runner image is unavailable")
-            name = f"heym-opencode-{uuid.uuid4().hex}"
-            cmd = (
-                self.build_docker_command(
-                    image=image, name=name, workspace=str(workspace), config_dir=str(home)
-                )
-                + run_args
-            )
-            env = self._safe_env()
-            cwd = None
+        # HOME/XDG point at the per-run OpenCode home on the workspace volume. The docker wrapper
+        # forwards these into the sibling container; locally OpenCode reads them directly.
+        env = self._safe_env()
+        env["HOME"] = str(home)
+        env["XDG_CONFIG_HOME"] = str(home / ".config")
+        env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+        cmd = self.build_run_command(model, request)
         try:
             completed = subprocess.run(
                 cmd,
-                cwd=cwd,
+                cwd=workspace,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
@@ -413,7 +331,7 @@ class OpenCodeRunnerService:
             )
         except FileNotFoundError as exc:
             raise ValueError(
-                "OpenCode CLI or Docker is not installed or not on PATH (install 'opencode')"
+                "OpenCode CLI is not installed or not on PATH (install 'opencode')"
             ) from exc
         except subprocess.TimeoutExpired as exc:
             raise ValueError(

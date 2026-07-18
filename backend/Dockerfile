@@ -56,6 +56,7 @@ ENV PLAYWRIGHT_INSTALL_AT_STARTUP=false
 
 COPY backend/ .
 COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
+COPY docker/heym-opencode-docker /usr/local/bin/heym-opencode-docker
 
 # AGENTS.md for dashboard chat system prompt (Heym platform context)
 COPY AGENTS.md /app/AGENTS.md
@@ -71,7 +72,14 @@ ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
     HEYM_CODEX_NETWORK_ACCESS=true \
     HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces
 
-RUN chmod +x entrypoint.sh /usr/local/bin/heym-codex-docker
+# OpenCode Go node: run the OpenCode CLI in a dedicated hardened sibling runner container that
+# shares the workspace named volume (mirrors the Codex setup).
+ENV HEYM_OPENCODE_CLI_COMMAND=/usr/local/bin/heym-opencode-docker \
+    HEYM_OPENCODE_DOCKER_IMAGE=heym-backend:local \
+    HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME=heym-opencode-workspaces \
+    HEYM_OPENCODE_WORKSPACE_DIR=/app/data/opencode-workspaces
+
+RUN chmod +x entrypoint.sh /usr/local/bin/heym-codex-docker /usr/local/bin/heym-opencode-docker
 
 EXPOSE 10105
 

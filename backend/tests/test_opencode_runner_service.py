@@ -2,45 +2,54 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from app.services.opencode_runner_service import OpenCodeRunnerService
+from app.services.opencode_runner_service import OpenCodeRunnerService, OpenCodeRunRequest
 
 
-class TestOpenCodeDockerCommand(unittest.TestCase):
+def _request(**overrides) -> OpenCodeRunRequest:
+    base = dict(
+        repository_url="https://github.com/acme/app",
+        base_branch="main",
+        task_prompt="fix the tests",
+        branch_name="opencode/run",
+        publish_mode="diff_only",
+        setup_command="",
+        timeout_seconds=60.0,
+        api_key="sk-secret",
+        base_url="",
+        github_config={"api_key": "ghp"},
+        model="opencode/kimi-k3",
+        variant="",
+    )
+    base.update(overrides)
+    return OpenCodeRunRequest(**base)
+
+
+class TestOpenCodeRunCommand(unittest.TestCase):
     def setUp(self):
-        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.svc = OpenCodeRunnerService(cli_command="opencode", workspace_root="/tmp/heym-oc-ws")
 
-    def test_docker_command_is_hardened_with_egress(self):
-        cmd = self.svc.build_docker_command(
-            image="heym-backend:latest",
-            name="heym-oc-abc",
-            workspace="/tmp/heym-oc-ws/run1",
-            config_dir="/tmp/heym-oc-ws/run1.oc-home",
+    def test_run_command_shape(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request())
+        self.assertEqual(cmd[0], "opencode")
+        self.assertEqual(cmd[1], "run")
+        self.assertIn("--format", cmd)
+        self.assertEqual(cmd[cmd.index("--format") + 1], "json")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opencode/kimi-k3")
+        self.assertEqual(cmd[cmd.index("--agent") + 1], "build")
+        self.assertNotIn("--variant", cmd)
+        self.assertIn("Task:", cmd[-1])
+
+    def test_run_command_includes_variant(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(variant="high"))
+        self.assertEqual(cmd[cmd.index("--variant") + 1], "high")
+
+    def test_run_command_uses_wrapper_cli(self):
+        svc = OpenCodeRunnerService(
+            cli_command="/usr/local/bin/heym-opencode-docker", workspace_root="/tmp/x"
         )
-        joined = " ".join(cmd)
-        self.assertIn("--rm", cmd)
-        self.assertIn("--read-only", cmd)
-        self.assertIn("ALL", cmd)  # --cap-drop ALL
-        self.assertIn("no-new-privileges", joined)
-        self.assertIn("--network", cmd)
-        idx = cmd.index("--network")
-        self.assertEqual(cmd[idx + 1], "bridge")  # egress allowed (NOT "none")
-        self.assertTrue(any("dst=/workspace" in a for a in cmd))
-        self.assertNotIn("/var/run/docker.sock", joined)
-
-    def test_sandbox_fail_closed_when_docker_unavailable(self):
-        with (
-            patch.object(self.svc, "_docker_available", return_value=False),
-            patch.object(self.svc, "_resolve_image", return_value=None),
-        ):
-            with self.assertRaises(ValueError) as ctx:
-                self.svc._resolve_execution_mode()
-            self.assertIn("Docker", str(ctx.exception))
-
-    def test_subprocess_mode_opt_in(self):
-        svc = OpenCodeRunnerService(workspace_root="/tmp/x", sandbox_mode="subprocess")
-        self.assertEqual(svc._resolve_execution_mode(), "subprocess")
+        cmd = svc.build_run_command("opencode/kimi-k3", _request())
+        self.assertEqual(cmd[0], "/usr/local/bin/heym-opencode-docker")
 
 
 class TestOpenCodeAuthConfig(unittest.TestCase):
