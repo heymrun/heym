@@ -542,6 +542,12 @@ export function usePropertiesPanelController() {
   const codexBranchNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const codexSetupCommandExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentCodexExpressionFieldIndex = ref(0);
+  const opencodeRepositoryUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const opencodeBaseBranchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const opencodeTaskPromptExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const opencodeBranchNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const opencodeSetupCommandExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const currentOpenCodeExpressionFieldIndex = ref(0);
   const variableValueInputRef = ref<ExpandableFieldRef | null>(null);
   const throwErrorMessageInputRef = ref<ExpandableFieldRef | null>(null);
 
@@ -2229,6 +2235,7 @@ export function usePropertiesPanelController() {
     closeMCPCallExpressionDialogs();
     closeChartOutputExpressionDialogs();
     closeCodexExpressionDialogs();
+    closeOpenCodeExpressionDialogs();
     closeGitHubExpressionDialogs();
     closeSentryExpressionDialogs();
     closeLinearExpressionDialogs();
@@ -2637,6 +2644,25 @@ export function usePropertiesPanelController() {
         const field = codexExpressionFields.value[startIndex];
         if (field && codexExpressionInputRefForKey(field.key)) {
           nextTick(() => openCodexExpressionFieldAtIndex(startIndex));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "opencodeGo") {
+      const startIndex = resolveOpenCodeExpressionStartIndex();
+      currentOpenCodeExpressionFieldIndex.value = startIndex;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        const n = workflowStore.selectedNode;
+        if (!n || n.type !== "opencodeGo") {
+          return;
+        }
+        const field = opencodeExpressionFields.value[startIndex];
+        if (field && opencodeExpressionInputRefForKey(field.key)) {
+          nextTick(() => openOpenCodeExpressionFieldAtIndex(startIndex));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -3359,6 +3385,7 @@ export function usePropertiesPanelController() {
       currentLlmExpressionFieldIndex.value = 0;
       currentAgentExpressionFieldIndex.value = 0;
       currentCodexExpressionFieldIndex.value = 0;
+      currentOpenCodeExpressionFieldIndex.value = 0;
       currentSetMappingIndex.value = 0;
       currentExecuteMappingIndex.value = 0;
       currentGristExpressionFieldIndex.value = 0;
@@ -4056,6 +4083,23 @@ export function usePropertiesPanelController() {
 
   const codexExpressionFieldCount = computed((): number => codexExpressionFields.value.length);
 
+  const opencodeExpressionFields = computed<CodexExpressionField[]>(() => {
+    if (!workflowStore.selectedNode || workflowStore.selectedNode.type !== "opencodeGo") {
+      return [];
+    }
+    return [
+      { key: "repositoryUrl", label: "Repository URL" },
+      { key: "baseBranch", label: "Base branch" },
+      { key: "taskPrompt", label: "Task prompt" },
+      { key: "branchName", label: "Branch name" },
+      { key: "setupCommand", label: "Setup command" },
+    ];
+  });
+
+  const opencodeExpressionFieldCount = computed(
+    (): number => opencodeExpressionFields.value.length,
+  );
+
   const githubExpressionFields = computed(() => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "github") {
@@ -4575,6 +4619,108 @@ export function usePropertiesPanelController() {
 
   function onCodexRegisterExpressionFieldIndex(index: number): void {
     currentCodexExpressionFieldIndex.value = index;
+  }
+
+  function opencodeExpressionFieldIndex(key: CodexExpressionFieldKey): number {
+    const index = opencodeExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : -1;
+  }
+
+  function opencodeExpressionFieldLabel(key: CodexExpressionFieldKey): string {
+    return opencodeExpressionFields.value.find((field) => field.key === key)?.label ?? "";
+  }
+
+  function opencodeExpressionNavBindings(key: CodexExpressionFieldKey): {
+    navigationEnabled: boolean;
+    navigationIndex: number;
+    navigationTotal: number;
+    dialogNodeLabel: string;
+    dialogKeyLabel: string;
+  } {
+    const index = opencodeExpressionFieldIndex(key);
+    return {
+      navigationEnabled: opencodeExpressionFieldCount.value > 1 && index >= 0,
+      navigationIndex: index >= 0 ? index : 0,
+      navigationTotal: opencodeExpressionFieldCount.value,
+      dialogNodeLabel: selectedNodeEvaluateDialogLabel.value,
+      dialogKeyLabel: opencodeExpressionFieldLabel(key),
+    };
+  }
+
+  function opencodeExpressionInputRefForKey(
+    key: CodexExpressionFieldKey,
+  ): ExpandableFieldRef | null {
+    switch (key) {
+      case "repositoryUrl":
+        return opencodeRepositoryUrlExpressionInputRef.value;
+      case "baseBranch":
+        return opencodeBaseBranchExpressionInputRef.value;
+      case "taskPrompt":
+        return opencodeTaskPromptExpressionInputRef.value;
+      case "branchName":
+        return opencodeBranchNameExpressionInputRef.value;
+      case "setupCommand":
+        return opencodeSetupCommandExpressionInputRef.value;
+      default:
+        return null;
+    }
+  }
+
+  function resolveOpenCodeExpressionStartIndex(): number {
+    const focusField = workflowStore.focusField;
+    if (focusField) {
+      const index = opencodeExpressionFieldIndex(focusField as CodexExpressionFieldKey);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return 2;
+  }
+
+  function openOpenCodeExpressionFieldAtIndex(index: number): boolean {
+    const n = selectedNode.value;
+    if (!n || n.type !== "opencodeGo") {
+      return false;
+    }
+    const field = opencodeExpressionFields.value[index];
+    if (!field) {
+      return false;
+    }
+    currentOpenCodeExpressionFieldIndex.value = index;
+    const input = opencodeExpressionInputRefForKey(field.key);
+    if (!input) {
+      return false;
+    }
+    input.openExpandDialog();
+    return true;
+  }
+
+  function closeOpenCodeExpressionDialogs(): void {
+    opencodeRepositoryUrlExpressionInputRef.value?.closeExpandDialog();
+    opencodeBaseBranchExpressionInputRef.value?.closeExpandDialog();
+    opencodeTaskPromptExpressionInputRef.value?.closeExpandDialog();
+    opencodeBranchNameExpressionInputRef.value?.closeExpandDialog();
+    opencodeSetupCommandExpressionInputRef.value?.closeExpandDialog();
+  }
+
+  function handleOpenCodeExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = opencodeExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentOpenCodeExpressionFieldIndex.value - 1
+        : currentOpenCodeExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeOpenCodeExpressionDialogs();
+    currentOpenCodeExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openOpenCodeExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onOpenCodeRegisterExpressionFieldIndex(index: number): void {
+    currentOpenCodeExpressionFieldIndex.value = index;
   }
 
   function githubExpressionFieldIndex(key: GitHubExpressionFieldKey): number {
@@ -8543,6 +8689,11 @@ export function usePropertiesPanelController() {
     codexTaskPromptExpressionInputRef,
     codexBranchNameExpressionInputRef,
     codexSetupCommandExpressionInputRef,
+    opencodeRepositoryUrlExpressionInputRef,
+    opencodeBaseBranchExpressionInputRef,
+    opencodeTaskPromptExpressionInputRef,
+    opencodeBranchNameExpressionInputRef,
+    opencodeSetupCommandExpressionInputRef,
     variableValueInputRef,
     throwErrorMessageInputRef,
     loadingModels,
@@ -8792,6 +8943,9 @@ export function usePropertiesPanelController() {
     codexExpressionNavBindings,
     handleCodexExpressionFieldNavigate,
     onCodexRegisterExpressionFieldIndex,
+    opencodeExpressionNavBindings,
+    handleOpenCodeExpressionFieldNavigate,
+    onOpenCodeRegisterExpressionFieldIndex,
     setAgentMCPEnvInputRef,
     agentMCPEnvExpressionIndex,
     handleMCPCallExpressionFieldNavigate,

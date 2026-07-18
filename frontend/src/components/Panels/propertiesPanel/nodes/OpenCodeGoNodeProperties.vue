@@ -21,6 +21,14 @@ const {
   opencodeGithubCredentialOptions,
   codexPublishModeOptions,
   codexPublishModeDescriptions,
+  opencodeRepositoryUrlExpressionInputRef,
+  opencodeBaseBranchExpressionInputRef,
+  opencodeTaskPromptExpressionInputRef,
+  opencodeBranchNameExpressionInputRef,
+  opencodeSetupCommandExpressionInputRef,
+  opencodeExpressionNavBindings,
+  handleOpenCodeExpressionFieldNavigate,
+  onOpenCodeRegisterExpressionFieldIndex,
   updateNodeData,
 } = usePropertiesPanelContext();
 
@@ -81,6 +89,7 @@ onMounted(async () => {
     <div class="space-y-2">
       <Label>Repository URL <span class="text-destructive">*</span></Label>
       <ExpressionInput
+        ref="opencodeRepositoryUrlExpressionInputRef"
         :model-value="selectedNode.data.repositoryUrl || ''"
         placeholder="https://github.com/org/repo"
         single-line
@@ -89,6 +98,9 @@ onMounted(async () => {
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="repositoryUrl"
+        v-bind="opencodeExpressionNavBindings('repositoryUrl')"
+        @navigate="handleOpenCodeExpressionFieldNavigate"
+        @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('repositoryUrl', $event)"
       />
     </div>
@@ -97,6 +109,7 @@ onMounted(async () => {
       <div class="space-y-2">
         <Label>Base Branch</Label>
         <ExpressionInput
+          ref="opencodeBaseBranchExpressionInputRef"
           :model-value="selectedNode.data.baseBranch || 'main'"
           placeholder="main"
           single-line
@@ -105,6 +118,9 @@ onMounted(async () => {
           :edges="workflowStore.edges"
           :current-node-id="selectedNode.id"
           field-key="baseBranch"
+          v-bind="opencodeExpressionNavBindings('baseBranch')"
+          @navigate="handleOpenCodeExpressionFieldNavigate"
+          @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('baseBranch', $event)"
         />
       </div>
@@ -168,6 +184,7 @@ onMounted(async () => {
     <div class="space-y-2">
       <Label>Task Prompt <span class="text-destructive">*</span></Label>
       <ExpressionInput
+        ref="opencodeTaskPromptExpressionInputRef"
         :model-value="selectedNode.data.taskPrompt || ''"
         placeholder="Fix the failing tests and summarize the change."
         :rows="6"
@@ -176,6 +193,9 @@ onMounted(async () => {
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="taskPrompt"
+        v-bind="opencodeExpressionNavBindings('taskPrompt')"
+        @navigate="handleOpenCodeExpressionFieldNavigate"
+        @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('taskPrompt', $event)"
       />
     </div>
@@ -185,6 +205,7 @@ onMounted(async () => {
         <div class="space-y-2">
           <Label>Branch Name</Label>
           <ExpressionInput
+            ref="opencodeBranchNameExpressionInputRef"
             :model-value="selectedNode.data.branchName || 'opencode/$executionId'"
             placeholder="opencode/$executionId"
             single-line
@@ -193,6 +214,9 @@ onMounted(async () => {
             :edges="workflowStore.edges"
             :current-node-id="selectedNode.id"
             field-key="branchName"
+            v-bind="opencodeExpressionNavBindings('branchName')"
+            @navigate="handleOpenCodeExpressionFieldNavigate"
+            @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
             @update:model-value="updateNodeData('branchName', $event)"
           />
         </div>
@@ -214,6 +238,7 @@ onMounted(async () => {
     <div class="space-y-2">
       <Label>Setup Command</Label>
       <ExpressionInput
+        ref="opencodeSetupCommandExpressionInputRef"
         :model-value="selectedNode.data.setupCommand || ''"
         placeholder="npm install && npm test"
         :rows="2"
@@ -222,6 +247,9 @@ onMounted(async () => {
         :edges="workflowStore.edges"
         :current-node-id="selectedNode.id"
         field-key="setupCommand"
+        v-bind="opencodeExpressionNavBindings('setupCommand')"
+        @navigate="handleOpenCodeExpressionFieldNavigate"
+        @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData('setupCommand', $event)"
       />
     </div>
