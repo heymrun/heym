@@ -85,6 +85,34 @@ class Settings(BaseSettings):
     codex_git_author_email: str = Field(
         default="support@heym.run", validation_alias="HEYM_CODEX_GIT_AUTHOR_EMAIL"
     )
+    # OpenCode Go coding-agent node. OpenCode has no built-in OS sandbox, so it runs inside a
+    # hardened, throwaway sibling container (fail-closed). Git is host-side; only `opencode run`
+    # is containerized. Network egress is required for the model API, so unlike the python-tool
+    # sandbox this allows egress — the GitHub token is never placed in the container.
+    opencode_cli_command: str = Field(
+        default="opencode", validation_alias="HEYM_OPENCODE_CLI_COMMAND"
+    )
+    opencode_workspace_dir: str = Field(
+        default="./data/opencode-workspaces", validation_alias="HEYM_OPENCODE_WORKSPACE_DIR"
+    )
+    # "docker" (default, fail-closed): require a hardened container. "subprocess": run opencode on
+    # the host (operator opt-in; weaker isolation).
+    opencode_sandbox: str = Field(default="docker", validation_alias="HEYM_OPENCODE_SANDBOX")
+    # Empty resolves to the backend's own running image (like the python tool sandbox).
+    opencode_image: str = Field(default="", validation_alias="HEYM_OPENCODE_IMAGE")
+    opencode_network: str = Field(default="bridge", validation_alias="HEYM_OPENCODE_NETWORK")
+    opencode_memory: str = Field(default="2g", validation_alias="HEYM_OPENCODE_MEMORY")
+    opencode_cpus: str = Field(default="2", validation_alias="HEYM_OPENCODE_CPUS")
+    opencode_pids: str = Field(default="512", validation_alias="HEYM_OPENCODE_PIDS")
+    opencode_zen_base_url: str = Field(
+        default="https://opencode.ai/zen/go/v1", validation_alias="HEYM_OPENCODE_ZEN_BASE_URL"
+    )
+    opencode_git_author_name: str = Field(
+        default="Heym OpenCode", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_NAME"
+    )
+    opencode_git_author_email: str = Field(
+        default="support@heym.run", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_EMAIL"
+    )
     # ChatGPT-subscription OAuth (PKCE) for the Codex node. Defaults mirror the public OpenAI
     # Codex CLI client; override via env if OpenAI changes the client id or endpoints.
     codex_oauth_client_id: str = Field(
