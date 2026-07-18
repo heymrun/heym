@@ -179,6 +179,7 @@ class CronScheduler:
                     actor_user_id=workflow.owner_id,
                     public_base_url=public_base_url,
                     cancel_event=cancel_event,
+                    execution_id=str(execution_id),
                 )
             finally:
                 clear_execution(execution_id)
@@ -195,6 +196,7 @@ class CronScheduler:
                     credentials_owner_id=workflow.owner_id,
                     trace_user_id=workflow.owner_id,
                     public_base_url=public_base_url,
+                    history_entry_id=execution_id,
                 )
                 await upsert_workflow_analytics_snapshot(
                     db,
@@ -213,6 +215,7 @@ class CronScheduler:
                 return
 
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=workflow.id,
                 inputs=enriched_inputs,
                 outputs=_to_json_compatible(result.outputs),

@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
 from app.db.models import (
+    ActiveWorkflowExecution,
     Credential,
     CredentialType,
     DashboardWidget,
@@ -76,6 +77,7 @@ from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
 )
 from app.services.execution_cancellation import (
+    get_active_execution_progress,
     list_active_executions,
     list_persisted_active_executions_for_user,
     register_execution,
@@ -989,6 +991,8 @@ async def list_active_workflow_executions(
             workflow_id=str(record.workflow_id),
             workflow_name=record.workflow_name,
             started_at=record.started_at,
+            running_node_ids=record.running_node_ids,
+            node_results=record.node_results,
         )
         for record in persisted
     }
@@ -1017,17 +1021,157 @@ async def list_active_workflow_executions(
         for handle in local_handles:
             if handle.workflow_id not in accessible:
                 continue
+            progress = get_active_execution_progress(
+                handle.execution_id,
+                workflow_id=handle.workflow_id,
+            )
+            if progress is None:
+                continue
+            running_node_ids, node_results = progress
             items_by_execution_id[handle.execution_id] = ActiveExecutionItem(
                 execution_id=str(handle.execution_id),
                 workflow_id=str(handle.workflow_id),
                 workflow_name=accessible[handle.workflow_id],
                 started_at=handle.started_at,
+                running_node_ids=running_node_ids,
+                node_results=node_results,
             )
 
     return sorted(
         items_by_execution_id.values(),
         key=lambda item: item.started_at,
         reverse=True,
+    )
+
+
+@router.get("/{workflow_id}/executions/{execution_id}/stream")
+async def stream_active_workflow_execution(
+    workflow_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Stream a running execution into any authorized workflow canvas."""
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        )
+
+    async def event_generator():
+        emitted_result_count = 0
+        emitted_running_node_ids: set[str] = set()
+        missing_ticks = 0
+
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "execution_started",
+                    "execution_id": str(execution_id),
+                }
+            )
+            + "\n\n"
+        )
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            running_node_ids: list[str] = []
+            node_results: list[dict] = []
+            active_found = False
+
+            local_progress = get_active_execution_progress(
+                execution_id,
+                workflow_id=workflow_id,
+            )
+            if local_progress is not None:
+                active_found = True
+                running_node_ids, node_results = local_progress
+            else:
+                async with async_session_maker() as stream_db:
+                    active_result = await stream_db.execute(
+                        select(ActiveWorkflowExecution).where(
+                            ActiveWorkflowExecution.execution_id == execution_id,
+                            ActiveWorkflowExecution.workflow_id == workflow_id,
+                            ActiveWorkflowExecution.cancel_requested_at.is_(None),
+                        )
+                    )
+                    active = active_result.scalar_one_or_none()
+                if active is not None:
+                    active_found = True
+                    running_node_ids = list(active.running_node_ids or [])
+                    node_results = list(active.node_results or [])
+
+            if active_found:
+                missing_ticks = 0
+                for node_result in node_results[emitted_result_count:]:
+                    yield f"data: {json.dumps({'type': 'node_complete', **node_result})}\n\n"
+                emitted_result_count = max(emitted_result_count, len(node_results))
+
+                current_running_node_ids = set(running_node_ids)
+                for node_id in sorted(current_running_node_ids - emitted_running_node_ids):
+                    yield (
+                        "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
+                    )
+                emitted_running_node_ids = current_running_node_ids
+                await asyncio.sleep(0.25)
+                continue
+
+            async with async_session_maker() as stream_db:
+                history_result = await stream_db.execute(
+                    select(ExecutionHistory).where(
+                        ExecutionHistory.id == execution_id,
+                        ExecutionHistory.workflow_id == workflow_id,
+                    )
+                )
+                history = history_result.scalar_one_or_none()
+
+            if history is not None:
+                final_node_results = list(history.node_results or [])
+                final_event = {
+                    "type": "execution_complete",
+                    "workflow_id": str(workflow_id),
+                    "status": history.status,
+                    "outputs": history.outputs or {},
+                    "execution_time_ms": history.execution_time_ms,
+                    "node_results": final_node_results,
+                    "execution_history_id": str(history.id),
+                    "highlight": build_highlight_payload(
+                        final_node_results,
+                        workflow.nodes or [],
+                        history.inputs or {},
+                    ),
+                }
+                yield f"data: {json.dumps(final_event)}\n\n"
+                break
+
+            missing_ticks += 1
+            if missing_ticks >= 40:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "error",
+                            "message": "Execution is no longer active",
+                        }
+                    )
+                    + "\n\n"
+                )
+                break
+            await asyncio.sleep(0.25)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -2479,6 +2623,7 @@ async def execute_workflow_endpoint(
                 credentials_owner_id=credentials_owner_id,
                 trace_user_id=trace_user_id,
                 public_base_url=build_public_base_url(request),
+                history_entry_id=execution_id,
             )
         else:
             history_entry, _ = await persist_pending_hitl_execution(
@@ -2490,6 +2635,7 @@ async def execute_workflow_endpoint(
                 credentials_owner_id=credentials_owner_id,
                 trace_user_id=trace_user_id,
                 public_base_url=build_public_base_url(request),
+                history_entry_id=execution_id,
             )
         await upsert_workflow_analytics_snapshot(
             db,
@@ -3198,6 +3344,7 @@ async def execute_workflow_stream(
                                 credentials_owner_id=credentials_owner_id,
                                 trace_user_id=trace_user_id,
                                 public_base_url=public_base_url,
+                                history_entry_id=execution_id,
                             )
                         else:
                             history_entry, _ = await persist_pending_hitl_execution(
@@ -3209,6 +3356,7 @@ async def execute_workflow_stream(
                                 credentials_owner_id=credentials_owner_id,
                                 trace_user_id=trace_user_id,
                                 public_base_url=public_base_url,
+                                history_entry_id=execution_id,
                             )
                         await upsert_workflow_analytics_snapshot(
                             db,
@@ -3272,6 +3420,7 @@ async def execute_workflow_stream(
                                         credentials_owner_id=credentials_owner_id,
                                         trace_user_id=trace_user_id,
                                         public_base_url=public_base_url,
+                                        history_entry_id=execution_id,
                                     )
                                 else:
                                     history_entry, _ = await persist_pending_hitl_execution(
@@ -3283,6 +3432,7 @@ async def execute_workflow_stream(
                                         credentials_owner_id=credentials_owner_id,
                                         trace_user_id=trace_user_id,
                                         public_base_url=public_base_url,
+                                        history_entry_id=execution_id,
                                     )
                                 await upsert_workflow_analytics_snapshot(
                                     db,

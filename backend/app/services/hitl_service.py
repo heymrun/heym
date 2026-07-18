@@ -207,6 +207,7 @@ async def persist_pending_hitl_execution(
     trace_user_id: uuid.UUID | None,
     public_base_url: str,
     history_entry: ExecutionHistory | None = None,
+    history_entry_id: uuid.UUID | None = None,
 ) -> tuple[ExecutionHistory, HITLRequest]:
     if execution_result.status != "pending":
         raise ValueError("persist_pending_hitl_execution requires a pending execution result")
@@ -234,6 +235,7 @@ async def persist_pending_hitl_execution(
 
     if history_entry is None:
         history_entry = ExecutionHistory(
+            **({"id": history_entry_id} if history_entry_id is not None else {}),
             workflow_id=workflow.id,
             inputs=enriched_inputs,
             outputs={},

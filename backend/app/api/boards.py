@@ -668,6 +668,7 @@ async def get_card_detail(
                 chain_length=r.chain_length,
                 status=r.status,
                 execution_history_id=r.execution_history_id,
+                active_execution_id=r.active_execution_id,
                 output=r.output or {},
                 error=r.error,
                 started_at=r.started_at,

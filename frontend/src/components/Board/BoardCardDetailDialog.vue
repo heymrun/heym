@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
@@ -9,6 +10,7 @@ import {
   Loader2,
   Paperclip,
   Play,
+  Radio,
   Trash2,
   User as UserIcon,
 } from "lucide-vue-next";
@@ -25,6 +27,7 @@ const props = defineProps<{ open: boolean; cardId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const boardStore = useBoardStore();
+const router = useRouter();
 const detail = ref<CardDetail | null>(null);
 const loading = ref(false);
 const comment = ref("");
@@ -247,6 +250,18 @@ async function copyRun(run: CardRun): Promise<void> {
   } catch {
     // clipboard unavailable; ignore
   }
+}
+
+function openLiveRun(run: CardRun): void {
+  if (!run.workflow_id || !run.active_execution_id) return;
+  void router.push({
+    name: "editor",
+    params: {
+      id: run.workflow_id,
+      executionId: run.active_execution_id,
+    },
+  });
+  emit("close");
 }
 </script>
 
@@ -507,6 +522,16 @@ async function copyRun(run: CardRun): Promise<void> {
                 step {{ run.chain_position + 1 }}/{{ run.chain_length }}
               </span>
               <div class="ml-auto flex items-center gap-1.5">
+                <button
+                  v-if="run.status === 'running' && run.active_execution_id"
+                  class="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-blue-500 hover:bg-blue-500/20"
+                  :data-testid="`run-open-live-${run.id}`"
+                  :aria-label="`Open ${run.workflow_name} live canvas`"
+                  @click.stop="openLiveRun(run)"
+                >
+                  <Radio class="h-3 w-3" />
+                  Open live
+                </button>
                 <button
                   class="hidden items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground group-hover:inline-flex"
                   :data-testid="`run-copy-${run.id}`"

@@ -15,7 +15,16 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["101_add_user_ai_defaults"])
+        self.assertEqual(self.script.get_heads(), ["102_add_live_execution_snapshots"])
+
+    def test_live_execution_snapshot_revision_follows_user_ai_defaults(self) -> None:
+        live_execution_revision = self.script.get_revision("102_add_live_execution_snapshots")
+
+        self.assertIsNotNone(live_execution_revision)
+        self.assertEqual(
+            live_execution_revision.down_revision,
+            "101_add_user_ai_defaults",
+        )
 
     def test_opencode_revision_follows_board_shares(self) -> None:
         opencode_revision = self.script.get_revision("100_add_opencode_credential_type")

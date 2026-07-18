@@ -42,6 +42,10 @@ from app.services.execution_cancellation import (
     clear_execution as _clear_sub_execution,
 )
 from app.services.execution_cancellation import (
+    record_execution_node_completed,
+    record_execution_node_started,
+)
+from app.services.execution_cancellation import (
     register_execution as _register_sub_execution,
 )
 from app.services.expression_evaluator import (
@@ -3200,6 +3204,7 @@ class WorkflowExecutor:
         _ensure_gc_tracking_callback_registered()
         gc_tracker = _NodeGcPauseTracker(node_started_ms=time.perf_counter() * 1000)
         _push_gc_tracker(gc_tracker)
+        record_execution_node_started(self.execution_id, node_id)
         try:
             result = self.execute_node(node_id, inputs, on_retry=on_retry)
         finally:
@@ -3213,6 +3218,13 @@ class WorkflowExecutor:
                     self._handle_error_branch_routing(node_id)
                 else:
                     self._handle_success_branch_routing(node_id)
+        live_result = _serialize_node_result(result)
+        if self.credentials_context:
+            live_result["output"] = mask_sensitive_output(
+                result.output,
+                self.credentials_context,
+            )
+        record_execution_node_completed(self.execution_id, node_id, live_result)
         return result
 
     def _handle_success_branch_routing(self, node_id: str) -> None:
@@ -3972,6 +3984,7 @@ class WorkflowExecutor:
             sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
             cancel_event=sub_cancel_event,
             invoked_by_agent=True,
+            execution_id=str(_sub_execution_id),
         )
         enriched_inputs = {
             "headers": {},

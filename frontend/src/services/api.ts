@@ -663,6 +663,94 @@ export const workflowApi = {
         onError(error instanceof Error ? error : new Error("History stream failed"));
       });
   },
+  streamActiveExecution: (
+    workflowId: string,
+    executionId: string,
+    onExecutionStarted: (data: { execution_id: string }) => void,
+    onNodeStart: (nodeId: string) => void,
+    onNodeComplete: (data: {
+      node_id: string;
+      node_label?: string;
+      node_type?: string;
+      status: string;
+      output: Record<string, unknown>;
+      execution_time_ms: number;
+      error?: string;
+      metadata?: Record<string, unknown>;
+    }) => void,
+    onComplete: (result: ExecutionResult) => void,
+    onError: (error: Error) => void,
+    onDisconnected: () => void,
+    signal?: AbortSignal,
+  ): void => {
+    const API_URL = import.meta.env.VITE_API_URL || "";
+
+    fetch(
+      `${API_URL}/api/workflows/${workflowId}/executions/${executionId}/stream`,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { ...heymClientHeaders },
+        signal,
+      },
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completionReceived = false;
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const messages = buffer.split("\n\n");
+          buffer = messages.pop() || "";
+
+          for (const message of messages) {
+            if (!message.startsWith("data: ")) continue;
+            const data = JSON.parse(message.slice(6));
+            if (data.type === "execution_started") {
+              onExecutionStarted({ execution_id: data.execution_id });
+            } else if (data.type === "node_start") {
+              onNodeStart(data.node_id);
+            } else if (data.type === "node_complete") {
+              onNodeComplete(data);
+            } else if (data.type === "execution_complete") {
+              completionReceived = true;
+              onComplete({
+                workflow_id: data.workflow_id,
+                status: data.status,
+                outputs: data.outputs,
+                execution_time_ms: data.execution_time_ms,
+                node_results: data.node_results,
+                execution_history_id: data.execution_history_id,
+                highlight: data.highlight ?? null,
+              });
+              return;
+            } else if (data.type === "error") {
+              throw new Error(data.message || "Live execution stream failed");
+            }
+          }
+        }
+
+        if (!completionReceived && !signal?.aborted) {
+          throw new Error("Live execution stream disconnected");
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          onDisconnected();
+          return;
+        }
+        onError(error instanceof Error ? error : new Error("Live execution stream failed"));
+      });
+  },
   getAllHistory: async (
     limit = 50,
     offset = 0,

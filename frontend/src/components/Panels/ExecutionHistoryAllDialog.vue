@@ -19,6 +19,7 @@ import {
   Search,
   X,
   RefreshCw,
+  Radio,
 } from "lucide-vue-next";
 
 import type {
@@ -418,6 +419,14 @@ async function cancelActiveExecution(item: ActiveExecutionItem): Promise<void> {
     }
     await loadHistory();
   }
+}
+
+function openActiveExecution(item: ActiveExecutionItem): void {
+  void router.push({
+    name: "editor",
+    params: { id: item.workflow_id, executionId: item.execution_id },
+  });
+  emit("close");
 }
 
 function toggleSearch(): void {
@@ -892,19 +901,31 @@ function bringToCanvas(): void {
                 {{ active.workflow_name }} · In progress...
               </div>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              class="h-6 px-2 shrink-0 text-xs"
-              :disabled="isCancellingId === active.execution_id"
-              @click="cancelActiveExecution(active)"
-            >
-              <Loader2
-                v-if="isCancellingId === active.execution_id"
-                class="w-3 h-3 animate-spin mr-1"
-              />
-              Cancel
-            </Button>
+            <div class="flex shrink-0 items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-6 px-2 text-xs"
+                :data-testid="`open-live-execution-${active.execution_id}`"
+                @click="openActiveExecution(active)"
+              >
+                <Radio class="mr-1 h-3 w-3" />
+                Open live canvas
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                class="h-6 px-2 text-xs"
+                :disabled="isCancellingId === active.execution_id"
+                @click="cancelActiveExecution(active)"
+              >
+                <Loader2
+                  v-if="isCancellingId === active.execution_id"
+                  class="w-3 h-3 animate-spin mr-1"
+                />
+                Cancel
+              </Button>
+            </div>
           </div>
           <div
             v-if="totalCount > 0 || executionHistory.length > 0"

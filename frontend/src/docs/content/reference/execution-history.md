@@ -1,6 +1,8 @@
 # Execution History
 
-Execution history records past workflow runs: inputs, outputs, node results, status, and trigger source. Use it to inspect past runs, debug failures, or re-run with the same inputs via **Bring to Canvas**.
+Execution history records workflow runs: inputs, outputs, node results, status, and trigger
+source. Use it to watch an active production run, inspect past runs, debug failures, or re-run
+with the same inputs via **Bring to Canvas**.
 
 ## Overview
 
@@ -88,10 +90,20 @@ Dashboard widget cards that ran a workflow show a ✦ **Execution highlights** b
 Both history dialogs show **currently running executions** at the top of the list, before past runs.
 
 - A spinning indicator and **Running** label appear with the start time
+- Click **Open live** to attach the editor to that exact run without restarting it
+- The canvas first restores nodes that have already completed, then receives
+  `node_start`, `node_complete`, and final execution events over SSE
+- The current node pulses on the canvas, downstream nodes keep their pending animation, and
+  the Debug panel adds each result as it arrives—just like a run started from the editor
 - Click **Cancel** to stop the execution immediately
 - Cancelling from any dialog (Editor or Dashboard) also closes the active SSE stream in any open canvas tab for that workflow, so the editor state resets cleanly
 - After cancellation, the running entry disappears on the next refresh; press **Refresh** to update the list manually
 - If you cancel a run that has already finished, the request is a no-op
+
+The live URL is `/workflows/{workflowId}/{executionId}`. The observer is read-only: leaving
+the editor only disconnects that browser tab and never stops the workflow. Active snapshots
+are shared through PostgreSQL, so opening a run still works when the trigger and the editor
+request land on different backend workers.
 
 ## Crash Recovery
 

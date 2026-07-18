@@ -2718,6 +2718,7 @@ function renderContent(content: string): string {
         <div
           v-for="result in displayResults"
           :key="result.displayKey"
+          :data-testid="`debug-node-result-${result.node_id}`"
           class="flex items-start gap-3 p-2 rounded-md bg-muted/30"
         >
           <component

@@ -509,9 +509,11 @@ async def _dispatch_named_server_jsonrpc(
                 trace_user_id=user.id,
                 actor_user_id=user.id,
                 cancel_event=cancel_event,
+                execution_id=str(execution_id),
             )
 
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=target_workflow.id,
                 inputs=enriched_inputs,
                 outputs=execution_result.outputs,

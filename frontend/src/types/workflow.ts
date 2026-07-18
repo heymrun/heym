@@ -1028,6 +1028,8 @@ export interface ActiveExecutionItem {
   workflow_id: string;
   workflow_name: string;
   started_at: string;
+  running_node_ids: string[];
+  node_results: NodeResult[];
 }
 
 export interface ServerExecutionHistory {

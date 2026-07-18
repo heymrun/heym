@@ -459,6 +459,8 @@ class ActiveExecutionItem(BaseModel):
     workflow_id: str
     workflow_name: str
     started_at: datetime
+    running_node_ids: list[str] = Field(default_factory=list)
+    node_results: list[dict] = Field(default_factory=list)
 
 
 class LLMTraceListItem(BaseModel):

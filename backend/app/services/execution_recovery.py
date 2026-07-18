@@ -176,6 +176,7 @@ class ExecutionRecoveryService:
                 trace_user_id=actor_user_id,
                 actor_user_id=actor_user_id,
                 cancel_event=cancel_event,
+                execution_id=str(orphan.execution_id),
             )
         finally:
             clear_execution(orphan.execution_id)
@@ -183,6 +184,7 @@ class ExecutionRecoveryService:
         async with async_session_maker() as session:
             session.add(
                 ExecutionHistory(
+                    id=orphan.execution_id,
                     workflow_id=workflow.id,
                     inputs=orphan.inputs,
                     outputs=result.outputs,

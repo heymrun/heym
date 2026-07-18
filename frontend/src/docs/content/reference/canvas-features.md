@@ -34,7 +34,10 @@ Expression completion in the editor uses pinned data when available to suggest f
 
 ## Execution Logs
 
-The **Debug panel** (bottom drawer) shows real-time execution logs during workflow runs.
+The **Debug panel** (bottom drawer) shows real-time execution logs during workflow runs. You
+can also open a running production execution from either History dialog or a Board card. The
+editor attaches to that run's SSE stream, restores completed node results, and continues to
+show node animations and logs as new nodes start and finish.
 
 ### What It Shows
 

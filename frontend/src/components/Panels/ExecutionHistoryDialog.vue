@@ -17,6 +17,7 @@ import {
   Check,
   ExternalLink,
   RefreshCw,
+  Radio,
   Search,
   X,
 } from "lucide-vue-next";
@@ -266,6 +267,14 @@ async function cancelActiveExecution(item: ActiveExecutionItem): Promise<void> {
     }
     await refreshHistory();
   }
+}
+
+function openActiveExecution(item: ActiveExecutionItem): void {
+  void router.push({
+    name: "editor",
+    params: { id: item.workflow_id, executionId: item.execution_id },
+  });
+  emit("close");
 }
 
 async function refreshHistory(): Promise<void> {
@@ -737,19 +746,31 @@ function bringToCanvas(): void {
                 {{ formatTime(active.started_at) }}
               </div>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              class="h-5 px-1.5 shrink-0 text-[10px]"
-              :disabled="isCancellingId === active.execution_id"
-              @click="cancelActiveExecution(active)"
-            >
-              <Loader2
-                v-if="isCancellingId === active.execution_id"
-                class="w-3 h-3 animate-spin mr-0.5"
-              />
-              Cancel
-            </Button>
+            <div class="flex shrink-0 items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-5 px-1.5 text-[10px]"
+                :data-testid="`open-live-execution-${active.execution_id}`"
+                @click="openActiveExecution(active)"
+              >
+                <Radio class="mr-0.5 h-3 w-3" />
+                Open live
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                class="h-5 px-1.5 text-[10px]"
+                :disabled="isCancellingId === active.execution_id"
+                @click="cancelActiveExecution(active)"
+              >
+                <Loader2
+                  v-if="isCancellingId === active.execution_id"
+                  class="w-3 h-3 animate-spin mr-0.5"
+                />
+                Cancel
+              </Button>
+            </div>
           </div>
           <div
             v-if="executionHistoryTotal > 0"

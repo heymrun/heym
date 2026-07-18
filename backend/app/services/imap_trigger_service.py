@@ -448,11 +448,13 @@ class ImapTriggerManager:
                     trace_user_id=fresh_workflow.owner_id,
                     actor_user_id=fresh_workflow.owner_id,
                     cancel_event=cancel_event,
+                    execution_id=str(execution_id),
                 )
             finally:
                 clear_execution(execution_id)
 
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=fresh_workflow.id,
                 inputs=inputs,
                 outputs=result.outputs,

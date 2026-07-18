@@ -134,6 +134,7 @@ class CardRunResponse(BaseModel):
     chain_length: int
     status: str
     execution_history_id: uuid.UUID | None = None
+    active_execution_id: uuid.UUID | None = None
     output: dict = Field(default_factory=dict)
     error: str | None = None
     started_at: datetime

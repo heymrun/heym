@@ -176,6 +176,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **MCP Support** — Connect Agent nodes to any MCP server as a client; expose your workflows as an MCP server for Claude, Cursor, and other clients
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
+- **Live Execution Canvas** — Open any running production execution from History or a Kanban card and watch the existing run continue node by node on the animated canvas with incremental Debug logs
 - **Data Tables** — Manage structured data directly in the dashboard and reference it from workflows
 - **Workflow Analyzer** — Run-aware AI feedback that generates a shared Markdown report with improvement areas, purpose, and step-by-step behavior
 - **Workflow-Powered Dashboards** — Build custom chart dashboards where every widget is backed by its own hidden Heym workflow
@@ -233,6 +234,7 @@ Heym Built for developers who want control and enterprise teams that need a trus
 | WebSocket read / write | ✅ | limited¹² | ❌¹³ | ❌¹⁴ |
 | Natural language workflow builder | ✅ | limited³ | ✅ | ✅ |
 | Workflow Analyzer | ✅ | ❌¹⁸ | ❌¹⁸ | ❌¹⁸ |
+| Open an in-flight run on the live canvas | ✅ | limited²⁰ | limited²⁰ | ❌²⁰ |
 | Workflow-powered dashboards | ✅ | partial¹⁹ | partial¹⁹ | partial¹⁹ |
 | MCP (Model Context Protocol) | ✅ | ✅ | ✅ | ✅ |
 | Skills system for agents | ✅ | ❌ | ❌ | ❌ |
@@ -269,8 +271,18 @@ Heym Built for developers who want control and enterprise teams that need a trus
 17. Heym emits native OpenTelemetry spans (one per workflow run plus one per node) over OTLP/HTTP to any compatible backend, with W3C trace-context propagation and no instrumentation code, configured via `HEYM_OTEL_*` env vars and disabled by default. n8n has a documented OpenTelemetry tracing setup for workflow and node executions (blog.n8n.io). Zapier and Make.com do not document OpenTelemetry export of their workflow/scenario executions as of June 2026
 18. Heym Workflow Analyzer runs the workflow when possible, reads the execution result, and generates a shared editable Markdown report covering improvement areas, purpose, and step-by-step behavior. n8n AI Workflow Builder can create/refine/debug workflows, Zapier AI troubleshooting explains errored runs, and Make scenario history/agent reasoning exposes run details, but their public docs do not describe the same shared run-aware workflow analysis document
 19. n8n Insights, Zapier Zap History/Task Usage, and Make Scenario History are monitoring/history surfaces. They do not document custom dashboard widgets backed by arbitrary workflow logic like Heym's Dashboard tab, where each widget can fetch, transform, retrieve, or generate data through its own hidden workflow
+20. [n8n All executions](https://docs.n8n.io/workflows/executions/all-executions/) lists running executions and can load previous execution data into the editor, while [Zapier run statuses](https://help.zapier.com/hc/en-us/articles/20505304170637-Review-run-statuses-in-Zap-workflows) exposes a running editor state. [Make Scenario History](https://help.make.com/scenario-history) documents run details and logs. Their public docs, checked July 18, 2026, do not describe Heym's exact combination: open an arbitrary in-flight production run from History or a Kanban card, restore its current snapshot, and keep receiving node animation and Debug logs on the same canvas.
 
 </details>
+
+### Open any production run live
+
+Runs started by webhooks, schedules, chat, MCP, integrations, or the Agentic Kanban Board do
+not become black boxes. Open a **Running** entry from either History dialog—or from the run list
+inside a Board card—and Heym attaches the editor to that exact execution over SSE. Completed
+nodes are restored immediately; the current and pending nodes keep pulsing; Debug logs and the
+final output arrive incrementally. Leaving the editor disconnects only the observer and never
+cancels the production run.
 
 ---
 

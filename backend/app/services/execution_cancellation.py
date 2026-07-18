@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import copy
 import logging
 import os
 import queue
@@ -9,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +43,8 @@ class ExecutionCancellationHandle:
     trigger_source: str | None = None
     actor_user_id: uuid.UUID | None = None
     recoverable: bool = True
+    running_node_ids: set[str] = field(default_factory=set)
+    node_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,8 @@ class ActiveExecutionRecord:
     workflow_id: uuid.UUID
     workflow_name: str
     started_at: datetime
+    running_node_ids: list[str] = field(default_factory=list)
+    node_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -133,6 +138,54 @@ def list_active_executions() -> list[ExecutionCancellationHandle]:
         return list(_ACTIVE_EXECUTIONS.values())
 
 
+def get_active_execution_progress(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> tuple[list[str], list[dict[str, Any]]] | None:
+    """Return a thread-safe copy of one local execution's live node progress."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        return sorted(handle.running_node_ids), copy.deepcopy(handle.node_results)
+
+
+def record_execution_node_started(execution_id: str, node_id: str) -> None:
+    """Record a node start in the cross-worker live execution snapshot."""
+    try:
+        parsed_execution_id = uuid.UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return
+
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
+        if handle is None:
+            return
+        handle.running_node_ids.add(str(node_id))
+    active_execution_registry.wake_for_progress()
+
+
+def record_execution_node_completed(
+    execution_id: str,
+    node_id: str,
+    node_result: dict[str, Any],
+) -> None:
+    """Record a completed node so observers can stream the same log as the runner."""
+    try:
+        parsed_execution_id = uuid.UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return
+
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
+        if handle is None:
+            return
+        handle.running_node_ids.discard(str(node_id))
+        handle.node_results.append(copy.deepcopy(node_result))
+    active_execution_registry.wake_for_progress()
+
+
 class ActiveExecutionRegistry:
     """Persist local active execution state into Postgres for multi-worker visibility."""
 
@@ -189,6 +242,11 @@ class ActiveExecutionRegistry:
             return
         self._commands.put(_RegistryCommand(action="finish", execution_id=execution_id))
         self._wake()
+
+    def wake_for_progress(self) -> None:
+        """Flush a local node snapshot promptly without queueing a new command."""
+        if self._running:
+            self._wake()
 
     def _wake(self) -> None:
         if self._loop is None or self._wakeup is None:
@@ -258,6 +316,8 @@ class ActiveExecutionRegistry:
                         actor_user_id=command.actor_user_id,
                         attempt=0,
                         recoverable=command.recoverable,
+                        running_node_ids=[],
+                        node_results=[],
                     )
                     .on_conflict_do_update(
                         index_elements=["execution_id"],
@@ -273,6 +333,8 @@ class ActiveExecutionRegistry:
                             "inputs": command.inputs or {},
                             "trigger_source": command.trigger_source,
                             "actor_user_id": command.actor_user_id,
+                            "running_node_ids": [],
+                            "node_results": [],
                         },
                     )
                 )
@@ -300,11 +362,17 @@ class ActiveExecutionRegistry:
                 )
             )
             cancelled_ids = list(cancel_result.scalars().all())
-            await session.execute(
-                update(ActiveWorkflowExecution)
-                .where(ActiveWorkflowExecution.execution_id.in_(execution_ids))
-                .values(heartbeat_at=now, worker_id=_WORKER_ID)
-            )
+            for execution_id, handle in handles_by_id.items():
+                await session.execute(
+                    update(ActiveWorkflowExecution)
+                    .where(ActiveWorkflowExecution.execution_id == execution_id)
+                    .values(
+                        heartbeat_at=now,
+                        worker_id=_WORKER_ID,
+                        running_node_ids=sorted(handle.running_node_ids),
+                        node_results=copy.deepcopy(handle.node_results),
+                    )
+                )
             await session.commit()
 
         for execution_id in cancelled_ids:
@@ -437,6 +505,8 @@ async def list_persisted_active_executions_for_user(
             ActiveWorkflowExecution.workflow_id,
             ActiveWorkflowExecution.started_at,
             Workflow.name,
+            ActiveWorkflowExecution.running_node_ids,
+            ActiveWorkflowExecution.node_results,
         )
         .join(Workflow, Workflow.id == ActiveWorkflowExecution.workflow_id)
         .where(
@@ -458,6 +528,8 @@ async def list_persisted_active_executions_for_user(
             workflow_id=row.workflow_id,
             workflow_name=row.name,
             started_at=row.started_at,
+            running_node_ids=list(row.running_node_ids or []),
+            node_results=list(row.node_results or []),
         )
         for row in result.all()
     ]

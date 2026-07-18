@@ -155,3 +155,88 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("opens one running execution live from both history dialogs", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Live Execution Canvas ${Date.now()}`,
+    [
+      workflowNode("console_live", "consoleLog", 80, 160, {
+        label: "consoleLive",
+        logMessage: "observed live log",
+      }),
+      workflowNode("wait_live", "wait", 340, 160, {
+        label: "waitLive",
+        duration: 12_000,
+      }),
+      workflowNode("output_live", "output", 600, 160, {
+        label: "outputLive",
+        message: "$waitLive.logMessage",
+      }),
+    ],
+    [
+      workflowEdge("edge_console_wait", "console_live", "wait_live"),
+      workflowEdge("edge_wait_output", "wait_live", "output_live"),
+    ],
+  );
+
+  let executionId = "";
+  const allHistoryPage = await page.context().newPage();
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(3);
+    await page.evaluate((workflowId) => {
+      void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "x-simple-response": "false",
+        },
+        body: JSON.stringify({}),
+      });
+    }, workflow.id);
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          workflow_id: string;
+        }>;
+        executionId =
+          active.find((entry) => entry.workflow_id === workflow.id)?.execution_id ?? "";
+        return executionId;
+      })
+      .not.toBe("");
+
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(page, workflow.id, executionId);
+    await expect(page.locator('[data-id="wait_live"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.getByTestId("debug-node-result-console_live")).toContainText(
+      "consoleLive",
+    );
+
+    await allHistoryPage.goto("/");
+    await allHistoryPage.getByRole("button", { name: "History", exact: true }).click();
+    await expect(
+      allHistoryPage.getByRole("heading", { name: "All Execution History" }),
+    ).toBeVisible();
+    await allHistoryPage.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(allHistoryPage, workflow.id, executionId);
+    await expect(allHistoryPage.locator('[data-id="wait_live"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+  } finally {
+    if (executionId) {
+      await page.request.post(
+        `/api/workflows/${workflow.id}/executions/${executionId}/cancel`,
+      );
+    }
+    await allHistoryPage.close();
+    await deleteWorkflow(page, workflow.id);
+  }
+});

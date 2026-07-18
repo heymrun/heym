@@ -66,6 +66,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const isHistoryDetailLoading = ref(false);
   const currentExecutionId = ref<string | null>(null);
   const isExecuting = ref(false);
+  const isObservingExecution = ref(false);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
   const runningNodeId = ref<string | null>(null);
@@ -1424,6 +1425,87 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  async function observeExecution(executionId: string): Promise<void> {
+    const workflowId = currentWorkflow.value?.id;
+    if (!workflowId || !executionId) return;
+    if (isExecuting.value && currentExecutionId.value === executionId) return;
+
+    if (abortController.value) {
+      abortController.value.abort();
+    }
+    abortController.value = new AbortController();
+    const streamAbort = abortController.value;
+    isExecuting.value = true;
+    isObservingExecution.value = true;
+    currentExecutionId.value = executionId;
+    executionResult.value = null;
+    timelinePickedNodeResultIndex.value = null;
+    clearEvaluateLoopSelection();
+    nodeResults.value = [];
+    agentProgressLogs.value = new Map();
+    llmBatchProgressLogs.value = new Map();
+    clearNodeStatuses();
+    nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
+
+    await new Promise<void>((resolve, reject) => {
+      workflowApi.streamActiveExecution(
+        workflowId,
+        executionId,
+        (data) => {
+          currentExecutionId.value = data.execution_id;
+        },
+        (nodeId) => {
+          setNodeStatus(nodeId, "running");
+        },
+        (data) => {
+          setNodeStatus(
+            data.node_id,
+            data.status as "success" | "error" | "pending" | "skipped",
+          );
+          const row: NodeResult = {
+            node_id: data.node_id,
+            node_label: data.node_label || data.node_id,
+            node_type: data.node_type || "unknown",
+            status: data.status as "success" | "error" | "pending" | "skipped",
+            output: data.output,
+            execution_time_ms: data.execution_time_ms,
+            error: data.error ?? null,
+          };
+          if (data.metadata && typeof data.metadata === "object") {
+            row.metadata = data.metadata;
+          }
+          nodeResults.value = [...nodeResults.value, row];
+        },
+        (result) => {
+          applyExecutionResultSnapshot(result);
+          isObservingExecution.value = false;
+          resolve();
+        },
+        (error) => {
+          clearNodeStatuses();
+          isExecuting.value = false;
+          isObservingExecution.value = false;
+          runningNodeId.value = null;
+          abortController.value = null;
+          currentExecutionId.value = null;
+          reject(error);
+        },
+        () => resolve(),
+        streamAbort.signal,
+      );
+    });
+  }
+
+  function disconnectExecutionObservation(): void {
+    if (!isObservingExecution.value) return;
+    abortController.value?.abort();
+    abortController.value = null;
+    isObservingExecution.value = false;
+    isExecuting.value = false;
+    currentExecutionId.value = null;
+    clearNodeStatuses();
+  }
+
   async function stopExecution(): Promise<void> {
     const workflowId = currentWorkflow.value?.id;
     const executionId = currentExecutionId.value;
@@ -1439,6 +1521,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       abortController.value = null;
     }
     isExecuting.value = false;
+    isObservingExecution.value = false;
     runningNodeId.value = null;
     clearNodeStatuses();
     currentExecutionId.value = null;
@@ -2995,6 +3078,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     applyExecutionHistoryEntry,
     applyExecutionResultSnapshot,
     isExecuting,
+    isObservingExecution,
     isSaving,
     hasUnsavedChanges,
     runningNodeId,
@@ -3038,6 +3122,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     setNodeStatus,
     clearNodeStatuses,
     executeWorkflow,
+    observeExecution,
+    disconnectExecutionObservation,
     stopExecution,
     clearWorkflow,
     clearExecution,

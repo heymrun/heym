@@ -586,7 +586,13 @@ async function bringExecutionFromRoute(): Promise<void> {
   // result, not just node_results). fetchExecutionHistoryEntry returns null when the
   // execution is missing/inaccessible -> fall back to the plain workflow.
   const entry = await workflowStore.fetchExecutionHistoryEntry(execId);
-  if (!entry) return;
+  if (!entry) {
+    void workflowStore.observeExecution(execId).catch(() => {
+      // The run may have completed between the history lookup and live attach.
+      // A refresh or the next deep-link visit will load its persisted history.
+    });
+    return;
+  }
   if (
     route.params.executionId !== execId ||
     route.params.id !== routeWorkflowId ||
@@ -680,6 +686,7 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
   window.removeEventListener("storage", handleHitlResolutionStorage);
   stopPendingExecutionStream();
+  workflowStore.disconnectExecutionObservation();
   removeOverlayDismiss?.();
   removeOverlayDismiss = null;
 });

@@ -932,10 +932,12 @@ async def call_mcp_tool(
             trace_user_id=mcp_user.id,
             actor_user_id=mcp_user.id,
             cancel_event=cancel_event,
+            execution_id=str(execution_id),
         )
 
         # Save execution history with MCP trigger source
         history_entry = ExecutionHistory(
+            id=execution_id,
             workflow_id=target_workflow.id,
             inputs=enriched_inputs,
             outputs=execution_result.outputs,
@@ -1116,10 +1118,12 @@ async def _dispatch_mcp_jsonrpc(
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 cancel_event=cancel_event,
+                execution_id=str(execution_id),
             )
 
             # Save execution history with MCP trigger source
             history_entry = ExecutionHistory(
+                id=execution_id,
                 workflow_id=target_workflow.id,
                 inputs=enriched_inputs,
                 outputs=execution_result.outputs,

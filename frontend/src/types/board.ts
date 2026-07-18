@@ -79,6 +79,7 @@ export interface CardRun {
   chain_length: number;
   status: "running" | "pending" | "success" | "failed" | "cancelled" | "skipped";
   execution_history_id: string | null;
+  active_execution_id: string | null;
   output: Record<string, unknown>;
   error: string | null;
   started_at: string;

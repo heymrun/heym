@@ -339,7 +339,7 @@ async def _run_chain(
                 credentials_context = await get_credentials_context(db, board.owner_id)
                 global_variables_context = await get_global_variables_context(db, board.owner_id)
                 public_base_url = build_default_public_base_url()
-                execution_id = uuid.uuid4()
+                execution_id = run.id
                 cancel_event = register_execution(
                     workflow_id=workflow.id,
                     execution_id=execution_id,
@@ -347,6 +347,8 @@ async def _run_chain(
                     trigger_source="board",
                     actor_user_id=board.owner_id,
                 )
+                run.active_execution_id = execution_id
+                await db.commit()
                 try:
                     result = await asyncio.to_thread(
                         execute_workflow,
@@ -361,9 +363,11 @@ async def _run_chain(
                         actor_user_id=board.owner_id,
                         public_base_url=public_base_url,
                         cancel_event=cancel_event,
+                        execution_id=str(execution_id),
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad link fails the chain, not the app
                     run.status = "failed"
+                    run.active_execution_id = None
                     run.error = str(exc)
                     run.finished_at = datetime.now(timezone.utc)
                     db.add(
@@ -404,8 +408,10 @@ async def _run_chain(
                         credentials_owner_id=board.owner_id,
                         trace_user_id=board.owner_id,
                         public_base_url=public_base_url,
+                        history_entry_id=execution_id,
                     )
                     run.status = "pending"
+                    run.active_execution_id = None
                     run.execution_history_id = history_entry.id
                     run.finished_at = datetime.now(timezone.utc)
                     db.add(
@@ -425,6 +431,7 @@ async def _run_chain(
                     return
 
                 history_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=_to_json_compatible(inputs),
                     outputs=_to_json_compatible(result.outputs),
@@ -454,6 +461,7 @@ async def _run_chain(
 
                 outputs = _to_json_compatible(result.outputs) or {}
                 run.execution_history_id = history_entry.id
+                run.active_execution_id = None
                 run.finished_at = datetime.now(timezone.utc)
 
                 if result.status != "success":

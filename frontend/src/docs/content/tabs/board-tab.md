@@ -73,7 +73,9 @@ When a card moves into a column that has a chain:
 
 Runs are recorded in [Execution History](/docs/reference/execution-history) with the
 `board` trigger source, and each card keeps its own run list with per-workflow
-outputs and errors.
+outputs and errors. Open a card while a workflow is running and choose **Open live** beside
+the run to attach the editor to that exact execution. The same canvas animation, incremental
+Debug logs, and final result appear without starting a second run.
 
 ## What workflows receive
 

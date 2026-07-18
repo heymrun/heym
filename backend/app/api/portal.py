@@ -257,20 +257,35 @@ async def portal_execute(
         {"role": msg.role, "content": msg.content} for msg in execute_data.conversation_history
     ]
 
-    execution_result = await asyncio.to_thread(
-        execute_workflow,
+    execution_id = uuid.uuid4()
+    cancel_event = register_execution(
         workflow_id=workflow.id,
-        nodes=workflow.nodes,
-        edges=workflow.edges,
+        execution_id=execution_id,
         inputs=enriched_inputs,
-        workflow_cache=workflow_cache,
-        test_run=False,
-        credentials_context=credentials_context,
-        global_variables_context=global_variables_context,
-        trace_user_id=workflow.owner_id,
+        trigger_source="portal",
         actor_user_id=workflow.owner_id,
-        conversation_history=conversation_history_dicts if conversation_history_dicts else None,
     )
+    try:
+        execution_result = await asyncio.to_thread(
+            execute_workflow,
+            workflow_id=workflow.id,
+            nodes=workflow.nodes,
+            edges=workflow.edges,
+            inputs=enriched_inputs,
+            workflow_cache=workflow_cache,
+            test_run=False,
+            credentials_context=credentials_context,
+            global_variables_context=global_variables_context,
+            trace_user_id=workflow.owner_id,
+            actor_user_id=workflow.owner_id,
+            conversation_history=(
+                conversation_history_dicts if conversation_history_dicts else None
+            ),
+            cancel_event=cancel_event,
+            execution_id=str(execution_id),
+        )
+    finally:
+        clear_active_execution(execution_id)
 
     if execution_result.status == "pending":
         if is_codex_pending_execution(execution_result):
@@ -283,6 +298,7 @@ async def portal_execute(
                 credentials_owner_id=workflow.owner_id,
                 trace_user_id=workflow.owner_id,
                 public_base_url=build_public_base_url(request),
+                history_entry_id=execution_id,
             )
         else:
             history_entry, _ = await persist_pending_hitl_execution(
@@ -294,6 +310,7 @@ async def portal_execute(
                 credentials_owner_id=workflow.owner_id,
                 trace_user_id=workflow.owner_id,
                 public_base_url=build_public_base_url(request),
+                history_entry_id=execution_id,
             )
         await db.flush()
         return WorkflowExecuteResponse(
@@ -305,6 +322,7 @@ async def portal_execute(
             execution_history_id=history_entry.id,
         )
     history_entry = ExecutionHistory(
+        id=execution_id,
         workflow_id=workflow.id,
         inputs=enriched_inputs,
         outputs=execution_result.outputs,
@@ -457,6 +475,7 @@ async def portal_execute_stream(
                 else None,
                 cancel_event=cancel_event,
                 public_base_url=public_base_url,
+                execution_id=str(execution_id),
             ):
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
@@ -518,6 +537,7 @@ async def portal_execute_stream(
                                 credentials_owner_id=workflow.owner_id,
                                 trace_user_id=workflow.owner_id,
                                 public_base_url=public_base_url,
+                                history_entry_id=execution_id,
                             )
                         else:
                             history_entry, _ = await persist_pending_hitl_execution(
@@ -529,6 +549,7 @@ async def portal_execute_stream(
                                 credentials_owner_id=workflow.owner_id,
                                 trace_user_id=workflow.owner_id,
                                 public_base_url=public_base_url,
+                                history_entry_id=execution_id,
                             )
                         event["outputs"] = pending_result.outputs
                         event["node_results"] = pending_result.node_results
@@ -583,6 +604,7 @@ async def portal_execute_stream(
                                         credentials_owner_id=workflow.owner_id,
                                         trace_user_id=workflow.owner_id,
                                         public_base_url=public_base_url,
+                                        history_entry_id=execution_id,
                                     )
                                 else:
                                     history_entry, _ = await persist_pending_hitl_execution(
@@ -594,6 +616,7 @@ async def portal_execute_stream(
                                         credentials_owner_id=workflow.owner_id,
                                         trace_user_id=workflow.owner_id,
                                         public_base_url=public_base_url,
+                                        history_entry_id=execution_id,
                                     )
                                 event["outputs"] = pending_result.outputs
                                 event["node_results"] = pending_result.node_results
@@ -621,6 +644,7 @@ async def portal_execute_stream(
                     final_result.get("sub_workflow_executions", []),
                 )
                 history_entry = ExecutionHistory(
+                    id=execution_id,
                     workflow_id=workflow.id,
                     inputs=enriched_inputs,
                     outputs=final_result.get("outputs", {}),
