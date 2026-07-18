@@ -1,7 +1,7 @@
 """Add cross-worker live execution snapshots.
 
-Revision ID: 102_add_live_execution_snapshots
-Revises: 101_add_user_ai_defaults
+Revision ID: 101_add_live_execution_snapshots
+Revises: 100_add_opencode_credential_type
 Create Date: 2026-07-18
 """
 
@@ -12,8 +12,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "102_add_live_execution_snapshots"
-down_revision: str | None = "101_add_user_ai_defaults"
+revision: str = "101_add_live_execution_snapshots"
+down_revision: str | None = "100_add_opencode_credential_type"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
