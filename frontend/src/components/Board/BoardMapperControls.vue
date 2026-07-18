@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import type { CredentialType } from "@/types/credential";
 import { credentialsApi } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 
 // The mapper runs an LLM chat completion, so only chat-capable providers apply.
 const MAPPER_CREDENTIAL_TYPES: CredentialType[] = ["openai", "google", "custom"];
@@ -13,6 +14,8 @@ const emit = defineEmits<{
   (e: "update:credentialId", value: string): void;
   (e: "update:model", value: string): void;
 }>();
+
+const authStore = useAuthStore();
 
 const credentials = ref<{ id: string; name: string }[]>([]);
 const models = ref<{ id: string; name: string }[]>([]);
@@ -29,6 +32,17 @@ async function loadModels(credId: string): Promise<void> {
   try {
     const list = await credentialsApi.getModels(credId);
     models.value = list.map((m) => ({ id: m.id, name: m.name }));
+    // Prefill the user's preferred model when this is the preferred credential and
+    // no model has been chosen yet (new board).
+    const preferredModel = authStore.user?.preferred_model ?? "";
+    if (
+      !props.model &&
+      credId === (authStore.user?.preferred_credential_id ?? "") &&
+      preferredModel &&
+      models.value.some((m) => m.id === preferredModel)
+    ) {
+      emit("update:model", preferredModel);
+    }
   } catch {
     models.value = [];
   } finally {
@@ -41,6 +55,16 @@ onMounted(async () => {
   credentials.value = creds
     .filter((c) => MAPPER_CREDENTIAL_TYPES.includes(c.type))
     .map((c) => ({ id: c.id, name: c.name }));
+  // Prefill the user's preferred credential for a new board (no selection yet). The
+  // credential/model watch then loads models and fills the preferred model.
+  const preferredCredentialId = authStore.user?.preferred_credential_id ?? "";
+  if (
+    !props.credentialId &&
+    preferredCredentialId &&
+    credentials.value.some((c) => c.id === preferredCredentialId)
+  ) {
+    emit("update:credentialId", preferredCredentialId);
+  }
 });
 
 watch(
