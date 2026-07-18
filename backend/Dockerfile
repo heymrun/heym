@@ -20,6 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
+# OpenCode CLI (Go) required by the OpenCode Go node. The runner executes it inside a hardened
+# sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg.
+ARG HEYM_OPENCODE_CLI_VERSION=latest
+RUN curl -fsSL https://opencode.ai/install | VERSION="${HEYM_OPENCODE_CLI_VERSION}" bash \
+    && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && opencode --version
+
 # Install Docker CLI (static binary — no daemon needed, connects via mounted socket)
 RUN ARCH="$(uname -m)" \
     && case "$ARCH" in \
