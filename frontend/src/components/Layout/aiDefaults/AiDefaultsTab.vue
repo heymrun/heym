@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import type { CredentialListItem, LLMModel } from "@/types/credential";
+import type { CodexUsage, CredentialListItem, LLMModel } from "@/types/credential";
 
+import CodexUsageCard from "@/components/Layout/aiDefaults/CodexUsageCard.vue";
 import Button from "@/components/ui/Button.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
@@ -32,6 +33,31 @@ const modelOptions = computed(() => [
 ]);
 
 const preferredInvalid = computed(() => aiDefaults.preferredStatus(credentials.value) === "invalid");
+
+const codexCreds = ref<CredentialListItem[]>([]);
+const openCodeCreds = ref<CredentialListItem[]>([]);
+const usageByCred = ref<Record<string, CodexUsage | null>>({});
+const usageLoading = ref<Record<string, boolean>>({});
+
+async function loadCodexUsage(): Promise<void> {
+  codexCreds.value = await credentialsApi.listByType("codex");
+  openCodeCreds.value = await credentialsApi.listByType("opencode");
+  await Promise.all(
+    codexCreds.value.map(async (c) => {
+      usageLoading.value = { ...usageLoading.value, [c.id]: true };
+      try {
+        usageByCred.value = {
+          ...usageByCred.value,
+          [c.id]: await credentialsApi.getCodexUsage(c.id),
+        };
+      } catch {
+        usageByCred.value = { ...usageByCred.value, [c.id]: null };
+      } finally {
+        usageLoading.value = { ...usageLoading.value, [c.id]: false };
+      }
+    }),
+  );
+}
 
 async function loadModels(credId: string): Promise<void> {
   models.value = [];
@@ -72,6 +98,7 @@ onMounted(async () => {
     await loadModels(selectedCredentialId.value);
     selectedModel.value = authStore.user?.preferred_model ?? "";
   }
+  void loadCodexUsage();
 });
 </script>
 
@@ -109,6 +136,45 @@ onMounted(async () => {
       Your previously preferred credential is no longer available. Pick a new one, or leave it
       as "No preference".
     </p>
+
+    <div
+      v-if="codexCreds.length || openCodeCreds.length"
+      class="space-y-2 pt-2 border-t border-border"
+    >
+      <div class="flex items-center justify-between">
+        <Label>Coding package usage</Label>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          @click="loadCodexUsage"
+        >
+          Refresh
+        </Button>
+      </div>
+      <CodexUsageCard
+        v-for="c in codexCreds"
+        :key="c.id"
+        :name="c.name"
+        :usage="usageByCred[c.id] ?? null"
+        :loading="usageLoading[c.id] ?? false"
+      />
+      <div
+        v-for="c in openCodeCreds"
+        :key="c.id"
+        class="rounded-lg border border-border bg-card/60 p-3"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-medium truncate">{{ c.name }}</span>
+          <span class="text-[10px] rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
+            OpenCode
+          </span>
+        </div>
+        <p class="text-xs text-muted-foreground mt-1">
+          Usage unavailable — this gateway does not expose usage data.
+        </p>
+      </div>
+    </div>
 
     <div class="flex justify-end gap-3 pt-2">
       <Button
