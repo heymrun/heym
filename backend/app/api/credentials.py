@@ -186,6 +186,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.github,
         CredentialType.custom,
         CredentialType.elevenlabs,
+        CredentialType.opencode,
     ):
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
