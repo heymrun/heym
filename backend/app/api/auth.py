@@ -263,6 +263,18 @@ async def update_me(
         current_user.tts_credential_id = user_data.tts_credential_id
     if user_data.tts_voice_id is not None:
         current_user.tts_voice_id = user_data.tts_voice_id or None
+    if user_data.preferred_credential_id is not None:
+        preferred = await get_accessible_credential(
+            db, user_data.preferred_credential_id, current_user.id
+        )
+        if preferred is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Preferred credential not found",
+            )
+        current_user.preferred_credential_id = user_data.preferred_credential_id
+    if user_data.preferred_model is not None:
+        current_user.preferred_model = user_data.preferred_model or None
 
     await db.flush()
     await db.refresh(current_user)
