@@ -19,6 +19,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.models.schemas import (
     ClickHouseColumnsResponse,
+    CodexUsageResponse,
     CredentialCreate,
     CredentialForIntellisense,
     CredentialListResponse,
@@ -36,6 +37,7 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
 )
+from app.services.codex_usage_service import fetch_codex_usage
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 
 router = APIRouter()
@@ -1319,6 +1321,31 @@ async def get_credential_models(
                 m.context_window = limit
                 break
     return models
+
+
+@router.get("/{credential_id}/codex-usage", response_model=CodexUsageResponse)
+async def get_codex_usage(
+    credential_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CodexUsageResponse:
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.codex:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usage is only available for Codex credentials",
+        )
+    config = decrypt_config(credential.encrypted_config)
+    return await fetch_codex_usage(
+        credential_id=str(credential.id),
+        access_token=str(config.get("access_token") or ""),
+        account_id=str(config.get("account_id") or "") or None,
+    )
 
 
 def validate_credential_config(
