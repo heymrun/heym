@@ -51,6 +51,12 @@ choose **Internal token** or **OAuth** in the dialog; OAuth uses the Client ID a
 from your Notion public integration. See [Third-Party Integrations](./integrations.md#notion) for
 Notion setup details.
 
+## Coding-package usage
+
+The **AI Defaults** tab in [Settings](./user-settings.md) shows remaining coding-package usage for your Codex credentials (owned and shared). For each Codex credential it renders a horizontal bar per active rate-limit window — typically a **5 hours** and/or **Weekly** window, depending on your plan — with the percentage of quota left and a reset countdown. The data comes from the Codex backend's rate-limit response headers, fetched on demand.
+
+OpenCode Go credentials are listed there too, but marked **"usage unavailable"**: the OpenCode zen gateway does not expose remaining-quota data, so no bar can be shown.
+
 ## In Expressions
 
 Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression.

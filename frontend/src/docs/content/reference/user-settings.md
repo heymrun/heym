@@ -1,10 +1,10 @@
 # Settings
 
-The Settings dialog lets you manage your profile, set persistent AI instructions, update your account password, configure chat voice, and review observability status. Open it by clicking the **gear icon / your name** in the top-right corner of the header.
+The Settings dialog lets you manage your profile, set persistent AI instructions, update your account password, configure chat voice, set your default AI credential and model, and review observability status. Open it by clicking the **gear icon / your name** in the top-right corner of the header.
 
 ## Opening the Dialog
 
-Click the **gear (Settings) badge** in the top-right of the header. The dialog opens with four tabs: **Profile**, **Security**, **Voice**, and **Observability**.
+Click the **gear (Settings) badge** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**.
 
 ## Profile Tab
 
@@ -65,6 +65,28 @@ If the current password is incorrect, an inline error message is shown. On succe
 ## Voice Tab
 
 The Voice tab configures spoken voice for the [Chat tab](../tabs/chat-tab.md): pick an **ElevenLabs credential** (or add one inline), choose a **Voice** from your ElevenLabs account, and **Save Voice Settings**. This enables per-message read-aloud and interactive voice mode. See [Chat Voice (TTS & STT)](./chat-voice.md) for the full flow.
+
+## AI Defaults Tab
+
+The AI Defaults tab has two sections.
+
+### Preferred credential & model
+
+Pick a **preferred LLM credential** and a **model** from it. This becomes the starting default for every AI feature in the app — chat, the [AI Assistant](./ai-assistant.md) (builder, analyzer, and workflow creation), board mapper, AI dashboard widgets, [docs chat](../tabs/chat-tab.md), the data-table AI schema helper, the expression builder, and evals — whenever that surface has no saved selection of its own.
+
+The selection rule each surface follows is:
+
+1. **Saved selection** — a choice you already made on that surface (for example a chat conversation's last model) always wins.
+2. **Preferred** — used when there is no saved selection.
+3. **First available credential** — the fallback when you have set no preference.
+
+You can still change the credential and model per surface at any time; the preference only fills the initial default. Leave the credential as **No preference** to keep the previous first-credential behavior. If your preferred credential is later deleted or unshared, the tab shows a notice and surfaces silently fall back to the first available credential.
+
+### Coding package usage
+
+For each **Codex** credential (including shared ones) the tab shows remaining rate-limit usage as a horizontal bar per active window — for example a **5 hours** window and/or a **Weekly** window, depending on your plan. Each bar shows the percentage of quota left and a reset countdown. A **Refresh** button re-fetches on demand (results are cached briefly on the server).
+
+**OpenCode** credentials are listed with a **"usage unavailable"** note: the OpenCode zen gateway does not expose remaining-quota data, so no bar can be shown.
 
 ## Observability Tab
 
