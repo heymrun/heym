@@ -41,6 +41,7 @@ from app.api import (
     mcp_servers,
     notion_oauth,
     oauth,
+    opencode_go,
     playwright,
     plugins,
     portal,
@@ -326,6 +327,7 @@ app.include_router(llm_pricing.router, prefix="/api/llm-pricing", tags=["LLM Pri
 app.include_router(portal.router, prefix="/api/portal", tags=["Portal"])
 app.include_router(hitl.router, prefix="/api/hitl", tags=["HITL"])
 app.include_router(codex_followups.router, prefix="/api/codex/followups", tags=["Codex"])
+app.include_router(opencode_go.router, prefix="/api/opencode-go", tags=["OpenCode Go"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
 app.include_router(file_intake.router, prefix="/api", tags=["File Intake"])
 app.include_router(portal.router, prefix="/api/workflows", tags=["Portal Settings"])

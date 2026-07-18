@@ -85,6 +85,23 @@ class Settings(BaseSettings):
     codex_git_author_email: str = Field(
         default="support@heym.run", validation_alias="HEYM_CODEX_GIT_AUTHOR_EMAIL"
     )
+    # OpenCode Go coding-agent node. Like Codex, execution isolation is chosen by the CLI command:
+    # local dev (run.sh) leaves it as the host `opencode` binary, while Docker deployments set
+    # HEYM_OPENCODE_CLI_COMMAND=/usr/local/bin/heym-opencode-docker (a wrapper that runs OpenCode in
+    # a hardened sibling container sharing the workspace named volume). All git/GitHub work is
+    # host-side, so the GitHub token is never placed inside the OpenCode process/container.
+    opencode_cli_command: str = Field(
+        default="opencode", validation_alias="HEYM_OPENCODE_CLI_COMMAND"
+    )
+    opencode_workspace_dir: str = Field(
+        default="./data/opencode-workspaces", validation_alias="HEYM_OPENCODE_WORKSPACE_DIR"
+    )
+    opencode_git_author_name: str = Field(
+        default="Heym OpenCode", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_NAME"
+    )
+    opencode_git_author_email: str = Field(
+        default="support@heym.run", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_EMAIL"
+    )
     # ChatGPT-subscription OAuth (PKCE) for the Codex node. Defaults mirror the public OpenAI
     # Codex CLI client; override via env if OpenAI changes the client id or endpoints.
     codex_oauth_client_id: str = Field(

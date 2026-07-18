@@ -20,6 +20,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
+# OpenCode CLI (Go) required by the OpenCode Go node. The runner executes it inside a hardened
+# sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg; the
+# installer resolves "latest" only when VERSION is unset (passing VERSION=latest looks up a literal
+# "vlatest" tag and fails), so pass VERSION only for a pinned version.
+ARG HEYM_OPENCODE_CLI_VERSION=latest
+RUN if [ "${HEYM_OPENCODE_CLI_VERSION}" = "latest" ]; then \
+        curl -fsSL https://opencode.ai/install | bash; \
+    else \
+        curl -fsSL https://opencode.ai/install | VERSION="${HEYM_OPENCODE_CLI_VERSION}" bash; \
+    fi \
+    && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && opencode --version
+
 # Install Docker CLI (static binary — no daemon needed, connects via mounted socket)
 RUN ARCH="$(uname -m)" \
     && case "$ARCH" in \
@@ -49,6 +62,7 @@ ENV PLAYWRIGHT_INSTALL_AT_STARTUP=false
 
 COPY backend/ .
 COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
+COPY docker/heym-opencode-docker /usr/local/bin/heym-opencode-docker
 
 # AGENTS.md for dashboard chat system prompt (Heym platform context)
 COPY AGENTS.md /app/AGENTS.md
@@ -64,7 +78,14 @@ ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
     HEYM_CODEX_NETWORK_ACCESS=true \
     HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces
 
-RUN chmod +x entrypoint.sh /usr/local/bin/heym-codex-docker
+# OpenCode Go node: run the OpenCode CLI in a dedicated hardened sibling runner container that
+# shares the workspace named volume (mirrors the Codex setup).
+ENV HEYM_OPENCODE_CLI_COMMAND=/usr/local/bin/heym-opencode-docker \
+    HEYM_OPENCODE_DOCKER_IMAGE=heym-backend:local \
+    HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME=heym-opencode-workspaces \
+    HEYM_OPENCODE_WORKSPACE_DIR=/app/data/opencode-workspaces
+
+RUN chmod +x entrypoint.sh /usr/local/bin/heym-codex-docker /usr/local/bin/heym-opencode-docker
 
 EXPOSE 10105
 

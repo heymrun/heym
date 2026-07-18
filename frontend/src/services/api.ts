@@ -1096,6 +1096,24 @@ export const teamsApi = {
   },
 };
 
+export interface OpenCodeModelOption {
+  id: string;
+  name: string;
+}
+
+export const opencodeApi = {
+  listModels: async (
+    baseUrl?: string,
+  ): Promise<{ models: OpenCodeModelOption[]; source: string }> => {
+    const params = baseUrl ? { base_url: baseUrl } : undefined;
+    const response = await api.get<{ models: OpenCodeModelOption[]; source: string }>(
+      "/opencode-go/models",
+      { params },
+    );
+    return response.data;
+  },
+};
+
 export const credentialsApi = {
   list: async (): Promise<CredentialListItem[]> => {
     const response = await api.get<CredentialListItem[]>("/credentials");

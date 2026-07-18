@@ -143,6 +143,28 @@ The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI 
 
 > `HEYM_CODEX_CLI_VERSION` is a **Docker build arg** (not a runtime env var) that pins the `@openai/codex` npm version installed into the image. Default `latest`.
 
+## OpenCode Go node
+
+The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs the OpenCode CLI (Go) in an isolated workspace against a GitHub repository. It needs the `opencode` CLI and `git` on PATH. Local `./run.sh` uses the native `opencode` CLI (host subprocess). Docker deployments use the bundled `heym-opencode-docker` wrapper, which starts a hardened sibling container from the same Heym image (all capabilities dropped, `no-new-privileges`, read-only root, resource limits) sharing the workspace named volume. All git/GitHub operations run host-side, so the GitHub token is never placed inside the OpenCode process/container.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_OPENCODE_CLI_COMMAND` | Path/name of the OpenCode CLI binary (or the `heym-opencode-docker` wrapper in Docker deployments). | `opencode` |
+| `HEYM_OPENCODE_WORKSPACE_DIR` | Directory for cloned repo workspaces (its `<workspace>.oc-home` sibling holds the OpenCode config/auth for the run). | `./data/opencode-workspaces` |
+| `HEYM_OPENCODE_GIT_AUTHOR_NAME` | Author name for commits OpenCode creates. | `Heym OpenCode` |
+| `HEYM_OPENCODE_GIT_AUTHOR_EMAIL` | Author email for OpenCode commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
+| `HEYM_OPENCODE_DOCKER_IMAGE` | Image used by `heym-opencode-docker`. Compose defaults to the locally built backend image (`heym-backend:local`). The release image defaults to the same single GHCR image (`ghcr.io/heymrun/heym:<version>`). | auto |
+| `HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME` | Docker volume mounted into each OpenCode runner at `HEYM_OPENCODE_WORKSPACE_DIR`. Docker Compose uses `heym-opencode-workspaces`. | — |
+| `HEYM_OPENCODE_HOST_WORKSPACE_DIR` | Absolute host path for `HEYM_OPENCODE_WORKSPACE_DIR` when using bind mounts instead of a Docker volume. | — |
+| `HEYM_OPENCODE_DOCKER_NETWORK` | Docker network mode for OpenCode runner containers (egress is required to reach the model gateway). | `bridge` |
+| `HEYM_OPENCODE_DOCKER_CPUS` | CPU limit passed to OpenCode runner containers. | `2` |
+| `HEYM_OPENCODE_DOCKER_MEMORY` | Memory limit passed to OpenCode runner containers. | `2g` |
+| `HEYM_OPENCODE_DOCKER_PIDS` | PID limit passed to OpenCode runner containers. | `1024` |
+| `HEYM_OPENCODE_DOCKER_ENTRYPOINT` | Entrypoint binary run inside the OpenCode runner container. | `opencode` |
+| `HEYM_OPENCODE_DOCKER_EXTRA_ARGS` | Extra `docker run` arguments appended to the OpenCode runner invocation (shell-split). | — |
+
+> `HEYM_OPENCODE_CLI_VERSION` is a **Docker build arg** (not a runtime env var) that pins the `opencode` CLI version installed into the image. Default `latest`.
+
 ## OpenTelemetry tracing
 
 | Variable | Description | Default |

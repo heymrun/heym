@@ -500,10 +500,16 @@ class CredentialType(str, Enum):
     s3 = "s3"
     elevenlabs = "elevenlabs"
     clickhouse = "clickhouse"
+    opencode = "opencode"
 
 
 class CredentialConfigOpenAI(BaseModel):
     api_key: str
+
+
+class CredentialConfigOpenCode(BaseModel):
+    api_key: str
+    base_url: str | None = None
 
 
 class CredentialConfigCodex(BaseModel):

@@ -4297,6 +4297,72 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 41. opencodeGo (OpenCode Go Coding Agent)
+- **Type**: `opencodeGo`
+- **Purpose**: Run a coding task against a Git repository using the OpenCode CLI inside Heym's
+  hardened, isolated Docker sandbox. Heym performs every git/GitHub operation; OpenCode only edits
+  files on disk.
+- **Inputs**: 1 | **Outputs**: 1
+- **Fields**:
+  - `credentialId`: UUID of an owned `opencode` credential (OpenCode Go gateway API key)
+  - `githubCredentialId`: UUID of an owned `github` credential used for clone/commit/push/PR
+  - `repositoryUrl`: HTTPS Git URL (expression-capable), required
+  - `baseBranch` (default `main`): branch to clone and target
+  - `taskPrompt` (default `$input.text`): the coding task, required
+  - `branchName` (default `opencode/$executionId`): working branch for PR/commit modes
+  - `publishMode` (default `diff_only`): how OpenCode's changes are delivered — `diff_only`,
+    `draft_pr`, `open_pr`, `commit_push`, `direct_commit`, `update_existing_pr`, `patch_artifact`
+  - `setupCommand`: optional repository setup command before OpenCode runs
+  - `opencodeModel`: OpenCode Go model id, e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`;
+    empty uses the runner default (`opencode/kimi-k3`)
+  - `opencodeVariant`: optional model reasoning variant passed to `opencode run --variant`
+  - `timeoutSeconds` (default 3600)
+- **As an agent tool**: The OpenCode Go node can be attached to an agent's `tool-input` handle; the
+  agent supplies `taskPrompt` (and optionally `repositoryUrl`).
+- **Output**: `{status:"completed", summary, validation, diff, changedFiles, branchName,
+  pullRequestUrl?, pushedBranch?}`. Unlike Codex, the node never pauses for input (no `question`
+  branch).
+
+**OpenCode Go example (open a pull request)**:
+```json
+{
+  "nodes": [
+    {
+      "id": "task",
+      "type": "textInput",
+      "position": {"x": 80, "y": 120},
+      "data": {"label": "task", "text": "Add a health-check endpoint at /healthz"}
+    },
+    {
+      "id": "opencode_1",
+      "type": "opencodeGo",
+      "position": {"x": 380, "y": 120},
+      "data": {
+        "label": "opencodeFix",
+        "credentialId": "opencode-credential-uuid",
+        "githubCredentialId": "github-credential-uuid",
+        "repositoryUrl": "https://github.com/acme/app",
+        "baseBranch": "main",
+        "taskPrompt": "$input.text",
+        "publishMode": "open_pr",
+        "branchName": "opencode/$executionId",
+        "opencodeModel": "opencode/kimi-k3"
+      }
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "position": {"x": 680, "y": 120},
+      "data": {"label": "result", "message": "$opencodeFix.summary"}
+    }
+  ],
+  "edges": [
+    {"id": "e1", "source": "task", "target": "opencode_1"},
+    {"id": "e2", "source": "opencode_1", "target": "output"}
+  ]
+}
+```
+
 ## Edge Connections
 
 Edges connect nodes. Handle specification depends on the node type:
@@ -4434,7 +4500,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

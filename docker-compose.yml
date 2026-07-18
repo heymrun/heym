@@ -80,6 +80,12 @@ services:
       HEYM_CODEX_DOCKER_WORKSPACE_VOLUME: ${HEYM_CODEX_DOCKER_WORKSPACE_VOLUME:-heym-codex-workspaces}
       HEYM_CODEX_WORKSPACE_DIR: ${HEYM_CODEX_WORKSPACE_DIR:-/app/data/codex-workspaces}
       HEYM_CODEX_NETWORK_ACCESS: ${HEYM_CODEX_NETWORK_ACCESS:-true}
+      # OpenCode Go node: run the OpenCode CLI in a dedicated hardened sibling runner container
+      # sharing the workspace named volume (mirrors the Codex setup).
+      HEYM_OPENCODE_CLI_COMMAND: ${HEYM_OPENCODE_CLI_COMMAND:-/usr/local/bin/heym-opencode-docker}
+      HEYM_OPENCODE_DOCKER_IMAGE: ${HEYM_OPENCODE_DOCKER_IMAGE:-heym-backend:local}
+      HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME: ${HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME:-heym-opencode-workspaces}
+      HEYM_OPENCODE_WORKSPACE_DIR: ${HEYM_OPENCODE_WORKSPACE_DIR:-/app/data/opencode-workspaces}
       # Python tool sandbox: untrusted user tools run in a hardened, throwaway
       # sibling container (no network, no docker socket, read-only, non-root).
       # Empty image = auto-detect this backend image.
@@ -103,6 +109,8 @@ services:
       - ./data/plugins:/app/data/plugins
       # Codex workspaces are shared with the throwaway Codex runner containers.
       - codex-workspaces:/app/data/codex-workspaces
+      # OpenCode Go workspaces are shared with the throwaway OpenCode runner containers.
+      - opencode-workspaces:/app/data/opencode-workspaces
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,3 +151,5 @@ networks:
 volumes:
   codex-workspaces:
     name: heym-codex-workspaces
+  opencode-workspaces:
+    name: heym-opencode-workspaces

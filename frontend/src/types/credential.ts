@@ -1,6 +1,7 @@
 export type CredentialType =
   | "openai"
   | "codex"
+  | "opencode"
   | "google"
   | "github"
   | "jira"
@@ -86,6 +87,11 @@ export interface CredentialConfigCodex {
   id_token?: string;
   account_id?: string;
   expires_at?: string | null;
+}
+
+export interface CredentialConfigOpenCode {
+  api_key: string;
+  base_url?: string;
 }
 
 export interface CredentialConfigGoogle {
@@ -256,6 +262,7 @@ export interface CredentialConfigSentry {
 export type CredentialConfig =
   | CredentialConfigOpenAI
   | CredentialConfigCodex
+  | CredentialConfigOpenCode
   | CredentialConfigGoogle
   | CredentialConfigGitHub
   | CredentialConfigJira
@@ -356,6 +363,7 @@ export interface NotionPagesResponse {
 export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   openai: "OpenAI",
   codex: "OpenAI Codex",
+  opencode: "OpenCode Go",
   google: "Google AI",
   github: "GitHub",
   jira: "Jira",
@@ -390,6 +398,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   openai: "Connect to OpenAI API for GPT models",
   codex: "Use a ChatGPT/Codex access token for the local Codex runner",
+  opencode: "Use an OpenCode Go gateway API key for the OpenCode Go coding agent",
   google: "Connect to Google AI for Gemini models",
   github: "Store a GitHub personal access token for GitHub API, MCP, and agent workflows",
   jira: "Connect to Jira for project, issue, comment, attachment, user, notification, and transition automation",
