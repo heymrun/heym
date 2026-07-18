@@ -96,9 +96,6 @@ class Settings(BaseSettings):
     opencode_workspace_dir: str = Field(
         default="./data/opencode-workspaces", validation_alias="HEYM_OPENCODE_WORKSPACE_DIR"
     )
-    opencode_zen_base_url: str = Field(
-        default="https://opencode.ai/zen/go/v1", validation_alias="HEYM_OPENCODE_ZEN_BASE_URL"
-    )
     opencode_git_author_name: str = Field(
         default="Heym OpenCode", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_NAME"
     )

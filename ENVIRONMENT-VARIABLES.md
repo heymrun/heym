@@ -151,7 +151,6 @@ The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs
 |----------|-------------|---------|
 | `HEYM_OPENCODE_CLI_COMMAND` | Path/name of the OpenCode CLI binary (or the `heym-opencode-docker` wrapper in Docker deployments). | `opencode` |
 | `HEYM_OPENCODE_WORKSPACE_DIR` | Directory for cloned repo workspaces (its `<workspace>.oc-home` sibling holds the OpenCode config/auth for the run). | `./data/opencode-workspaces` |
-| `HEYM_OPENCODE_ZEN_BASE_URL` | OpenCode Go gateway base URL used to fetch the live model list and as the default provider base URL. | `https://opencode.ai/zen/go/v1` |
 | `HEYM_OPENCODE_GIT_AUTHOR_NAME` | Author name for commits OpenCode creates. | `Heym OpenCode` |
 | `HEYM_OPENCODE_GIT_AUTHOR_EMAIL` | Author email for OpenCode commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
 | `HEYM_OPENCODE_DOCKER_IMAGE` | Image used by `heym-opencode-docker`. Compose defaults to the locally built backend image (`heym-backend:local`). The release image defaults to the same single GHCR image (`ghcr.io/heymrun/heym:<version>`). | auto |

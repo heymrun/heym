@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Default OpenCode Go gateway base URL. Overridable per credential (its optional ``base_url``), not
+# via an environment variable.
+OPENCODE_ZEN_BASE_URL = "https://opencode.ai/zen/go/v1"
+
 # Small known-good set of Go-gateway models; used when the live /models fetch fails.
 OPENCODE_MODEL_FALLBACK: tuple[dict[str, str], ...] = (
     {"id": "opencode/kimi-k3", "name": "Kimi K3"},

@@ -21,7 +21,7 @@ from pathlib import Path
 from app.config import settings
 from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
-from app.services.opencode_catalog import OPENCODE_DEFAULT_MODEL
+from app.services.opencode_catalog import OPENCODE_DEFAULT_MODEL, OPENCODE_ZEN_BASE_URL
 
 _REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
     {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
@@ -132,7 +132,7 @@ class OpenCodeRunnerService:
             "provider": {
                 "opencode": {
                     "options": {
-                        "baseURL": base_url or settings.opencode_zen_base_url,
+                        "baseURL": base_url or OPENCODE_ZEN_BASE_URL,
                         "apiKey": api_key,
                     }
                 }
