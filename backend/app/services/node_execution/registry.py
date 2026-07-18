@@ -39,6 +39,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "mcpCall": "mcp_call_node",
     "merge": "merge_node",
     "notion": "notion_node",
+    "opencodeGo": "opencode_go_node",
     "output": "output_node",
     "playwright": "playwright_node",
     "plugin": "plugin_node",
