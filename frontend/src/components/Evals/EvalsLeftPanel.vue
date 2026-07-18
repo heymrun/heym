@@ -10,6 +10,7 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, evalsApi } from "@/services/api";
 import type { CredentialListItem } from "@/types/credential";
 import type { LLMModel } from "@/types/credential";
@@ -69,6 +70,7 @@ const emit = defineEmits<{
 
 const credentials = ref<CredentialListItem[]>([]);
 const models = ref<LLMModel[]>([]);
+const aiDefaults = useAiDefaults();
 const selectedCredentialId = ref<string>("");
 const selectedModelIds = ref<Set<string>>(new Set());
 const scoringMethod = ref<string>("exact_match");
@@ -184,7 +186,7 @@ async function loadCredentials(): Promise<void> {
   try {
     credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0 && !selectedCredentialId.value) {
-      selectedCredentialId.value = credentials.value[0].id;
+      selectedCredentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
     }
   } catch {
     credentials.value = [];

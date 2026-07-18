@@ -9,6 +9,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, dataTablesApi } from "@/services/api";
 import { playSuccessSound } from "@/utils/audio";
 
@@ -23,6 +24,7 @@ const COLUMN_TYPES: DataTableColumn["type"][] = ["string", "number", "boolean", 
 const phase = ref<"input" | "review">("input");
 const prompt = ref("");
 const promptInputRef = ref<InstanceType<typeof Textarea> | null>(null);
+const aiDefaults = useAiDefaults();
 const credentialId = ref("");
 const modelName = ref("");
 const credentials = ref<CredentialListItem[]>([]);
@@ -76,7 +78,7 @@ watchEffect(async () => {
   if (credentials.value.length === 0) {
     credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0) {
-      credentialId.value = credentials.value[0].id;
+      credentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
     }
   }
 });
@@ -87,7 +89,9 @@ async function loadModels(): Promise<void> {
   if (!credentialId.value) return;
   models.value = await credentialsApi.getModels(credentialId.value);
   if (models.value.length > 0) {
-    modelName.value = models.value[models.value.length - 1].id;
+    modelName.value =
+      aiDefaults.resolveModel(credentialId.value, models.value, {}) ??
+      models.value[models.value.length - 1].id;
   }
 }
 

@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { aiApi, credentialsApi } from "@/services/api";
 
 export interface DocsChatDialogProps {
@@ -24,6 +25,7 @@ interface SelectOption {
 const MAX_CONTEXT_MESSAGES = 25;
 
 export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => void) {
+  const aiDefaults = useAiDefaults();
   const credentials = ref<CredentialListItem[]>([]);
   const models = ref<LLMModel[]>([]);
   const selectedCredentialId = ref("");
@@ -76,7 +78,8 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   async function loadCredentials(): Promise<void> {
     try {
       credentials.value = await credentialsApi.listLLM();
-      if (credentials.value.length > 0 && !selectedCredentialId.value) selectedCredentialId.value = credentials.value[0].id;
+      if (credentials.value.length > 0 && !selectedCredentialId.value)
+        selectedCredentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
     } catch {
       credentials.value = [];
     }
@@ -95,7 +98,11 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     selectedModel.value = "";
     try {
       models.value = await credentialsApi.getModels(selectedCredentialId.value);
-      selectedModel.value = models.value.length > 0 ? pickDefaultModel(models.value) : "";
+      selectedModel.value =
+        models.value.length > 0
+          ? (aiDefaults.resolveModel(selectedCredentialId.value, models.value, {}) ??
+            pickDefaultModel(models.value))
+          : "";
     } catch {
       models.value = [];
       modelsLoadFailed.value = true;

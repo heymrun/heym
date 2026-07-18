@@ -5,6 +5,7 @@ import { ChevronDown, Loader2, Sparkles, X } from "lucide-vue-next";
 import type { ExpressionEvaluateResponse } from "@/types/workflow";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type { ExpressionGeneratePriorAttempt } from "@/types/expression";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, expressionApi } from "@/services/api";
 
 /** Visible row cap; taller content scrolls inside the control. */
@@ -41,6 +42,7 @@ const emit = defineEmits<{
 }>();
 
 const description = ref("");
+const aiDefaults = useAiDefaults();
 const credentialId = ref("");
 const modelName = ref("");
 const credentials = ref<CredentialListItem[]>([]);
@@ -200,7 +202,7 @@ watch(
       loadingCredentials.value = false;
     }
     if (credentials.value.length > 0) {
-      credentialId.value = credentials.value[0].id;
+      credentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
       await loadModelsForSelectedCredential();
     } else {
       credentialId.value = "";
@@ -222,7 +224,9 @@ async function loadModelsForSelectedCredential(): Promise<void> {
   }
   models.value = await credentialsApi.getModels(credentialId.value);
   if (models.value.length > 0) {
-    modelName.value = models.value[models.value.length - 1].id;
+    modelName.value =
+      aiDefaults.resolveModel(credentialId.value, models.value, {}) ??
+      models.value[models.value.length - 1].id;
   }
 }
 

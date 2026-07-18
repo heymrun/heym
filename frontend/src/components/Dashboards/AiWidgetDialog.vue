@@ -4,6 +4,7 @@ import { Loader2, Sparkles, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import Select from "@/components/ui/Select.vue";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi } from "@/services/api";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (e: "generate", payload: { prompt: string; credentialId: string; model: string }): void;
 }>();
 
+const aiDefaults = useAiDefaults();
 const prompt = ref("");
 const promptInputRef = ref<HTMLTextAreaElement | null>(null);
 const credentials = ref<CredentialListItem[]>([]);
@@ -51,7 +53,9 @@ async function loadModels(): Promise<void> {
   if (!selectedCredentialId.value) return;
   try {
     models.value = await credentialsApi.getModels(selectedCredentialId.value);
-    selectedModel.value = models.value.length > 0 ? models.value[models.value.length - 1].id : "";
+    selectedModel.value =
+      aiDefaults.resolveModel(selectedCredentialId.value, models.value, {}) ??
+      (models.value.length > 0 ? models.value[models.value.length - 1].id : "");
   } catch {
     models.value = [];
     selectedModel.value = "";
@@ -95,7 +99,7 @@ onMounted(async () => {
   try {
     credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0) {
-      selectedCredentialId.value = credentials.value[0].id;
+      selectedCredentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
     } else {
       loadError.value = "No LLM credentials found. Add one in the Credentials tab.";
     }

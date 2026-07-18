@@ -19,6 +19,7 @@ import type { AnalysisNoteEditor, AnalysisNoteResponse } from "@/services/api";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { preserveExplicitOrderedListNumbers } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { aiApi, credentialsApi, workflowApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
 
@@ -55,6 +56,7 @@ const mode = ref<"edit" | "preview">("edit");
 const saving = ref(false);
 
 const credentials = ref<CredentialListItem[]>([]);
+const aiDefaults = useAiDefaults();
 const credentialId = ref("");
 const models = ref<LLMModel[]>([]);
 const model = ref("");
@@ -139,7 +141,7 @@ async function loadCredentials(): Promise<void> {
   try {
     credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0) {
-      credentialId.value = credentials.value[0].id;
+      credentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
       await loadModels();
     }
   } catch {
@@ -153,7 +155,9 @@ async function loadModels(): Promise<void> {
   if (!credentialId.value) return;
   models.value = await credentialsApi.getModels(credentialId.value);
   if (models.value.length > 0) {
-    model.value = models.value[models.value.length - 1].id;
+    model.value =
+      aiDefaults.resolveModel(credentialId.value, models.value, {}) ??
+      models.value[models.value.length - 1].id;
   }
 }
 

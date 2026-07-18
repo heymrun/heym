@@ -38,12 +38,14 @@ import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workf
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { aiApi, codexFollowupApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
+import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
 
 const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
 const workflowStore = useWorkflowStore();
+const aiDefaults = useAiDefaults();
 
 const panelHeight = ref(212);
 const isResizing = ref(false);
@@ -1465,7 +1467,11 @@ async function loadAiCredentials(): Promise<void> {
     aiCredentials.value = await credentialsApi.listLLM();
     if (aiCredentials.value.length > 0 && !selectedCredentialId.value) {
       const firstOwned = aiCredentials.value.find((c) => !c.is_shared);
-      selectedCredentialId.value = (firstOwned ?? aiCredentials.value[0]).id;
+      const fallbackId = (firstOwned ?? aiCredentials.value[0]).id;
+      selectedCredentialId.value =
+        aiDefaults.preferredStatus(aiCredentials.value) === "ok"
+          ? (aiDefaults.resolveCredentialId(aiCredentials.value, {}) ?? fallbackId)
+          : fallbackId;
     }
   } catch {
     aiCredentials.value = [];
@@ -1491,7 +1497,9 @@ async function loadAiModels(): Promise<void> {
   try {
     aiModels.value = await credentialsApi.getModels(selectedCredentialId.value);
     if (aiModels.value.length > 0) {
-      selectedModel.value = aiModels.value[aiModels.value.length - 1].id;
+      selectedModel.value =
+        aiDefaults.resolveModel(selectedCredentialId.value, aiModels.value, {}) ??
+        aiModels.value[aiModels.value.length - 1].id;
     }
   } catch {
     aiModels.value = [];
