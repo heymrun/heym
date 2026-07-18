@@ -99,6 +99,7 @@ export function usePropertiesPanelController() {
     llm: Brain,
     agent: Bot,
     codex: Terminal,
+    opencodeGo: Terminal,
     condition: GitBranch,
     switch: Shuffle,
     execute: Play,
@@ -156,6 +157,7 @@ export function usePropertiesPanelController() {
     llm: "node-llm",
     agent: "node-agent",
     codex: "node-codex",
+    opencodeGo: "node-codex",
     condition: "node-condition",
     switch: "node-switch",
     execute: "node-execute",
@@ -213,6 +215,7 @@ export function usePropertiesPanelController() {
     llm: "llm-node",
     agent: "agent-node",
     codex: "codex-node",
+    opencodeGo: "opencode-go-node",
     condition: "condition-node",
     switch: "switch-node",
     execute: "execute-node",
@@ -560,6 +563,7 @@ export function usePropertiesPanelController() {
   const redisCredentials = ref<CredentialListItem[]>([]);
   const gristCredentials = ref<CredentialListItem[]>([]);
   const codexCredentials = ref<CredentialListItem[]>([]);
+  const opencodeCredentials = ref<CredentialListItem[]>([]);
   const githubCredentials = ref<CredentialListItem[]>([]);
   const jiraCredentials = ref<CredentialListItem[]>([]);
   const linearCredentials = ref<CredentialListItem[]>([]);
@@ -1083,6 +1087,19 @@ export function usePropertiesPanelController() {
           codexCredentials.value = await credentialsApi.listByType("codex");
         } catch {
           codexCredentials.value = [];
+        }
+        try {
+          githubCredentials.value = await credentialsApi.listByType("github");
+        } catch {
+          githubCredentials.value = [];
+        }
+      }
+
+      if (type === "opencodeGo") {
+        try {
+          opencodeCredentials.value = await credentialsApi.listByType("opencode");
+        } catch {
+          opencodeCredentials.value = [];
         }
         try {
           githubCredentials.value = await credentialsApi.listByType("github");
@@ -5745,6 +5762,36 @@ export function usePropertiesPanelController() {
     );
   });
 
+  const opencodeCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "opencodeGo"
+        ? (node.data.credentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      opencodeCredentials.value,
+      selectedCredentialId,
+      "Select OpenCode Go credential...",
+      "Shared OpenCode Go credential (from owner)",
+    );
+  });
+
+  const opencodeGithubCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "opencodeGo"
+        ? (node.data.githubCredentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      githubCredentials.value,
+      selectedCredentialId,
+      "Select GitHub credential...",
+      "Shared GitHub credential (from owner)",
+    );
+  });
+
   const codexPublishModeOptions = [
     { value: "diff_only", label: "Diff only" },
     { value: "draft_pr", label: "Draft PR" },
@@ -8835,6 +8882,8 @@ export function usePropertiesPanelController() {
     codexGithubCredentialOptions,
     codexPublishModeOptions,
     codexPublishModeDescriptions,
+    opencodeCredentialOptions,
+    opencodeGithubCredentialOptions,
     githubCredentialOptions,
     jiraCredentialOptions,
     jiraOperationOptions,

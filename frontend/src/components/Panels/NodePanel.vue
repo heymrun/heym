@@ -220,6 +220,7 @@ const icons = {
   llm: Brain,
   agent: Bot,
   codex: Terminal,
+  opencodeGo: Terminal,
   condition: GitBranch,
   switch: Shuffle,
   execute: Play,

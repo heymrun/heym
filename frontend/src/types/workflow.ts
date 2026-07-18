@@ -137,6 +137,7 @@ export type NodeType =
   | "llm"
   | "agent"
   | "codex"
+  | "opencodeGo"
   | "condition"
   | "switch"
   | "execute"
@@ -435,6 +436,8 @@ export interface NodeData {
   setupCommand?: string;
   codexModel?: string;
   codexReasoningEffort?: CodexReasoningEffort;
+  opencodeModel?: string;
+  opencodeVariant?: string;
   systemInstruction?: string;
   userMessage?: string;
   batchModeEnabled?: boolean;
