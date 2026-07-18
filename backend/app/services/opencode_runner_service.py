@@ -410,10 +410,9 @@ class OpenCodeRunnerService:
         )
         commit_cmd = [
             "git",
-            "-c",
-            f"user.name={settings.opencode_git_author_name}",
-            "-c",
-            f"user.email={settings.opencode_git_author_email}",
+            *pr_publish.git_identity_args(
+                settings.opencode_git_author_name, settings.opencode_git_author_email
+            ),
             "commit",
             "-m",
             title,
@@ -433,7 +432,18 @@ class OpenCodeRunnerService:
         if remote_branch.strip():
             try:
                 self._run_command(
-                    ["git", "pull", "--rebase", "--strategy-option=theirs", "origin", branch],
+                    [
+                        "git",
+                        *pr_publish.git_identity_args(
+                            settings.opencode_git_author_name,
+                            settings.opencode_git_author_email,
+                        ),
+                        "pull",
+                        "--rebase",
+                        "--strategy-option=theirs",
+                        "origin",
+                        branch,
+                    ],
                     cwd=workspace,
                     sensitive_values=sensitive_values,
                 )

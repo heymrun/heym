@@ -656,10 +656,9 @@ class CodexRunnerService:
         self._run_command(["git", "add", "-A"], cwd=workspace)
         commit_cmd = [
             "git",
-            "-c",
-            f"user.name={settings.codex_git_author_name}",
-            "-c",
-            f"user.email={settings.codex_git_author_email}",
+            *pr_publish.git_identity_args(
+                settings.codex_git_author_name, settings.codex_git_author_email
+            ),
             "commit",
             "-m",
             self._commit_title(result),
@@ -684,6 +683,9 @@ class CodexRunnerService:
                 self._run_command(
                     [
                         "git",
+                        *pr_publish.git_identity_args(
+                            settings.codex_git_author_name, settings.codex_git_author_email
+                        ),
                         "pull",
                         "--rebase",
                         "--strategy-option=theirs",

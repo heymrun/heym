@@ -37,6 +37,12 @@ class TestPrPublishHelpers(unittest.TestCase):
     def test_mask_sensitive(self):
         self.assertEqual(pr_publish.mask_sensitive("token=abc", ["abc"]), "token=[masked]")
 
+    def test_git_identity_args(self):
+        self.assertEqual(
+            pr_publish.git_identity_args("Heym Codex", "support@heym.run"),
+            ["-c", "user.name=Heym Codex", "-c", "user.email=support@heym.run"],
+        )
+
     def test_commit_title_prefers_pr_title(self):
         self.assertEqual(
             pr_publish.commit_title("Add feature", "ignored", fallback="fb"), "Add feature"

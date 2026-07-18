@@ -2,7 +2,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
+from app.config import settings
+from app.services.coding_agent import pr_publish
 from app.services.opencode_runner_service import OpenCodeRunnerService, OpenCodeRunRequest
 
 _WS = Path("/tmp/heym-oc-ws/run1")
@@ -115,3 +118,35 @@ class TestOpenCodeParser(unittest.TestCase):
         result = self.svc.parse_events("")
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.summary)
+
+
+class TestOpenCodePushBranch(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.runner._run_command = MagicMock()  # type: ignore[method-assign]
+        self.workspace = Path("/tmp/ws")
+        self.request = _request(publish_mode="update_existing_pr", branch_name="opencode/run")
+
+    def test_existing_remote_branch_rebase_includes_git_identity(self) -> None:
+        self.runner._git_output = MagicMock(  # type: ignore[method-assign]
+            return_value="abc123\trefs/heads/opencode/run\n"
+        )
+
+        self.runner._push_branch(self.workspace, self.request, "opencode/run")
+
+        commands = [call.args[0] for call in self.runner._run_command.call_args_list]
+        self.assertEqual(
+            commands[1],
+            [
+                "git",
+                *pr_publish.git_identity_args(
+                    settings.opencode_git_author_name, settings.opencode_git_author_email
+                ),
+                "pull",
+                "--rebase",
+                "--strategy-option=theirs",
+                "origin",
+                "opencode/run",
+            ],
+        )
+        self.assertEqual(commands[2], ["git", "push", "-u", "origin", "opencode/run"])

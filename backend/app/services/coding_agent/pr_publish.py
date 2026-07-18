@@ -60,6 +60,16 @@ def mask_sensitive(text: str, values: list[object]) -> str:
     return masked
 
 
+def git_identity_args(name: str, email: str) -> list[str]:
+    """Return ``git -c`` args so commit/rebase works without a local gitconfig.
+
+    Dockerized coding-agent workspaces run as root with no ``user.name`` /
+    ``user.email``. Commits and ``git pull --rebase`` both need an identity;
+    pass these args on those commands instead of mutating repo config.
+    """
+    return ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+
+
 def commit_title(pull_request_title: str, summary: str, *, fallback: str) -> str:
     """Prefer the dedicated PR title; else the first sentence of the summary; else ``fallback``."""
     title = re.sub(r"\s+", " ", str(pull_request_title or "")).strip()
