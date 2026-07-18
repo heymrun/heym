@@ -323,10 +323,10 @@ async function handleChangePassword(): Promise<void> {
     @close="emit('close')"
   >
     <div class="space-y-5 -mt-3">
-      <div class="flex border-b border-border pb-1">
+      <div class="flex border-b border-border pb-1 overflow-x-auto">
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'profile' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'profile'"
         >
@@ -334,7 +334,7 @@ async function handleChangePassword(): Promise<void> {
         </button>
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'security' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'security'"
         >
@@ -342,7 +342,7 @@ async function handleChangePassword(): Promise<void> {
         </button>
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'voice' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'voice'"
         >
@@ -350,7 +350,7 @@ async function handleChangePassword(): Promise<void> {
         </button>
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'ai-defaults' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'ai-defaults'"
         >
@@ -358,7 +358,7 @@ async function handleChangePassword(): Promise<void> {
         </button>
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'observability' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'observability'"
         >
@@ -366,7 +366,7 @@ async function handleChangePassword(): Promise<void> {
         </button>
         <button
           type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
           :class="activeTab === 'plugins' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'plugins'"
         >
