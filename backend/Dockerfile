@@ -21,9 +21,15 @@ ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
 # OpenCode CLI (Go) required by the OpenCode Go node. The runner executes it inside a hardened
-# sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg.
+# sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg; the
+# installer resolves "latest" only when VERSION is unset (passing VERSION=latest looks up a literal
+# "vlatest" tag and fails), so pass VERSION only for a pinned version.
 ARG HEYM_OPENCODE_CLI_VERSION=latest
-RUN curl -fsSL https://opencode.ai/install | VERSION="${HEYM_OPENCODE_CLI_VERSION}" bash \
+RUN if [ "${HEYM_OPENCODE_CLI_VERSION}" = "latest" ]; then \
+        curl -fsSL https://opencode.ai/install | bash; \
+    else \
+        curl -fsSL https://opencode.ai/install | VERSION="${HEYM_OPENCODE_CLI_VERSION}" bash; \
+    fi \
     && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && opencode --version
 
