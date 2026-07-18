@@ -382,6 +382,14 @@ const workflowCountLabel = computed((): string => {
   return `${workflowSearchMatchCount.value}/${workflows.value.length}`;
 });
 
+const isMac = computed((): boolean => {
+  return navigator.userAgent.toLowerCase().includes("mac");
+});
+
+const searchShortcutLabel = computed((): string => {
+  return isMac.value ? "⌘F" : "Ctrl+F";
+});
+
 function isFolderExpandedForDisplay(folderId: string): boolean {
   return workflowSearchExpandedFolderIds.value.has(folderId) || folderStore.isFolderExpanded(folderId);
 }
@@ -1463,6 +1471,12 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   >
                     {{ workflowCountLabel }}
                   </span>
+                  <kbd
+                    v-if="!loading && workflows.length > 0"
+                    class="inline-flex items-center px-1.5 py-px rounded text-[10px] font-mono text-muted-foreground/60 bg-muted/40 border border-border/50 mt-0.5"
+                  >
+                    {{ searchShortcutLabel }}
+                  </kbd>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">
                   Create and manage your AI workflows
