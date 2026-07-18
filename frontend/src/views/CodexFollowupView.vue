@@ -159,18 +159,22 @@ onMounted(loadFollowup);
               class="space-y-2"
             >
               <Label>Summary</Label>
+              <!-- eslint-disable vue/no-v-html -- sanitized with DOMPurify in renderMarkdown -->
               <div
                 class="prose prose-sm max-w-none text-muted-foreground dark:prose-invert"
                 v-html="summaryHtml"
               />
+              <!-- eslint-enable vue/no-v-html -->
             </section>
 
             <section class="space-y-2">
               <Label>Question</Label>
+              <!-- eslint-disable vue/no-v-html -- sanitized with DOMPurify in renderMarkdown -->
               <div
                 class="prose prose-sm max-w-none rounded-xl border border-border/60 bg-muted/30 p-4 dark:prose-invert"
                 v-html="questionHtml"
               />
+              <!-- eslint-enable vue/no-v-html -->
             </section>
 
             <section class="space-y-2">
