@@ -16,9 +16,7 @@ class CodexUsageEndpointTest(IsolatedAsyncioTestCase):
         db = AsyncMock()
         user = MagicMock()
         user.id = uuid.uuid4()
-        with patch(
-            "app.api.credentials._get_accessible_credential", AsyncMock(return_value=cred)
-        ):
+        with patch("app.api.credentials._get_accessible_credential", AsyncMock(return_value=cred)):
             with self.assertRaises(HTTPException) as ctx:
                 await get_codex_usage(uuid.uuid4(), current_user=user, db=db)
         self.assertEqual(ctx.exception.status_code, 400)
@@ -27,9 +25,7 @@ class CodexUsageEndpointTest(IsolatedAsyncioTestCase):
         db = AsyncMock()
         user = MagicMock()
         user.id = uuid.uuid4()
-        with patch(
-            "app.api.credentials._get_accessible_credential", AsyncMock(return_value=None)
-        ):
+        with patch("app.api.credentials._get_accessible_credential", AsyncMock(return_value=None)):
             with self.assertRaises(HTTPException) as ctx:
                 await get_codex_usage(uuid.uuid4(), current_user=user, db=db)
         self.assertEqual(ctx.exception.status_code, 404)
@@ -43,9 +39,7 @@ class CodexUsageEndpointTest(IsolatedAsyncioTestCase):
         user = MagicMock()
         user.id = uuid.uuid4()
         with (
-            patch(
-                "app.api.credentials._get_accessible_credential", AsyncMock(return_value=cred)
-            ),
+            patch("app.api.credentials._get_accessible_credential", AsyncMock(return_value=cred)),
             patch(
                 "app.api.credentials.decrypt_config",
                 return_value={"access_token": "t", "account_id": "a"},
