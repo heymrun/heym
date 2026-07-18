@@ -212,6 +212,7 @@ const hasSupabaseCredentialConfigChange = computed((): boolean => {
 const typeOptions = [
   { value: "openai", label: CREDENTIAL_TYPE_LABELS.openai },
   { value: "codex", label: CREDENTIAL_TYPE_LABELS.codex },
+  { value: "opencode", label: CREDENTIAL_TYPE_LABELS.opencode },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
   { value: "github", label: CREDENTIAL_TYPE_LABELS.github },
   { value: "jira", label: CREDENTIAL_TYPE_LABELS.jira },
@@ -506,7 +507,8 @@ const isValid = computed(() => {
     type.value === "google" ||
     type.value === "github" ||
     type.value === "sentry" ||
-    type.value === "elevenlabs"
+    type.value === "elevenlabs" ||
+    type.value === "opencode"
   ) {
     return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "jira") {
@@ -714,6 +716,12 @@ function buildConfig(): CredentialConfig {
     return { access_token: codexAccessToken.value.trim(), auth_mode: "access_token" };
   } else if (type.value === "google") {
     return { api_key: apiKey.value };
+  } else if (type.value === "opencode") {
+    const trimmedBaseUrl = baseUrl.value.trim();
+    return {
+      api_key: apiKey.value.trim(),
+      ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
+    };
   } else if (type.value === "github") {
     const trimmedBaseUrl = baseUrl.value.trim();
     return {
@@ -1553,7 +1561,7 @@ async function handleSave(): Promise<void> {
       </div>
 
       <div
-        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'sentry' || type === 'elevenlabs'"
+        v-if="type === 'openai' || type === 'google' || type === 'github' || type === 'sentry' || type === 'elevenlabs' || type === 'opencode'"
         class="space-y-2"
       >
         <Label for="cred-api-key">API Key</Label>
@@ -1562,7 +1570,7 @@ async function handleSave(): Promise<void> {
             id="cred-api-key"
             v-model="apiKey"
             :type="showApiKey ? 'text' : 'password'"
-            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : type === 'sentry' ? 'sntrys_... or sentry auth token' : 'sk-...')"
+            :placeholder="isEditing ? '••••••• (re-enter to update)' : (type === 'github' ? 'github_pat_... or ghp_...' : type === 'sentry' ? 'sntrys_... or sentry auth token' : type === 'opencode' ? 'OpenCode Go gateway API key' : 'sk-...')"
             :disabled="saving"
             class="pr-10"
           />
@@ -1600,6 +1608,14 @@ async function handleSave(): Promise<void> {
           class="text-xs text-muted-foreground"
         >
           Use a Sentry auth token with access to the organizations and projects you want to automate.
+        </p>
+        <p
+          v-else-if="type === 'opencode'"
+          class="text-xs text-muted-foreground"
+        >
+          Use an OpenCode Go gateway API key from
+          <code>opencode.ai/go</code>. The OpenCode Go node runs the OpenCode CLI in an isolated
+          container; git/GitHub operations use a separate GitHub credential.
         </p>
       </div>
 
@@ -1915,6 +1931,23 @@ async function handleSave(): Promise<void> {
           </p>
         </div>
       </template>
+
+      <div
+        v-if="type === 'opencode'"
+        class="space-y-2"
+      >
+        <Label for="cred-opencode-base-url">Gateway Base URL (Optional)</Label>
+        <Input
+          id="cred-opencode-base-url"
+          v-model="baseUrl"
+          placeholder="https://opencode.ai/zen/go/v1"
+          :disabled="saving"
+        />
+        <p class="text-xs text-muted-foreground">
+          Leave empty for the OpenCode Go gateway (<code>https://opencode.ai/zen/go/v1</code>).
+          Override only for a self-hosted or proxied gateway.
+        </p>
+      </div>
 
       <div
         v-if="type === 'github'"
