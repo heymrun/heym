@@ -44,6 +44,8 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--agent") + 1], "build")
         self.assertNotIn("--variant", cmd)
         self.assertIn("Task:", cmd[-1])
+        self.assertIn("Do NOT run git", cmd[-1])
+        self.assertIn("./check.sh", cmd[-1])
 
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
@@ -118,6 +120,40 @@ class TestOpenCodeParser(unittest.TestCase):
         result = self.svc.parse_events("")
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.summary)
+
+
+class TestOpenCodeExecFailureFormatting(unittest.TestCase):
+    def test_event_stream_is_not_dumped_as_error(self) -> None:
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "step_start", "sessionID": "ses_1"}),
+                json.dumps(
+                    {
+                        "type": "tool_use",
+                        "part": {
+                            "tool": "bash",
+                            "state": {
+                                "status": "completed",
+                                "title": "./check.sh",
+                                "output": "FATAL ERROR: JavaScript heap out of memory",
+                                "metadata": {"exit": 134},
+                            },
+                        },
+                    }
+                ),
+                json.dumps({"type": "step_start", "sessionID": "ses_1"}),
+            ]
+        )
+        detail = OpenCodeRunnerService._format_exec_failure(137, stdout, "")
+        self.assertNotIn('"sessionID"', detail)
+        self.assertIn("bash: ./check.sh failed", detail)
+        self.assertIn("heap out of memory", detail)
+        self.assertIn("exited with code 137", detail)
+        self.assertIn("OOM", detail)
+
+    def test_plain_stderr_is_preserved(self) -> None:
+        detail = OpenCodeRunnerService._format_exec_failure(1, "", "opencode: command failed")
+        self.assertEqual(detail, "opencode: command failed")
 
 
 class TestOpenCodePushBranch(unittest.TestCase):

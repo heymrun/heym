@@ -29,12 +29,17 @@ _REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
 _PR_SCREENSHOT_RELEASE_TAG = "opencode-pr-assets"
 
 _LOCAL_ONLY_RULES = (
-    "Apply ALL changes by editing files on disk in the current working directory. Do NOT run git; "
-    "do NOT commit, push, or create branches; and do NOT use the GitHub API or any remote tool to "
-    "modify the repository — Heym performs every git and GitHub operation after you finish. For "
-    "UI/frontend visual changes, save at least one PNG screenshot under a gitignored path such as "
-    "`frontend/.e2e-artifacts/`; Heym uploads those images onto the pull request afterward."
+    "Apply ALL changes by editing files on disk in the current working directory. "
+    "Heym already checked out the correct branch. Do NOT run git at all (no status, checkout, "
+    "fetch, commit, push, or branch commands); do NOT use the GitHub API or any remote tool to "
+    "modify the repository — Heym performs every git and GitHub operation after you finish. "
+    "Do NOT install package managers, run ./check.sh, bun/npm/pnpm install, or full "
+    "lint/typecheck/test suites — the runner container is memory-limited and Heym validates "
+    "changes after you finish. For UI/frontend visual changes, save at least one PNG screenshot "
+    "under a gitignored path such as `frontend/.e2e-artifacts/`; Heym uploads those images onto "
+    "the pull request afterward."
 )
+_MAX_ERROR_DETAIL_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -255,14 +260,15 @@ class OpenCodeRunnerService:
         home = Path(f"{workspace}.oc-home")
         home.mkdir(parents=True, exist_ok=True)
 
-        clone_branch = (
-            request.branch_name
-            if request.publish_mode == "update_existing_pr"
-            else request.base_branch
-        )
-        try:
-            self._clone_branch(workspace, request, clone_branch)
-        except ValueError:
+        # ``update_existing_pr`` clones the existing PR branch so OpenCode works on top of it; if
+        # that branch does not exist yet it falls back to the base branch (same as Codex).
+        if request.publish_mode == "update_existing_pr":
+            try:
+                self._clone_branch(workspace, request, request.branch_name)
+            except ValueError:
+                shutil.rmtree(workspace, ignore_errors=True)
+                self._clone_branch(workspace, request, request.base_branch)
+        else:
             self._clone_branch(workspace, request, request.base_branch)
 
         if request.setup_command.strip():
@@ -348,10 +354,91 @@ class OpenCodeRunnerService:
             ) from exc
         if completed.returncode != 0:
             detail = pr_publish.mask_sensitive(
-                completed.stderr or completed.stdout or "OpenCode exec failed", [request.api_key]
+                self._format_exec_failure(completed.returncode, completed.stdout, completed.stderr),
+                [request.api_key],
             )
             raise ValueError(detail)
         return completed.stdout
+
+    @classmethod
+    def _format_exec_failure(cls, returncode: int, stdout: str, stderr: str) -> str:
+        """Build a short failure message; never dump the full OpenCode JSONL event stream."""
+        extracted = cls._extract_exec_error(stdout)
+        stderr_clean = (stderr or "").strip()
+        parts: list[str] = []
+        if extracted:
+            parts.append(extracted)
+        elif stderr_clean and not cls._looks_like_event_stream(stderr_clean):
+            parts.append(stderr_clean)
+        if cls._looks_like_event_stream(stdout):
+            parts.append(
+                f"OpenCode exited with code {returncode} before successful completion. "
+                "The runner container may have been killed (OOM) or the session aborted "
+                "mid-step — avoid heavy ./check.sh / install / typecheck work inside the "
+                "OpenCode node; Heym validates after the run."
+            )
+        elif not parts:
+            detail = (stdout or "").strip() or f"OpenCode exec failed (exit code {returncode})"
+            parts.append(detail)
+        detail = "\n\n".join(parts)
+        if len(detail) > _MAX_ERROR_DETAIL_CHARS:
+            detail = detail[:_MAX_ERROR_DETAIL_CHARS].rstrip() + "\n…(truncated)"
+        return detail
+
+    @staticmethod
+    def _looks_like_event_stream(text: str) -> bool:
+        sample = (text or "").lstrip()[:80]
+        return sample.startswith('{"type":') or '"sessionID"' in sample
+
+    @classmethod
+    def _extract_exec_error(cls, stdout: str) -> str:
+        """Prefer the last failed tool / explicit error from OpenCode JSONL events."""
+        failed_tool = ""
+        explicit = ""
+        for raw_line in (stdout or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "")
+            if event_type == "error":
+                message = event.get("message") or event.get("error") or ""
+                if isinstance(message, str) and message.strip():
+                    explicit = message.strip()
+                continue
+            part = event.get("part")
+            if not isinstance(part, dict):
+                continue
+            state = part.get("state")
+            if not isinstance(state, dict):
+                continue
+            metadata = state.get("metadata")
+            exit_code = None
+            if isinstance(metadata, dict) and metadata.get("exit") is not None:
+                try:
+                    exit_code = int(metadata["exit"])
+                except (TypeError, ValueError):
+                    exit_code = None
+            status = str(state.get("status") or "")
+            if status == "error" or (exit_code is not None and exit_code != 0):
+                tool = str(part.get("tool") or "tool")
+                title = str(state.get("title") or "")
+                output = str(state.get("output") or "")
+                snippet = output.strip()
+                if len(snippet) > 500:
+                    snippet = snippet[:500].rstrip() + "…"
+                label = f"{tool}: {title}".strip(": ")
+                failed_tool = (
+                    f"{label} failed (exit {exit_code if exit_code is not None else status})"
+                )
+                if snippet:
+                    failed_tool = f"{failed_tool}\n{snippet}"
+        return explicit or failed_tool
 
     # --- publish (reuses shared pr_publish helpers) ---
     def _publish(

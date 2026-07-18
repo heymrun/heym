@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from app.config import settings
-from app.services.coding_agent import pr_publish
 from app.services.codex_runner_service import (
     _CODEX_REMOTE_PUBLISH_MODES,
     CODEX_FINAL_OUTPUT_SCHEMA,
@@ -12,6 +11,7 @@ from app.services.codex_runner_service import (
     CodexRunRequest,
     CodexRunResult,
 )
+from app.services.coding_agent import pr_publish
 
 
 class TestOutputSchema(unittest.TestCase):
