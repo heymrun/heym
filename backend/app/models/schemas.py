@@ -72,6 +72,30 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class CodexUsageWindow(BaseModel):
+    key: str  # "primary" | "secondary"
+    label: str  # e.g. "5 hours", "Weekly"
+    used_percent: float
+    window_minutes: int
+    reset_after_seconds: int | None = None
+    reset_at: int | None = None
+
+
+class CodexUsageCredits(BaseModel):
+    has_credits: bool = False
+    balance: str | None = None
+    unlimited: bool = False
+
+
+class CodexUsageResponse(BaseModel):
+    available: bool
+    plan_type: str | None = None
+    active_limit: str | None = None
+    windows: list[CodexUsageWindow] = []
+    credits: CodexUsageCredits | None = None
+    error: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
