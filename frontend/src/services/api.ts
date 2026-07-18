@@ -9,6 +9,7 @@ import type {
   WorkflowTemplate,
 } from "@/features/templates/types/template.types";
 import type {
+  CodexUsage,
   Credential,
   CredentialForIntellisense,
   CredentialListItem,
@@ -1173,6 +1174,11 @@ export const credentialsApi = {
 
   getModels: async (id: string): Promise<LLMModel[]> => {
     const response = await api.get<LLMModel[]>(`/credentials/${id}/models`);
+    return response.data;
+  },
+
+  getCodexUsage: async (id: string): Promise<CodexUsage> => {
+    const response = await api.get<CodexUsage>(`/credentials/${id}/codex-usage`);
     return response.data;
   },
 

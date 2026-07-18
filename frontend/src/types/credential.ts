@@ -76,6 +76,30 @@ export interface LLMModel {
   context_window?: number | null;
 }
 
+export interface CodexUsageWindow {
+  key: string;
+  label: string;
+  used_percent: number;
+  window_minutes: number;
+  reset_after_seconds?: number | null;
+  reset_at?: number | null;
+}
+
+export interface CodexUsageCredits {
+  has_credits: boolean;
+  balance?: string | null;
+  unlimited: boolean;
+}
+
+export interface CodexUsage {
+  available: boolean;
+  plan_type?: string | null;
+  active_limit?: string | null;
+  windows: CodexUsageWindow[];
+  credits?: CodexUsageCredits | null;
+  error?: string | null;
+}
+
 export interface CredentialConfigOpenAI {
   api_key: string;
 }
