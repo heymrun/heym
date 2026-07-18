@@ -1475,12 +1475,6 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   >
                     {{ workflowCountLabel }}
                   </span>
-                  <kbd
-                    v-if="!loading && workflows.length > 0"
-                    class="inline-flex items-center px-1.5 py-px rounded text-[10px] font-mono text-muted-foreground/60 bg-muted/40 border border-border/50 mt-0.5"
-                  >
-                    {{ searchShortcutLabel }}
-                  </kbd>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">
                   Create and manage your AI workflows
