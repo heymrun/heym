@@ -56,6 +56,7 @@ class ActiveExecutionRecord:
     workflow_id: uuid.UUID
     workflow_name: str
     started_at: datetime
+    inputs: dict = field(default_factory=dict)
     running_node_ids: list[str] = field(default_factory=list)
     node_results: list[dict[str, Any]] = field(default_factory=list)
 
@@ -150,6 +151,19 @@ def get_active_execution_progress(
         if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
             return None
         return sorted(handle.running_node_ids), list(handle.node_results)
+
+
+def get_active_execution_inputs(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> dict | None:
+    """Return a thread-safe copy of one local execution's original inputs."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        return dict(handle.inputs)
 
 
 def record_execution_node_started(execution_id: str, node_id: str) -> None:
@@ -539,6 +553,7 @@ async def list_persisted_active_executions_for_user(
             ActiveWorkflowExecution.workflow_id,
             ActiveWorkflowExecution.started_at,
             Workflow.name,
+            ActiveWorkflowExecution.inputs,
             ActiveWorkflowExecution.running_node_ids,
             ActiveWorkflowExecution.node_results,
         )
@@ -562,6 +577,7 @@ async def list_persisted_active_executions_for_user(
             workflow_id=row.workflow_id,
             workflow_name=row.name,
             started_at=row.started_at,
+            inputs=dict(row.inputs or {}),
             running_node_ids=list(row.running_node_ids or []),
             node_results=list(row.node_results or []),
         )

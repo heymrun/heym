@@ -1028,6 +1028,7 @@ export interface ActiveExecutionItem {
   workflow_id: string;
   workflow_name: string;
   started_at: string;
+  inputs: Record<string, unknown>;
   running_node_ids: string[];
   node_results: NodeResult[];
 }

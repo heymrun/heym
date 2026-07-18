@@ -371,23 +371,33 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
     `Board Live WF ${Date.now()}`,
     [
       {
+        id: "input_board_live",
+        type: "textInput",
+        position: { x: 100, y: 100 },
+        data: { label: "boardInput", inputFields: [{ key: "board" }] },
+      },
+      {
         id: "wait_board_live",
         type: "wait",
-        position: { x: 100, y: 100 },
+        position: { x: 400, y: 100 },
         data: { label: "waitBoardLive", duration: 12_000 },
       },
       {
         id: "output_board_live",
         type: "output",
-        position: { x: 400, y: 100 },
+        position: { x: 700, y: 100 },
         data: { label: "out", message: "board live complete" },
       },
     ],
-    [{ id: "edge_board_live", source: "wait_board_live", target: "output_board_live" }],
+    [
+      { id: "edge_board_input", source: "input_board_live", target: "wait_board_live" },
+      { id: "edge_board_live", source: "wait_board_live", target: "output_board_live" },
+    ],
   );
 
   let activeExecutionId = "";
   let cardRunId = "";
+  let liveInputText = "";
   try {
     const { boardId, cardId, columns } = await createBoardWithCard(page, "watch live");
     const planning = columns.find((column) => column.name === "Planning")!;
@@ -410,6 +420,21 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
       })
       .not.toBe("");
 
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          inputs: Record<string, unknown>;
+        }>;
+        const inputs = active.find(
+          (entry) => entry.execution_id === activeExecutionId,
+        )?.inputs;
+        liveInputText = inputs?.board ? JSON.stringify(inputs.board) : "";
+        return liveInputText;
+      })
+      .not.toBe("");
+
     await page.goto(`/?tab=board&board=${boardId}`);
     await page.getByTestId(`board-card-${cardId}`).click();
     await page.getByTestId(`run-open-live-${cardRunId}`).click();
@@ -419,6 +444,7 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
     await expect(page.locator('[data-id="wait_board_live"] .node-base')).toHaveClass(
       /animate-heartbeat/,
     );
+    await expect(page.getByPlaceholder("Enter board...")).toHaveValue(liveInputText);
   } finally {
     if (activeExecutionId) {
       await page.request.post(

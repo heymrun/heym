@@ -537,10 +537,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
   function applyExecutionHistoryEntry(entry: ExecutionHistoryEntry): void {
     if (!entry.result) return;
     upsertExecutionHistoryEntry(entry);
-    applyExecutionResultSnapshot({
+    const result: ExecutionResult = {
       ...entry.result,
       execution_history_id: entry.id,
-    });
+    };
+    loadHistoryInputs(entry.inputs, result.node_results, result);
+    applyExecutionResultSnapshot(result);
   }
 
   async function loadWorkflow(id: string): Promise<void> {
@@ -1453,9 +1455,28 @@ export const useWorkflowStore = defineStore("workflow", () => {
         executionId,
         (data) => {
           currentExecutionId.value = data.execution_id;
+          loadHistoryInputs(data.inputs);
         },
         (nodeId) => {
           setNodeStatus(nodeId, "running");
+          const existingRunningResult = nodeResults.value.some(
+            (result) => result.node_id === nodeId && result.status === "running",
+          );
+          if (!existingRunningResult) {
+            const node = nodes.value.find((candidate) => candidate.id === nodeId);
+            nodeResults.value = [
+              ...nodeResults.value,
+              {
+                node_id: nodeId,
+                node_label: node?.data.label || nodeId,
+                node_type: node?.type || "unknown",
+                status: "running",
+                output: {},
+                execution_time_ms: 0,
+                error: null,
+              },
+            ];
+          }
         },
         (data) => {
           setNodeStatus(
@@ -1474,10 +1495,27 @@ export const useWorkflowStore = defineStore("workflow", () => {
           if (data.metadata && typeof data.metadata === "object") {
             row.metadata = data.metadata;
           }
-          nodeResults.value = [...nodeResults.value, row];
+          const runningResultIndex = nodeResults.value.findIndex(
+            (result) => result.node_id === data.node_id && result.status === "running",
+          );
+          if (runningResultIndex >= 0) {
+            const nextResults = [...nodeResults.value];
+            nextResults.splice(runningResultIndex, 1, row);
+            nodeResults.value = nextResults;
+          } else {
+            nodeResults.value = [...nodeResults.value, row];
+          }
         },
-        (result) => {
-          applyExecutionResultSnapshot(result);
+        async (result) => {
+          const historyId = result.execution_history_id;
+          const historyEntry = historyId
+            ? await fetchExecutionHistoryEntry(historyId, true)
+            : null;
+          if (historyEntry?.result) {
+            applyExecutionHistoryEntry(historyEntry);
+          } else {
+            applyExecutionResultSnapshot(result);
+          }
           isObservingExecution.value = false;
           resolve();
         },

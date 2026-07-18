@@ -14,6 +14,7 @@ from app.services.execution_cancellation import (
     ExecutionCancellationHandle,
     active_execution_registry,
     clear_execution,
+    get_active_execution_inputs,
     get_active_execution_progress,
     list_active_executions,
     list_persisted_active_executions_for_user,
@@ -30,6 +31,7 @@ def _make_handle(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ExecutionCa
         execution_id=execution_id,
         event=threading.Event(),
         started_at=datetime.datetime(2025, 1, 1, 12, 0, 0),
+        inputs={"text": "local input"},
     )
 
 
@@ -39,6 +41,7 @@ def _make_record(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ActiveExecu
         execution_id=execution_id,
         workflow_name="My Workflow",
         started_at=datetime.datetime(2025, 1, 1, 12, 0, 0),
+        inputs={"text": "persisted input"},
     )
 
 
@@ -81,6 +84,7 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].execution_id, str(ex_id))
         self.assertEqual(result[0].workflow_id, str(wf_id))
         self.assertEqual(result[0].workflow_name, "My Workflow")
+        self.assertEqual(result[0].inputs, {"text": "persisted input"})
         self.assertIsInstance(result[0], ActiveExecutionItem)
         db.execute.assert_not_called()
 
@@ -124,6 +128,7 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].execution_id, str(ex_id_owned))
         self.assertEqual(result[0].workflow_id, str(wf_id_owned))
         self.assertEqual(result[0].workflow_name, "My Workflow")
+        self.assertEqual(result[0].inputs, {"text": "local input"})
         self.assertIsInstance(result[0], ActiveExecutionItem)
 
     async def test_returns_started_at_from_handle(self) -> None:
@@ -240,6 +245,10 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 get_active_execution_progress(execution_id, workflow_id=workflow_id),
                 (["node-2"], [node_result]),
             )
+            self.assertEqual(
+                get_active_execution_inputs(execution_id, workflow_id=workflow_id),
+                {},
+            )
         finally:
             clear_execution(execution_id)
 
@@ -285,7 +294,11 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_replays_live_node_snapshot_as_canvas_events(self) -> None:
         workflow_id = uuid.uuid4()
         execution_id = uuid.uuid4()
-        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+        register_execution(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            inputs={"text": "live input"},
+        )
         record_execution_node_completed(
             str(execution_id),
             "console",
@@ -329,6 +342,7 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
             await iterator.aclose()
 
             self.assertIn('"type": "execution_started"', started)
+            self.assertIn('"inputs": {"text": "live input"}', started)
             self.assertIn('"type": "node_complete"', completed)
             self.assertIn('"message": "hello"', completed)
             self.assertIn('"type": "node_start"', running)

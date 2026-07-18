@@ -230,6 +230,7 @@ function showAllRows(): void {
       <div
         v-for="row in visibleRows"
         :key="row.key"
+        :data-testid="`execution-timeline-row-${row.nodeId}`"
         class="flex items-center hover:bg-muted/20 group"
         :style="{ height: `${rowHeightPx}px` }"
       >

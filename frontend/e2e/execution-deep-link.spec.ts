@@ -161,22 +161,32 @@ test("opens one running execution live from both history dialogs", async ({ page
     page,
     `Live Execution Canvas ${Date.now()}`,
     [
-      workflowNode("console_live", "consoleLog", 80, 160, {
-        label: "consoleLive",
-        logMessage: "observed live log",
+      workflowNode("input_live", "textInput", 80, 160, {
+        label: "inputLive",
+        inputFields: [{ key: "text" }],
       }),
       workflowNode("wait_live", "wait", 340, 160, {
         label: "waitLive",
-        duration: 12_000,
+        duration: 6_000,
       }),
-      workflowNode("output_live", "output", 600, 160, {
+      workflowNode("set_live", "set", 600, 160, {
+        label: "setLive",
+        mappings: [{ key: "text", value: "$waitLive.text" }],
+      }),
+      workflowNode("wait_live_two", "wait", 860, 160, {
+        label: "waitLiveTwo",
+        duration: 3_000,
+      }),
+      workflowNode("output_live", "jsonOutputMapper", 1_120, 160, {
         label: "outputLive",
-        message: "$waitLive.logMessage",
+        mappings: [{ key: "message", value: "$waitLiveTwo.text" }],
       }),
     ],
     [
-      workflowEdge("edge_console_wait", "console_live", "wait_live"),
-      workflowEdge("edge_wait_output", "wait_live", "output_live"),
+      workflowEdge("edge_input_wait", "input_live", "wait_live"),
+      workflowEdge("edge_wait_set", "wait_live", "set_live"),
+      workflowEdge("edge_set_wait_two", "set_live", "wait_live_two"),
+      workflowEdge("edge_wait_two_output", "wait_live_two", "output_live"),
     ],
   );
 
@@ -184,7 +194,7 @@ test("opens one running execution live from both history dialogs", async ({ page
   const allHistoryPage = await page.context().newPage();
   try {
     await page.goto(`/workflows/${workflow.id}`);
-    await expect(page.locator(".vue-flow__node")).toHaveCount(3);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(5);
     await page.evaluate((workflowId) => {
       void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
         method: "POST",
@@ -193,7 +203,7 @@ test("opens one running execution live from both history dialogs", async ({ page
           "Content-Type": "application/json",
           "x-simple-response": "false",
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ text: "live input payload" }),
       });
     }, workflow.id);
 
@@ -216,9 +226,8 @@ test("opens one running execution live from both history dialogs", async ({ page
     await expect(page.locator('[data-id="wait_live"] .node-base')).toHaveClass(
       /animate-heartbeat/,
     );
-    await expect(page.getByTestId("debug-node-result-console_live")).toContainText(
-      "consoleLive",
-    );
+    await expect(page.getByPlaceholder("Enter text...")).toHaveValue("live input payload");
+    await expect(page.getByTestId("debug-node-result-input_live")).toContainText("inputLive");
 
     await allHistoryPage.goto("/");
     await allHistoryPage.getByRole("button", { name: "History", exact: true }).click();
@@ -229,6 +238,28 @@ test("opens one running execution live from both history dialogs", async ({ page
     await expectExecutionPath(allHistoryPage, workflow.id, executionId);
     await expect(allHistoryPage.locator('[data-id="wait_live"] .node-base')).toHaveClass(
       /animate-heartbeat/,
+    );
+    await expect(allHistoryPage.getByPlaceholder("Enter text...")).toHaveValue(
+      "live input payload",
+    );
+
+    await expect(page.locator('[data-id="wait_live_two"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+      { timeout: 10_000 },
+    );
+    await expect(page.getByTestId("debug-node-result-wait_live_two")).toContainText(
+      "waitLiveTwo",
+    );
+
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(allHistoryPage.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
+    await page.getByTitle("Execution timeline").click();
+    await expect(page.getByTestId("execution-timeline-row-wait_live_two")).toContainText(
+      "waitLiveTwo",
     );
   } finally {
     if (executionId) {

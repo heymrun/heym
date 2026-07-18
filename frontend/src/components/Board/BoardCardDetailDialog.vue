@@ -236,6 +236,11 @@ async function removeActivity(activityId: string): Promise<void> {
 }
 
 const copiedRunId = ref<string | null>(null);
+const activeLiveRun = computed<CardRun | null>(() =>
+  detail.value?.runs.find(
+    (run) => run.status === "running" && Boolean(run.active_execution_id),
+  ) ?? null,
+);
 
 async function copyRun(run: CardRun): Promise<void> {
   const text = Object.keys(run.output).length
@@ -275,17 +280,29 @@ function openLiveRun(run: CardRun): void {
       v-if="detail"
       #subtitle
     >
-      <span
-        class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-        :class="{
-          'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
-          'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
-          'bg-amber-500/15 text-amber-500':
-            detail.card.run_status === 'running' || detail.card.run_status === 'pending',
-          'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
-        }"
-      >
-        {{ detail.card.run_status }}
+      <span class="inline-flex items-center gap-1.5">
+        <span
+          class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+          :class="{
+            'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
+            'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
+            'bg-amber-500/15 text-amber-500':
+              detail.card.run_status === 'running' || detail.card.run_status === 'pending',
+            'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
+          }"
+        >
+          {{ detail.card.run_status }}
+        </span>
+        <button
+          v-if="activeLiveRun"
+          class="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-xs text-blue-500 hover:bg-blue-500/20"
+          :data-testid="`run-open-live-${activeLiveRun.id}`"
+          :aria-label="`Open ${activeLiveRun.workflow_name} live canvas`"
+          @click.stop="openLiveRun(activeLiveRun)"
+        >
+          <Radio class="h-3 w-3" />
+          Open live
+        </button>
       </span>
     </template>
     <template #header-trailing>
@@ -522,16 +539,6 @@ function openLiveRun(run: CardRun): void {
                 step {{ run.chain_position + 1 }}/{{ run.chain_length }}
               </span>
               <div class="ml-auto flex items-center gap-1.5">
-                <button
-                  v-if="run.status === 'running' && run.active_execution_id"
-                  class="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-blue-500 hover:bg-blue-500/20"
-                  :data-testid="`run-open-live-${run.id}`"
-                  :aria-label="`Open ${run.workflow_name} live canvas`"
-                  @click.stop="openLiveRun(run)"
-                >
-                  <Radio class="h-3 w-3" />
-                  Open live
-                </button>
                 <button
                   class="hidden items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground group-hover:inline-flex"
                   :data-testid="`run-copy-${run.id}`"

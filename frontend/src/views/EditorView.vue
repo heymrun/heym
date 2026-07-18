@@ -600,11 +600,7 @@ async function bringExecutionFromRoute(): Promise<void> {
   ) {
     return;
   }
-  workflowStore.loadHistoryInputs(
-    entry.inputs,
-    entry.result?.node_results || [],
-    entry.result || undefined,
-  );
+  workflowStore.applyExecutionHistoryEntry(entry);
 }
 
 onMounted(async () => {

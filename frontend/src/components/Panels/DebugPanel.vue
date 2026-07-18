@@ -294,8 +294,7 @@ const timelineResults = computed((): TimelineEntry[] =>
         r.node_type !== "condition" &&
         r.node_type !== "sticky" &&
         !isRetryAttemptNodeResult(r) &&
-        r.status !== "skipped" &&
-        r.execution_time_ms > 0,
+        r.status !== "skipped",
     )
     .map(({ r, rowIndex, allRows }) => {
       let retryFailedAttempts = 0;

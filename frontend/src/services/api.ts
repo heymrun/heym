@@ -666,7 +666,10 @@ export const workflowApi = {
   streamActiveExecution: (
     workflowId: string,
     executionId: string,
-    onExecutionStarted: (data: { execution_id: string }) => void,
+    onExecutionStarted: (data: {
+      execution_id: string;
+      inputs: Record<string, unknown>;
+    }) => void,
     onNodeStart: (nodeId: string) => void,
     onNodeComplete: (data: {
       node_id: string;
@@ -716,7 +719,13 @@ export const workflowApi = {
             if (!message.startsWith("data: ")) continue;
             const data = JSON.parse(message.slice(6));
             if (data.type === "execution_started") {
-              onExecutionStarted({ execution_id: data.execution_id });
+              onExecutionStarted({
+                execution_id: data.execution_id,
+                inputs:
+                  data.inputs && typeof data.inputs === "object" && !Array.isArray(data.inputs)
+                    ? data.inputs
+                    : {},
+              });
             } else if (data.type === "node_start") {
               onNodeStart(data.node_id);
             } else if (data.type === "node_complete") {

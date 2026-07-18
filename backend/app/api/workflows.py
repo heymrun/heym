@@ -80,6 +80,7 @@ from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
 )
 from app.services.execution_cancellation import (
+    get_active_execution_inputs,
     get_active_execution_progress,
     list_active_executions,
     list_persisted_active_executions_for_user,
@@ -1005,6 +1006,7 @@ async def list_active_workflow_executions(
             workflow_id=str(record.workflow_id),
             workflow_name=record.workflow_name,
             started_at=record.started_at,
+            inputs=record.inputs,
             running_node_ids=record.running_node_ids,
             node_results=record.node_results,
         )
@@ -1047,6 +1049,7 @@ async def list_active_workflow_executions(
                 workflow_id=str(handle.workflow_id),
                 workflow_name=accessible[handle.workflow_id],
                 started_at=handle.started_at,
+                inputs=dict(handle.inputs),
                 running_node_ids=running_node_ids,
                 node_results=node_results,
             )
@@ -1074,6 +1077,22 @@ async def stream_active_workflow_execution(
             detail="Workflow not found",
         )
 
+    initial_inputs = get_active_execution_inputs(
+        execution_id,
+        workflow_id=workflow_id,
+    )
+    if initial_inputs is None:
+        async with async_session_maker() as stream_db:
+            active_inputs_result = await stream_db.execute(
+                select(ActiveWorkflowExecution.inputs).where(
+                    ActiveWorkflowExecution.execution_id == execution_id,
+                    ActiveWorkflowExecution.workflow_id == workflow_id,
+                    ActiveWorkflowExecution.cancel_requested_at.is_(None),
+                )
+            )
+            persisted_inputs = active_inputs_result.scalar_one_or_none()
+        initial_inputs = dict(persisted_inputs or {})
+
     async def event_generator():
         emitted_result_count = 0
         emitted_running_node_ids: set[str] = set()
@@ -1085,6 +1104,7 @@ async def stream_active_workflow_execution(
                 {
                     "type": "execution_started",
                     "execution_id": str(execution_id),
+                    "inputs": initial_inputs,
                 }
             )
             + "\n\n"

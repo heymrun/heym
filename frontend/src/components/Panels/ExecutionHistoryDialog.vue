@@ -735,32 +735,33 @@ function bringToCanvas(): void {
           <div
             v-for="active in activeExecutions"
             :key="active.execution_id"
-            class="flex items-center justify-between gap-2 p-2 rounded-md border border-blue-500/30 bg-blue-500/10"
+            class="p-2 rounded-md border border-blue-500/30 bg-blue-500/10"
           >
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <Loader2 class="w-3 h-3 text-blue-400 animate-spin shrink-0" />
-                <span class="text-xs font-medium text-blue-400">Running</span>
-              </div>
-              <div class="text-[10px] text-muted-foreground mt-0.5 pl-4 truncate">
-                {{ formatTime(active.started_at) }}
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-1">
+            <div class="flex items-center gap-1.5">
+              <Loader2 class="w-3 h-3 text-blue-400 animate-spin shrink-0" />
+              <span class="text-xs font-medium text-blue-400">Running</span>
               <Button
                 variant="outline"
                 size="sm"
-                class="h-5 px-1.5 text-[10px]"
+                class="!h-7 !min-h-7 !rounded-md !px-2 text-[10px]"
                 :data-testid="`open-live-execution-${active.execution_id}`"
                 @click="openActiveExecution(active)"
               >
                 <Radio class="mr-0.5 h-3 w-3" />
                 Open live
               </Button>
+            </div>
+            <div class="mt-1 flex min-w-0 items-center justify-between gap-2">
+              <div
+                class="min-w-0 truncate text-[10px] text-muted-foreground"
+                :title="formatTime(active.started_at)"
+              >
+                {{ formatTime(active.started_at) }}
+              </div>
               <Button
                 variant="destructive"
                 size="sm"
-                class="h-5 px-1.5 text-[10px]"
+                class="!h-7 !min-h-7 !rounded-md !px-2 text-[10px]"
                 :disabled="isCancellingId === active.execution_id"
                 @click="cancelActiveExecution(active)"
               >
