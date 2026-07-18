@@ -240,3 +240,76 @@ test("opens one running execution live from both history dialogs", async ({ page
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("keeps other pages responsive while parallel canvas nodes are running", async ({
+  page,
+}) => {
+  const workflow = await createWorkflow(
+    page,
+    `Parallel Responsive Canvas ${Date.now()}`,
+    [
+      workflowNode("parallel_input", "textInput", 80, 160, {
+        label: "parallelInput",
+        inputFields: [],
+      }),
+      workflowNode("parallel_wait_a", "wait", 340, 80, {
+        label: "parallelWaitA",
+        duration: 8_000,
+      }),
+      workflowNode("parallel_wait_b", "wait", 340, 240, {
+        label: "parallelWaitB",
+        duration: 8_000,
+      }),
+    ],
+    [
+      workflowEdge("edge_parallel_a", "parallel_input", "parallel_wait_a"),
+      workflowEdge("edge_parallel_b", "parallel_input", "parallel_wait_b"),
+    ],
+  );
+
+  let executionId = "";
+  const dashboardPage = await page.context().newPage();
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(3);
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+
+    await expect(page.locator('[data-id="parallel_wait_a"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.locator('[data-id="parallel_wait_b"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          workflow_id: string;
+        }>;
+        executionId =
+          active.find((entry) => entry.workflow_id === workflow.id)?.execution_id ?? "";
+        return executionId;
+      })
+      .not.toBe("");
+
+    const navigationStartedAt = Date.now();
+    await dashboardPage.goto("/", { timeout: 4_000 });
+    await expect(dashboardPage.getByTestId(`workflow-card-${workflow.id}`)).toBeVisible();
+    expect(Date.now() - navigationStartedAt).toBeLessThan(4_000);
+
+    const healthResponse = await dashboardPage.request.get("/api/health", {
+      timeout: 2_000,
+    });
+    expect(healthResponse.ok()).toBeTruthy();
+  } finally {
+    if (executionId) {
+      await page.request.post(
+        `/api/workflows/${workflow.id}/executions/${executionId}/cancel`,
+      );
+    }
+    await dashboardPage.close();
+    await deleteWorkflow(page, workflow.id);
+  }
+});

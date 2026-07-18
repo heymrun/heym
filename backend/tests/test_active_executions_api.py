@@ -12,6 +12,7 @@ from app.models.schemas import ActiveExecutionItem
 from app.services.execution_cancellation import (
     ActiveExecutionRecord,
     ExecutionCancellationHandle,
+    active_execution_registry,
     clear_execution,
     get_active_execution_progress,
     list_active_executions,
@@ -201,15 +202,22 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
         execution_id = uuid.uuid4()
         register_execution(workflow_id=workflow_id, execution_id=execution_id)
         try:
-            record_execution_node_started(str(execution_id), "node-1")
-            self.assertEqual(
-                get_active_execution_progress(execution_id, workflow_id=workflow_id),
-                (["node-1"], []),
-            )
-            handle = next(
-                item for item in list_active_executions() if item.execution_id == execution_id
-            )
-            self.assertEqual(handle.running_node_ids, {"node-1"})
+            with patch.object(active_execution_registry, "_wake") as registry_wake:
+                record_execution_node_started(str(execution_id), "node-1")
+                record_execution_node_completed(
+                    str(execution_id),
+                    "node-1",
+                    {
+                        "node_id": "node-1",
+                        "node_label": "Console",
+                        "node_type": "consoleLog",
+                        "status": "success",
+                        "output": {"message": "live"},
+                        "execution_time_ms": 4.0,
+                        "error": None,
+                    },
+                )
+                registry_wake.assert_not_called()
 
             node_result = {
                 "node_id": "node-1",
@@ -220,14 +228,57 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 "execution_time_ms": 4.0,
                 "error": None,
             }
-            record_execution_node_completed(str(execution_id), "node-1", node_result)
-
+            handle = next(
+                item for item in list_active_executions() if item.execution_id == execution_id
+            )
+            self.assertEqual(handle.progress_version, 2)
             self.assertEqual(handle.running_node_ids, set())
             self.assertEqual(handle.node_results, [node_result])
+
+            record_execution_node_started(str(execution_id), "node-2")
             self.assertEqual(
                 get_active_execution_progress(execution_id, workflow_id=workflow_id),
-                ([], [node_result]),
+                (["node-2"], [node_result]),
             )
+        finally:
+            clear_execution(execution_id)
+
+    async def test_registry_writes_progress_only_after_node_state_changes(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+
+        session = AsyncMock()
+        select_result = MagicMock()
+        select_result.scalars.return_value.all.return_value = []
+        session.execute.return_value = select_result
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+
+        async def sync_update_sql() -> str:
+            session.execute.reset_mock()
+            with patch(
+                "app.db.session.async_session_maker",
+                return_value=session_context,
+            ):
+                await active_execution_registry._sync_local_handles()
+            update_statement = session.execute.await_args_list[-1].args[0]
+            return str(update_statement).partition(" WHERE ")[0]
+
+        try:
+            heartbeat_only_sql = await sync_update_sql()
+            self.assertNotIn("running_node_ids", heartbeat_only_sql)
+            self.assertNotIn("node_results", heartbeat_only_sql)
+
+            record_execution_node_started(str(execution_id), "node-1")
+            progress_sql = await sync_update_sql()
+            self.assertIn("running_node_ids", progress_sql)
+            self.assertIn("node_results", progress_sql)
+
+            next_heartbeat_sql = await sync_update_sql()
+            self.assertNotIn("running_node_ids", next_heartbeat_sql)
+            self.assertNotIn("node_results", next_heartbeat_sql)
         finally:
             clear_execution(execution_id)
 

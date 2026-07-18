@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import copy
 import logging
 import os
 import queue
@@ -45,6 +44,8 @@ class ExecutionCancellationHandle:
     recoverable: bool = True
     running_node_ids: set[str] = field(default_factory=set)
     node_results: list[dict[str, Any]] = field(default_factory=list)
+    progress_version: int = 0
+    synced_progress_version: int = 0
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,7 @@ def get_active_execution_progress(
         handle = _ACTIVE_EXECUTIONS.get(execution_id)
         if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
             return None
-        return sorted(handle.running_node_ids), copy.deepcopy(handle.node_results)
+        return sorted(handle.running_node_ids), list(handle.node_results)
 
 
 def record_execution_node_started(execution_id: str, node_id: str) -> None:
@@ -162,8 +163,10 @@ def record_execution_node_started(execution_id: str, node_id: str) -> None:
         handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
         if handle is None:
             return
-        handle.running_node_ids.add(str(node_id))
-    active_execution_registry.wake_for_progress()
+        normalized_node_id = str(node_id)
+        if normalized_node_id not in handle.running_node_ids:
+            handle.running_node_ids.add(normalized_node_id)
+            handle.progress_version += 1
 
 
 def record_execution_node_completed(
@@ -182,8 +185,8 @@ def record_execution_node_completed(
         if handle is None:
             return
         handle.running_node_ids.discard(str(node_id))
-        handle.node_results.append(copy.deepcopy(node_result))
-    active_execution_registry.wake_for_progress()
+        handle.node_results.append(node_result)
+        handle.progress_version += 1
 
 
 class ActiveExecutionRegistry:
@@ -242,11 +245,6 @@ class ActiveExecutionRegistry:
             return
         self._commands.put(_RegistryCommand(action="finish", execution_id=execution_id))
         self._wake()
-
-    def wake_for_progress(self) -> None:
-        """Flush a local node snapshot promptly without queueing a new command."""
-        if self._running:
-            self._wake()
 
     def _wake(self) -> None:
         if self._loop is None or self._wakeup is None:
@@ -353,6 +351,25 @@ class ActiveExecutionRegistry:
 
         handles_by_id = {handle.execution_id: handle for handle in handles}
         execution_ids = list(handles_by_id)
+        progress_snapshots: dict[
+            uuid.UUID,
+            tuple[ExecutionCancellationHandle, list[str], list[dict[str, Any]], int, bool],
+        ] = {}
+        with _LOCK:
+            for execution_id, listed_handle in handles_by_id.items():
+                current_handle = _ACTIVE_EXECUTIONS.get(execution_id)
+                if current_handle is not listed_handle:
+                    continue
+                progress_changed = (
+                    current_handle.progress_version != current_handle.synced_progress_version
+                )
+                progress_snapshots[execution_id] = (
+                    current_handle,
+                    sorted(current_handle.running_node_ids) if progress_changed else [],
+                    list(current_handle.node_results) if progress_changed else [],
+                    current_handle.progress_version,
+                    progress_changed,
+                )
         now = _utcnow()
         async with async_session_maker() as session:
             cancel_result = await session.execute(
@@ -362,18 +379,35 @@ class ActiveExecutionRegistry:
                 )
             )
             cancelled_ids = list(cancel_result.scalars().all())
-            for execution_id, handle in handles_by_id.items():
+            for execution_id, snapshot in progress_snapshots.items():
+                _handle, running_node_ids, node_results, _version, progress_changed = snapshot
+                update_values: dict[str, Any] = {
+                    "heartbeat_at": now,
+                    "worker_id": _WORKER_ID,
+                }
+                if progress_changed:
+                    update_values.update(
+                        running_node_ids=running_node_ids,
+                        node_results=node_results,
+                    )
                 await session.execute(
                     update(ActiveWorkflowExecution)
                     .where(ActiveWorkflowExecution.execution_id == execution_id)
-                    .values(
-                        heartbeat_at=now,
-                        worker_id=_WORKER_ID,
-                        running_node_ids=sorted(handle.running_node_ids),
-                        node_results=copy.deepcopy(handle.node_results),
-                    )
+                    .values(**update_values)
                 )
             await session.commit()
+
+        with _LOCK:
+            for execution_id, snapshot in progress_snapshots.items():
+                snapshotted_handle, _running, _results, version, progress_changed = snapshot
+                if not progress_changed:
+                    continue
+                current_handle = _ACTIVE_EXECUTIONS.get(execution_id)
+                if current_handle is snapshotted_handle:
+                    current_handle.synced_progress_version = max(
+                        current_handle.synced_progress_version,
+                        version,
+                    )
 
         for execution_id in cancelled_ids:
             handle = handles_by_id.get(execution_id)
