@@ -286,12 +286,21 @@ class OpenCodeRunnerService:
             self._publish(workspace, request, result)
         return result
 
-    def build_run_command(self, model: str, request: OpenCodeRunRequest) -> list[str]:
-        """The ``<cli_command> run …`` argv (host binary locally, docker wrapper in deployments)."""
+    def build_run_command(
+        self, model: str, request: OpenCodeRunRequest, workspace: Path
+    ) -> list[str]:
+        """The ``<cli_command> run …`` argv (host binary locally, docker wrapper in deployments).
+
+        ``--dir`` pins OpenCode to the cloned workspace. Without it OpenCode resolves its project by
+        walking up from the process cwd and can edit files in an enclosing repository (e.g. Heym's
+        own checkout) instead of the clone — the run then reports success with an empty diff.
+        """
         prompt = f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
         cmd = [
             self.cli_command,
             "run",
+            "--dir",
+            str(workspace),
             "--format",
             "json",
             "--model",
@@ -317,7 +326,7 @@ class OpenCodeRunnerService:
         env["HOME"] = str(home)
         env["XDG_CONFIG_HOME"] = str(home / ".config")
         env["XDG_DATA_HOME"] = str(home / ".local" / "share")
-        cmd = self.build_run_command(model, request)
+        cmd = self.build_run_command(model, request, workspace)
         try:
             completed = subprocess.run(
                 cmd,

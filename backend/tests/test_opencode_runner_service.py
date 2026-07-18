@@ -5,6 +5,8 @@ from pathlib import Path
 
 from app.services.opencode_runner_service import OpenCodeRunnerService, OpenCodeRunRequest
 
+_WS = Path("/tmp/heym-oc-ws/run1")
+
 
 def _request(**overrides) -> OpenCodeRunRequest:
     base = dict(
@@ -30,7 +32,7 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.svc = OpenCodeRunnerService(cli_command="opencode", workspace_root="/tmp/heym-oc-ws")
 
     def test_run_command_shape(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request())
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[0], "opencode")
         self.assertEqual(cmd[1], "run")
         self.assertIn("--format", cmd)
@@ -40,15 +42,19 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertNotIn("--variant", cmd)
         self.assertIn("Task:", cmd[-1])
 
+    def test_run_command_pins_workspace_dir(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        self.assertEqual(cmd[cmd.index("--dir") + 1], str(_WS))
+
     def test_run_command_includes_variant(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(variant="high"))
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(variant="high"), _WS)
         self.assertEqual(cmd[cmd.index("--variant") + 1], "high")
 
     def test_run_command_uses_wrapper_cli(self):
         svc = OpenCodeRunnerService(
             cli_command="/usr/local/bin/heym-opencode-docker", workspace_root="/tmp/x"
         )
-        cmd = svc.build_run_command("opencode/kimi-k3", _request())
+        cmd = svc.build_run_command("opencode/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[0], "/usr/local/bin/heym-opencode-docker")
 
 

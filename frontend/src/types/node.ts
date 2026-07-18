@@ -194,7 +194,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   opencodeGo: {
     type: "opencodeGo",
     label: "OpenCode Go",
-    description: "Run OpenCode Go coding tasks in a repository (isolated container)",
+    description: "Run OpenCode Go coding tasks against a Git repository",
     color: "node-codex",
     icon: "Terminal",
     inputs: 1,
