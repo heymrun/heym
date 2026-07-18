@@ -5,6 +5,8 @@ export interface User {
   user_rules: string | null;
   tts_credential_id: string | null;
   tts_voice_id: string | null;
+  preferred_credential_id: string | null;
+  preferred_model: string | null;
   created_at: string;
 }
 
@@ -13,6 +15,8 @@ export interface UserUpdateRequest {
   user_rules?: string;
   tts_credential_id?: string | null;
   tts_voice_id?: string | null;
+  preferred_credential_id?: string | null;
+  preferred_model?: string | null;
 }
 
 export interface LoginRequest {
