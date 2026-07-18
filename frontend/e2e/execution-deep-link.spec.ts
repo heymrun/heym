@@ -241,43 +241,49 @@ test("opens one running execution live from both history dialogs", async ({ page
   }
 });
 
-test("keeps other pages responsive while parallel canvas nodes are running", async ({
+test("keeps the dashboard responsive while a canvas workflow is running", async ({
   page,
 }) => {
   const workflow = await createWorkflow(
     page,
-    `Parallel Responsive Canvas ${Date.now()}`,
+    `Responsive Canvas Navigation ${Date.now()}`,
     [
-      workflowNode("parallel_input", "textInput", 80, 160, {
-        label: "parallelInput",
-        inputFields: [],
+      workflowNode("responsive_input", "textInput", 80, 160, {
+        label: "start",
+        inputFields: [{ key: "text" }],
       }),
-      workflowNode("parallel_wait_a", "wait", 340, 80, {
-        label: "parallelWaitA",
-        duration: 8_000,
+      workflowNode("responsive_wait_a", "wait", 340, 160, {
+        label: "wait",
+        duration: 30_000,
       }),
-      workflowNode("parallel_wait_b", "wait", 340, 240, {
-        label: "parallelWaitB",
-        duration: 8_000,
+      workflowNode("responsive_set", "set", 600, 160, {
+        label: "set",
+        mappings: [{ key: "text", value: "$wait.text" }],
+      }),
+      workflowNode("responsive_wait_b", "wait", 860, 160, {
+        label: "wait1",
+        duration: 10_000,
+      }),
+      workflowNode("responsive_output", "jsonOutputMapper", 1_120, 160, {
+        label: "jsonResponse",
+        mappings: [{ key: "message", value: "$wait1.text" }],
       }),
     ],
     [
-      workflowEdge("edge_parallel_a", "parallel_input", "parallel_wait_a"),
-      workflowEdge("edge_parallel_b", "parallel_input", "parallel_wait_b"),
+      workflowEdge("edge_responsive_a", "responsive_input", "responsive_wait_a"),
+      workflowEdge("edge_responsive_b", "responsive_wait_a", "responsive_set"),
+      workflowEdge("edge_responsive_c", "responsive_set", "responsive_wait_b"),
+      workflowEdge("edge_responsive_d", "responsive_wait_b", "responsive_output"),
     ],
   );
 
   let executionId = "";
-  const dashboardPage = await page.context().newPage();
   try {
     await page.goto(`/workflows/${workflow.id}`);
-    await expect(page.locator(".vue-flow__node")).toHaveCount(3);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(5);
     await page.getByRole("button", { name: "Run Workflow" }).click();
 
-    await expect(page.locator('[data-id="parallel_wait_a"] .node-base')).toHaveClass(
-      /animate-heartbeat/,
-    );
-    await expect(page.locator('[data-id="parallel_wait_b"] .node-base')).toHaveClass(
+    await expect(page.locator('[data-id="responsive_wait_a"] .node-base')).toHaveClass(
       /animate-heartbeat/,
     );
 
@@ -295,11 +301,14 @@ test("keeps other pages responsive while parallel canvas nodes are running", asy
       .not.toBe("");
 
     const navigationStartedAt = Date.now();
-    await dashboardPage.goto("/", { timeout: 4_000 });
-    await expect(dashboardPage.getByTestId(`workflow-card-${workflow.id}`)).toBeVisible();
+    await page.locator('header a[href="/"]').first().click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 4_000 });
+    await expect(page.getByTestId(`workflow-card-${workflow.id}`)).toBeVisible({
+      timeout: 4_000,
+    });
     expect(Date.now() - navigationStartedAt).toBeLessThan(4_000);
 
-    const healthResponse = await dashboardPage.request.get("/api/health", {
+    const healthResponse = await page.request.get("/api/health", {
       timeout: 2_000,
     });
     expect(healthResponse.ok()).toBeTruthy();
@@ -309,7 +318,6 @@ test("keeps other pages responsive while parallel canvas nodes are running", asy
         `/api/workflows/${workflow.id}/executions/${executionId}/cancel`,
       );
     }
-    await dashboardPage.close();
     await deleteWorkflow(page, workflow.id);
   }
 });

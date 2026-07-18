@@ -2,6 +2,9 @@ import asyncio
 import copy
 import json
 import uuid
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -119,6 +122,17 @@ _SENSITIVE_HEADERS: frozenset[str] = frozenset(
 )
 _INTERNAL_STREAM_TRIGGER_SOURCES: frozenset[str] = frozenset({"Canvas", "Quick Drawer"})
 WORKFLOW_SSE_HEARTBEAT_SECONDS = 10.0
+WORKFLOW_STREAM_QUEUE_POLL_SECONDS = 0.01
+
+
+@contextmanager
+def _non_blocking_thread_pool(max_workers: int) -> Iterator[ThreadPoolExecutor]:
+    """Release a request-owned executor without blocking the async event loop."""
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        yield pool
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _coerce_bool(value: object, *, default: bool = False) -> bool:
@@ -3218,9 +3232,7 @@ async def execute_workflow_stream(
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
     public_base_url = build_public_base_url(request)
 
-    import asyncio
     import queue
-    from concurrent.futures import ThreadPoolExecutor
 
     execution_id = uuid.uuid4()
     cancel_event = register_execution(
@@ -3296,7 +3308,7 @@ async def execute_workflow_stream(
     async def event_generator():
         nonlocal final_result, was_cancelled
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        with _non_blocking_thread_pool(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
             last_heartbeat_at = loop.time()
             yield (
@@ -3314,9 +3326,10 @@ async def execute_workflow_stream(
             while True:
                 if await request.is_disconnected():
                     cancel_event.set()
+                    await asyncio.shield(future)
                     break
                 try:
-                    event = event_queue.get(block=True, timeout=0.01)
+                    event = event_queue.get_nowait()
                     if event is None:
                         break
                     last_heartbeat_at = loop.time()
@@ -3458,7 +3471,7 @@ async def execute_workflow_stream(
                                 sanitized_event = {"outputs": sanitized_event.get("outputs", {})}
                             yield f"data: {json.dumps(sanitized_event)}\n\n"
                         break
-                    await asyncio.sleep(0.001)
+                    await asyncio.sleep(WORKFLOW_STREAM_QUEUE_POLL_SECONDS)
                 except Exception:
                     cancel_event.set()
                     break

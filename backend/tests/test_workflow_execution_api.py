@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import subprocess
@@ -549,6 +550,68 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('"type": "execution_complete"', complete_chunk)
             with self.assertRaises(StopAsyncIteration):
                 await stream.__anext__()
+
+    async def test_disconnect_does_not_block_the_event_loop_until_executor_stops(self) -> None:
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Canvas Workflow",
+            nodes=[{"id": "n1", "type": "wait", "data": {"label": "Wait"}}],
+            edges=[],
+            sse_enabled=True,
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            cache_ttl_seconds=None,
+            sse_node_config={},
+            workflow_timeout_seconds=None,
+        )
+        release_executor = Event()
+
+        def fake_streaming_executor(**_kwargs: object):
+            release_executor.wait(timeout=2)
+            if False:
+                yield {}
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_ScalarResult(workflow))
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        request = make_request(
+            query_string=b"trigger_source=Canvas",
+            headers=[(b"x-simple-response", b"false")],
+        )
+        request.is_disconnected = AsyncMock(return_value=True)
+
+        with (
+            patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.register_execution", return_value=Event()),
+            patch("app.api.workflows.clear_active_execution"),
+            patch("app.api.workflows.execute_workflow_streaming", fake_streaming_executor),
+            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
+        ):
+            response = await execute_workflow_stream(
+                workflow_id=workflow.id,
+                request=request,
+                current_user=None,
+                db=db,
+            )
+            stream = response.body_iterator
+            self.assertIn('"type": "execution_started"', await stream.__anext__())
+
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            disconnected_stream = asyncio.create_task(stream.__anext__())
+            await asyncio.sleep(0.03)
+
+            self.assertLess(loop.time() - started_at, 0.15)
+            self.assertFalse(disconnected_stream.done())
+            release_executor.set()
+            with self.assertRaises(StopAsyncIteration):
+                await asyncio.wait_for(disconnected_stream, timeout=1)
 
 
 class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
