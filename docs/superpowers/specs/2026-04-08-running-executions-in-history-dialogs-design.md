@@ -23,7 +23,7 @@ Backend exposes active in-memory executions via a new lightweight endpoint. Fron
 
 ### 1. `execution_cancellation.py` — add `started_at` + list function
 
-Add `started_at: datetime` field to `ExecutionCancellationHandle` (set to `datetime.utcnow()` in `register_execution`).
+Add `started_at: datetime` field to `ExecutionCancellationHandle` (set to `datetime.now(timezone.utc)` in `register_execution`).
 
 Add new public function:
 

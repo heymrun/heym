@@ -41,12 +41,12 @@ from app.services.execution_cancellation import list_active_executions
 
 # Inside RegisterExecutionTests:
 def test_handle_has_started_at(self) -> None:
-    before = datetime.datetime.utcnow()
+    before = datetime.datetime.now(datetime.timezone.utc)
     wf_id = uuid.uuid4()
     ex_id = uuid.uuid4()
     register_execution(workflow_id=wf_id, execution_id=ex_id)
     handle = _ACTIVE_EXECUTIONS[ex_id]
-    after = datetime.datetime.utcnow()
+    after = datetime.datetime.now(datetime.timezone.utc)
     self.assertGreaterEqual(handle.started_at, before)
     self.assertLessEqual(handle.started_at, after)
 
@@ -102,7 +102,7 @@ class ExecutionCancellationHandle:
     workflow_id: uuid.UUID
     execution_id: uuid.UUID
     event: threading.Event
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
