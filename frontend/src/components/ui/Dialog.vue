@@ -126,14 +126,14 @@ function toggleFullscreen(): void {
           :class="[
             'dialog-content relative z-50 w-full border border-border/60',
             'bg-card',
-            'p-6 md:p-7 flex flex-col',
-            isFullscreen ? 'max-h-[100vh]' : 'max-h-[90vh] sm:max-h-[85vh] rounded-2xl',
+            'p-4 sm:p-6 md:p-7 flex flex-col',
+            isFullscreen ? 'max-h-[100vh]' : 'max-h-[92vh] sm:max-h-[85vh] rounded-2xl',
             'overflow-hidden',
             sizeClasses
           ]"
           @click.stop
         >
-          <div class="dialog-header flex items-center justify-between pb-4 mb-5 shrink-0 gap-2">
+          <div class="dialog-header flex items-center justify-between pb-3 mb-3 sm:pb-4 sm:mb-5 shrink-0 gap-2">
             <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
               <div
                 v-if="title || $slots.subtitle"

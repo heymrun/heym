@@ -767,7 +767,7 @@ function bringToCanvas(): void {
     @escape="handleDialogEscape"
   >
     <div class="space-y-4">
-      <div class="flex items-start justify-between gap-3">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
           <p class="text-sm text-muted-foreground shrink-0">
             {{ totalCount }} run(s)
@@ -782,7 +782,7 @@ function bringToCanvas(): void {
             clear-aria-label="Clear tag filter"
           />
         </div>
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+        <div class="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
           <AutoRefreshControl
             :active="open"
             :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
@@ -890,14 +890,14 @@ function bringToCanvas(): void {
             class="flex items-center justify-between gap-3 p-2.5 rounded-md border border-blue-500/30 bg-blue-500/10"
           >
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 min-w-0">
                 <Loader2 class="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                <span class="text-sm font-medium text-blue-400">Running</span>
-                <span class="text-sm text-muted-foreground truncate">
+                <span class="text-sm font-medium text-blue-400 shrink-0">Running</span>
+                <span class="text-sm text-muted-foreground truncate min-w-0">
                   {{ formatTime(active.started_at) }}
                 </span>
               </div>
-              <div class="text-xs text-muted-foreground mt-0.5 pl-6">
+              <div class="text-xs text-muted-foreground mt-0.5 pl-6 min-w-0 truncate">
                 {{ active.workflow_name }} · In progress...
               </div>
             </div>
@@ -983,7 +983,7 @@ function bringToCanvas(): void {
                 :class="entry.status === 'success' ? 'text-emerald-500' : entry.status === 'error' ? 'text-red-500' : 'text-amber-500'"
               />
             </div>
-            <div class="text-xs text-muted-foreground mt-1">
+            <div class="text-xs text-muted-foreground mt-1 min-w-0 truncate">
               <template v-if="entry.status === 'pending'">
                 {{ entry.workflow_name }} · Pending human review
               </template>

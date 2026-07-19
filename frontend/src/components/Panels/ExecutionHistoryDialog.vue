@@ -622,7 +622,7 @@ function bringToCanvas(): void {
     @escape="handleDialogEscape"
   >
     <!-- Top bar: count, filter, actions -->
-    <div class="flex items-start justify-between gap-3 mb-4 shrink-0">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 shrink-0">
       <div class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         <p class="text-sm text-muted-foreground flex items-center gap-2 shrink-0">
           <template v-if="isHistoryLoading">
@@ -643,7 +643,7 @@ function bringToCanvas(): void {
           clear-aria-label="Clear tag filter"
         />
       </div>
-      <div class="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+      <div class="flex items-center gap-1 shrink-0 flex-wrap justify-start sm:justify-end">
         <AutoRefreshControl
           :active="open"
           :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
@@ -723,10 +723,10 @@ function bringToCanvas(): void {
     <!-- Two-column layout -->
     <div
       v-else
-      class="flex gap-4 min-h-0 h-[60vh]"
+      class="flex flex-col gap-3 sm:gap-4 min-h-0 h-[68vh] sm:h-[60vh]"
     >
       <!-- LEFT: run list -->
-      <div class="w-64 shrink-0 flex flex-col overflow-hidden border-r border-border/40 pr-3">
+      <div class="w-full sm:w-64 shrink-0 flex flex-col overflow-hidden border-b sm:border-b-0 sm:border-r border-border/40 pb-3 sm:pb-0 sm:pr-3 max-h-48 sm:max-h-none">
         <!-- Active executions -->
         <div
           v-if="activeExecutions.length > 0"
