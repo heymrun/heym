@@ -1550,6 +1550,14 @@ def _wrap_value(value: object) -> object:
     return value
 
 
+_JSON_UNTRANSLATABLE_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_json_string(value: str) -> str:
+    """Remove control characters that PostgreSQL JSON cannot store."""
+    return _JSON_UNTRANSLATABLE_CHAR_RE.sub("", value)
+
+
 def _to_json_compatible(value: object) -> object:
     """Convert expression wrapper types back to plain JSON-safe containers."""
     if isinstance(value, DotDict):
@@ -1567,7 +1575,9 @@ def _to_json_compatible(value: object) -> object:
     if isinstance(value, DotFloat):
         return float(value)
     if isinstance(value, DotStr):
-        return str(value)
+        return _sanitize_json_string(str(value))
+    if isinstance(value, str):
+        return _sanitize_json_string(value)
     if isinstance(value, DotDateTime):
         return value.toISO()
     return value

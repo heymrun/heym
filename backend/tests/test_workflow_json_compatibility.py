@@ -4,6 +4,7 @@ import unittest
 from app.services.workflow_executor import (
     DotDict,
     DotList,
+    DotStr,
     NodeResult,
     SubWorkflowExecution,
     _serialize_node_result,
@@ -24,6 +25,27 @@ class WorkflowJsonCompatibilityTests(unittest.TestCase):
         plain = _to_json_compatible(wrapped)
 
         self.assertEqual(plain, {"items": [{"value": 1}], "keys": ["a", "b"]})
+        json.dumps(plain)
+
+    def test_control_characters_are_removed_from_strings(self) -> None:
+        wrapped = DotDict(
+            {
+                "title": DotStr("card\x00title"),
+                "content": " Planning\x01\x7f text ",
+                "nested": {"items": DotList(["\x00a\x01b\x7fc"])},
+            }
+        )
+
+        plain = _to_json_compatible(wrapped)
+
+        self.assertEqual(
+            plain,
+            {
+                "title": "cardtitle",
+                "content": " Planning text ",
+                "nested": {"items": ["abc"]},
+            },
+        )
         json.dumps(plain)
 
     def test_node_result_serialization_removes_dot_wrappers(self) -> None:
