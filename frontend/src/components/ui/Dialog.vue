@@ -13,6 +13,7 @@ interface Props {
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "full";
   allowFullscreen?: boolean;
   defaultFullscreen?: boolean;
+  hideFullscreenToggleOnMobile?: boolean;
   closeOnEscape?: boolean;
   closeOnBack?: boolean;
 }
@@ -22,6 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
   size: "lg",
   allowFullscreen: false,
   defaultFullscreen: false,
+  hideFullscreenToggleOnMobile: false,
   closeOnEscape: true,
   closeOnBack: false,
 });
@@ -181,7 +183,10 @@ function toggleFullscreen(): void {
             >
               <button
                 v-if="allowFullscreen"
-                class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
+                :class="[
+                  'dialog-btn items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200',
+                  hideFullscreenToggleOnMobile ? 'hidden sm:flex' : 'flex',
+                ]"
                 @click="toggleFullscreen"
               >
                 <Minimize2
