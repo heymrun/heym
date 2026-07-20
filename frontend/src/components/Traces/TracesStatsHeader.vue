@@ -169,7 +169,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
 
 <template>
   <div class="space-y-4">
-    <div class="grid gap-3 grid-cols-2 md:grid-cols-5">
+    <div class="grid gap-3 grid-cols-1 md:grid-cols-5">
       <Card
         variant="flat"
         :hover="false"
