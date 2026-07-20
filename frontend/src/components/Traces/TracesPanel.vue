@@ -911,7 +911,7 @@ onMounted(async () => {
         v-else
         class="space-y-4"
       >
-        <div class="grid gap-3 md:grid-cols-4">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
           <Card
             variant="flat"
             :hover="false"
@@ -971,7 +971,7 @@ onMounted(async () => {
           :spans="spans"
         />
 
-        <div class="grid gap-3 md:grid-cols-3">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Card
             variant="flat"
             :hover="false"
