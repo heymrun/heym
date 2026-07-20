@@ -841,7 +841,7 @@ onMounted(async () => {
     <Dialog
       :open="detailOpen"
       title="Trace Details"
-      title-class="text-base sm:text-base md:text-lg"
+      title-class="text-lg sm:text-lg md:text-xl"
       size="3xl"
       allow-fullscreen
       default-fullscreen
