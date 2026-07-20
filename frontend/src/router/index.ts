@@ -126,6 +126,12 @@ const router = createRouter({
       component: () => import("@/views/DocsView.vue"),
       meta: { requiresAuth: true },
     },
+    {
+      path: "/_screenshot-debug",
+      name: "screenshot-debug",
+      component: () => import("@/views/ScreenshotDebugView.vue"),
+      meta: { requiresAuth: false, guest: false },
+    },
   ],
 });
 
