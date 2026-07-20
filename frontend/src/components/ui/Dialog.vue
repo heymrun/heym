@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, useSlots, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
 
 import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
+
+const slots = useSlots();
+const hasHeaderActions = computed(() => typeof slots["header-actions"] === "function");
 
 interface Props {
   open: boolean;
@@ -133,8 +136,15 @@ function toggleFullscreen(): void {
           ]"
           @click.stop
         >
-          <div class="dialog-header flex items-center justify-between pb-3 sm:pb-4 mb-3 sm:mb-5 shrink-0 gap-1.5 sm:gap-2">
-            <div class="flex items-center gap-1.5 sm:gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
+          <div
+            :class="[
+              'dialog-header shrink-0 pb-3 sm:pb-4 mb-3 sm:mb-5 gap-x-1.5 sm:gap-x-2 gap-y-2',
+              hasHeaderActions
+                ? 'grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center'
+                : 'flex items-center justify-between',
+            ]"
+          >
+            <div class="min-w-0 flex items-center gap-1.5 sm:gap-2 md:gap-4 overflow-hidden">
               <div
                 v-if="title || $slots.subtitle"
                 class="min-w-0"
@@ -153,14 +163,22 @@ function toggleFullscreen(): void {
                   <slot name="subtitle" />
                 </div>
               </div>
-              <template v-if="$slots['header-actions']">
-                <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
-                <div class="min-w-0 flex-1 overflow-hidden">
-                  <slot name="header-actions" />
-                </div>
-              </template>
             </div>
-            <div class="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+            <div
+              v-if="hasHeaderActions"
+              class="col-span-2 sm:col-span-1 min-w-0 flex items-center gap-1.5 sm:gap-2"
+            >
+              <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
+              <div class="min-w-0 flex-1 overflow-hidden">
+                <slot name="header-actions" />
+              </div>
+            </div>
+            <div
+              :class="[
+                'flex items-center gap-1 sm:gap-1.5 flex-shrink-0',
+                hasHeaderActions ? 'row-start-1 col-start-2 sm:col-start-3' : '',
+              ]"
+            >
               <button
                 v-if="allowFullscreen"
                 class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"

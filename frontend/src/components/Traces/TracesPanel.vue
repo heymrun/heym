@@ -847,25 +847,25 @@ onMounted(async () => {
       @close="closeDetail"
     >
       <template #header-actions>
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex items-center gap-1">
+        <div class="flex flex-col gap-2 w-full sm:flex-row sm:items-center sm:flex-wrap sm:w-auto">
+          <div class="flex items-center gap-1 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+              class="h-9 px-2 flex-1 sm:flex-none md:h-7 text-xs"
               :disabled="!hasPreviousTrace || detailLoading"
               @click="goToPreviousTrace"
             >
               <ChevronLeft class="w-3 h-3 md:w-4 md:h-4" />
               <span class="hidden sm:inline">Prev</span>
             </Button>
-            <span class="text-xs text-muted-foreground px-1 whitespace-nowrap">
+            <span class="text-xs text-muted-foreground px-2 whitespace-nowrap shrink-0">
               {{ tracePositionLabel }}
             </span>
             <Button
               variant="outline"
               size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+              class="h-9 px-2 flex-1 sm:flex-none md:h-7 text-xs"
               :disabled="!hasNextTrace || detailLoading"
               @click="goToNextTrace"
             >
@@ -877,7 +877,7 @@ onMounted(async () => {
             v-if="selectedTrace?.workflow_id"
             variant="outline"
             size="sm"
-            class="h-9 md:h-7 text-xs"
+            class="h-9 w-full sm:w-auto md:h-7 text-xs"
             @click="goToWorkflow"
           >
             <ExternalLink class="w-3 h-3 mr-1" />
