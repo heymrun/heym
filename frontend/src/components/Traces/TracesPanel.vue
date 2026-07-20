@@ -634,7 +634,7 @@ onMounted(async () => {
           Inspect AI assistant and workflow LLM calls in one place.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 w-full md:w-auto">
         <Button
           variant="outline"
           size="sm"
@@ -655,6 +655,7 @@ onMounted(async () => {
         <Button
           variant="destructive"
           size="sm"
+          class="ml-auto md:ml-0"
           :loading="clearing"
           :disabled="traces.length === 0"
           @click="clearTraces"
