@@ -847,37 +847,37 @@ onMounted(async () => {
       @close="closeDetail"
     >
       <template #header-actions>
-        <div class="flex flex-col gap-2 w-full sm:flex-row sm:items-center sm:flex-wrap sm:w-auto">
-          <div class="flex items-center gap-1 w-full sm:w-auto">
+        <div class="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto flex-wrap">
+          <div class="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              class="h-9 px-2 flex-1 sm:flex-none md:h-7 text-xs"
+              class="h-7 w-7 p-0 sm:w-auto sm:px-2 shrink-0 text-xs"
               :disabled="!hasPreviousTrace || detailLoading"
               @click="goToPreviousTrace"
             >
-              <ChevronLeft class="w-3 h-3 md:w-4 md:h-4" />
+              <ChevronLeft class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">Prev</span>
             </Button>
-            <span class="text-xs text-muted-foreground px-2 whitespace-nowrap shrink-0">
+            <span class="text-xs text-muted-foreground px-1 whitespace-nowrap">
               {{ tracePositionLabel }}
             </span>
             <Button
               variant="outline"
               size="sm"
-              class="h-9 px-2 flex-1 sm:flex-none md:h-7 text-xs"
+              class="h-7 w-7 p-0 sm:w-auto sm:px-2 shrink-0 text-xs"
               :disabled="!hasNextTrace || detailLoading"
               @click="goToNextTrace"
             >
               <span class="hidden sm:inline">Next</span>
-              <ChevronRight class="w-3 h-3 md:w-4 md:h-4" />
+              <ChevronRight class="w-3.5 h-3.5" />
             </Button>
           </div>
           <Button
             v-if="selectedTrace?.workflow_id"
             variant="outline"
             size="sm"
-            class="h-9 w-full sm:w-auto md:h-7 text-xs"
+            class="h-7 text-xs shrink-0"
             @click="goToWorkflow"
           >
             <ExternalLink class="w-3 h-3 mr-1" />
