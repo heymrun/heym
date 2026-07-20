@@ -841,6 +841,7 @@ onMounted(async () => {
     <Dialog
       :open="detailOpen"
       title="Trace Details"
+      title-class="text-base sm:text-base md:text-lg"
       size="3xl"
       allow-fullscreen
       default-fullscreen
@@ -848,28 +849,40 @@ onMounted(async () => {
       @close="closeDetail"
     >
       <template #header-actions>
-        <div class="inline-flex items-center h-8 rounded-lg border border-border bg-muted/50 overflow-hidden">
-          <button
-            type="button"
-            class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
-            :disabled="!hasPreviousTrace || detailLoading"
-            aria-label="Previous trace"
-            @click="goToPreviousTrace"
+        <div class="inline-flex items-center gap-2">
+          <div class="inline-flex items-center h-8 rounded-lg border border-border bg-muted/50 overflow-hidden">
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
+              :disabled="!hasPreviousTrace || detailLoading"
+              aria-label="Previous trace"
+              @click="goToPreviousTrace"
+            >
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <span class="h-8 min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
+              {{ tracePositionLabel }}
+            </span>
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
+              :disabled="!hasNextTrace || detailLoading"
+              aria-label="Next trace"
+              @click="goToNextTrace"
+            >
+              <ChevronRight class="w-4 h-4" />
+            </button>
+          </div>
+          <Button
+            v-if="selectedTrace?.workflow_id"
+            variant="outline"
+            size="sm"
+            class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 hidden sm:inline-flex"
+            @click="goToWorkflow"
           >
-            <ChevronLeft class="w-4 h-4" />
-          </button>
-          <span class="h-8 min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
-            {{ tracePositionLabel }}
-          </span>
-          <button
-            type="button"
-            class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
-            :disabled="!hasNextTrace || detailLoading"
-            aria-label="Next trace"
-            @click="goToNextTrace"
-          >
-            <ChevronRight class="w-4 h-4" />
-          </button>
+            <ExternalLink class="w-3 h-3 mr-1" />
+            Go to Workflow
+          </Button>
         </div>
       </template>
       <template #header-trailing>
@@ -877,12 +890,11 @@ onMounted(async () => {
           v-if="selectedTrace?.workflow_id"
           variant="outline"
           size="sm"
-          class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0"
+          class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 sm:hidden"
           @click="goToWorkflow"
         >
           <ExternalLink class="w-3 h-3 mr-1" />
-          <span class="hidden sm:inline">Go to Workflow</span>
-          <span class="sm:hidden">Workflow</span>
+          Workflow
         </Button>
       </template>
       <div

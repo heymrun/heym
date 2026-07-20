@@ -10,6 +10,7 @@ const hasHeaderActions = computed(() => typeof slots["header-actions"] === "func
 interface Props {
   open: boolean;
   title?: string;
+  titleClass?: string;
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "full";
   allowFullscreen?: boolean;
   defaultFullscreen?: boolean;
@@ -20,6 +21,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   title: undefined,
+  titleClass: undefined,
   size: "lg",
   allowFullscreen: false,
   defaultFullscreen: false,
@@ -154,7 +156,10 @@ function toggleFullscreen(): void {
                 <h2
                   v-if="title"
                   :title="title"
-                  class="text-sm sm:text-base md:text-lg font-semibold tracking-tight line-clamp-1"
+                  :class="[
+                    'font-semibold tracking-tight line-clamp-1',
+                    titleClass || 'text-sm sm:text-base md:text-lg',
+                  ]"
                 >
                   {{ title }}
                 </h2>
@@ -168,10 +173,10 @@ function toggleFullscreen(): void {
             </div>
             <div
               v-if="hasHeaderActions"
-              class="col-span-2 sm:col-span-1 min-w-0 flex items-center gap-1.5 sm:gap-2"
+              class="col-span-2 sm:col-span-1 min-w-0 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2"
             >
               <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
-              <div class="min-w-0 flex-1 overflow-hidden">
+              <div class="min-w-0 overflow-hidden flex justify-center sm:justify-start sm:flex-1">
                 <slot name="header-actions" />
               </div>
             </div>
@@ -181,6 +186,12 @@ function toggleFullscreen(): void {
                 hasHeaderActions ? 'row-start-1 col-start-2 sm:col-start-3' : '',
               ]"
             >
+              <div
+                v-if="$slots['header-trailing']"
+                class="flex items-center gap-1"
+              >
+                <slot name="header-trailing" />
+              </div>
               <button
                 v-if="allowFullscreen"
                 :class="[
@@ -198,12 +209,6 @@ function toggleFullscreen(): void {
                   class="h-3.5 w-3.5"
                 />
               </button>
-              <div
-                v-if="$slots['header-trailing']"
-                class="flex items-center gap-1"
-              >
-                <slot name="header-trailing" />
-              </div>
               <button
                 class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
                 @click="emit('close')"
