@@ -928,6 +928,121 @@ async def _auto_advance(
         logger.exception("Board auto-advance failed for card %s", card_id)
 
 
+async def sync_recovered_board_run(
+    execution_history_id: uuid.UUID, *, session_factory=async_session_maker
+) -> None:
+    """Apply a recovered workflow result to its board run and continue the chain."""
+    try:
+        async with session_factory() as db:
+            run = await db.get(BoardCardRun, execution_history_id)
+            if run is None:
+                return
+            history = await db.get(ExecutionHistory, execution_history_id)
+            card = await db.get(BoardCard, run.card_id)
+            column = await db.get(BoardColumn, run.column_id)
+            if history is None or card is None or column is None:
+                return
+
+            board = await db.get(Board, card.board_id)
+            workflow = (
+                await db.get(Workflow, run.workflow_id) if run.workflow_id is not None else None
+            )
+            links = await _column_links(db, column.id)
+            remaining = links[run.chain_position + 1 :]
+            run.execution_history_id = history.id
+            run.active_execution_id = None
+            run.finished_at = datetime.now(timezone.utc)
+
+            if history.status == "pending":
+                run.status = "pending"
+                run.error = None
+                card.run_status = "pending"
+                await db.commit()
+                return
+
+            if history.status != "success":
+                run.status = "failed"
+                run.error = f"Workflow finished with status {history.status}"
+                db.add(
+                    BoardCardActivity(
+                        card_id=card.id,
+                        kind="event",
+                        author_type="system",
+                        content=f"{run.workflow_name} failed after recovery",
+                        data={"status": history.status, "recovered": True},
+                        run_id=run.id,
+                    )
+                )
+                await _abort_remaining(
+                    db,
+                    card.id,
+                    column.id,
+                    remaining,
+                    0,
+                    run.chain_position + 1,
+                    run.chain_length,
+                )
+                card.run_status = "failed"
+                await db.commit()
+                return
+
+            outputs = history.outputs or {}
+            run.status = "success"
+            run.output = outputs
+            run.error = None
+            if board is not None:
+                await _record_output_activity(
+                    db,
+                    card_id=card.id,
+                    run=run,
+                    board=board,
+                    workflow=workflow,
+                    workflow_name=run.workflow_name,
+                    outputs=outputs,
+                    column_instructions=column.ai_instructions,
+                )
+
+            if remaining:
+                previous_outputs: list[dict] = []
+                chain = history.inputs.get("chain") if isinstance(history.inputs, dict) else None
+                if isinstance(chain, dict):
+                    raw_previous_outputs = chain.get("previous_workflow_outputs")
+                    if isinstance(raw_previous_outputs, list):
+                        previous_outputs = [
+                            output for output in raw_previous_outputs if isinstance(output, dict)
+                        ]
+                previous_outputs.append({"workflow_name": run.workflow_name, "output": outputs})
+                card.run_status = "running"
+                await db.commit()
+                _spawn_chain(
+                    card_id=card.id,
+                    board_id=card.board_id,
+                    column_id=column.id,
+                    links=remaining,
+                    move=None,
+                    rerun=False,
+                    start_index=run.chain_position + 1,
+                    chain_length=run.chain_length,
+                    initial_outputs=previous_outputs,
+                )
+                return
+
+            card.run_status = "success"
+            board_id = card.board_id
+            column_id = column.id
+            card_id = card.id
+            await db.commit()
+
+        await _auto_advance(
+            card_id=card_id,
+            board_id=board_id,
+            from_column_id=column_id,
+            session_factory=session_factory,
+        )
+    except Exception:  # noqa: BLE001 - board sync must never break generic recovery
+        logger.exception("Recovered board run sync failed for execution %s", execution_history_id)
+
+
 async def reconcile_orphaned_board_runs() -> None:
     """On startup, fail runs/cards left 'running' by a previous process."""
     try:

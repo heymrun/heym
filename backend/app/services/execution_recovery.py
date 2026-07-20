@@ -212,6 +212,10 @@ class ExecutionRecoveryService:
                 result.sub_workflow_executions,
             )
             await session.commit()
+        if orphan.trigger_source == "board":
+            from app.services.board_run_service import sync_recovered_board_run
+
+            await sync_recovered_board_run(orphan.execution_id)
         logger.info(
             "Recovery re-ran execution %s -> %s (workflow %s)",
             orphan.execution_id,

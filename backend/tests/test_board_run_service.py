@@ -666,3 +666,170 @@ class TestFailOpenRuns(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.error, "chain crashed")
         self.assertIsNone(run.active_execution_id)
         self.assertIsNotNone(run.finished_at)
+
+
+class TestSyncRecoveredBoardRun(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _env(*, history_status: str, chain_length: int = 1):
+        from app.db.models import (
+            Board,
+            BoardCard,
+            BoardCardRun,
+            BoardColumn,
+            ExecutionHistory,
+            Workflow,
+        )
+
+        execution_id = uuid.uuid4()
+        board = SimpleNamespace(id=uuid.uuid4(), name="Board", owner_id=uuid.uuid4())
+        column = SimpleNamespace(id=uuid.uuid4(), ai_instructions=None)
+        card = SimpleNamespace(
+            id=uuid.uuid4(),
+            board_id=board.id,
+            column_id=column.id,
+            run_status="failed",
+        )
+        workflow = SimpleNamespace(id=uuid.uuid4(), name="Deploy")
+        run = SimpleNamespace(
+            id=execution_id,
+            card_id=card.id,
+            column_id=column.id,
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            chain_position=0,
+            chain_length=chain_length,
+            status="failed",
+            execution_history_id=None,
+            active_execution_id=execution_id,
+            output={},
+            error="Server restarted during execution",
+            finished_at=datetime.now(timezone.utc),
+        )
+        history = SimpleNamespace(
+            id=execution_id,
+            status=history_status,
+            inputs={"chain": {"previous_workflow_outputs": [{"workflow_name": "Plan"}]}},
+            outputs={"text": "deployed"},
+        )
+        session = _FakeSession(
+            {
+                (BoardCardRun.__name__, execution_id): run,
+                (ExecutionHistory.__name__, execution_id): history,
+                (BoardCard.__name__, card.id): card,
+                (BoardColumn.__name__, column.id): column,
+                (Board.__name__, board.id): board,
+                (Workflow.__name__, workflow.id): workflow,
+            }
+        )
+        return execution_id, card, run, session, (lambda: session)
+
+    async def test_success_replaces_restart_failure_and_auto_advances(self) -> None:
+        execution_id, card, run, session, factory = self._env(history_status="success")
+        current_link = {
+            "workflow_id": run.workflow_id,
+            "workflow_name": run.workflow_name,
+            "position": 0,
+        }
+
+        with (
+            patch.object(
+                board_run_service, "_column_links", AsyncMock(return_value=[current_link])
+            ),
+            patch.object(board_run_service, "_record_output_activity", AsyncMock()) as output,
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.sync_recovered_board_run(execution_id, session_factory=factory)
+
+        self.assertEqual(run.status, "success")
+        self.assertEqual(run.output, {"text": "deployed"})
+        self.assertIsNone(run.error)
+        self.assertIsNone(run.active_execution_id)
+        self.assertEqual(run.execution_history_id, execution_id)
+        self.assertEqual(card.run_status, "success")
+        output.assert_awaited_once()
+        advance.assert_awaited_once()
+        spawn.assert_not_called()
+        session.commit.assert_awaited_once()
+
+    async def test_success_continues_remaining_column_workflows(self) -> None:
+        execution_id, card, run, _session, factory = self._env(
+            history_status="success", chain_length=2
+        )
+        remaining_link = {
+            "workflow_id": uuid.uuid4(),
+            "workflow_name": "Verify",
+            "position": 1,
+        }
+        links = [
+            {
+                "workflow_id": run.workflow_id,
+                "workflow_name": run.workflow_name,
+                "position": 0,
+            },
+            remaining_link,
+        ]
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_record_output_activity", AsyncMock()),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.sync_recovered_board_run(execution_id, session_factory=factory)
+
+        self.assertEqual(run.status, "success")
+        self.assertEqual(card.run_status, "running")
+        advance.assert_not_awaited()
+        spawn.assert_called_once()
+        kwargs = spawn.call_args.kwargs
+        self.assertEqual(kwargs["links"], [remaining_link])
+        self.assertEqual(kwargs["start_index"], 1)
+        self.assertEqual(kwargs["chain_length"], 2)
+        self.assertEqual(
+            kwargs["initial_outputs"],
+            [
+                {"workflow_name": "Plan"},
+                {"workflow_name": "Deploy", "output": {"text": "deployed"}},
+            ],
+        )
+
+    async def test_failed_recovery_keeps_card_failed_and_skips_remaining_chain(self) -> None:
+        execution_id, card, run, session, factory = self._env(
+            history_status="error", chain_length=2
+        )
+        links = [
+            {
+                "workflow_id": run.workflow_id,
+                "workflow_name": run.workflow_name,
+                "position": 0,
+            },
+            {"workflow_id": uuid.uuid4(), "workflow_name": "Verify", "position": 1},
+        ]
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.sync_recovered_board_run(execution_id, session_factory=factory)
+
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.error, "Workflow finished with status error")
+        self.assertIsNone(run.active_execution_id)
+        self.assertEqual(card.run_status, "failed")
+        skipped = [
+            item
+            for item in session.added
+            if type(item).__name__ == "BoardCardRun" and item.status == "skipped"
+        ]
+        self.assertEqual(len(skipped), 1)
+        self.assertTrue(
+            any(
+                type(item).__name__ == "BoardCardActivity"
+                and item.content == "Deploy failed after recovery"
+                for item in session.added
+            )
+        )
+        advance.assert_not_awaited()
+        spawn.assert_not_called()
