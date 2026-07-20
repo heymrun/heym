@@ -173,7 +173,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-2 md:p-3 min-w-0"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
         <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Calls
@@ -185,7 +185,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-2 md:p-3 min-w-0"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
         <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Tokens
@@ -197,7 +197,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-2 md:p-3 min-w-0"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
         <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Cost
@@ -209,7 +209,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-2 md:p-3 min-w-0"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
         <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           <span class="md:hidden">Lat.</span>
@@ -222,7 +222,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-2 md:p-3 min-w-0"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
         <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           <span class="md:hidden">Err%</span>
