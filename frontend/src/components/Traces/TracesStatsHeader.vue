@@ -169,11 +169,11 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
 
 <template>
   <div class="space-y-4">
-    <div class="grid gap-3 grid-cols-2 md:grid-cols-5">
+    <div class="grid gap-3 grid-cols-6 md:grid-cols-5">
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="col-span-2 p-3 md:col-span-1"
       >
         <div class="text-xs text-muted-foreground">
           Calls
@@ -185,7 +185,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="col-span-2 p-3 md:col-span-1"
       >
         <div class="text-xs text-muted-foreground">
           Tokens
@@ -197,7 +197,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="col-span-2 p-3 md:col-span-1"
       >
         <div class="text-xs text-muted-foreground">
           Cost
@@ -209,7 +209,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="col-span-3 p-3 md:col-span-1"
       >
         <div class="text-xs text-muted-foreground">
           Avg Latency
@@ -221,7 +221,7 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="col-span-3 p-3 md:col-span-1"
       >
         <div class="text-xs text-muted-foreground">
           Error %
