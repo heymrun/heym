@@ -8,6 +8,7 @@ import type { LLMTraceDetail, LLMTraceListItem, TraceStatsResponse, TraceTimeRan
 import type { WorkflowListItem } from "@/types/workflow";
 
 import TraceDurationChart, { type TraceSpan } from "@/components/Traces/TraceDurationChart.vue";
+import TraceJsonContent from "@/components/Traces/TraceJsonContent.vue";
 import TracesStatsHeader from "@/components/Traces/TracesStatsHeader.vue";
 import TracesTimeRangeSelect from "@/components/Traces/TracesTimeRangeSelect.vue";
 import TraceStepsTimeline from "@/components/Traces/TraceStepsTimeline.vue";
@@ -1066,7 +1067,7 @@ onMounted(async () => {
             >
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-primary">
-                  {{ tc.name }}({{ JSON.stringify(tc.arguments) }})
+                  {{ tc.name }}
                 </span>
                 <span
                   v-if="tc.source === 'mcp'"
@@ -1087,8 +1088,28 @@ onMounted(async () => {
                   Workflow: {{ toolCallWorkflowLabel(tc) }}
                 </span>
               </div>
-              <div class="mt-2 text-xs text-muted-foreground break-all">
-                → {{ typeof tc.result === 'object' ? JSON.stringify(tc.result) : tc.result }}
+              <div class="mt-2 space-y-2">
+                <div class="space-y-1">
+                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Arguments
+                  </div>
+                  <TraceJsonContent
+                    :value="tc.arguments"
+                    max-height="small"
+                  />
+                </div>
+                <div
+                  v-if="tc.result !== undefined"
+                  class="space-y-1"
+                >
+                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Result
+                  </div>
+                  <TraceJsonContent
+                    :value="tc.result"
+                    max-height="small"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1121,7 +1142,10 @@ onMounted(async () => {
               {{ copiedRequest ? "Copied" : "Copy" }}
             </Button>
           </div>
-          <pre class="text-xs bg-muted/30 border rounded-md p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap">{{ formatJson(selectedTrace.request) }}</pre>
+          <TraceJsonContent
+            :value="selectedTrace.request"
+            max-height="large"
+          />
         </div>
 
         <div class="space-y-2">
@@ -1146,7 +1170,10 @@ onMounted(async () => {
               {{ copiedResponse ? "Copied" : "Copy" }}
             </Button>
           </div>
-          <pre class="text-xs bg-muted/30 border rounded-md p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap">{{ formatJson(selectedTrace.response) }}</pre>
+          <TraceJsonContent
+            :value="selectedTrace.response"
+            max-height="large"
+          />
         </div>
       </div>
     </Dialog>
