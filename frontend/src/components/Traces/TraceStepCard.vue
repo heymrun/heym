@@ -109,57 +109,48 @@ const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
       <template v-if="step.kind === 'tool'">
         <div
           v-if="step.argumentsText"
-          class="space-y-1"
         >
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Arguments
-          </div>
-          <div class="relative">
-            <CopyButton
-              :text="step.argumentsText"
-              class="absolute right-1.5 top-1.5 z-[1]"
-            />
-            <TraceJsonContent
-              :value="step.argumentsText"
-              max-height="small"
-              class="pr-10"
-            />
-          </div>
+          <TraceJsonContent
+            :value="step.argumentsText"
+            max-height="small"
+          >
+            <template #title>
+              <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Arguments
+              </span>
+            </template>
+            <template #actions>
+              <CopyButton :text="step.argumentsText" />
+            </template>
+          </TraceJsonContent>
         </div>
         <div
           v-if="step.resultText"
-          class="space-y-1"
         >
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Result
-          </div>
-          <div class="relative">
-            <CopyButton
-              :text="step.resultText"
-              class="absolute right-1.5 top-1.5 z-[1]"
-            />
-            <TraceJsonContent
-              :value="step.resultText"
-              max-height="small"
-              class="pr-10"
-            />
-          </div>
+          <TraceJsonContent
+            :value="step.resultText"
+            max-height="small"
+          >
+            <template #title>
+              <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Result
+              </span>
+            </template>
+            <template #actions>
+              <CopyButton :text="step.resultText" />
+            </template>
+          </TraceJsonContent>
         </div>
       </template>
 
-      <div
+      <TraceJsonContent
         v-else-if="step.detail && isTraceJsonContent(step.detail)"
-        class="relative"
+        :value="step.detail"
       >
-        <CopyButton
-          :text="step.detail"
-          class="absolute right-1.5 top-1.5 z-[1]"
-        />
-        <TraceJsonContent
-          :value="step.detail"
-          class="pr-10"
-        />
-      </div>
+        <template #actions>
+          <CopyButton :text="step.detail" />
+        </template>
+      </TraceJsonContent>
 
       <div
         v-else-if="step.detail && step.detailIsMarkdown"
@@ -190,21 +181,16 @@ const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
         </div>
       </div>
 
-      <div class="space-y-1">
-        <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Event JSON
-        </div>
-        <div class="relative">
-          <CopyButton
-            :text="jsonText"
-            class="absolute right-1.5 top-1.5 z-[1]"
-          />
-          <TraceJsonContent
-            :value="step.json"
-            class="pr-10"
-          />
-        </div>
-      </div>
+      <TraceJsonContent :value="step.json">
+        <template #title>
+          <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Event JSON
+          </span>
+        </template>
+        <template #actions>
+          <CopyButton :text="jsonText" />
+        </template>
+      </TraceJsonContent>
     </div>
   </div>
 </template>

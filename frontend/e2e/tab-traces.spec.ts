@@ -215,10 +215,11 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
   );
   await expect(userJson.getByText("jsonrpc:", { exact: true })).toBeVisible();
   await expect(userJson.getByText("name:", { exact: true })).toBeVisible();
-  await expect(userJson.getByText("query:", { exact: true })).toBeHidden();
-
-  await userJson.getByText("arguments:", { exact: true }).click();
   await expect(userJson.getByText("query:", { exact: true })).toBeVisible();
+  await expect(userJson.getByText("in_stock:", { exact: true })).toBeHidden();
+
+  await userJson.getByText("filters:", { exact: true }).click();
+  await expect(userJson.getByText("in_stock:", { exact: true })).toBeVisible();
   await userJson.getByText("params:", { exact: true }).click();
   await expect(userJson.getByText("name:", { exact: true })).toBeHidden();
   await userJson.getByText("params:", { exact: true }).click();

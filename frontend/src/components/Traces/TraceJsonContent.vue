@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, useSlots, watch } from "vue";
 
-import Button from "@/components/ui/Button.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
 import { getTraceJsonContent } from "@/lib/traceJson";
 
@@ -14,8 +13,12 @@ const props = withDefaults(defineProps<Props>(), {
   maxHeight: "medium",
 });
 
+const slots = useSlots();
 const viewMode = ref<"tree" | "raw">("tree");
 const content = computed(() => getTraceJsonContent(props.value));
+const showToolbar = computed(
+  () => content.value.isJson || Boolean(slots.actions) || Boolean(slots.title),
+);
 const maxHeightClass = computed(() => {
   if (props.maxHeight === "small") return "max-h-60";
   if (props.maxHeight === "large") return "max-h-[40vh]";
@@ -36,29 +39,52 @@ watch(
     data-testid="trace-json-content"
   >
     <div
-      v-if="content.isJson"
-      class="mb-1 flex justify-end"
-      role="group"
-      aria-label="JSON view"
+      v-if="showToolbar"
+      class="mb-1 flex items-center gap-2"
+      :class="slots.title ? 'justify-between' : 'justify-end'"
     >
-      <Button
-        :variant="viewMode === 'tree' ? 'secondary' : 'ghost'"
-        size="sm"
-        class="h-7 min-h-7 rounded-r-none px-2 text-[11px] font-medium"
-        :aria-pressed="viewMode === 'tree'"
-        @click="viewMode = 'tree'"
+      <div
+        v-if="slots.title"
+        class="min-w-0 leading-6"
       >
-        Tree
-      </Button>
-      <Button
-        :variant="viewMode === 'raw' ? 'secondary' : 'ghost'"
-        size="sm"
-        class="h-7 min-h-7 rounded-l-none px-2 text-[11px] font-medium"
-        :aria-pressed="viewMode === 'raw'"
-        @click="viewMode = 'raw'"
-      >
-        Raw
-      </Button>
+        <slot name="title" />
+      </div>
+      <div class="flex shrink-0 items-center gap-1 -mt-0.5">
+        <div
+          v-if="content.isJson"
+          class="inline-flex h-6 items-center rounded-md border border-border/60 bg-muted/40 p-0.5"
+          role="group"
+          aria-label="JSON view"
+        >
+          <button
+            type="button"
+            class="h-5 rounded px-1.5 text-[10px] font-medium leading-none transition-colors"
+            :class="
+              viewMode === 'tree'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            :aria-pressed="viewMode === 'tree'"
+            @click="viewMode = 'tree'"
+          >
+            Tree
+          </button>
+          <button
+            type="button"
+            class="h-5 rounded px-1.5 text-[10px] font-medium leading-none transition-colors"
+            :class="
+              viewMode === 'raw'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            :aria-pressed="viewMode === 'raw'"
+            @click="viewMode = 'raw'"
+          >
+            Raw
+          </button>
+        </div>
+        <slot name="actions" />
+      </div>
     </div>
 
     <div
@@ -71,7 +97,7 @@ watch(
       >
         <JsonTree
           :data="content.treeValue"
-          :auto-expand-depth="1"
+          :auto-expand-depth="2"
           :root-expanded="true"
         />
       </div>

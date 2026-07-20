@@ -1120,61 +1120,59 @@ onMounted(async () => {
           :steps="steps"
         />
 
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">
-              Request
-            </div>
+        <TraceJsonContent
+          :value="selectedTrace.request"
+          max-height="large"
+        >
+          <template #title>
+            <span class="text-sm font-medium">Request</span>
+          </template>
+          <template #actions>
             <Button
               variant="ghost"
               size="sm"
-              class="h-6 px-2"
+              class="h-6 min-h-0 gap-1 rounded-md px-1.5 text-[10px]"
               @click="copyToClipboard(formatJson(selectedTrace.request), 'request')"
             >
               <Check
                 v-if="copiedRequest"
-                class="w-3 h-3 mr-1 text-emerald-500"
+                class="h-3 w-3 text-emerald-500"
               />
               <Copy
                 v-else
-                class="w-3 h-3 mr-1"
+                class="h-3 w-3"
               />
               {{ copiedRequest ? "Copied" : "Copy" }}
             </Button>
-          </div>
-          <TraceJsonContent
-            :value="selectedTrace.request"
-            max-height="large"
-          />
-        </div>
+          </template>
+        </TraceJsonContent>
 
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">
-              Response
-            </div>
+        <TraceJsonContent
+          :value="selectedTrace.response"
+          max-height="large"
+        >
+          <template #title>
+            <span class="text-sm font-medium">Response</span>
+          </template>
+          <template #actions>
             <Button
               variant="ghost"
               size="sm"
-              class="h-6 px-2"
+              class="h-6 min-h-0 gap-1 rounded-md px-1.5 text-[10px]"
               @click="copyToClipboard(formatJson(selectedTrace.response), 'response')"
             >
               <Check
                 v-if="copiedResponse"
-                class="w-3 h-3 mr-1 text-emerald-500"
+                class="h-3 w-3 text-emerald-500"
               />
               <Copy
                 v-else
-                class="w-3 h-3 mr-1"
+                class="h-3 w-3"
               />
               {{ copiedResponse ? "Copied" : "Copy" }}
             </Button>
-          </div>
-          <TraceJsonContent
-            :value="selectedTrace.response"
-            max-height="large"
-          />
-        </div>
+          </template>
+        </TraceJsonContent>
       </div>
     </Dialog>
   </div>
