@@ -191,6 +191,25 @@ watch(
   { flush: "post" },
 );
 
+watch(
+  () => selectedNode.value,
+  (node) => {
+    if (!node || isCollapsed.value || isExecuting.value) return;
+
+    nextTick(() => {
+      if (!scrollContainer.value) return;
+      const entries = scrollContainer.value.querySelectorAll(
+        `[data-testid="debug-node-result-${node.id}"]`,
+      );
+      if (entries.length === 0) return;
+      (entries[entries.length - 1] as HTMLElement).scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  },
+);
+
 const delegatedSubAgentLabelSet = computed(() => {
   const s = new Set<string>();
   for (const n of workflowStore.nodes) {
