@@ -579,6 +579,55 @@ test("shows execution highlights after a workflow run", async ({ page }) => {
   }
 });
 
+test("keeps execution highlights collapsed by default on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const workflow = await createWorkflow(
+    page,
+    `Mobile Highlights ${Date.now()}`,
+    [
+      {
+        id: "set-highlight",
+        type: "set",
+        position: { x: 120, y: 120 },
+        data: {
+          label: "Build Highlight",
+          mappings: [{ key: "message", value: "Mobile highlight smoke" }],
+          highlight: true,
+        },
+      },
+      {
+        id: "output-final",
+        type: "output",
+        position: { x: 460, y: 120 },
+        data: { label: "Final Output", message: "$input.message" },
+      },
+    ],
+    [
+      {
+        id: "edge-highlight-output",
+        source: "set-highlight",
+        target: "output-final",
+        sourceHandle: "output",
+        targetHandle: "input",
+      },
+    ],
+  );
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+
+    await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
+    await expect(page.getByTestId("execution-highlights-panel")).toBeHidden();
+
+    await page.getByTestId("execution-highlights-open").click();
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
 test("adds and configures a Linear node", async ({ page }) => {
   const credentialResponse = await page.request.post("/api/credentials", {
     data: {
