@@ -191,6 +191,58 @@ watch(
   { flush: "post" },
 );
 
+const NODE_RESULT_SCROLL_TOP_OFFSET_PX = 10; // 0.75rem — keep entry from sitting flush against the panel top
+const NODE_RESULT_SCROLL_DURATION_MS = 400; // approximate smooth-scroll duration in Chromium/WebKit
+const NODE_RESULT_SCROLL_FLASH_AT_RATIO = 0.65;
+const NODE_RESULT_SCROLL_FLASH_MS = 700;
+const NODE_RESULT_SCROLL_FLASH_CLASSES = [
+  "debug-scroll-flash-success",
+  "debug-scroll-flash-error",
+  "debug-scroll-flash-warn",
+] as const;
+let nodeResultScrollFlashStartTimer: ReturnType<typeof setTimeout> | null = null;
+let nodeResultScrollFlashEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scrollFlashClassForStatus(status: string): (typeof NODE_RESULT_SCROLL_FLASH_CLASSES)[number] {
+  if (status === "success") return "debug-scroll-flash-success";
+  if (status === "error" || status === "failed") return "debug-scroll-flash-error";
+  // HITL (pending) and running share the yellow flash
+  return "debug-scroll-flash-warn";
+}
+
+function clearNodeResultScrollFlashTimers(): void {
+  if (nodeResultScrollFlashStartTimer !== null) {
+    clearTimeout(nodeResultScrollFlashStartTimer);
+    nodeResultScrollFlashStartTimer = null;
+  }
+  if (nodeResultScrollFlashEndTimer !== null) {
+    clearTimeout(nodeResultScrollFlashEndTimer);
+    nodeResultScrollFlashEndTimer = null;
+  }
+}
+
+function scrollToNodeResultEntry(el: HTMLElement): void {
+  const container = scrollContainer.value;
+  if (!container) return;
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = el.getBoundingClientRect();
+  const nextTop =
+    targetRect.top - containerRect.top + container.scrollTop - NODE_RESULT_SCROLL_TOP_OFFSET_PX;
+  container.scrollTo({ top: Math.max(0, nextTop), behavior: "smooth" });
+}
+
+function flashScrolledNodeResult(el: HTMLElement, status: string): void {
+  const flashClass = scrollFlashClassForStatus(status);
+  el.classList.remove(...NODE_RESULT_SCROLL_FLASH_CLASSES);
+  // Restart CSS animation when selecting nodes quickly
+  void el.offsetWidth;
+  el.classList.add(flashClass);
+  nodeResultScrollFlashEndTimer = setTimeout(() => {
+    el.classList.remove(flashClass);
+    nodeResultScrollFlashEndTimer = null;
+  }, NODE_RESULT_SCROLL_FLASH_MS);
+}
+
 watch(
   () => selectedNode.value,
   (node) => {
@@ -202,10 +254,16 @@ watch(
         `[data-testid="debug-node-result-${node.id}"]`,
       );
       if (entries.length === 0) return;
-      (entries[entries.length - 1] as HTMLElement).scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      const target = entries[entries.length - 1] as HTMLElement;
+      clearNodeResultScrollFlashTimers();
+      scrollToNodeResultEntry(target);
+      const flashDelayMs = Math.round(
+        NODE_RESULT_SCROLL_DURATION_MS * NODE_RESULT_SCROLL_FLASH_AT_RATIO,
+      );
+      nodeResultScrollFlashStartTimer = setTimeout(() => {
+        nodeResultScrollFlashStartTimer = null;
+        flashScrolledNodeResult(target, target.dataset.status ?? "running");
+      }, flashDelayMs);
     });
   },
 );
@@ -1628,6 +1686,7 @@ onUnmounted(() => {
   unsubDismissOverlays = null;
   window.removeEventListener("keydown", handleDebugPanelWindowKeyDown, true);
   window.removeEventListener("keydown", handleDownloadDialogKeyDown, true);
+  clearNodeResultScrollFlashTimers();
   if (isResizing.value) {
     isResizing.value = false;
     workflowStore.setDebugPanelHeight(panelHeight.value);
@@ -2813,6 +2872,7 @@ function renderContent(content: string): string {
           v-for="result in displayResults"
           :key="result.displayKey"
           :data-testid="`debug-node-result-${result.node_id}`"
+          :data-status="result.status"
           class="flex items-start gap-3 p-2 rounded-md bg-muted/30"
         >
           <component
@@ -4293,5 +4353,59 @@ function renderContent(content: string): string {
 .mode-toggle-btn.active {
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
+}
+
+.debug-scroll-flash-success {
+  animation: debug-scroll-flash-success 0.7s ease-out;
+}
+
+.debug-scroll-flash-error {
+  animation: debug-scroll-flash-error 0.7s ease-out;
+}
+
+.debug-scroll-flash-warn {
+  animation: debug-scroll-flash-warn 0.7s ease-out;
+}
+
+@keyframes debug-scroll-flash-success {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(34 197 94 / 0.22),
+      0 0 0 1px rgb(34 197 94 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+@keyframes debug-scroll-flash-error {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(239 68 68 / 0.22),
+      0 0 0 1px rgb(239 68 68 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+@keyframes debug-scroll-flash-warn {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(234 179 8 / 0.22),
+      0 0 0 1px rgb(234 179 8 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
 }
 </style>
