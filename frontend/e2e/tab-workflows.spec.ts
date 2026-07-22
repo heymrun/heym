@@ -616,7 +616,18 @@ test("keeps execution highlights collapsed by default on mobile", async ({ page 
 
   try {
     await page.goto(`/workflows/${workflow.id}`);
-    await page.getByRole("button", { name: "Run Workflow" }).click();
+    await expect(page.getByTestId("workflow-title")).toBeVisible();
+    await expect(page.getByText("Build Highlight")).toBeVisible();
+
+    // On mobile the properties panel starts closed and the Run label is icon-only
+    // below `sm`, so drive the run via the editor shortcut instead.
+    await page.keyboard.press("ControlOrMeta+Enter");
+
+    // The shortcut opens the properties panel; close it so the canvas chip is
+    // unobstructed on a narrow viewport.
+    await expect(page.locator(".properties-panel")).toBeVisible();
+    await page.locator("button.panel-toggle-right").click();
+    await expect(page.locator(".properties-panel")).toBeHidden();
 
     await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
     await expect(page.getByTestId("execution-highlights-panel")).toBeHidden();
