@@ -70,6 +70,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const isObservingExecution = ref(false);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
+  const workflowLoadedAt = ref<string | null>(null);
+  const staleSaveDialogOpen = ref(false);
+  const staleSaveServerUpdatedAt = ref<string | null>(null);
   const runningNodeId = ref<string | null>(null);
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
@@ -584,6 +587,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentWorkflow.value = { ...workflow, nodes: loadedNodes, edges: loadedEdges };
     nodes.value = loadedNodes;
     edges.value = loadedEdges;
+    workflowLoadedAt.value = workflow.updated_at;
     void refreshAnalysisNoteEmpty();
     hasUnsavedChanges.value = false;
     timelinePickedNodeResultIndex.value = null;
@@ -619,19 +623,52 @@ export const useWorkflowStore = defineStore("workflow", () => {
     historyIndex.value = 0;
   }
 
-  async function saveWorkflow(): Promise<void> {
-    if (!currentWorkflow.value) return;
+  async function saveWorkflow(skipStaleCheck = false): Promise<void> {
+    const wf = currentWorkflow.value;
+    if (!wf) return;
+
+    if (!skipStaleCheck && wf.id && workflowLoadedAt.value) {
+      try {
+        const fresh = await workflowApi.get(wf.id);
+        if (fresh.updated_at > workflowLoadedAt.value) {
+          staleSaveServerUpdatedAt.value = fresh.updated_at;
+          staleSaveDialogOpen.value = true;
+          return;
+        }
+      } catch {
+        // network error — proceed with save anyway
+      }
+    }
+
+    await _executeSave();
+  }
+
+  async function _executeSave(): Promise<void> {
+    const wf = currentWorkflow.value;
+    if (!wf) return;
 
     isSaving.value = true;
     try {
-      await workflowApi.update(currentWorkflow.value.id, {
+      const updated = await workflowApi.update(wf.id, {
         nodes: nodes.value,
         edges: edges.value,
       });
+      workflowLoadedAt.value = updated.updated_at;
       hasUnsavedChanges.value = false;
     } finally {
       isSaving.value = false;
     }
+  }
+
+  async function forceSaveWorkflow(): Promise<void> {
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
+    await _executeSave();
+  }
+
+  function cancelStaleSave(): void {
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
   }
 
   async function updateMetadata(name: string, description: string | null): Promise<void> {
@@ -1226,7 +1263,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
     try {
       if (hasUnsavedChanges.value) {
-        await saveWorkflow();
+        await saveWorkflow(true);
       }
 
       nodes.value.forEach((node) => {
@@ -1658,6 +1695,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
       currentExecutionWorkflowId.value = null;
     }
     hasUnsavedChanges.value = false;
+    workflowLoadedAt.value = null;
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
   }
 
   function clearExecution(): void {
@@ -3206,6 +3246,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
     canRedo,
     loadWorkflow,
     saveWorkflow,
+    forceSaveWorkflow,
+    cancelStaleSave,
+    workflowLoadedAt,
+    staleSaveDialogOpen,
+    staleSaveServerUpdatedAt,
     updateMetadata,
     addNode,
     updateNode,

@@ -270,6 +270,7 @@ function toggleRightPanel(): void {
 }
 
 const { analysisPanelOpen } = storeToRefs(workflowStore);
+const { staleSaveDialogOpen } = storeToRefs(workflowStore);
 
 const analysisWorkflowId = computed(() => workflowStore.currentWorkflow?.id ?? "");
 const analysisWorkflowPayload = computed(() => ({
@@ -2309,6 +2310,44 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               >
                 Close
               </Button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="staleSaveDialogOpen"
+          class="fixed inset-0 z-50 flex items-center justify-center"
+        >
+          <div
+            class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            @click="workflowStore.cancelStaleSave()"
+          />
+          <div class="relative bg-card border rounded-lg shadow-xl w-[90vw] max-w-[440px]">
+            <div class="p-6">
+              <h3 class="font-semibold text-base mb-2">
+                Stale Workflow Detected
+              </h3>
+              <p class="text-sm text-muted-foreground mb-6">
+                Bu workflow'un yeni bir versiyonu kaydedildi. Uzerine yazmak istiyor musunuz?
+              </p>
+              <div class="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  @click="workflowStore.cancelStaleSave()"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="gradient"
+                  @click="workflowStore.forceSaveWorkflow()"
+                >
+                  Override
+                </Button>
+              </div>
             </div>
           </div>
         </div>
