@@ -456,6 +456,12 @@ class HistoryListResponse(BaseModel):
     items: list[ExecutionHistoryListResponse]
 
 
+class ActiveWorkflowCountResponse(BaseModel):
+    """Response containing the count of distinct workflows with at least one active execution."""
+
+    count: int
+
+
 class ActiveExecutionItem(BaseModel):
     """Single currently-running execution visible to the requesting user."""
 

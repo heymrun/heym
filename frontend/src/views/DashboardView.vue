@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   Pin,
   PinOff,
+  Play,
   Plus,
   RotateCcw,
   Search,
@@ -169,6 +170,9 @@ const copyingId = ref<string | null>(null);
 const toastMessage = ref("");
 const toastVisible = ref(false);
 const toastType = ref<"error" | "success">("error");
+
+const activeWorkflowCount = ref(0);
+let activeCountTimer: ReturnType<typeof setInterval> | null = null;
 
 const showFolderDialog = ref(false);
 const newFolderName = ref("");
@@ -563,6 +567,8 @@ onMounted(async () => {
   if (workflows.value.length === 0 && folderStore.folderTree.length === 0) {
     await loadRecentTemplates();
   }
+  fetchActiveWorkflowCount();
+  activeCountTimer = setInterval(fetchActiveWorkflowCount, 10_000);
   document.addEventListener("click", closeContextMenu);
   window.addEventListener("keydown", handleKeyDown);
   window.addEventListener("storage", onQuickDrawerPreferencesStorage);
@@ -583,6 +589,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (activeCountTimer !== null) {
+    clearInterval(activeCountTimer);
+    activeCountTimer = null;
+  }
   document.removeEventListener("click", closeContextMenu);
   window.removeEventListener("keydown", handleKeyDown);
   window.removeEventListener("storage", onQuickDrawerPreferencesStorage);
@@ -597,6 +607,14 @@ async function loadWorkflows(): Promise<void> {
     workflows.value = await workflowApi.list();
   } finally {
     loading.value = false;
+  }
+}
+
+async function fetchActiveWorkflowCount(): Promise<void> {
+  try {
+    activeWorkflowCount.value = await workflowApi.activeCount();
+  } catch {
+    // Silently ignore network errors in background polling
   }
 }
 
@@ -1480,6 +1498,13 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     class="inline-flex items-center px-2 py-px rounded-full text-xs font-medium bg-primary/10 text-primary ring-1 ring-inset ring-primary/20 mt-0.5 dark:bg-primary/15 dark:text-accent-foreground dark:ring-primary/35"
                   >
                     {{ workflowCountLabel }}
+                  </span>
+                  <span
+                    v-if="activeWorkflowCount > 0"
+                    class="inline-flex items-center gap-1 px-2 py-px rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/30 mt-0.5"
+                  >
+                    <Play class="w-3 h-3 fill-emerald-500 dark:fill-emerald-400" />
+                    {{ activeWorkflowCount }} {{ activeWorkflowCount === 1 ? 'running' : 'running' }}
                   </span>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">

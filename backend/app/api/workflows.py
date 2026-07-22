@@ -38,6 +38,7 @@ from app.db.models import (
 from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
     ActiveExecutionItem,
+    ActiveWorkflowCountResponse,
     AnalysisNoteEditor,
     AnalysisNoteResponse,
     AnalysisNoteSaveRequest,
@@ -74,6 +75,7 @@ from app.services.codex_followup_service import (
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
+    ACTIVE_EXECUTION_STALE_AFTER_SECONDS,
     cancel_execution as cancel_active_execution,
 )
 from app.services.execution_cancellation import (
@@ -1059,6 +1061,34 @@ async def list_active_workflow_executions(
         key=lambda item: item.started_at,
         reverse=True,
     )
+
+
+@router.get("/active/count", response_model=ActiveWorkflowCountResponse)
+async def get_active_workflow_count(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActiveWorkflowCountResponse:
+    """Return the number of distinct workflows that have at least one active execution."""
+    from sqlalchemy import distinct
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
+    result = await db.execute(
+        select(func.count(distinct(ActiveWorkflowExecution.workflow_id)))
+        .join(Workflow, Workflow.id == ActiveWorkflowExecution.workflow_id)
+        .where(
+            ActiveWorkflowExecution.heartbeat_at >= cutoff,
+            ActiveWorkflowExecution.cancel_requested_at.is_(None),
+            or_(
+                Workflow.owner_id == current_user.id,
+                Workflow.id.in_(
+                    select(WorkflowShare.workflow_id).where(
+                        WorkflowShare.user_id == current_user.id
+                    )
+                ),
+            ),
+        )
+    )
+    return ActiveWorkflowCountResponse(count=result.scalar() or 0)
 
 
 @router.get("/{workflow_id}/executions/{execution_id}/stream")
