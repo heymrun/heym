@@ -17,6 +17,7 @@ The **Chat** tab provides a direct LLM chat interface. Use it to test models, as
 - **Workspace template context** – Shared workflow and node templates in your workspace are included as context, so Chat can answer questions about available templates
 - **Long-running agent** – Chat keeps working on the backend even if the browser closes, so you can come back from another device and continue the same conversation
 - **Workflow creation** – Ask Chat to create or set up a workflow, and it uses the same Workflow AI Builder engine as the editor assistant to generate and save the workflow
+- **Kanban task creation** – Ask naturally to add a task or create a card. Chat adds it to the first column of the requested board; when you have multiple boards and do not name one, Chat presents a board picker before creating the card
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
 - **Streaming responses** – See the model's output as it streams
@@ -39,6 +40,17 @@ When you ask Chat to create, build, generate, or set up a workflow, it creates a
 Follow-up feedback in the same chat edits that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step", "change the output format", or "şöyle yap" and Chat updates the saved workflow and refreshes the preview.
 
 This is best for requests where you want the work done as a reusable automation, not just a one-off answer.
+
+## Creating Kanban Tasks
+
+Ask Chat in ordinary language, for example, “Add a task called Fix login bug” or
+“Create a new card Update documentation on the Launch board.” You can include a
+description in the same request. Chat always creates the card in the selected board's
+first column.
+
+If your workspace has several boards and you do not identify one, Chat pauses with a
+single-choice board picker. Select a board to finish creating the card. No slash command
+or special message format is required.
 
 ## User Rules
 

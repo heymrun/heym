@@ -24,6 +24,9 @@ and workflow runs.
 - Columns are fully editable: add, rename, recolor, reorder, or delete them from the
   column settings (a column must be empty before it can be deleted).
 - Cards are ordered vertically by priority — drag to reorder.
+- You can also create a card from the [Chat tab](/docs/tabs/chat-tab) with a natural-language
+  request. Chat asks you to select a board when needed and always adds the card to that
+  board's first column.
 
 ## Sharing a board
 

@@ -20,6 +20,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import compute_analytics_stats, upsert_workflow_analytics_snapshot
+from app.api.boards import create_card as create_board_card
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
 from app.api.workflows import (
@@ -50,6 +51,7 @@ from app.db.models import (
     WorkflowVersion,
 )
 from app.db.session import get_db
+from app.models.board_schemas import CardCreateRequest
 from app.services import template_service
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
@@ -367,6 +369,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 6. When the user asks for details of what ran or what came in (e.g. what ran, show details, list recent runs), use get_recent_executions with the appropriate time_range and optionally limit. Summarize the list (workflow name, time, status, brief output) in the user's language.
 6a. When the user asks about scheduled cron runs, the calendar, or when workflows will run (today, this week, this month, upcoming times), use get_schedule_events with view_window day, week, or month, optional reference_date (YYYY-MM-DD), include_shared false for owned-only or true to include shared workflows, or start_iso/end_iso for a custom range. Summarize events (workflow name and time) in the user's language.
 6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. For a specific task/card (what it is, its description, the comments/conversation on it, what happened, its output or error), use get_card_detail with the card_id from get_board_tasks. Answer from the results in the user's language; do not execute workflows for these questions.
+6c. When the user naturally asks to add or create a kanban task/card, use create_board_task; this is a board action, not a request to create a workflow, and no command prefix is needed. Pass the user's requested title and optional description. If the user clearly names a board, call list_boards first to resolve its exact board_id. If no board is specified, call create_board_task without board_id: it will create the task when there is exactly one board, or return requires_board_selection with the available boards when there are several. For requires_board_selection, emit one heym-clarify question of type single whose options are the returned board names, then stop and wait. After the user selects a board, call list_boards again to resolve the selected name to its board_id, then call create_board_task exactly once. If a named board is missing or ambiguous, use the same single-choice board selection. Never ask which column to use: create_board_task always places the task in the first column.
 7. When a workflow is waiting for human review and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation.
 8. When the user asks you to wait, monitor, or check again for a workflow that is still running or pending, use wait_for_execution_update instead of repeatedly polling yourself. Default to 5 seconds between checks and at most 5 checks unless the user explicitly asks otherwise.
 9. If execute_workflow or wait_for_execution_update returns a pending workflow with review details, explain that pending state in the same language as the user, include the review link as a markdown link, briefly summarize the blocked step, and show the three direct chat reply options: approve, edit: ..., and reject.
@@ -691,6 +694,33 @@ DASHBOARD_CHAT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_board_task",
+            "description": "Create a task/card on a kanban board from a natural-language request. Pass title and optional description. Pass board_id when the user identified a board (resolve names with list_boards); otherwise omit it. With one board, omission selects it automatically. With multiple boards, omission returns requires_board_selection and board options without creating anything. The task is always placed in the board's first column.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "board_id": {
+                        "type": "string",
+                        "description": "Optional UUID of the selected board. Omit when the user did not specify a board.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "description": "Task/card title requested by the user.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional task/card description or details requested by the user.",
+                    },
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_board_tasks",
             "description": "List the tasks (cards) on kanban boards with their column and run status (idle, running, pending, success, failed). Use when the user asks what jobs/tasks are on a board, their status, what is running/failed/done, or what is in a column. Optional board_id to scope to one board (get it from list_boards); omit to include all boards. Optional status to filter (idle|running|pending|success|failed).",
             "parameters": {
@@ -775,6 +805,89 @@ async def list_boards_for_chat(db: AsyncSession, user_id: uuid.UUID) -> dict:
             }
         )
     return {"count": len(out), "boards": out}
+
+
+async def create_board_task_for_chat(
+    db: AsyncSession,
+    user: User,
+    title: str,
+    description: str | None = None,
+    board_id: str | None = None,
+) -> dict:
+    """Create a chat-requested card in the selected board's first column."""
+    if not isinstance(title, str) or not title.strip():
+        return {"error": "Task title is required"}
+    clean_title = title.strip()
+    if len(clean_title) > 500:
+        return {"error": "Task title must be 500 characters or fewer"}
+    if description is not None and not isinstance(description, str):
+        return {"error": "Task description must be text"}
+
+    board: Board | None = None
+    if board_id:
+        try:
+            selected_board_id = uuid.UUID(board_id)
+        except (ValueError, TypeError):
+            return {"error": "Invalid board_id"}
+        board = (
+            await db.execute(
+                select(Board).where(
+                    Board.id == selected_board_id,
+                    Board.owner_id == user.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if board is None:
+            return {"error": "Board not found"}
+    else:
+        boards = (
+            (
+                await db.execute(
+                    select(Board).where(Board.owner_id == user.id).order_by(Board.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not boards:
+            return {"error": "No boards available"}
+        if len(boards) > 1:
+            return {
+                "requires_board_selection": True,
+                "count": len(boards),
+                "boards": [
+                    {
+                        "id": str(candidate.id),
+                        "name": candidate.name,
+                        "description": candidate.description,
+                    }
+                    for candidate in boards
+                ],
+            }
+        board = boards[0]
+
+    try:
+        card = await create_board_card(
+            board_id=board.id,
+            request=CardCreateRequest(
+                title=clean_title,
+                content=description.strip() if description else "",
+            ),
+            db=db,
+            current_user=user,
+        )
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+    return {
+        "created": True,
+        "task": {
+            "id": str(card.id),
+            "title": card.title,
+            "description": card.content,
+        },
+        "board": {"id": str(board.id), "name": board.name},
+        "placement": {"column": "first", "column_id": str(card.column_id)},
+    }
 
 
 async def get_board_tasks_for_chat(
@@ -2353,6 +2466,16 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         if isinstance(data, dict) and "count" in data:
             return f"{int(data.get('count') or 0)} board(s) listed"
         return result_json[:150] + ("..." if len(result_json) > 150 else "")
+    if tool_name == "create_board_task":
+        if isinstance(data, dict) and data.get("error"):
+            return f"Error: {str(data.get('error'))[:150]}"
+        if isinstance(data, dict) and data.get("requires_board_selection"):
+            return f"Board selection required ({int(data.get('count') or 0)} available)"
+        if isinstance(data, dict) and data.get("created"):
+            task = data.get("task") or {}
+            board = data.get("board") or {}
+            return f"Created task {task.get('title')!r} on board {board.get('name')!r}"
+        return result_json[:200] + ("..." if len(result_json) > 200 else "")
     if tool_name == "get_board_tasks":
         if isinstance(data, dict) and "error" in data:
             return f"Error: {str(data.get('error'))[:150]}"
@@ -3569,6 +3692,46 @@ async def stream_dashboard_chat(
                             "label": step_label,
                             "tool": name,
                             "request": {},
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                    )
+                elif name == "create_board_task":
+                    step_label = "Adding task to board..."
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(
+                        await create_board_task_for_chat(
+                            db,
+                            user,
+                            title=args.get("title") or "",
+                            description=args.get("description"),
+                            board_id=args.get("board_id") or None,
+                        )
+                    )
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }

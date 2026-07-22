@@ -669,7 +669,7 @@ See also [Global Variables](./global-variables.md), [Variable](../nodes/variable
 
 ### [Chat](../tabs/chat-tab.md)
 
-The Chat tab is Heym's long-running agent surface for operating the workspace from conversation. Select a [credential](./credentials.md) and model, then ask Chat to answer questions, inspect workflow definitions, run existing workflows, summarize executions and schedules, resolve pending human reviews, or create and revise workflows with the same AI Builder engine used in the editor.
+The Chat tab is Heym's long-running agent surface for operating the workspace from conversation. Select a [credential](./credentials.md) and model, then ask Chat to answer questions, inspect workflow definitions, run existing workflows, summarize executions and schedules, resolve pending human reviews, create and revise workflows with the same AI Builder engine used in the editor, or add cards to kanban boards with natural language. New cards always start in the selected board's first column; when several boards are available and none was named, Chat presents a board selection before creating the card.
 
 Chat keeps running on the backend after the browser closes. While an answer is streaming, you can send more messages; Heym stores them in a database-backed queue, lets you edit or delete queued messages before they start, and runs them in order when the current response finishes. If the assistant needs planning details and returns clarification questions, the queue pauses until you answer those questions, then resumes after the planning response.
 
