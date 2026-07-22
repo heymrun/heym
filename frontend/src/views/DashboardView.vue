@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { useRoute, useRouter } from "vue-router";
 import { useMediaQuery } from "@vueuse/core";
 import {
+  Activity,
   AlertTriangle,
   Check,
   Clock,
@@ -150,6 +151,8 @@ function onDataTableNavigate(id: string | null): void {
 }
 
 const workflows = ref<WorkflowListItem[]>([]);
+const activeWorkflowCount = ref(0);
+let activeCountInterval: ReturnType<typeof setInterval> | null = null;
 const workflowSearchQuery = ref("");
 const workflowSearchInput = ref<HTMLInputElement | null>(null);
 const loading = ref(true);
@@ -563,6 +566,8 @@ onMounted(async () => {
   if (workflows.value.length === 0 && folderStore.folderTree.length === 0) {
     await loadRecentTemplates();
   }
+  fetchActiveWorkflowCount();
+  activeCountInterval = setInterval(fetchActiveWorkflowCount, 10_000);
   document.addEventListener("click", closeContextMenu);
   window.addEventListener("keydown", handleKeyDown);
   window.addEventListener("storage", onQuickDrawerPreferencesStorage);
@@ -589,6 +594,10 @@ onUnmounted(() => {
   removeOverlayDismiss?.();
   removeOverlayDismiss = null;
   removeWorkflowDragGhost();
+  if (activeCountInterval !== null) {
+    clearInterval(activeCountInterval);
+    activeCountInterval = null;
+  }
 });
 
 async function loadWorkflows(): Promise<void> {
@@ -597,6 +606,15 @@ async function loadWorkflows(): Promise<void> {
     workflows.value = await workflowApi.list();
   } finally {
     loading.value = false;
+  }
+}
+
+async function fetchActiveWorkflowCount(): Promise<void> {
+  try {
+    const { count } = await workflowApi.getActiveExecutionCount();
+    activeWorkflowCount.value = count;
+  } catch {
+    activeWorkflowCount.value = 0;
   }
 }
 
@@ -1480,6 +1498,17 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     class="inline-flex items-center px-2 py-px rounded-full text-xs font-medium bg-primary/10 text-primary ring-1 ring-inset ring-primary/20 mt-0.5 dark:bg-primary/15 dark:text-accent-foreground dark:ring-primary/35"
                   >
                     {{ workflowCountLabel }}
+                  </span>
+                  <span
+                    v-if="activeWorkflowCount > 0"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-px rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-200 mt-0.5 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700/50"
+                  >
+                    <span class="relative flex h-1.5 w-1.5 shrink-0">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      <span class="relative inline-flex h-full w-full rounded-full bg-emerald-500" />
+                    </span>
+                    <Activity class="h-3 w-3 shrink-0" />
+                    {{ activeWorkflowCount }} running
                   </span>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">

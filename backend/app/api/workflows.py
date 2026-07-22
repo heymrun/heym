@@ -37,6 +37,7 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
+    ActiveExecutionCountResponse,
     ActiveExecutionItem,
     AnalysisNoteEditor,
     AnalysisNoteResponse,
@@ -1059,6 +1060,20 @@ async def list_active_workflow_executions(
         key=lambda item: item.started_at,
         reverse=True,
     )
+
+
+@router.get("/executions/active/count", response_model=ActiveExecutionCountResponse)
+async def count_active_workflow_executions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActiveExecutionCountResponse:
+    """Return how many distinct workflows have at least one active execution."""
+    active_items = await list_active_workflow_executions(
+        current_user=current_user,
+        db=db,
+    )
+    distinct_workflow_ids = {item.workflow_id for item in active_items}
+    return ActiveExecutionCountResponse(count=len(distinct_workflow_ids))
 
 
 @router.get("/{workflow_id}/executions/{execution_id}/stream")

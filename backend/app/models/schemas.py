@@ -468,6 +468,12 @@ class ActiveExecutionItem(BaseModel):
     node_results: list[dict] = Field(default_factory=list)
 
 
+class ActiveExecutionCountResponse(BaseModel):
+    """Count of distinct workflows with at least one currently active execution."""
+
+    count: int
+
+
 class LLMTraceListItem(BaseModel):
     id: uuid.UUID
     created_at: datetime

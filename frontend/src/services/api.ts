@@ -1029,6 +1029,12 @@ export const workflowApi = {
     );
     return response.data;
   },
+  getActiveExecutionCount: async (): Promise<{ count: number }> => {
+    const response = await api.get<{ count: number }>(
+      "/workflows/executions/active/count",
+    );
+    return response.data;
+  },
   listShares: async (id: string): Promise<WorkflowShare[]> => {
     const response = await api.get<WorkflowShare[]>(`/workflows/${id}/shares`);
     return response.data;

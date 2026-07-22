@@ -5,10 +5,11 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.workflows import (
+    count_active_workflow_executions,
     list_active_workflow_executions,
     stream_active_workflow_execution,
 )
-from app.models.schemas import ActiveExecutionItem
+from app.models.schemas import ActiveExecutionCountResponse, ActiveExecutionItem
 from app.services.execution_cancellation import (
     ActiveExecutionRecord,
     ExecutionCancellationHandle,
@@ -185,6 +186,74 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [])
         db.execute.assert_not_called()
+
+
+class CountActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_returns_zero_when_no_active_executions(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = AsyncMock()
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.workflows.list_active_executions", return_value=[]),
+        ):
+            result = await count_active_workflow_executions(current_user=user, db=db)
+
+        self.assertIsInstance(result, ActiveExecutionCountResponse)
+        self.assertEqual(result.count, 0)
+
+    async def test_counts_distinct_workflow_ids(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+
+        wf_id_a = uuid.uuid4()
+        wf_id_b = uuid.uuid4()
+        ex_id_a = uuid.uuid4()
+        ex_id_b = uuid.uuid4()
+        ex_id_a2 = uuid.uuid4()
+
+        records = [
+            _make_record(wf_id_a, ex_id_a),
+            _make_record(wf_id_b, ex_id_b),
+            _make_record(wf_id_a, ex_id_a2),
+        ]
+        db = AsyncMock()
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=records),
+            ),
+            patch("app.api.workflows.list_active_executions", return_value=[]),
+        ):
+            result = await count_active_workflow_executions(current_user=user, db=db)
+
+        self.assertIsInstance(result, ActiveExecutionCountResponse)
+        self.assertEqual(result.count, 2)
+
+    async def test_counts_single_workflow(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+        db = AsyncMock()
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[_make_record(wf_id, ex_id)]),
+            ),
+            patch("app.api.workflows.list_active_executions", return_value=[]),
+        ):
+            result = await count_active_workflow_executions(current_user=user, db=db)
+
+        self.assertIsInstance(result, ActiveExecutionCountResponse)
+        self.assertEqual(result.count, 1)
 
 
 class ListPersistedActiveExecutionsTests(unittest.IsolatedAsyncioTestCase):
