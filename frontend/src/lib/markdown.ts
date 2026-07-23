@@ -39,6 +39,28 @@ export function renderChartMarkdown(content: string): string {
   return DOMPurify.sanitize(html);
 }
 
+/**
+ * Heuristic: true when text contains common Markdown constructs.
+ * Used to decide whether a Markdown view toggle should appear in the UI.
+ */
+export function looksLikeMarkdown(content: string): boolean {
+  const text = content.trim();
+  if (!text) return false;
+
+  return (
+    /^#{1,6}\s+\S/m.test(text) ||
+    /```[\s\S]*?```/.test(text) ||
+    /~~~[\s\S]*?~~~/.test(text) ||
+    /\*\*[^*\n]+\*\*/.test(text) ||
+    /__[^_\n]+__/.test(text) ||
+    /^>\s+\S/m.test(text) ||
+    /^\s{0,3}[-*+]\s+\S/m.test(text) ||
+    /^\s{0,3}\d+\.\s+\S/m.test(text) ||
+    /\[[^\]]+\]\([^)]+\)/.test(text) ||
+    /^\s*\|.+\|\s*$/m.test(text)
+  );
+}
+
 /** Render trusted-but-sanitized markdown to an HTML string for v-html. */
 export function renderMarkdown(content: string): string {
   if (!content) return "";
