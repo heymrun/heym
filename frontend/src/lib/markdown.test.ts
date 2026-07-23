@@ -22,12 +22,12 @@ describe("looksLikeMarkdown", () => {
 
   it("detects markdown inside LLM sample responses", () => {
     const sample = [
-      "Elbette, işte Markdown'ın temel özelliklerini gösteren bir örnek metin:",
+      "Sure, here is a sample text showing basic Markdown features:",
       "",
       "```markdown",
-      "# Başlık 1 (H1)",
+      "# Heading 1 (H1)",
       "",
-      "Bu bir paragraf. Metin içinde **kalın**, *italik* yazılar.",
+      "This is a paragraph with **bold** and *italic* text.",
       "```",
     ].join("\n");
     expect(looksLikeMarkdown(sample)).toBe(true);
