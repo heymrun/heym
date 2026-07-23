@@ -8,6 +8,7 @@ import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
+import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
 import { useToast } from "@/composables/useToast";
 import type {
   AgentProgressEntry,
@@ -631,22 +632,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
     historyIndex.value = 0;
   }
 
-  function revisionTime(value: string | null): number {
-    if (!value) return 0;
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-
-  /**
-   * Newest revision this tab knows it produced: the loaded one, or any later write of its own
-   * (a rename, a settings change, the properties panel — see `lastWrittenWorkflowRevision`).
-   */
   function knownWorkflowRevision(id: string): string | null {
-    const loaded = workflowLoadedAt.value;
-    const written = lastWrittenWorkflowRevision(id);
-    if (!loaded) return written;
-    if (!written) return loaded;
-    return revisionTime(written) >= revisionTime(loaded) ? written : loaded;
+    return pickPreferredRevision(
+      lastWrittenWorkflowRevision(id),
+      workflowLoadedAt.value,
+    );
   }
 
   /** Returns false when a concurrent edit blocked the save and the dialog was opened. */
@@ -736,7 +726,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       const fresh = await workflowApi.get(id);
       const known = knownWorkflowRevision(id);
       if (!known) return null;
-      return revisionTime(fresh.updated_at) > revisionTime(known) ? fresh.updated_at : null;
+      return isRevisionAfter(fresh.updated_at, known) ? fresh.updated_at : null;
     } catch {
       // A failed check must never block a run.
       return null;

@@ -1,9 +1,13 @@
 import { test, expect } from "@playwright/test";
 
-import { createWorkflow, deleteWorkflow } from "./support";
+import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
 /** Simulate a second tab / another user saving the workflow. */
-async function saveFromElsewhere(page: import("@playwright/test").Page, id: string): Promise<void> {
+async function saveFromElsewhere(
+  page: import("@playwright/test").Page,
+  id: string,
+  previousUpdatedAt?: string | null,
+): Promise<string> {
   const response = await page.request.put(`/api/workflows/${id}`, {
     data: {
       nodes: [
@@ -18,7 +22,16 @@ async function saveFromElsewhere(page: import("@playwright/test").Page, id: stri
     },
   });
   expect(response.ok()).toBeTruthy();
+  const payload = (await response.json()) as { updated_at: string };
+  if (previousUpdatedAt) {
+    expect(payload.updated_at).not.toBe(previousUpdatedAt);
+  }
+  return payload.updated_at;
 }
+
+test.beforeEach(async ({ page }) => {
+  await prepareAuthenticatedPage(page);
+});
 
 test("clean tab: Run on a workflow changed elsewhere asks to reload", async ({ page }) => {
   const workflow = await createWorkflow(page, `Stale Clean ${Date.now()}`);
@@ -26,11 +39,18 @@ test("clean tab: Run on a workflow changed elsewhere asks to reload", async ({ p
     await page.goto(`/workflows/${workflow.id}`);
     await page.getByTestId("node-palette-consoleLog").dblclick();
     await expect(page.locator(".vue-flow__node")).toHaveCount(1);
+    const localSavePromise = page.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === "PUT" &&
+        new URL(candidate.url()).pathname === `/api/workflows/${workflow.id}`,
+    );
     await page.getByTestId("save-workflow-button").click();
+    const localSave = await localSavePromise;
     await expect(page.getByTestId("save-workflow-button")).toBeDisabled();
+    const localPayload = (await localSave.json()) as { updated_at: string };
 
     // Tab A is now clean and in sync. Another tab saves.
-    await saveFromElsewhere(page, workflow.id);
+    await saveFromElsewhere(page, workflow.id, localPayload.updated_at);
 
     await page.getByRole("button", { name: "Run Workflow" }).click();
 

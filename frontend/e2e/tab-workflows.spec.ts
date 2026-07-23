@@ -502,20 +502,33 @@ test("collapses toolbar labels to icons when tight and keeps them when wide, wit
 test("shows a failed workflow execution", async ({ page }) => {
   const workflow = await createWorkflow(page, `Failing Workflow ${Date.now()}`);
 
-  await page.goto(`/workflows/${workflow.id}`);
-  await page.getByTestId("node-palette-throwError").dblclick();
-  await page.getByTestId("save-workflow-button").click();
-  await page.getByRole("button", { name: "Run Workflow" }).click();
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByTestId("node-palette-throwError").dblclick();
+    const saveButton = page.getByTestId("save-workflow-button");
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await expect(saveButton).toBeDisabled();
 
-  await expect(page.getByText("Last Executed Node")).toBeVisible();
-  await expect(page.getByText("error", { exact: true })).toBeVisible();
-  // Scope to the output <pre> — the Execution Highlights popup also renders this
-  // node's output as a preview span, so an unscoped getByText is ambiguous.
-  await expect(
-    page.locator("pre").filter({ hasText: /"httpStatusCode":\s*400/ }),
-  ).toBeVisible();
+    const completionPromise = page.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === "POST" &&
+        new URL(candidate.url()).pathname === `/api/workflows/${workflow.id}/execute/stream`,
+      { timeout: 30_000 },
+    );
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+    await completionPromise;
 
-  await deleteWorkflow(page, workflow.id);
+    await expect(page.getByText("Last Executed Node")).toBeVisible();
+    await expect(page.getByText("error", { exact: true })).toBeVisible();
+    // Scope to the output <pre> — the Execution Highlights popup also renders this
+    // node's output as a preview span, so an unscoped getByText is ambiguous.
+    await expect(
+      page.locator("pre").filter({ hasText: /"httpStatusCode":\s*400/ }),
+    ).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
 });
 
 test("shows execution highlights after a workflow run", async ({ page }) => {
