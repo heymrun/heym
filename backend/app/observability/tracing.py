@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 from opentelemetry import context as otel_context
@@ -28,6 +29,83 @@ logger = logging.getLogger(__name__)
 
 _provider: Any = None
 T = TypeVar("T")
+
+
+def set_span_attribute(span: Any, key: str, value: Any) -> None:
+    """Set an OTel attribute without allowing observability to affect execution."""
+    if span is None:
+        return
+    try:
+        span.set_attribute(key, value)
+    except Exception:  # noqa: BLE001 - tracing must never break workflows
+        logger.debug("Failed to set OTel span attribute %s", key, exc_info=True)
+
+
+def set_span_status(span: Any, status_code: Any, description: str | None = None) -> None:
+    """Set an OTel span status without allowing observability to affect execution."""
+    if span is None:
+        return
+    try:
+        from opentelemetry.trace import Status
+
+        span.set_status(Status(status_code, description) if description else Status(status_code))
+    except Exception:  # noqa: BLE001 - tracing must never break workflows
+        logger.debug("Failed to set OTel span status", exc_info=True)
+
+
+@contextmanager
+def agent_tool_span(
+    *,
+    tool_name: str,
+    tool_call_id: str | None,
+    source: str | None,
+    mcp_server: str | None = None,
+    workflow_id: str | None = None,
+    node_id: str | None = None,
+    node_label: str | None = None,
+    iteration: int | None = None,
+) -> Any:
+    """Create an opt-in span for one Agent tool invocation."""
+    if not is_enabled():
+        yield None
+        return
+
+    span = get_tracer().start_as_current_span("heym.agent.tool.execute")
+    with span:
+        current = trace.get_current_span()
+        set_span_attribute(current, "heym.agent.tool.name", tool_name)
+        if tool_call_id:
+            set_span_attribute(current, "heym.agent.tool.call_id", tool_call_id)
+        if source:
+            set_span_attribute(current, "heym.agent.tool.source", source)
+        if mcp_server:
+            set_span_attribute(current, "heym.agent.tool.mcp_server", mcp_server)
+        if workflow_id:
+            set_span_attribute(current, "heym.workflow.id", workflow_id)
+        if node_id:
+            set_span_attribute(current, "heym.node.id", node_id)
+        if node_label:
+            set_span_attribute(current, "heym.node.label", node_label)
+        if iteration is not None:
+            set_span_attribute(current, "heym.agent.tool.iteration", iteration)
+        try:
+            yield current
+        except Exception as exc:  # noqa: BLE001 - observability must never break execution
+            record_agent_tool_exception(current, exc)
+            raise
+
+
+def record_agent_tool_exception(span: Any, exc: BaseException) -> None:
+    """Record a caught Agent tool exception without affecting tool execution."""
+    if span is None:
+        return
+    try:
+        from opentelemetry.trace import StatusCode
+
+        span.record_exception(exc)
+        set_span_status(span, StatusCode.ERROR, str(exc))
+    except Exception:  # noqa: BLE001 - observability must never break execution
+        pass
 
 
 def _parse_headers(raw: str) -> dict[str, str]:

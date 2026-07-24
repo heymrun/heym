@@ -9,6 +9,9 @@ export interface WorkflowPreview {
   edges: WorkflowEdge[]
 }
 
+export type ToolCallStatus = 'running' | 'success' | 'error' | 'pending' | 'timeout' | 'compressed' | 'cancelled'
+export type ToolCallTerminalStatus = 'success' | 'error' | 'pending' | 'timeout' | 'cancelled'
+
 export interface ToolCall {
   id: string
   name: string
@@ -16,7 +19,7 @@ export interface ToolCall {
   args: Record<string, unknown>
   response_summary?: string
   elapsed_ms?: number
-  status: 'running' | 'success' | 'error' | 'compressed' | 'cancelled'
+  status: ToolCallStatus
 }
 
 export interface ContextBreakdown {
@@ -97,7 +100,7 @@ export interface SendMessageResponse {
 export type SSEChunk =
   | { type: 'content'; text: string; message_id?: string }
   | { type: 'tool_start'; id: string; name: string; label: string; args: Record<string, unknown>; message_id?: string }
-  | { type: 'tool_end'; id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error'; message_id?: string }
+  | { type: 'tool_end'; id: string; response_summary: string; elapsed_ms: number; status: ToolCallTerminalStatus; message_id?: string }
   | { type: 'compressed'; messages_compressed: number; tokens_before: number; tokens_after: number; elapsed_ms: number; message_id?: string }
   | { type: 'context'; used: number; limit: number; breakdown: ContextBreakdown }
   | { type: 'tool_output'; images: string[] }

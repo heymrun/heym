@@ -143,11 +143,25 @@ import type {
   Message,
   QueuedMessage,
   SendMessageResponse,
+  ToolCallTerminalStatus,
   WorkflowPreview,
 } from "@/types/chat";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 const AI_REQUEST_TIMEOUT_MS = 120_000;
+const TOOL_CALL_TERMINAL_STATUSES: readonly ToolCallTerminalStatus[] = [
+  "success",
+  "error",
+  "pending",
+  "timeout",
+  "cancelled",
+];
+
+function parseToolCallTerminalStatus(value: unknown): ToolCallTerminalStatus {
+  return TOOL_CALL_TERMINAL_STATUSES.includes(value as ToolCallTerminalStatus)
+    ? (value as ToolCallTerminalStatus)
+    : "error";
+}
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -3379,7 +3393,7 @@ export const chatApi = {
     onDone: () => void,
     onError: (msg: string) => void,
     onToolStart?: (payload: { id: string; name: string; label: string; args: Record<string, unknown>; messageId?: string }) => void,
-    onToolEnd?: (payload: { id: string; response_summary: string; elapsed_ms: number; status: 'success' | 'error'; messageId?: string }) => void,
+    onToolEnd?: (payload: { id: string; response_summary: string; elapsed_ms: number; status: ToolCallTerminalStatus; messageId?: string }) => void,
     onToolOutput?: (images: string[]) => void,
     onTitle?: (title: string) => void,
     onWorkflowCreated?: (workflow: WorkflowPreview, messageId?: string) => void,
@@ -3464,7 +3478,7 @@ export const chatApi = {
               response_summary:
                 typeof parsed.response_summary === "string" ? parsed.response_summary : "",
               elapsed_ms: typeof parsed.elapsed_ms === "number" ? parsed.elapsed_ms : 0,
-              status: parsed.status === "error" ? "error" : "success",
+              status: parseToolCallTerminalStatus(parsed.status),
               messageId,
             });
           } else if (parsed.type === "compressed") {

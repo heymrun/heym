@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { Ban, Check, ChevronDown, ChevronRight, Loader2, TriangleAlert, Zap } from "lucide-vue-next";
+import { Ban, Check, ChevronDown, ChevronRight, Clock3, Loader2, TriangleAlert, Zap } from "lucide-vue-next";
 
 import type { ToolCall } from "@/types/chat";
 
@@ -36,8 +36,8 @@ function prettyArgs(args: Record<string, unknown>): string {
   <div
     class="chat-tool-call rounded-lg border text-xs"
     :class="{
-      'border-border/40 bg-muted/40': toolCall.status === 'running' || toolCall.status === 'success' || toolCall.status === 'cancelled',
-      'border-destructive/40 bg-destructive/5': toolCall.status === 'error',
+      'border-border/40 bg-muted/40': toolCall.status === 'running' || toolCall.status === 'success' || toolCall.status === 'cancelled' || toolCall.status === 'pending',
+      'border-destructive/40 bg-destructive/5': toolCall.status === 'error' || toolCall.status === 'timeout',
       'border-primary/30 bg-primary/5': toolCall.status === 'compressed',
     }"
   >
@@ -65,6 +65,14 @@ function prettyArgs(args: Record<string, unknown>): string {
       <Ban
         v-else-if="toolCall.status === 'cancelled'"
         class="w-3.5 h-3.5 shrink-0 text-muted-foreground"
+      />
+      <Clock3
+        v-else-if="toolCall.status === 'pending'"
+        class="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+      />
+      <TriangleAlert
+        v-else-if="toolCall.status === 'timeout'"
+        class="w-3.5 h-3.5 shrink-0 text-destructive"
       />
       <Zap
         v-else

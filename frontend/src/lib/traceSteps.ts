@@ -53,6 +53,7 @@ interface RawResponseToolCall {
   source?: string;
   mcp_server?: string;
   workflow_name?: string;
+  status?: string;
 }
 
 const SUMMARY_MAX = 140;
@@ -154,6 +155,13 @@ function buildToolStep(
   } else if (workflowId) {
     badges.push({ label: `Workflow: ${workflowId.slice(0, 8)}…` });
   }
+  if (enriched?.status === "pending") {
+    badges.push({ label: "Pending review" });
+  } else if (enriched?.status === "timeout") {
+    badges.push({ label: "Timeout" });
+  } else if (enriched?.status === "cancelled") {
+    badges.push({ label: "Cancelled" });
+  }
 
   const argsCompact =
     argsObj === undefined ? "" : typeof argsObj === "string" ? argsObj : safeJsonCompact(argsObj);
@@ -184,6 +192,7 @@ function buildToolStep(
       ...(resultValue !== undefined ? { result: resultValue } : {}),
     },
     durationMs: typeof enriched?.elapsed_ms === "number" ? enriched.elapsed_ms : undefined,
+    isError: enriched?.status === "error" || enriched?.status === "timeout",
     badges: badges.length > 0 ? badges : undefined,
   };
 }
@@ -284,6 +293,39 @@ function buildConversationSteps(
   if (text || error) {
     const usage = response.usage as { total_tokens?: number } | undefined;
     const elapsed = typeof response.elapsed_ms === "number" ? response.elapsed_ms : undefined;
+    const metrics = response.tool_metrics as
+      | {
+          count?: number;
+          success?: number;
+          error?: number;
+          pending?: number;
+          timeout?: number;
+          cancelled?: number;
+          total_duration_ms?: number;
+        }
+      | undefined;
+    const answerBadges: TraceStepBadge[] = [];
+    if (metrics && typeof metrics.count === "number" && metrics.count > 0) {
+      answerBadges.push({ label: `${metrics.count} tools` });
+      if (typeof metrics.success === "number" && metrics.success > 0) {
+        answerBadges.push({ label: `${metrics.success} ok` });
+      }
+      if (typeof metrics.error === "number" && metrics.error > 0) {
+        answerBadges.push({ label: `${metrics.error} error` });
+      }
+      if (typeof metrics.timeout === "number" && metrics.timeout > 0) {
+        answerBadges.push({ label: `${metrics.timeout} timeout` });
+      }
+      if (typeof metrics.cancelled === "number" && metrics.cancelled > 0) {
+        answerBadges.push({ label: `${metrics.cancelled} cancelled` });
+      }
+      if (typeof metrics.pending === "number" && metrics.pending > 0) {
+        answerBadges.push({ label: `${metrics.pending} pending` });
+      }
+      if (typeof metrics.total_duration_ms === "number" && metrics.total_duration_ms > 0) {
+        answerBadges.push({ label: `${Math.round(metrics.total_duration_ms)}ms tools` });
+      }
+    }
     steps.push({
       id: "answer",
       kind: "answer",
@@ -295,11 +337,13 @@ function buildConversationSteps(
       durationMs: elapsed,
       tokens: typeof usage?.total_tokens === "number" ? usage.total_tokens : undefined,
       isError: Boolean(error),
+      badges: answerBadges.length > 0 ? answerBadges : undefined,
       json: {
         text: response.text,
         model: response.model,
         usage: response.usage,
         elapsed_ms: response.elapsed_ms,
+        ...(metrics ? { tool_metrics: metrics } : {}),
         ...(error ? { error } : {}),
       },
     });

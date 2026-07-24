@@ -1,6 +1,6 @@
 # OpenTelemetry Tracing
 
-Heym can emit [OpenTelemetry](https://opentelemetry.io/) traces for every workflow run and every node execution. Each run produces a root span with child spans per node, so you can see which step failed, how long it took, what it called, and what came back. Spans are exported over OTLP/HTTP to any compatible backend such as Jaeger, Grafana Tempo, Honeycomb, Datadog, New Relic, or Grafana Cloud.
+Heym can emit [OpenTelemetry](https://opentelemetry.io/) traces for every workflow run, node execution, and Agent tool invocation. Each run produces a root span with child spans per node and Agent tool, so you can see which step failed, how long it took, what it called, and what came back. Spans are exported over OTLP/HTTP to any compatible backend such as Jaeger, Grafana Tempo, Honeycomb, Datadog, New Relic, or Grafana Cloud.
 
 Tracing is **disabled by default**. When it is off there is no measurable overhead and no spans are created.
 
@@ -57,6 +57,27 @@ Name: `heym.node.execute`, created as a child of the workflow span.
 | `heym.llm.prompt_tokens` / `heym.llm.completion_tokens` / `heym.llm.total_tokens` | Token usage for LLM and agent nodes, when available. |
 
 Node spans nest correctly under the workflow span even when nodes run in parallel, because the workflow context is propagated into worker threads.
+
+### Agent tool span
+
+Name: `heym.agent.tool.execute`, created under the active Agent node span.
+
+| Attribute | Description |
+|-----------|-------------|
+| `heym.agent.tool.name` | Tool name selected by the model. |
+| `heym.agent.tool.call_id` | Provider tool-call id, when available. |
+| `heym.agent.tool.source` | Tool source such as `node_tool`, `mcp`, `skill`, or `sub_workflow`. |
+| `heym.agent.tool.mcp_server` | MCP server label, when applicable. |
+| `heym.agent.tool.iteration` | Agent tool-loop iteration. |
+| `heym.agent.tool.args_bytes` | UTF-8 size of serialized tool arguments. |
+| `heym.agent.tool.result_bytes` | UTF-8 size of serialized tool result. |
+| `heym.agent.tool.status` | `success`, `error`, `pending`, `timeout`, or `cancelled`. Tool errors set the span status to `ERROR`. |
+
+Raw tool arguments and results are not attached to spans by default.
+
+## Agent tool payload safety
+
+Persisted Agent tool records (LLM traces, execution history `tool_calls`, HITL history) always redact common secrets and truncate oversized payloads. Limits are fixed in code (`4096` chars per string, depth `6`, `32768` total chars per trace write). Live tool execution and the messages sent back to the model are unchanged; only stored observability payloads are sanitized.
 
 ## Trace Context Propagation
 

@@ -14,6 +14,14 @@ from openai import OpenAI
 
 from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
+from app.observability import tracing
+from app.services.agent_tool_observability import (
+    classify_tool_failure_status,
+    normalize_tool_call_status,
+    sanitize_persisted_tool_entry,
+    sanitize_tool_payload,
+    summarize_tool_calls,
+)
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.openai_client import create_openai_client
@@ -21,43 +29,16 @@ from app.services.openai_client import create_openai_client
 logger = logging.getLogger(__name__)
 
 _WORKFLOW_INPUT_LOG_STR_MAX = 500
-_WORKFLOW_INPUT_LOG_TOP_KEYS = 24
 
 
 def _call_sub_workflow_inputs_for_log(raw: Any) -> Any:
     """Bounded copy of sub-workflow tool inputs for execution logs (SSE / progress)."""
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        s = str(raw)
-        return s[:_WORKFLOW_INPUT_LOG_STR_MAX] + (
-            "…" if len(s) > _WORKFLOW_INPUT_LOG_STR_MAX else ""
-        )
-    out: dict[str, Any] = {}
-    for i, (k, v) in enumerate(raw.items()):
-        if i >= _WORKFLOW_INPUT_LOG_TOP_KEYS:
-            out["_truncated_key_count"] = len(raw) - _WORKFLOW_INPUT_LOG_TOP_KEYS
-            break
-        ks = str(k)[:80]
-        if isinstance(v, str):
-            out[ks] = v[:_WORKFLOW_INPUT_LOG_STR_MAX] + (
-                "…" if len(v) > _WORKFLOW_INPUT_LOG_STR_MAX else ""
-            )
-        elif isinstance(v, (int, float, bool)) or v is None:
-            out[ks] = v
-        elif isinstance(v, dict):
-            out[ks] = _call_sub_workflow_inputs_for_log(v)
-        elif isinstance(v, list):
-            enc = json.dumps(v, default=str)
-            out[ks] = enc[:_WORKFLOW_INPUT_LOG_STR_MAX] + (
-                "…" if len(enc) > _WORKFLOW_INPUT_LOG_STR_MAX else ""
-            )
-        else:
-            s = str(v)
-            out[ks] = s[:_WORKFLOW_INPUT_LOG_STR_MAX] + (
-                "…" if len(s) > _WORKFLOW_INPUT_LOG_STR_MAX else ""
-            )
-    return out
+    return sanitize_tool_payload(
+        raw,
+        max_chars=_WORKFLOW_INPUT_LOG_STR_MAX,
+        max_depth=3,
+        max_total_chars=2_000,
+    )
 
 
 def _progress_safe_tool_arguments(
@@ -96,6 +77,44 @@ def _workflow_name_for_tool_entry(tool_def: dict[str, Any] | None, args: Any) ->
         if isinstance(wn, str) and wn.strip():
             return wn.strip()
     return None
+
+
+def _tool_result_status(tool_result: Any) -> str:
+    """Normalize tool result status for traces, metrics, and chat history."""
+    if not isinstance(tool_result, dict):
+        return "success"
+    status = tool_result.get("status")
+    if isinstance(status, str):
+        normalized = normalize_tool_call_status(status)
+        if normalized != "unknown":
+            return normalized
+    error_text = _tool_result_error(tool_result)
+    if error_text:
+        return classify_tool_failure_status(error_text)
+    return "success"
+
+
+def _tool_result_error(tool_result: Any) -> str | None:
+    """Return the most useful error text from a tool result, including nested outputs."""
+    if not isinstance(tool_result, dict):
+        return None
+    error = tool_result.get("error")
+    if isinstance(error, str) and error.strip():
+        return error.strip()
+    outputs = tool_result.get("outputs")
+    if isinstance(outputs, dict):
+        nested_error = outputs.get("error")
+        if isinstance(nested_error, str) and nested_error.strip():
+            return nested_error.strip()
+    return None
+
+
+def _attach_tool_metrics(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach aggregate tool metrics when tool_calls are present."""
+    tool_calls = result.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        result["tool_metrics"] = summarize_tool_calls(tool_calls)
+    return result
 
 
 GOOGLE_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -1036,9 +1055,19 @@ class LLMService:
             }
             combined_tool_calls = copy.deepcopy(tool_calls_collected)
             if extra_tool_entry is not None:
-                combined_tool_calls.append(copy.deepcopy(extra_tool_entry))
+                patched = copy.deepcopy(extra_tool_entry)
+                failure_status = classify_tool_failure_status(
+                    error_text,
+                    explicit_status=patched.get("status")
+                    if isinstance(patched.get("status"), str)
+                    else None,
+                )
+                if failure_status in {"timeout", "cancelled"}:
+                    patched["status"] = failure_status
+                combined_tool_calls.append(sanitize_persisted_tool_entry(patched))
             if combined_tool_calls:
                 result["tool_calls"] = combined_tool_calls
+            _attach_tool_metrics(result)
             self._record_trace(
                 request_type="chat.completions",
                 provider=provider,
@@ -1189,6 +1218,7 @@ class LLMService:
                 }
                 if tool_calls_collected:
                     result["tool_calls"] = tool_calls_collected
+                _attach_tool_metrics(result)
                 self._record_trace(
                     request_type="chat.completions",
                     provider=provider,
@@ -1217,6 +1247,7 @@ class LLMService:
                 }
                 if tool_calls_collected:
                     result["tool_calls"] = tool_calls_collected
+                _attach_tool_metrics(result)
                 self._record_trace(
                     request_type="chat.completions",
                     provider=provider,
@@ -1275,6 +1306,7 @@ class LLMService:
             def _build_pending_result(
                 paused_tool_name: str,
                 pause_request: HumanReviewPause,
+                pending_tool_entry: dict[str, Any] | None = None,
             ) -> dict[str, Any]:
                 review_markdown = pause_request.review_markdown.strip()
                 if not review_markdown:
@@ -1308,8 +1340,14 @@ class LLMService:
                         "match_strategy": pause_request.match_strategy,
                     },
                 }
-                if tool_calls_collected:
-                    result["tool_calls"] = tool_calls_collected
+                pending_tool_calls = copy.deepcopy(tool_calls_collected)
+                if pending_tool_entry is not None:
+                    pending_tool_calls.append(
+                        sanitize_persisted_tool_entry(copy.deepcopy(pending_tool_entry))
+                    )
+                if pending_tool_calls:
+                    result["tool_calls"] = pending_tool_calls
+                _attach_tool_metrics(result)
                 self._record_trace(
                     request_type="chat.completions",
                     provider=provider,
@@ -1329,8 +1367,8 @@ class LLMService:
             ) -> tuple[str, str | None, dict[str, Any] | None, HumanReviewPause | None, str | None]:
                 name = tc.function.name
                 tool_call_id = getattr(tc, "id", None)
+                args_str = tc.function.arguments or "{}"
                 try:
-                    args_str = tc.function.arguments or "{}"
                     args = json.loads(args_str)
                 except json.JSONDecodeError:
                     args = {}
@@ -1350,41 +1388,136 @@ class LLMService:
                         }
                     )
                 tool_start = time.time()
-                if not tool_def:
-                    result_str = json.dumps({"error": f"Unknown tool: {name}"})
-                    tool_result: Any = {"error": f"Unknown tool: {name}"}
-                    tool_source = None
-                    mcp_server = None
-                else:
-                    try:
-                        tool_result = await asyncio.to_thread(
-                            tool_executor,
-                            tool_def,
-                            name,
-                            args,
-                            tool_timeout_seconds,
+                started_at = int(tool_start * 1000)
+                tool_source = tool_def.get("_source") if tool_def else None
+                mcp_server = tool_def.get("_mcp_server") if tool_def else None
+                pending_pause: HumanReviewPause | None = None
+                pending_entry: dict[str, Any] | None = None
+                result_str = ""
+                tool_result: Any = None
+                with tracing.agent_tool_span(
+                    tool_name=name,
+                    tool_call_id=tool_call_id,
+                    source=tool_source,
+                    mcp_server=mcp_server,
+                    workflow_id=(
+                        str(self.trace_context.workflow_id)
+                        if self.trace_context and self.trace_context.workflow_id
+                        else None
+                    ),
+                    node_id=self.trace_context.node_id if self.trace_context else None,
+                    node_label=self.trace_context.node_label if self.trace_context else None,
+                    iteration=iteration,
+                ) as tool_span:
+                    tracing.set_span_attribute(
+                        tool_span,
+                        "heym.agent.tool.args_bytes",
+                        len(args_str.encode("utf-8")),
+                    )
+                    if not tool_def:
+                        result_str = json.dumps({"error": f"Unknown tool: {name}"})
+                        tool_result = {"error": f"Unknown tool: {name}"}
+                    else:
+                        try:
+                            tool_result = await asyncio.to_thread(
+                                tool_executor,
+                                tool_def,
+                                name,
+                                args,
+                                tool_timeout_seconds,
+                            )
+                            if isinstance(tool_result, HumanReviewPause):
+                                pending_pause = tool_result
+                                pending_entry = sanitize_persisted_tool_entry(
+                                    {
+                                        "tool_call_id": tool_call_id,
+                                        "name": name,
+                                        "arguments": args,
+                                        "result": None,
+                                        "elapsed_ms": 0.0,
+                                        "status": "pending",
+                                        "started_at": started_at,
+                                        "finished_at": 0,
+                                        **({"source": tool_source} if tool_source else {}),
+                                    }
+                                )
+                                tracing.set_span_attribute(
+                                    tool_span, "heym.agent.tool.status", "pending"
+                                )
+                                tracing.set_span_attribute(
+                                    tool_span, "heym.agent.tool.result_bytes", 0
+                                )
+                            else:
+                                result_str = json.dumps(tool_result, default=str)
+                        except Exception as exc:
+                            tracing.record_agent_tool_exception(tool_span, exc)
+                            failure_status = classify_tool_failure_status(exc)
+                            result_str = json.dumps(
+                                {"error": str(exc), "status": failure_status},
+                                default=str,
+                            )
+                            tool_result = {"error": str(exc), "status": failure_status}
+                    if pending_pause is None:
+                        tracing.set_span_attribute(
+                            tool_span,
+                            "heym.agent.tool.result_bytes",
+                            len(result_str.encode("utf-8")),
                         )
-                        if isinstance(tool_result, HumanReviewPause):
-                            return tc.id, None, None, tool_result, None
-                        result_str = json.dumps(tool_result, default=str)
-                        tool_source = tool_def.get("_source")
-                        mcp_server = tool_def.get("_mcp_server")
-                    except Exception as e:
-                        result_str = json.dumps({"error": str(e)})
-                        tool_result = {"error": str(e)}
-                        tool_source = tool_def.get("_source")
-                        mcp_server = tool_def.get("_mcp_server")
+                        tool_status = _tool_result_status(tool_result)
+                        tracing.set_span_attribute(tool_span, "heym.agent.tool.status", tool_status)
+                        if tool_status in {"error", "timeout", "cancelled"}:
+                            from opentelemetry.trace import StatusCode
+
+                            tracing.set_span_status(
+                                tool_span,
+                                StatusCode.ERROR,
+                                _tool_result_error(tool_result) or tool_status,
+                            )
                 tool_elapsed_ms = round((time.time() - tool_start) * 1000, 2)
-                entry: dict[str, Any] = {
-                    "name": name,
-                    "arguments": args,
-                    "result": tool_result,
-                    "elapsed_ms": tool_elapsed_ms,
-                }
-                if tool_source:
-                    entry["source"] = tool_source
-                if mcp_server:
-                    entry["mcp_server"] = mcp_server
+                if pending_pause is not None and pending_entry is not None:
+                    pending_entry["elapsed_ms"] = tool_elapsed_ms
+                    pending_entry["finished_at"] = int(time.time() * 1000)
+                    if on_tool_call:
+                        on_tool_call(
+                            {
+                                "name": name,
+                                "arguments": _progress_safe_tool_arguments(name, tool_def, args),
+                                "result": None,
+                                "elapsed_ms": tool_elapsed_ms,
+                                "phase": "end",
+                                "status": "pending",
+                                "tool_call_id": tool_call_id,
+                                "timestamp": int(time.time() * 1000),
+                            }
+                        )
+                        on_tool_call(
+                            {
+                                "name": name,
+                                "arguments": _progress_safe_tool_arguments(name, tool_def, args),
+                                "result": {"pending": True},
+                                "elapsed_ms": tool_elapsed_ms,
+                                "phase": "result",
+                                "status": "pending",
+                                "tool_call_id": tool_call_id,
+                                "timestamp": int(time.time() * 1000),
+                            }
+                        )
+                    return tc.id, None, pending_entry, pending_pause, None
+                tool_status = _tool_result_status(tool_result)
+                entry: dict[str, Any] = sanitize_persisted_tool_entry(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "name": name,
+                        "arguments": args,
+                        "result": tool_result,
+                        "elapsed_ms": tool_elapsed_ms,
+                        "status": tool_status,
+                        "started_at": started_at,
+                        "finished_at": int(time.time() * 1000),
+                        **({"source": tool_source} if tool_source else {}),
+                        **({"mcp_server": mcp_server} if mcp_server else {}),
+                    }
+                )
                 wf_display = _workflow_name_for_tool_entry(tool_def, args)
                 if wf_display:
                     entry["workflow_name"] = wf_display
@@ -1397,18 +1530,19 @@ class LLMService:
                             "result": None,
                             "elapsed_ms": tool_elapsed_ms,
                             "phase": "end",
+                            "status": tool_status,
                             "tool_call_id": tool_call_id,
                             "timestamp": int(time.time() * 1000),
                         }
                     )
                     # Emit a small, safe result summary.
                     summary: dict[str, Any] = {
-                        "has_error": bool(
-                            isinstance(tool_result, dict) and tool_result.get("error")
-                        )
+                        "has_error": tool_status in {"error", "timeout", "cancelled"}
                     }
                     if isinstance(tool_result, dict) and isinstance(tool_result.get("status"), str):
                         summary["status"] = tool_result["status"]
+                    elif tool_status != "success":
+                        summary["status"] = tool_status
                     if isinstance(tool_result, dict) and isinstance(
                         tool_result.get("execution_time_ms"), (int, float)
                     ):
@@ -1420,6 +1554,7 @@ class LLMService:
                             "result": summary,
                             "elapsed_ms": tool_elapsed_ms,
                             "phase": "result",
+                            "status": tool_status,
                             "tool_call_id": tool_call_id,
                             "timestamp": int(time.time() * 1000),
                         }
@@ -1427,6 +1562,13 @@ class LLMService:
                 abort_reason = _abort_reason_from_tool_result(tool_result)
                 if abort_reason is None and should_abort is not None:
                     abort_reason = should_abort()
+                if abort_reason is not None:
+                    entry["status"] = classify_tool_failure_status(
+                        abort_reason,
+                        explicit_status=entry.get("status")
+                        if isinstance(entry.get("status"), str)
+                        else None,
+                    )
                 return tc.id, result_str, entry, None, abort_reason
 
             if hitl_tcs:
@@ -1435,7 +1577,7 @@ class LLMService:
                     paused_tc
                 )
                 if pause_request is not None:
-                    return _build_pending_result(paused_tc.function.name, pause_request)
+                    return _build_pending_result(paused_tc.function.name, pause_request, entry)
                 if abort_reason:
                     return _build_error_result(abort_reason, entry)
 
@@ -1447,7 +1589,7 @@ class LLMService:
                     sub_slots, sub_agent_tcs, gathered
                 ):
                     if pause_request is not None:
-                        return _build_pending_result(tc.function.name, pause_request)
+                        return _build_pending_result(tc.function.name, pause_request, entry)
                     if abort_reason:
                         return _build_error_result(abort_reason, entry)
                     if result_str is None or entry is None:
@@ -1457,7 +1599,7 @@ class LLMService:
                 for slot, tc in zip(sub_slots, sub_agent_tcs):
                     _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                     if pause_request is not None:
-                        return _build_pending_result(tc.function.name, pause_request)
+                        return _build_pending_result(tc.function.name, pause_request, entry)
                     if abort_reason:
                         return _build_error_result(abort_reason, entry)
                     if result_str is None or entry is None:
@@ -1467,7 +1609,7 @@ class LLMService:
             for slot, tc in zip(other_slots, other_tcs):
                 _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                 if pause_request is not None:
-                    return _build_pending_result(tc.function.name, pause_request)
+                    return _build_pending_result(tc.function.name, pause_request, entry)
                 if abort_reason:
                     return _build_error_result(abort_reason, entry)
                 if result_str is None or entry is None:
@@ -1480,8 +1622,6 @@ class LLMService:
                     continue
                 result_str, entry = packed
                 tool_calls_collected.append(entry)
-                if on_tool_call:
-                    on_tool_call(entry)
                 messages.append(
                     {
                         "role": "tool",
@@ -1576,6 +1716,7 @@ class LLMService:
                         }
                         if tool_calls_collected:
                             result["tool_calls"] = tool_calls_collected
+                        _attach_tool_metrics(result)
                         self._record_trace(
                             request_type="chat.completions",
                             provider=provider,
@@ -1603,7 +1744,7 @@ class LLMService:
         }
         if tool_calls_collected:
             result["tool_calls"] = tool_calls_collected
-        return result
+        return _attach_tool_metrics(result)
 
     async def execute_image_generation(
         self,

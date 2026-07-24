@@ -32,6 +32,11 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationResponse]
 
 
+ToolCallStatus = Literal[
+    "running", "success", "error", "pending", "timeout", "cancelled", "compressed"
+]
+
+
 class ToolCallRecord(BaseModel):
     id: str
     name: str
@@ -39,7 +44,7 @@ class ToolCallRecord(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     response_summary: str | None = None
     elapsed_ms: float | None = None
-    status: Literal["running", "success", "error", "compressed"]
+    status: ToolCallStatus
 
 
 class MessageResponse(BaseModel):

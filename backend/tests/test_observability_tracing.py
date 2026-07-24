@@ -131,6 +131,56 @@ class NodeSpanTest(_EnabledTracingTestBase):
         self.assertEqual(attrs["heym.llm.total_tokens"], 15)
         self.assertEqual(attrs["heym.llm.prompt_tokens"], 10)
 
+    def test_agent_tool_span_has_tool_identity_and_status(self) -> None:
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-1",
+            source="node_tool",
+            mcp_server="weather",
+            workflow_id="workflow-1",
+            node_id="agent-1",
+            node_label="Research Agent",
+            iteration=2,
+        ) as span:
+            span.set_attribute("heym.agent.tool.status", "success")
+
+        tool_spans = [
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        ]
+        self.assertEqual(len(tool_spans), 1)
+        attrs = dict(tool_spans[0].attributes)
+        self.assertEqual(attrs["heym.agent.tool.name"], "fetch_data")
+        self.assertEqual(attrs["heym.agent.tool.call_id"], "call-1")
+        self.assertEqual(attrs["heym.agent.tool.source"], "node_tool")
+        self.assertEqual(attrs["heym.agent.tool.mcp_server"], "weather")
+        self.assertEqual(attrs["heym.workflow.id"], "workflow-1")
+        self.assertEqual(attrs["heym.node.id"], "agent-1")
+        self.assertEqual(attrs["heym.node.label"], "Research Agent")
+        self.assertEqual(attrs["heym.agent.tool.iteration"], 2)
+        self.assertEqual(attrs["heym.agent.tool.status"], "success")
+
+    def test_agent_tool_span_records_uncaught_exception(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "tool exploded"):
+            with tracing.agent_tool_span(
+                tool_name="fetch_data",
+                tool_call_id="call-2",
+                source="node_tool",
+            ):
+                raise RuntimeError("tool exploded")
+
+        tool_span = next(
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        )
+        self.assertEqual(tool_span.status.status_code, trace.StatusCode.ERROR)
+        self.assertTrue(any(event.name == "exception" for event in tool_span.events))
+
+    def test_set_span_status_failure_is_swallowed(self) -> None:
+        class BrokenSpan:
+            def set_status(self, *_args: object, **_kwargs: object) -> None:
+                raise RuntimeError("otel broken")
+
+        tracing.set_span_status(BrokenSpan(), trace.StatusCode.ERROR, "boom")
+
 
 class WorkflowSpanTest(_EnabledTracingTestBase):
     def test_root_span_emitted(self) -> None:

@@ -5,6 +5,10 @@ from typing import Any
 
 from app.db.models import LLMTrace
 from app.db.session import SessionLocal
+from app.services.agent_tool_observability import (
+    get_agent_tool_payload_limits,
+    sanitize_trace_tool_payloads,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,14 @@ def record_llm_trace(
 ) -> uuid.UUID | None:
     """Persist a single LLM trace entry for later inspection."""
     try:
+        max_chars, max_depth, max_total_chars = get_agent_tool_payload_limits()
+        safe_request, safe_response = sanitize_trace_tool_payloads(
+            request or {},
+            response or {},
+            max_chars=max_chars,
+            max_depth=max_depth,
+            max_total_chars=max_total_chars,
+        )
         with SessionLocal() as db:
             trace = LLMTrace(
                 user_id=context.user_id,
@@ -46,8 +58,8 @@ def record_llm_trace(
                 model=model,
                 node_id=context.node_id,
                 node_label=context.node_label,
-                request=request or {},
-                response=response or {},
+                request=safe_request,
+                response=safe_response,
                 error=error,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -59,5 +71,5 @@ def record_llm_trace(
             context.trace_ids.append(trace.id)
             return trace.id
     except Exception:
-        logger.exception("Failed to record LLM trace")
+        logger.exception("Failed to sanitize or record LLM trace")
     return None

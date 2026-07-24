@@ -5479,6 +5479,8 @@ class WorkflowExecutor:
             if mcp_list_ms > 0:
                 result["mcp_list_ms"] = mcp_list_ms
             tool_calls = result.get("tool_calls") or []
+            from app.services.agent_tool_observability import summarize_tool_calls
+
             sub_agent_times = [
                 tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") == "call_sub_agent"
             ]
@@ -5491,6 +5493,7 @@ class WorkflowExecutor:
                 "tools_ms": round(tools_total_ms, 2),
                 "mcp_list_ms": mcp_list_ms,
             }
+            result["tool_metrics"] = summarize_tool_calls(tool_calls)
             if is_hitl_resume and hitl_history:
                 result["hitlHistory"] = copy.deepcopy(hitl_history)
             if is_hitl_resume and not result.get("error") and "_hitl_pending" not in result:
