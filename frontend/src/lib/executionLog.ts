@@ -44,6 +44,10 @@ function getMetadataInteger(result: NodeResult, key: string): number | null {
   return value !== null && Number.isInteger(value) ? value : null;
 }
 
+export function isHitlWaitNodeResult(result: NodeResult): boolean {
+  return result.metadata?.hitl_wait === true;
+}
+
 export function isRetryAttemptNodeResult(result: NodeResult): boolean {
   return result.metadata?.retry_stage === "attempt_failed";
 }

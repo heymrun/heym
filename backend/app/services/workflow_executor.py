@@ -8201,6 +8201,68 @@ def _snapshot_actor_user_id(
     return None
 
 
+def _build_hitl_resume_timeline_results(
+    pending: NodeResult,
+    *,
+    resume_now_ms: float,
+) -> tuple[NodeResult, NodeResult]:
+    """Preserve pre-HITL compute and materialize the wait gap for the execution timeline.
+
+    Resume used to drop the pending row, which left a wall-clock hole between the last
+    pre-pause span and the post-resume work. Keep the paused compute as ``pre_review`` and
+    emit an explicit ``hitl_wait`` span covering pause → resume.
+    """
+    pre_meta = dict(pending.metadata or {})
+    pre_meta["hitl_phase"] = "pre_review"
+    pending_output = pending.output if isinstance(pending.output, dict) else {}
+    # Keep a compact historical payload so DebugPanel does not treat this row as an
+    # actionable pending HITL review (that UI keys off decision === null + reviewUrl).
+    pre_output = {
+        "hitlPhase": "pre_review",
+        "summary": str(pending_output.get("summary") or "").strip(),
+        "draftText": str(
+            pending_output.get("draftText") or pending_output.get("text") or ""
+        ).strip(),
+    }
+    if pending_output.get("question"):
+        pre_output["question"] = str(pending_output.get("question") or "").strip()
+    pre_result = NodeResult(
+        node_id=pending.node_id,
+        node_label=pending.node_label,
+        node_type=pending.node_type,
+        status="success",
+        output=pre_output,
+        execution_time_ms=float(pending.execution_time_ms or 0.0),
+        error=pending.error,
+        metadata=pre_meta,
+    )
+
+    wait_start_raw = pre_meta.get("ended_at_ms")
+    wait_start = (
+        float(wait_start_raw)
+        if isinstance(wait_start_raw, (int, float)) and float(wait_start_raw) > 0
+        else float(resume_now_ms)
+    )
+    wait_end = max(float(resume_now_ms), wait_start)
+    wait_ms = max(wait_end - wait_start, 0.0)
+    wait_sequence = (_node_result_sequence_value(pending) or 0) + 1
+    wait_result = NodeResult(
+        node_id=pending.node_id,
+        node_label=pending.node_label,
+        node_type=pending.node_type,
+        status="success",
+        output={"hitlWait": True, "durationMs": wait_ms},
+        execution_time_ms=wait_ms,
+        metadata={
+            "hitl_wait": True,
+            "started_at_ms": wait_start,
+            "ended_at_ms": wait_end,
+            "sequence": wait_sequence,
+        },
+    )
+    return pre_result, wait_result
+
+
 def resume_workflow_execution(
     *,
     snapshot: dict,
@@ -8261,12 +8323,25 @@ def resume_workflow_execution(
     hitl_approved_tool_call = copy.deepcopy(snapshot.get("hitl_approved_tool_call") or {})
 
     paused_result_ms = 0.0
+    pending_paused_result: NodeResult | None = None
     filtered_results: list[NodeResult] = []
     for result in node_results:
         if result.node_id == paused_node_id and result.status == "pending":
             paused_result_ms = result.execution_time_ms
+            pending_paused_result = result
             continue
         filtered_results.append(result)
+
+    resume_now_ms = time.time() * 1000
+    if pending_paused_result is not None:
+        pre_review_result, hitl_wait_result = _build_hitl_resume_timeline_results(
+            pending_paused_result,
+            resume_now_ms=resume_now_ms,
+        )
+        filtered_results.append(pre_review_result)
+        filtered_results.append(hitl_wait_result)
+        wf_executor._node_result_sequence = _max_node_result_sequence(filtered_results)
+
     node_results = filtered_results
 
     if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
@@ -8298,7 +8373,14 @@ def resume_workflow_execution(
             node_type=wf_executor.nodes.get(paused_node_id, {}).get("type", "agent"),
             status="success",
             output=copy.deepcopy(resolved_output),
-            execution_time_ms=paused_result_ms,
+            execution_time_ms=0.0,
+            metadata={
+                "hitl_phase": "resolved",
+                "started_at_ms": resume_now_ms,
+                "ended_at_ms": resume_now_ms,
+                # Keep prior compute duration discoverable without relocating the span.
+                "pre_review_execution_time_ms": paused_result_ms,
+            },
         )
         node_results.append(wf_executor._stamp_node_result(resumed_result))
         completed_nodes.add(paused_node_id)
