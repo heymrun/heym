@@ -4,6 +4,7 @@ import unittest
 from app.services.workflow_executor import (
     DotDict,
     DotList,
+    DotStr,
     NodeResult,
     SubWorkflowExecution,
     _serialize_node_result,
@@ -25,6 +26,37 @@ class WorkflowJsonCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(plain, {"items": [{"value": 1}], "keys": ["a", "b"]})
         json.dumps(plain)
+
+    def test_postgresql_unsafe_characters_are_sanitized_recursively(self) -> None:
+        wrapped = DotDict(
+            {
+                "unsafe\u0000key": DotList(
+                    [
+                        DotStr("null\u0000byte"),
+                        {"controls": "before\u0001\u0008\u000b\u001f\u007f\u0080\u009fafter"},
+                        {"surrogate": "before\ud800after"},
+                    ]
+                ),
+                "whitespace": "tab\tnewline\nreturn\r",
+            }
+        )
+
+        plain = _to_json_compatible(wrapped)
+
+        self.assertEqual(
+            plain,
+            {
+                "unsafekey": [
+                    "nullbyte",
+                    {"controls": "beforeafter"},
+                    {"surrogate": "beforeafter"},
+                ],
+                "whitespace": "tab\tnewline\nreturn\r",
+            },
+        )
+        serialized = json.dumps(plain)
+        self.assertNotIn(r"\u0000", serialized)
+        self.assertNotIn(r"\ud800", serialized)
 
     def test_node_result_serialization_removes_dot_wrappers(self) -> None:
         result = NodeResult(

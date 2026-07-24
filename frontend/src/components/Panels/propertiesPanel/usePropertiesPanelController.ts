@@ -5933,6 +5933,7 @@ export function usePropertiesPanelController() {
     { value: "open_pr", label: "Open PR" },
     { value: "commit_push", label: "Commit & push" },
     { value: "direct_commit", label: "Direct commit" },
+    { value: "open_or_update_pr", label: "Open or update PR" },
     { value: "update_existing_pr", label: "Update existing PR" },
     { value: "patch_artifact", label: "Patch artifact" },
   ];
@@ -5943,6 +5944,8 @@ export function usePropertiesPanelController() {
     open_pr: "Commits to the branch, pushes it, and opens a review-ready (non-draft) pull request.",
     commit_push: "Commits to the branch and pushes it, without opening a pull request.",
     direct_commit: "Commits and pushes straight to the base branch (no separate branch or PR).",
+    open_or_update_pr:
+      "Updates the agent's existing open PR when one exists (even if the branch name differs), otherwise opens a new one. Best for re-runs.",
     update_existing_pr:
       "Adds a commit to the existing branch/PR; opens one if none exists yet.",
     patch_artifact: "Saves the diff as a downloadable file and returns a patchUrl (nothing pushed).",

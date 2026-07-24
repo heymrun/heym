@@ -133,6 +133,124 @@ class TestBoardOwnership(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 404)
 
 
+class TestBoardActiveExecutionStatus(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _card(*, run_status: str = "failed") -> SimpleNamespace:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            board_id=uuid.uuid4(),
+            column_id=uuid.uuid4(),
+            title="Recover deployment",
+            content="",
+            position=0,
+            run_status=run_status,
+            card_metadata={},
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def test_board_state_prefers_active_workflow_over_stored_failure(self) -> None:
+        user = _User()
+        card = self._card()
+        board = SimpleNamespace(
+            id=card.board_id,
+            name="Recovery board",
+            description=None,
+            mapper_model=None,
+            mapper_credential_id=None,
+        )
+        column = SimpleNamespace(
+            id=card.column_id,
+            board_id=board.id,
+            name="Development",
+            position=0,
+            color=None,
+            ai_instructions=None,
+        )
+        execution_id = uuid.uuid4()
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalars_list=[column]),
+                _result_with(scalars_list=[card]),
+            ]
+        )
+
+        with (
+            patch.object(
+                boards_api,
+                "_get_board_for_user",
+                AsyncMock(return_value=(board, "owner")),
+            ),
+            patch.object(
+                boards_api,
+                "_active_board_execution_ids",
+                AsyncMock(return_value={card.id: {execution_id}}),
+            ),
+            patch.object(boards_api, "_column_workflow_responses", AsyncMock(return_value={})),
+            patch.object(boards_api, "_mapper_credential_name", AsyncMock(return_value=None)),
+        ):
+            response = await boards_api.get_board_state(board_id=board.id, db=db, current_user=user)
+
+        self.assertEqual(response.cards[0].run_status, "running")
+        self.assertTrue(response.has_active_runs)
+
+    async def test_card_detail_marks_only_linked_active_run_as_running(self) -> None:
+        user = _User()
+        card = self._card()
+        board = SimpleNamespace(id=card.board_id)
+        execution_id = uuid.uuid4()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        run = SimpleNamespace(
+            id=uuid.uuid4(),
+            card_id=card.id,
+            column_id=card.column_id,
+            workflow_id=uuid.uuid4(),
+            workflow_name="Deploy",
+            chain_position=0,
+            chain_length=1,
+            status="failed",
+            execution_history_id=None,
+            active_execution_id=execution_id,
+            output={},
+            error="Server restarted during execution",
+            started_at=now,
+            finished_at=now,
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalars_list=[]),
+                _result_with(scalars_list=[run]),
+            ]
+        )
+
+        with (
+            patch.object(
+                boards_api,
+                "_get_board_for_user",
+                AsyncMock(return_value=(board, "owner")),
+            ),
+            patch.object(boards_api, "_get_board_card", AsyncMock(return_value=card)),
+            patch.object(
+                boards_api,
+                "_active_board_execution_ids",
+                AsyncMock(return_value={card.id: {execution_id}}),
+            ),
+        ):
+            response = await boards_api.get_card_detail(
+                board_id=board.id,
+                card_id=card.id,
+                db=db,
+                current_user=user,
+            )
+
+        self.assertEqual(response.card.run_status, "running")
+        self.assertEqual(response.runs[0].status, "running")
+        self.assertEqual(response.runs[0].error, "Server restarted during execution")
+
+
 class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
     def _board(self, user):
         board = MagicMock()

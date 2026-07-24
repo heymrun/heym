@@ -167,7 +167,8 @@ test("opens one running execution live from both history dialogs", async ({ page
       }),
       workflowNode("wait_live", "wait", 340, 160, {
         label: "waitLive",
-        duration: 6_000,
+        // Long enough for both history dialogs under CI (3 Playwright workers share the runner).
+        duration: 18_000,
       }),
       workflowNode("set_live", "set", 600, 160, {
         label: "setLive",
@@ -193,7 +194,9 @@ test("opens one running execution live from both history dialogs", async ({ page
   let executionId = "";
   const allHistoryPage = await page.context().newPage();
   try {
-    await page.goto(`/workflows/${workflow.id}`);
+    // Warm the second page before the run starts so opening All History does not burn the
+    // wait window (CI with parallel workers can make a cold dashboard load exceed 6s).
+    await Promise.all([page.goto(`/workflows/${workflow.id}`), allHistoryPage.goto("/")]);
     await expect(page.locator(".vue-flow__node")).toHaveCount(5);
     await page.evaluate((workflowId) => {
       void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
@@ -229,7 +232,6 @@ test("opens one running execution live from both history dialogs", async ({ page
     await expect(page.getByPlaceholder("Enter text...")).toHaveValue("live input payload");
     await expect(page.getByTestId("debug-node-result-input_live")).toContainText("inputLive");
 
-    await allHistoryPage.goto("/");
     await allHistoryPage.getByRole("button", { name: "History", exact: true }).click();
     await expect(
       allHistoryPage.getByRole("heading", { name: "All Execution History" }),
@@ -245,7 +247,7 @@ test("opens one running execution live from both history dialogs", async ({ page
 
     await expect(page.locator('[data-id="wait_live_two"] .node-base')).toHaveClass(
       /animate-heartbeat/,
-      { timeout: 10_000 },
+      { timeout: 25_000 },
     );
     await expect(page.getByTestId("debug-node-result-wait_live_two")).toContainText(
       "waitLiveTwo",
@@ -272,7 +274,7 @@ test("opens one running execution live from both history dialogs", async ({ page
   }
 });
 
-test("keeps the dashboard responsive while a canvas workflow is running", async ({
+test("keeps a canvas run live after dashboard navigation and history re-entry", async ({
   page,
 }) => {
   const workflow = await createWorkflow(
@@ -285,7 +287,7 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       }),
       workflowNode("responsive_wait_a", "wait", 340, 160, {
         label: "wait",
-        duration: 30_000,
+        duration: 10_000,
       }),
       workflowNode("responsive_set", "set", 600, 160, {
         label: "set",
@@ -293,7 +295,7 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       }),
       workflowNode("responsive_wait_b", "wait", 860, 160, {
         label: "wait1",
-        duration: 10_000,
+        duration: 2_000,
       }),
       workflowNode("responsive_output", "jsonOutputMapper", 1_120, 160, {
         label: "jsonResponse",
@@ -343,6 +345,20 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       timeout: 2_000,
     });
     expect(healthResponse.ok()).toBeTruthy();
+
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(page, workflow.id, executionId);
+    await expect(page.locator('[data-id="responsive_wait_a"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.locator('[data-id="responsive_wait_b"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+      { timeout: 15_000 },
+    );
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
   } finally {
     if (executionId) {
       await page.request.post(

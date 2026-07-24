@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.config import settings
 from app.services.codex_runner_service import (
@@ -47,6 +47,7 @@ class TestPublishModeConstants(unittest.TestCase):
                 "commit_push",
                 "direct_commit",
                 "update_existing_pr",
+                "open_or_update_pr",
                 "patch_artifact",
             },
         )
@@ -70,21 +71,147 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn("Do NOT run git", prompt)
         self.assertIn("use port 1234", prompt)
 
+    def test_build_prompt_states_pull_request_content_policy(self) -> None:
+        prompt = CodexRunnerService._build_prompt("translate the readme")
+        self.assertIn("the task prompt is PRIVATE", prompt)
+        self.assertIn("## Change Summary", prompt)
+        self.assertIn("## Screenshots", prompt)
+
+    def test_resume_prompt_states_pull_request_content_policy(self) -> None:
+        self.assertIn(
+            pr_publish.PR_CONTENT_POLICY, CodexRunnerService._build_resume_prompt("use port 1234")
+        )
+
+    def test_build_prompt_forbids_ending_on_a_screenshot_announcement(self) -> None:
+        # Regression for the observed "…Now let me take a screenshot" early stop.
+        prompt = CodexRunnerService._build_prompt("add a badge")
+        self.assertIn("BEFORE you return your final result", prompt)
+        self.assertIn("Now let me take a screenshot", prompt)
+
+    def test_finishing_prompt_states_the_finishing_preamble(self) -> None:
+        prompt = CodexRunnerService._build_finishing_prompt()
+        self.assertIn(pr_publish.FINISHING_PASS_PREAMBLE, prompt)
+        self.assertIn("Do NOT run git", prompt)
+        self.assertIn("## Change Summary", prompt)
+
+
+class TestCodexResolveUpdateExistingPr(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = CodexRunnerService()
+
+    def test_non_update_mode_is_unchanged(self) -> None:
+        request = _request("open_pr")
+        self.assertIs(self.runner._resolve_update_existing_pr_request(request), request)
+
+    def test_update_mode_swaps_in_the_existing_pr_branch(self) -> None:
+        request = _request("update_existing_pr")
+        gh = MagicMock()
+        with (
+            patch("app.services.codex_runner_service.GitHubService", return_value=gh),
+            patch.object(
+                pr_publish, "resolve_update_existing_pr_branch", return_value="feat/real-branch"
+            ),
+        ):
+            resolved = self.runner._resolve_update_existing_pr_request(request)
+        self.assertEqual(resolved.branch_name, "feat/real-branch")
+        self.assertEqual(request.branch_name, "codex/run")  # original request untouched
+        gh.close.assert_called_once()
+
+
+class TestCodexFinishIncompleteRun(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = CodexRunnerService()
+        self.runner._git_output = MagicMock(return_value="")  # type: ignore[method-assign]
+        self.ws = Path("/tmp/ws")
+
+    def test_reruns_and_updates_summary_when_agent_stopped_mid_task(self) -> None:
+        # Real PR #401 case: the agent stopped right before the screenshot ("Backend code is
+        # clean. Let me now take a screenshot."). A UI change with no screenshot triggers the
+        # finishing pass even though the summary is not empty.
+        result = CodexRunResult(
+            status="completed",
+            summary="Backend code is clean. Let me now take a screenshot.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        CodexRunnerService._prepare_publishable_text(result, "")
+
+        finished = CodexRunResult(
+            status="completed",
+            summary="Add a live running-workflow count badge to the toolbar.",
+            pull_request_title="Add running-workflow count badge",
+            pull_request_body="## Change Summary\n\nAdd a live badge.",
+        )
+        self.runner._run_codex_exec = MagicMock(return_value=finished)  # type: ignore[method-assign]
+        self.runner._discover_pr_screenshots = MagicMock(return_value=[])  # type: ignore[method-assign]
+        self.runner._changed_files = MagicMock(  # type: ignore[method-assign]
+            return_value=["frontend/src/views/DashboardView.vue"]
+        )
+
+        self.runner._finish_incomplete_run(self.ws, _request("open_pr"), result)
+
+        self.runner._run_codex_exec.assert_called_once()
+        self.assertEqual(result.summary, "Add a live running-workflow count badge to the toolbar.")
+        self.assertEqual(result.pull_request_title, "Add running-workflow count badge")
+        # A UI change with no screenshot after the pass gets a visible note.
+        self.assertIn("## Screenshots", result.pull_request_body)
+
+    def test_no_rerun_when_summary_and_screenshot_present(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="Add a live badge.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        CodexRunnerService._prepare_publishable_text(result, "")
+        self.runner._run_codex_exec = MagicMock()  # type: ignore[method-assign]
+        self.runner._discover_pr_screenshots = MagicMock(  # type: ignore[method-assign]
+            return_value=[Path("/tmp/ws/frontend/.e2e-artifacts/shot.png")]
+        )
+
+        self.runner._finish_incomplete_run(self.ws, _request("open_pr"), result)
+
+        self.runner._run_codex_exec.assert_not_called()
+
+
+class TestCodexPublishedTextRedaction(unittest.TestCase):
+    def test_finalize_strips_task_prompt_echo_from_published_fields(self) -> None:
+        prompt = "Add a retry to the webhook trigger and do not touch the scheduler."
+        result = CodexRunResult(
+            status="completed",
+            summary=f"Added the retry loop.\n\n{prompt}",
+            validation="Ran the backend suite.",
+            pull_request_title="Add webhook trigger retry",
+            pull_request_body=f"## Change Summary\n\nAdded the retry loop.\n\n## Task\n\n{prompt}",
+        )
+
+        CodexRunnerService._prepare_publishable_text(result, prompt)
+
+        self.assertEqual(result.summary, "Added the retry loop.")
+        self.assertEqual(result.validation, "Ran the backend suite.")
+        self.assertNotIn("## Task", result.pull_request_body)
+        self.assertNotIn("do not touch the scheduler", result.pull_request_body)
+        self.assertIn("Added the retry loop.", result.pull_request_body)
+
 
 class TestCommitMessage(unittest.TestCase):
+    @staticmethod
+    def _result(**kwargs) -> CodexRunResult:
+        """Build a result the way the runner does, so `publish_summary` is populated."""
+        result = CodexRunResult(status="completed", **kwargs)
+        CodexRunnerService._prepare_publishable_text(result, "")
+        return result
+
     def test_commit_title_keeps_full_single_sentence(self) -> None:
         # A long run-on summary (no early period) is kept whole, not cut at ~72 chars.
         summary = "Added n8n10 to docker-compose.yml using host port 2245, internal port 3032"
-        result = CodexRunResult(status="completed", summary=summary)
+        result = self._result(summary=summary)
         self.assertEqual(CodexRunnerService._commit_title(result), summary)
 
     def test_commit_title_keeps_short_summary(self) -> None:
-        result = CodexRunResult(status="completed", summary="Fix typo")
+        result = self._result(summary="Fix typo")
         self.assertEqual(CodexRunnerService._commit_title(result), "Fix typo")
 
     def test_commit_title_prefers_pull_request_title(self) -> None:
-        result = CodexRunResult(
-            status="completed",
+        result = self._result(
             summary="A long detailed summary sentence describing everything that changed in depth.",
             pull_request_title="Add n8n10 service to compose and Traefik",
         )
@@ -93,15 +220,13 @@ class TestCommitMessage(unittest.TestCase):
         )
 
     def test_commit_title_uses_first_sentence(self) -> None:
-        result = CodexRunResult(
-            status="completed",
+        result = self._result(
             summary="README.md translated. Headings, tables, notes localized; commands preserved.",
         )
         self.assertEqual(CodexRunnerService._commit_title(result), "README.md translated.")
 
     def test_commit_title_skips_placeholder_done(self) -> None:
-        result = CodexRunResult(
-            status="completed",
+        result = self._result(
             summary="Done. Reorder the mobile chat header actions.",
             pull_request_title="Done.",
         )
@@ -111,9 +236,7 @@ class TestCommitMessage(unittest.TestCase):
         )
 
     def test_commit_body_has_full_summary_and_validation(self) -> None:
-        result = CodexRunResult(
-            status="completed", summary="X" * 100, validation="ran docker compose config"
-        )
+        result = self._result(summary="X" * 100, validation="ran docker compose config")
         body = CodexRunnerService._commit_body(result)
         self.assertIn("X" * 100, body)
         self.assertIn("ran docker compose config", body)
@@ -249,3 +372,46 @@ class TestPublishDispatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCodexNarrationIsNotPublished(unittest.TestCase):
+    """The narration guard is shared with OpenCode; Codex must get the same treatment."""
+
+    NARRATION = "Both pass. Let me do a final review of the complete changes:"
+
+    def _prepared(self, **kwargs) -> CodexRunResult:
+        result = CodexRunResult(status="completed", **kwargs)
+        CodexRunnerService._prepare_publishable_text(result, "")
+        return result
+
+    def test_narration_summary_is_not_a_commit_title_or_body(self) -> None:
+        result = self._prepared(summary=self.NARRATION, changed_files=["a.py"])
+
+        self.assertEqual(result.publish_summary, "")
+        self.assertEqual(CodexRunnerService._commit_title(result), "Apply Codex changes")
+        self.assertNotIn("Let me do a final review", CodexRunnerService._commit_body(result))
+        # The raw message stays on the node output so the run is still debuggable in Heym.
+        self.assertIn("Let me do a final review", result.summary)
+
+    def test_a_real_summary_still_reaches_the_commit(self) -> None:
+        result = self._prepared(summary="Add a retry to the webhook trigger.")
+
+        self.assertEqual(
+            CodexRunnerService._commit_title(result), "Add a retry to the webhook trigger."
+        )
+
+    def test_pr_body_falls_back_to_the_changed_file_list(self) -> None:
+        result = self._prepared(summary=self.NARRATION, changed_files=["app/main.py", "app/api.py"])
+        gh = MagicMock()
+        gh.create_pull_request.return_value = {"number": 7, "html_url": "https://x/pull/7"}
+        runner = CodexRunnerService(workspace_root="/tmp/heym-codex-ws")
+        runner._discover_pr_screenshots = MagicMock(return_value=[])  # type: ignore[method-assign]
+
+        with patch("app.services.codex_runner_service.GitHubService", return_value=gh):
+            runner._create_pr(
+                Path("/tmp/ws"), _request("open_pr"), result, "codex/run", draft=False
+            )
+
+        body = gh.create_pull_request.call_args.kwargs["body"]
+        self.assertNotIn("Let me do a final review", body)
+        self.assertIn("`app/main.py`", body)

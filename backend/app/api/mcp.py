@@ -806,6 +806,12 @@ async def list_mcp_tools(
     return MCPToolsListResponse(tools=tools)
 
 
+# Server-side ceiling for the caller-supplied MCP connect timeout. The outer HTTP
+# deadline is already capped at 15s; this stops a request from leaving a worker
+# thread (and the MCP server process it started) alive long after the response.
+_MCP_FETCH_MAX_TIMEOUT_SECONDS = 60.0
+
+
 @router.post("/fetch-tools", response_model=MCPFetchToolsResponse)
 async def fetch_mcp_tools(
     request: Request,
@@ -819,9 +825,24 @@ async def fetch_mcp_tools(
 
     body = await request.json()
     connection = body.get("connection") or {}
-    timeout_seconds = float(connection.get("timeoutSeconds") or 30)
+
+    # timeoutSeconds comes straight from the request body. A non-numeric value
+    # used to raise an unhandled ValueError (HTTP 500), and a negative or huge
+    # value disabled the internal read deadline while the outer asyncio deadline
+    # still returned early, leaving the worker thread and its child process
+    # running after the response was sent. Validate and clamp instead.
+    raw_timeout = connection.get("timeoutSeconds")
+    try:
+        timeout_seconds = float(raw_timeout) if raw_timeout else 30.0
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="timeoutSeconds must be a number.",
+        ) from exc
+    timeout_seconds = max(1.0, min(timeout_seconds, _MCP_FETCH_MAX_TIMEOUT_SECONDS))
 
     conn = dict(connection)
+    conn["timeoutSeconds"] = timeout_seconds
     conn.setdefault("id", conn.get("label", "default"))
 
     # Cap the hard timeout so a silent auth failure (e.g. 401 in a background

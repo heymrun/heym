@@ -17,6 +17,7 @@ OPENCODE_PUBLISH_MODES: frozenset[str] = frozenset(
         "commit_push",
         "direct_commit",
         "update_existing_pr",
+        "open_or_update_pr",
         "patch_artifact",
     }
 )

@@ -227,6 +227,7 @@ Heym Built for developers who want control and enterprise teams that need a trus
 | AI Agent node (tool calling) | ✅ | ✅ | ✅ | ✅ |
 | Agent persistent memory (knowledge graph) | ✅ | limited¹¹ | limited¹¹ | limited¹¹ |
 | Multi-agent orchestration | ✅ | ✅ | limited | limited |
+| Coding agent nodes (Codex, OpenCode) | ✅ | ❌²¹ | ❌²¹ | ❌²¹ |
 | Human-in-the-Loop (HITL) | ✅ | ✅⁵ | limited⁶ | limited⁷ |
 | LLM Guardrails | ✅ | ✅⁸ | ✅⁸ | limited⁸ |
 | Automatic context compression | ✅ | ❌ | ❌ | ❌ |
@@ -236,8 +237,11 @@ Heym Built for developers who want control and enterprise teams that need a trus
 | Workflow Analyzer | ✅ | ❌¹⁸ | ❌¹⁸ | ❌¹⁸ |
 | Open an in-flight run on the live canvas | ✅ | limited²⁰ | limited²⁰ | ❌²⁰ |
 | Workflow-powered dashboards | ✅ | partial¹⁹ | partial¹⁹ | partial¹⁹ |
+| Agentic Kanban board | ✅ | ❌²² | ❌²² | ❌²² |
 | MCP (Model Context Protocol) | ✅ | ✅ | ✅ | ✅ |
 | Skills system for agents | ✅ | ❌ | ❌ | ❌ |
+| Built-in file drive (share links, teams) | ✅ | limited²³ | limited²³ | ❌²³ |
+| Browser automation node (Playwright) | ✅ | limited²⁴ | limited²⁴ | ❌²⁴ |
 | Auto Heal (Playwright) | ✅ | ❌ | ❌ | ❌ |
 | Data Tables | ✅ | ✅ | ✅ | ❌ |
 | Workflow Templates | ✅ | ✅ | ✅ | ✅ |
@@ -272,6 +276,10 @@ Heym Built for developers who want control and enterprise teams that need a trus
 18. Heym Workflow Analyzer runs the workflow when possible, reads the execution result, and generates a shared editable Markdown report covering improvement areas, purpose, and step-by-step behavior. n8n AI Workflow Builder can create/refine/debug workflows, Zapier AI troubleshooting explains errored runs, and Make scenario history/agent reasoning exposes run details, but their public docs do not describe the same shared run-aware workflow analysis document
 19. n8n Insights, Zapier Zap History/Task Usage, and Make Scenario History are monitoring/history surfaces. They do not document custom dashboard widgets backed by arbitrary workflow logic like Heym's Dashboard tab, where each widget can fetch, transform, retrieve, or generate data through its own hidden workflow
 20. [n8n All executions](https://docs.n8n.io/workflows/executions/all-executions/) lists running executions and can load previous execution data into the editor, while [Zapier run statuses](https://help.zapier.com/hc/en-us/articles/20505304170637-Review-run-statuses-in-Zap-workflows) exposes a running editor state. [Make Scenario History](https://help.make.com/scenario-history) documents run details and logs. Their public docs, checked July 18, 2026, do not describe Heym's exact combination: open an arbitrary in-flight production run from History or a Kanban card, restore its current snapshot, and keep receiving node animation and Debug logs on the same canvas.
+21. Heym's Codex and OpenCode Go nodes run a real coding agent CLI in an isolated workspace against a GitHub repository — clone, edit, diff, push a branch, open a pull request — as a first-class workflow step. As of July 20, 2026, no competitor documents an equivalent: n8n's OpenAI node covers chat/assistant API calls and native Codex support remains a community request, Zapier's own blog documents the reverse direction ([Codex driving Zapier tools through Zapier MCP](https://zapier.com/blog/automate-codex-zapier-mcp/)), and Make's OpenAI modules expose completions/assistants/batch actions only
+22. Heym's Board tab is a built-in agentic Kanban board whose columns execute workflows and whose cards carry context, conversation history, execution state, and runs. n8n, Zapier, and Make only integrate with third-party kanban apps (Kanban Tool, Wekan, NocoDB); none documents a built-in board that runs its own automations, as of July 20, 2026
+23. Heym's Drive tab stores workflow/skill-generated files with public or password-protected share links, team sharing, and bulk ZIP/share/delete actions. n8n keeps execution binary data internally (optionally on [S3-compatible external storage](https://docs.n8n.io/hosting/scaling/external-storage/)) with no user-facing file drive; Zapier's Files by Zapier holds files only for the duration of a Zap run and Storage by Zapier holds small text values; Make's data stores hold structured records and its file handling passes files between apps without persistent built-in storage
+24. Heym's Playwright node is first-party browser automation with visual steps, AI-generated steps, and a full-code mode. n8n offers only community packages with a still-open [feature request for native browser automation nodes](https://community.n8n.io/t/front-end-web-mobile-app-test-automation-nodes/129796); Zapier Agents can browse and read pages but Zapier documents no scripted browser-automation step; Make documents HTTP modules and third-party scraping apps rather than a native browser module, as of July 20, 2026
 
 </details>
 
@@ -734,7 +742,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.73" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.76" />
 </a>
 
 </div>

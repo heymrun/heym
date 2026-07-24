@@ -88,6 +88,31 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result[0], ActiveExecutionItem)
         db.execute.assert_not_called()
 
+    async def test_returns_every_execution_for_the_same_workflow(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+
+        workflow_id = uuid.uuid4()
+        execution_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+        records = [_make_record(workflow_id, execution_id) for execution_id in execution_ids]
+        db = AsyncMock()
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=records),
+            ),
+            patch("app.api.workflows.list_active_executions", return_value=[]),
+        ):
+            result = await list_active_workflow_executions(current_user=user, db=db)
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            {item.execution_id for item in result},
+            {str(execution_id) for execution_id in execution_ids},
+        )
+        self.assertEqual({item.workflow_id for item in result}, {str(workflow_id)})
+
     async def test_filters_local_fallback_to_accessible_workflows(self) -> None:
         user = MagicMock()
         user.id = uuid.uuid4()
@@ -347,6 +372,45 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('"message": "hello"', completed)
             self.assertIn('"type": "node_start"', running)
             self.assertIn('"node_id": "wait"', running)
+        finally:
+            clear_execution(execution_id)
+
+    async def test_stream_sends_heartbeat_while_active_node_is_idle(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        try:
+            with (
+                patch(
+                    "app.api.workflows.get_workflow_for_user",
+                    AsyncMock(return_value=workflow),
+                ),
+                patch("app.api.workflows.WORKFLOW_SSE_HEARTBEAT_SECONDS", 0),
+            ):
+                response = await stream_active_workflow_execution(
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    request=request,
+                    current_user=user,
+                    db=AsyncMock(),
+                )
+
+                iterator = response.body_iterator
+                started = await anext(iterator)
+                heartbeat = await anext(iterator)
+                await iterator.aclose()
+
+            self.assertIn('"type": "execution_started"', started)
+            self.assertEqual(heartbeat, ": heartbeat\n\n")
         finally:
             clear_execution(execution_id)
 

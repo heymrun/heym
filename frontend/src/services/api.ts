@@ -393,6 +393,23 @@ export const versionApi = {
   },
 };
 
+// Newest `updated_at` this tab has itself written, per workflow id. The stale-save check compares
+// against it so a workflow the user edited from a settings dialog, the properties panel, or the
+// dashboard is not mistaken for a concurrent edit by someone else. Recorded here rather than at
+// each call site so new writers are covered without having to remember to opt in.
+const lastWrittenWorkflowRevisions = new Map<string, string>();
+
+export function lastWrittenWorkflowRevision(id: string): string | null {
+  return lastWrittenWorkflowRevisions.get(id) ?? null;
+}
+
+function noteWorkflowRevision(workflow: Workflow): Workflow {
+  if (workflow.id && workflow.updated_at) {
+    lastWrittenWorkflowRevisions.set(workflow.id, workflow.updated_at);
+  }
+  return workflow;
+}
+
 export const workflowApi = {
   list: async (): Promise<WorkflowListItem[]> => {
     const response = await api.get<WorkflowListItem[]>("/workflows");
@@ -526,7 +543,7 @@ export const workflowApi = {
     description?: string;
   }): Promise<Workflow> => {
     const response = await api.post<Workflow>("/workflows", data);
-    return response.data;
+    return noteWorkflowRevision(response.data);
   },
 
   update: async (
@@ -552,10 +569,14 @@ export const workflowApi = {
         | "minutes_saved_per_run"
         | "workflow_timeout_seconds"
       >
-    >,
+    > & {
+      // Optimistic concurrency: the revision this edit is based on. The server answers 409 when
+      // the stored workflow is newer. Omit to save unconditionally.
+      base_updated_at?: string;
+    },
   ): Promise<Workflow> => {
     const response = await api.put<Workflow>(`/workflows/${id}`, data);
-    return response.data;
+    return noteWorkflowRevision(response.data);
   },
 
   clearResponseCache: async (id: string): Promise<void> => {

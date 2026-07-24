@@ -1,6 +1,7 @@
 import { ref, type Ref } from "vue";
 
 import { voiceApi } from "@/services/api";
+import { vibrate } from "@/utils/audio";
 
 export type VoiceState = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
 
@@ -158,6 +159,7 @@ export function useInteractiveVoice(onUtterance: (text: string) => void): UseInt
   function listen(): void {
     if (muted.value) return;
     setState("listening");
+    vibrate(50);
     beginRecording();
     monitor();
   }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useMediaQuery } from "@vueuse/core";
 import {
   Check,
   ChevronDown,
@@ -22,7 +23,14 @@ const emit = defineEmits<{ close: [] }>();
 
 const PREVIEW_LIMIT = 250;
 
-const dismissed = ref(false);
+const isMobile = useMediaQuery("(max-width: 767px)");
+
+/** Collapsed by default on mobile so the canvas stays usable after a run. */
+function defaultDismissed(): boolean {
+  return props.collapsible && isMobile.value;
+}
+
+const dismissed = ref(defaultDismissed());
 const expanded = ref<Set<string>>(new Set());
 const runIndexById = ref<Record<string, number>>({});
 const copiedId = ref<string | null>(null);
@@ -59,7 +67,7 @@ const kindLabel: Record<HighlightRecord["kind"], string> = {
 watch(
   () => props.payload,
   () => {
-    dismissed.value = false;
+    dismissed.value = defaultDismissed();
     expanded.value = new Set();
     runIndexById.value = {};
     copiedId.value = null;

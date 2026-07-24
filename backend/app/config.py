@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     mcp_allow_private_urls: bool = Field(
         default=False, validation_alias="HEYM_MCP_ALLOW_PRIVATE_URLS"
     )
+    # Isolation for MCP `stdio` servers, which start a process from a command in
+    # the node configuration. Deliberately separate from HEYM_PYTHON_TOOL_SANDBOX:
+    # an operator who picks `subprocess` there for Python tool compatibility must
+    # not silently lose MCP stdio isolation as a side effect. `auto` requires
+    # Docker and fails closed without it; `subprocess` is an explicit,
+    # host-executing opt-out for trusted single-user setups.
+    mcp_stdio_sandbox: str = Field(default="auto", validation_alias="HEYM_MCP_STDIO_SANDBOX")
     app_version: str = ""
 
     # OpenTelemetry tracing (disabled by default -> zero overhead).

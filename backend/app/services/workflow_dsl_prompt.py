@@ -4224,6 +4224,9 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
     - `open_pr`: commit + push `branchName`, open a review-ready (non-draft) pull request
     - `commit_push`: commit + push `branchName`, no pull request
     - `direct_commit`: commit + push straight to `baseBranch` (no separate branch/PR)
+    - `open_or_update_pr`: update the agent's existing open PR when one exists (even if
+      `branchName` differs — the runner finds it), else open a new one. Best for re-runs / "update
+      the open PR" instructions.
     - `update_existing_pr`: add a commit to the existing `branchName`/PR (opens one if none exists)
     - `patch_artifact`: save the diff as a downloadable file, return `patchUrl`; nothing pushed
   - `branchName`: Working branch for PR/commit modes, e.g. `codex/$executionId`
@@ -4311,7 +4314,9 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   - `taskPrompt` (default `$input.text`): the coding task, required
   - `branchName` (default `opencode/$executionId`): working branch for PR/commit modes
   - `publishMode` (default `diff_only`): how OpenCode's changes are delivered — `diff_only`,
-    `draft_pr`, `open_pr`, `commit_push`, `direct_commit`, `update_existing_pr`, `patch_artifact`
+    `draft_pr`, `open_pr`, `commit_push`, `direct_commit`, `open_or_update_pr`,
+    `update_existing_pr`, `patch_artifact` (`open_or_update_pr` updates the agent's existing open
+    PR when one exists, else opens a new one — best for re-runs)
   - `opencodeModel`: OpenCode Go model id, e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`;
     empty uses the runner default (`opencode/kimi-k3`)
   - `opencodeVariant`: optional model reasoning variant passed to `opencode run --variant`

@@ -20,6 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
+# Bun (required for frontend lint/typecheck from this image, e.g. opencode isolated execution).
+RUN curl -fsSL https://bun.sh/install | bash \
+    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
+    && bun --version
+
 # OpenCode CLI (Go) required by the OpenCode Go node. The runner executes it inside a hardened
 # sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg; the
 # installer resolves "latest" only when VERSION is unset (passing VERSION=latest looks up a literal

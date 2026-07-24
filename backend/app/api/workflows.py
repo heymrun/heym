@@ -1097,6 +1097,8 @@ async def stream_active_workflow_execution(
         emitted_result_count = 0
         emitted_running_node_ids: set[str] = set()
         missing_ticks = 0
+        loop = asyncio.get_running_loop()
+        last_heartbeat_at = loop.time()
 
         yield (
             "data: "
@@ -1142,8 +1144,10 @@ async def stream_active_workflow_execution(
 
             if active_found:
                 missing_ticks = 0
+                emitted_event = False
                 for node_result in node_results[emitted_result_count:]:
                     yield f"data: {json.dumps({'type': 'node_complete', **node_result})}\n\n"
+                    emitted_event = True
                 emitted_result_count = max(emitted_result_count, len(node_results))
 
                 current_running_node_ids = set(running_node_ids)
@@ -1151,7 +1155,14 @@ async def stream_active_workflow_execution(
                     yield (
                         "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
                     )
+                    emitted_event = True
                 emitted_running_node_ids = current_running_node_ids
+                now = loop.time()
+                if emitted_event:
+                    last_heartbeat_at = now
+                elif now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
+                    last_heartbeat_at = now
+                    yield ": heartbeat\n\n"
                 await asyncio.sleep(0.25)
                 continue
 
@@ -1259,6 +1270,30 @@ async def get_workflow(
     return response
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Treat a naive timestamp as UTC so stored and client-supplied values are comparable."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _reject_stale_update(workflow: Workflow, base_updated_at: datetime | None) -> None:
+    """Refuse an update whose base revision is older than the stored one.
+
+    Optimistic concurrency, like the analysis note's ``base_revision``: the check happens in the
+    same request that writes, so there is no window between checking and saving. Clients that omit
+    ``base_updated_at`` are explicitly overriding and are never rejected.
+    """
+    if base_updated_at is None or workflow.updated_at is None:
+        return
+    if _as_utc(workflow.updated_at) > _as_utc(base_updated_at):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Workflow was updated by someone else",
+                "updated_at": _as_utc(workflow.updated_at).isoformat(),
+            },
+        )
+
+
 @router.put("/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(
     workflow_id: uuid.UUID,
@@ -1273,6 +1308,8 @@ async def update_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found",
         )
+
+    _reject_stale_update(workflow, workflow_data.base_updated_at)
 
     should_create_version = False
     old_nodes = workflow.nodes

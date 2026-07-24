@@ -74,6 +74,7 @@ _ITEM_DOT_PATH_RE = re.compile(r"^item(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
 _DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
 _ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
+_POSTGRES_UNSAFE_JSON_STRING_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
@@ -1551,11 +1552,16 @@ def _wrap_value(value: object) -> object:
 
 
 def _to_json_compatible(value: object) -> object:
-    """Convert expression wrapper types back to plain JSON-safe containers."""
+    """Convert wrappers and recursively sanitize values for PostgreSQL JSON fields."""
     if isinstance(value, DotDict):
-        return {key: _to_json_compatible(item) for key, item in dict.items(value)}
+        return {
+            _to_json_compatible_key(key): _to_json_compatible(item)
+            for key, item in dict.items(value)
+        }
     if isinstance(value, dict):
-        return {key: _to_json_compatible(item) for key, item in value.items()}
+        return {
+            _to_json_compatible_key(key): _to_json_compatible(item) for key, item in value.items()
+        }
     if isinstance(value, DotList):
         return [_to_json_compatible(item) for item in list(value)]
     if isinstance(value, list):
@@ -1567,10 +1573,22 @@ def _to_json_compatible(value: object) -> object:
     if isinstance(value, DotFloat):
         return float(value)
     if isinstance(value, DotStr):
-        return str(value)
+        return _sanitize_json_string(str(value))
     if isinstance(value, DotDateTime):
         return value.toISO()
+    if isinstance(value, str):
+        return _sanitize_json_string(value)
     return value
+
+
+def _to_json_compatible_key(key: object) -> object:
+    if isinstance(key, str):
+        return _sanitize_json_string(str(key))
+    return key
+
+
+def _sanitize_json_string(value: str) -> str:
+    return _POSTGRES_UNSAFE_JSON_STRING_RE.sub("", value)
 
 
 @dataclass

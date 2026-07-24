@@ -5,7 +5,7 @@ import os
 import shutil
 import subprocess
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,12 +47,24 @@ CODEX_PUBLISH_MODES: frozenset[str] = frozenset(
         "commit_push",
         "direct_commit",
         "update_existing_pr",
+        "open_or_update_pr",
         "patch_artifact",
     }
 )
 _CODEX_REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
-    {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
+    {
+        "draft_pr",
+        "open_pr",
+        "commit_push",
+        "direct_commit",
+        "update_existing_pr",
+        "open_or_update_pr",
+    }
 )
+# Modes that update the agent's existing open PR when one exists, else open a new one.
+# ``open_or_update_pr`` is the intuitive single mode for re-runs; ``update_existing_pr`` is kept
+# for back-compat and behaves identically.
+_CODEX_OPEN_OR_UPDATE_MODES: frozenset[str] = frozenset({"update_existing_pr", "open_or_update_pr"})
 
 # Codex must only edit files on disk; Heym owns all git/GitHub operations. Codex's own GitHub
 # tools/API are network calls that the sandbox blocks, which otherwise makes Codex loop on
@@ -68,7 +80,10 @@ _CODEX_LOCAL_ONLY_RULES = (
     "dependencies are missing, you MAY run a package install (for example `bun install`, "
     "`npm install`, or `pnpm install`) and start a short-lived preview/dev server solely to "
     "capture the screenshot, then stop the server. Heym uploads those images onto the pull "
-    "request after you finish (do not commit screenshot binaries into source)."
+    "request after you finish (do not commit screenshot binaries into source). Capture "
+    "screenshots BEFORE you return your final result — never end a turn by announcing a pending "
+    "step such as 'Now let me take a screenshot'; perform that step first, then return "
+    "`status: completed`."
 )
 
 _PR_SCREENSHOT_RELEASE_TAG = "codex-pr-assets"
@@ -118,6 +133,10 @@ class CodexRunResult:
     summary: str = ""
     question: str = ""
     validation: str = ""
+    # ``summary`` narrowed to what may be published to GitHub (see
+    # ``pr_publish.publishable_summary``). Deliberately absent from ``to_output()``: it exists
+    # for the commit/PR seam, not the node output.
+    publish_summary: str = ""
     pull_request_title: str = ""
     pull_request_body: str = ""
     diff: str = ""
@@ -295,6 +314,9 @@ class CodexRunnerService:
         self.parser = CodexJsonlParser()
 
     def run_task(self, request: CodexRunRequest) -> CodexRunResult:
+        # Resolve the real head branch of the agent's open PR for update_existing_pr, so a
+        # per-run/LLM-generated branch name still updates that PR instead of opening a new one.
+        request = self._resolve_update_existing_pr_request(request)
         workspace = self._prepare_workspace(request)
         self._authenticate(
             workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
@@ -346,12 +368,30 @@ class CodexRunnerService:
         )
         return self._finalize_result(result, workspace, run_request)
 
+    def _resolve_update_existing_pr_request(self, request: CodexRunRequest) -> CodexRunRequest:
+        """For update/open-or-update modes, swap in the head branch of the agent's open PR."""
+        if request.publish_mode not in _CODEX_OPEN_OR_UPDATE_MODES:
+            return request
+        owner, repo = self._parse_github_owner_repo(request.repository_url)
+        gh = GitHubService(request.github_config)
+        try:
+            branch = pr_publish.resolve_update_existing_pr_branch(
+                gh,
+                owner,
+                repo,
+                base_branch=request.base_branch,
+                configured_branch=request.branch_name,
+            )
+        finally:
+            gh.close()
+        return request if branch == request.branch_name else replace(request, branch_name=branch)
+
     def _prepare_workspace(self, request: CodexRunRequest) -> Path:
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         workspace = (self.workspace_root / str(uuid.uuid4())).resolve()
-        # ``update_existing_pr`` clones the existing PR branch so Codex works on top of it; if that
-        # branch does not exist yet it falls back to the base branch and creates it.
-        if request.publish_mode == "update_existing_pr":
+        # update/open-or-update modes clone the existing PR branch so Codex works on top of it; if
+        # that branch does not exist yet it falls back to the base branch and creates it.
+        if request.publish_mode in _CODEX_OPEN_OR_UPDATE_MODES:
             try:
                 self._clone_branch(workspace, request, request.branch_name)
                 self._exclude_runner_files(workspace)
@@ -578,9 +618,64 @@ class CodexRunnerService:
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
+        self._prepare_publishable_text(result, request.task_prompt)
         if result.status == "completed" and request.publish_mode in _CODEX_REMOTE_PUBLISH_MODES:
+            # Finish a run that stopped mid-task (e.g. announced a screenshot but never took it)
+            # before publishing, so the screenshot and a real summary reach the pull request.
+            self._finish_incomplete_run(workspace, request, result)
             self._publish(workspace, request, result)
         return result
+
+    def _finish_incomplete_run(
+        self,
+        workspace: Path,
+        request: CodexRunRequest,
+        result: CodexRunResult,
+    ) -> None:
+        """Run one more Codex exec when the first ended before finishing the task.
+
+        The follow-up resumes in the same workspace (in-progress edits are already on disk); it
+        only captures any promised screenshot and returns a real report. Best-effort: a failure
+        never breaks the primary run. When a UI change still lacks a screenshot afterwards, a
+        visible note is added so the gap is never silent.
+        """
+        try:
+            has_screenshots = bool(self._discover_pr_screenshots(workspace))
+            if pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=result.changed_files,
+                publish_summary=result.publish_summary,
+                ui_change=pr_publish.changed_files_touch_ui(result.changed_files),
+                has_screenshots=has_screenshots,
+            ):
+                finished = self._run_codex_exec(
+                    workspace=workspace,
+                    prompt=self._build_finishing_prompt(),
+                    timeout_seconds=request.timeout_seconds,
+                    resume_thread_id=result.thread_id,
+                    codex_access_token=self._exec_token(
+                        request.codex_auth, request.codex_access_token
+                    ),
+                    model=request.model,
+                    reasoning_effort=request.reasoning_effort,
+                )
+                if finished.summary:
+                    result.summary = finished.summary
+                if finished.pull_request_title:
+                    result.pull_request_title = finished.pull_request_title
+                if finished.pull_request_body:
+                    result.pull_request_body = finished.pull_request_body
+                result.diff = self._git_output(["git", "diff", "--binary"], workspace)
+                result.changed_files = self._changed_files(workspace)
+                self._prepare_publishable_text(result, request.task_prompt)
+        except Exception:  # noqa: BLE001 - a finishing pass must never fail the primary run
+            pass
+        if pr_publish.changed_files_touch_ui(
+            result.changed_files
+        ) and not self._discover_pr_screenshots(workspace):
+            result.pull_request_body = pr_publish.note_missing_ui_screenshot(
+                result.pull_request_body
+            )
 
     def _publish(
         self,
@@ -598,7 +693,7 @@ class CodexRunnerService:
             self._push_branch(workspace, request, request.base_branch)
             result.pushed_branch = request.base_branch
             return
-        if mode == "update_existing_pr":
+        if mode in _CODEX_OPEN_OR_UPDATE_MODES:
             on_existing = self._current_branch(workspace) == request.branch_name
             self._commit_changes(workspace, request.branch_name, result, new_branch=not on_existing)
             self._push_branch(workspace, request, request.branch_name)
@@ -606,9 +701,9 @@ class CodexRunnerService:
             existing_url = self._open_pr_url_for_head(request, request.branch_name)
             if existing_url:
                 result.pull_request_url = existing_url
-                pr_number = self._pr_number_from_url(existing_url)
-                if pr_number is not None:
-                    self._attach_pr_screenshots(workspace, request, result, pr_number)
+                self._update_pr_body_with_screenshots(
+                    workspace, request, result, request.branch_name, existing_url
+                )
             else:
                 result.pull_request_url = self._create_pr(
                     workspace, request, result, request.branch_name, draft=False
@@ -709,7 +804,8 @@ class CodexRunnerService:
         draft: bool,
     ) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
-        pr_body = str(result.pull_request_body or "").strip() or result.summary or None
+        # Embed screenshots BEFORE creating the PR so it opens already containing them.
+        pr_body = self._screenshot_body(workspace, request, result, head) or None
         gh = GitHubService(request.github_config)
         try:
             pr = gh.create_pull_request(
@@ -723,11 +819,7 @@ class CodexRunnerService:
             )
         finally:
             gh.close()
-        url = str(pr.get("html_url") or "").strip() or None
-        pr_number = pr.get("number")
-        if url and isinstance(pr_number, int):
-            self._attach_pr_screenshots(workspace, request, result, pr_number)
-        return url
+        return str(pr.get("html_url") or "").strip() or None
 
     def _open_pr_url_for_head(self, request: CodexRunRequest, head: str) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
@@ -745,49 +837,77 @@ class CodexRunnerService:
         """Find local UI screenshots that Codex left on disk (gitignored / untracked only)."""
         return pr_publish.discover_pr_screenshots(workspace, self._git_output)
 
-    def _attach_pr_screenshots(
+    def _screenshot_body(
         self,
         workspace: Path,
         request: CodexRunRequest,
         result: CodexRunResult,
-        pr_number: int,
-    ) -> None:
-        """Upload discovered screenshots as a GitHub release asset set and embed them in the PR."""
+        head: str,
+    ) -> str:
+        """Return the PR body with any UI screenshots uploaded and embedded.
+
+        Uploads discovered screenshots as release assets (keyed on the branch, so this can run
+        before the PR exists) and injects a ``## Screenshots`` section. Best-effort: on any failure
+        the plain body is returned. Also updates ``result.pull_request_body``.
+        """
+        base_body = (
+            str(result.pull_request_body or "").strip()
+            or result.publish_summary
+            or pr_publish.changed_files_body(result.changed_files, agent="Codex")
+        )
         try:
             screenshots = self._discover_pr_screenshots(workspace)
-            if not screenshots:
-                return
+            if screenshots:
+                owner, repo = self._parse_github_owner_repo(request.repository_url)
+                gh = GitHubService(request.github_config)
+                try:
+                    injected = pr_publish.upload_and_inject_screenshots(
+                        gh,
+                        screenshots=screenshots,
+                        owner=owner,
+                        repo=repo,
+                        base_branch=request.base_branch,
+                        asset_slug=head,
+                        base_body=base_body,
+                        release_tag=_PR_SCREENSHOT_RELEASE_TAG,
+                        release_name="Codex PR screenshots",
+                        release_body=(
+                            "Shared bucket for Heym Codex UI screenshots attached to pull "
+                            "requests. Assets are named <branch>-… and are not part of source."
+                        ),
+                    )
+                finally:
+                    gh.close()
+                if injected:
+                    base_body = injected
+        except Exception:  # noqa: BLE001 - screenshot embedding is best-effort
+            pass
+        result.pull_request_body = base_body
+        return base_body
+
+    def _update_pr_body_with_screenshots(
+        self,
+        workspace: Path,
+        request: CodexRunRequest,
+        result: CodexRunResult,
+        head: str,
+        pr_url: str,
+    ) -> None:
+        """Embed screenshots and push the updated body onto an already-open PR."""
+        pr_number = self._pr_number_from_url(pr_url)
+        if pr_number is None:
+            return
+        body = self._screenshot_body(workspace, request, result, head)
+        if not body:
+            return
+        try:
             owner, repo = self._parse_github_owner_repo(request.repository_url)
             gh = GitHubService(request.github_config)
             try:
-                base_body = (
-                    str(result.pull_request_body or "").strip()
-                    or str(result.summary or "").strip()
-                    or ""
-                )
-                updated_body = pr_publish.upload_and_inject_screenshots(
-                    gh,
-                    screenshots=screenshots,
-                    owner=owner,
-                    repo=repo,
-                    base_branch=request.base_branch,
-                    pr_number=pr_number,
-                    base_body=base_body,
-                    release_tag=_PR_SCREENSHOT_RELEASE_TAG,
-                    release_name="Codex PR screenshots",
-                    release_body=(
-                        "Shared bucket for Heym Codex UI screenshots attached to pull requests. "
-                        "Assets are named pr-<number>-… and are not part of source."
-                    ),
-                )
-                if not updated_body:
-                    return
-                gh.update_issue(owner, repo, pr_number, body=updated_body)
-                result.pull_request_body = updated_body
+                gh.update_issue(owner, repo, pr_number, body=body)
             finally:
                 gh.close()
-        except Exception:
-            # Screenshot attach is best-effort; never fail the Codex publish path for it.
+        except Exception:  # noqa: BLE001 - updating the body is best-effort
             return
 
     @staticmethod
@@ -795,8 +915,8 @@ class CodexRunnerService:
         return pr_publish.pr_number_from_url(url)
 
     @staticmethod
-    def _release_asset_name(path: Path, pr_number: int, index: int) -> str:
-        return pr_publish.release_asset_name(path, pr_number, index)
+    def _release_asset_name(path: Path, slug: str, index: int) -> str:
+        return pr_publish.release_asset_name(path, slug, index)
 
     @staticmethod
     def _inject_screenshot_markdown(body: str, images: list[tuple[str, str]]) -> str:
@@ -899,8 +1019,23 @@ class CodexRunnerService:
             "and return `status: completed` with a summary and validation notes. Always set "
             "`pull_request_title` to a concise, complete one-line change description "
             "(imperative mood, ideally <=72 characters) suitable as a commit/PR subject. "
-            "Never use placeholder titles such as Done, Fixed, or Update.\n\n"
+            "Never use placeholder titles such as Done, Fixed, or Update. Set "
+            "`pull_request_body` to a `## Change Summary` section (plus `## Screenshots` when "
+            "you captured any).\n"
+            f"{pr_publish.PR_CONTENT_POLICY}\n\n"
             f"Task:\n{task_prompt}"
+        )
+
+    @staticmethod
+    def _build_finishing_prompt() -> str:
+        return (
+            "You are running as the Heym Codex node inside a local cloned git repository.\n"
+            f"{_CODEX_LOCAL_ONLY_RULES}\n"
+            f"{pr_publish.FINISHING_PASS_PREAMBLE}\n"
+            "Return `status: completed` with `summary`, `validation`, a concise imperative "
+            "`pull_request_title`, and `pull_request_body` set to a `## Change Summary` section "
+            "(plus `## Screenshots` when you captured any).\n"
+            f"{pr_publish.PR_CONTENT_POLICY}"
         )
 
     @staticmethod
@@ -908,19 +1043,36 @@ class CodexRunnerService:
         return (
             "The user answered your previous follow-up question. Continue the same task.\n"
             f"{_CODEX_LOCAL_ONLY_RULES}\n"
-            "Return `needs_input` only if one more user decision is truly essential.\n\n"
+            "Return `needs_input` only if one more user decision is truly essential.\n"
+            f"{pr_publish.PR_CONTENT_POLICY}\n\n"
             f"Answer:\n{answer_text}"
         )
 
     @staticmethod
+    def _prepare_publishable_text(result: CodexRunResult, task_prompt: str) -> None:
+        """Narrow every field that can reach GitHub down to publishable content.
+
+        Enforcement backstop for ``pr_publish.PR_CONTENT_POLICY``, shared with the OpenCode
+        runner: strip task-prompt echoes, then drop a summary that only narrates the agent's own
+        process. The summary feeds the commit body, and both it and ``pull_request_body`` feed
+        the PR description.
+        """
+        result.summary = pr_publish.redact_task_prompt(result.summary, task_prompt)
+        result.validation = pr_publish.redact_task_prompt(result.validation, task_prompt)
+        result.pull_request_body = pr_publish.redact_task_prompt(
+            result.pull_request_body, task_prompt
+        )
+        result.publish_summary = pr_publish.publishable_summary(result.summary)
+
+    @staticmethod
     def _commit_title(result: CodexRunResult) -> str:
         return pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply Codex changes"
+            result.pull_request_title, result.publish_summary, fallback="Apply Codex changes"
         )
 
     @staticmethod
     def _commit_body(result: CodexRunResult) -> str:
-        return pr_publish.commit_body(result.summary, result.validation)
+        return pr_publish.commit_body(result.publish_summary, result.validation)
 
     @staticmethod
     def _clone_url_with_token(repository_url: str, github_config: dict) -> str:

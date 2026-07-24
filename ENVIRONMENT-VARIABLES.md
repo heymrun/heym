@@ -96,7 +96,7 @@ The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. Wh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python **tools** and **skills** run: `auto` (Docker sandbox, fail-closed), `docker` (never falls back), or `subprocess` (no security boundary; trusted/local only). Governs both paths. | `auto` |
+| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python **tools** and **skills** run: `auto` (Docker sandbox, fail-closed), `docker` (never falls back), or `subprocess` (no security boundary; trusted/local only). Governs both paths. MCP `stdio` isolation is **not** affected by this and has its own `HEYM_MCP_STDIO_SANDBOX`. | `auto` |
 | `HEYM_PYTHON_TOOL_IMAGE` | Image used for the Python tool Docker sandbox (also the skill sandbox fallback when `HEYM_SKILL_IMAGE` is empty). Empty auto-detects the running backend image. | — |
 
 ## Agent skill sandbox
@@ -115,6 +115,39 @@ Untrusted Agent Python **skills** run in a hardened, throwaway sibling container
 | `HEYM_SKILL_WORKSPACE_DIR` | Directory (under the mount) where per-run skill workspaces are created. | `<mount>/_skill-workspaces` |
 | `HEYM_SKILL_DOCKER_WORKSPACE_VOLUME` | Docker volume shared with each skill runner. Falls back to `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` (`heym-codex-workspaces` in Compose), else the backend's own mount is inspected. | — |
 | `HEYM_SKILL_HOST_WORKSPACE_DIR` | Absolute host path for the workspace mount when using a bind mount instead of a Docker volume. | — |
+
+## MCP stdio sandbox
+
+The MCP `stdio` transport starts a server process from a command supplied in the node configuration (Agent MCP connections, the MCP Call node, and the editor's "Fetch tools" preview). That process runs in a hardened, throwaway sibling container rather than on the backend host: non-root, `cap-drop ALL`, `no-new-privileges`, read-only root fs, resource limits, and **no Docker socket**. Network egress is allowed, because `npx` / `uvx` must fetch their package and MCP servers exist to call APIs.
+
+`HEYM_MCP_STDIO_SANDBOX` is deliberately separate from `HEYM_PYTHON_TOOL_SANDBOX`: an operator who selects `subprocess` there for Python tool compatibility (as `run.sh` does automatically for native dev) must not silently lose MCP stdio isolation as a side effect. Unknown values fall back to `auto`, never to host execution.
+
+A `docker run [flags] IMAGE [args]` command keeps working: Heym starts `IMAGE` itself with the hardening applied, carrying over `-e`, `-w` and `--entrypoint`. Flags that would dissolve the boundary (`--privileged`, `--cap-add`, `--device`, `--security-opt`, `--network host`, `--pid/--ipc/--uts host`, `--env-file`, `--volumes-from`) are refused with an explanatory error.
+
+**Caller-supplied mounts (`-v`, `--volume`, `--mount`, `--volumes-from`) are refused outright.** Validating a mount source is not a winnable game: `//var/run/docker.sock` survives `os.path.normpath` because POSIX preserves exactly two leading slashes, and relative paths, symlinks and parent directories each defeat a denylist differently.
+
+**No application storage is mounted by default either.** The sandbox sees no Heym files unless you name a volume or directory explicitly, and that mount is read-only unless you also opt into writes. The skill/Codex/OpenCode workspace volumes are never auto-mounted: they hold every tenant's workspaces, so exposing one to a single caller's MCP process would be a cross-tenant read. If a file-oriented MCP server (for example `@modelcontextprotocol/server-filesystem`) needs data, point `HEYM_MCP_STDIO_FILES_VOLUME` at a volume you scope yourself, optionally narrowing it with `HEYM_MCP_STDIO_FILES_SUBPATH`.
+
+Inside the container the root filesystem is read-only and `/tmp` is a throwaway tmpfs, so the sandbox sets `HOME` and the npm/uv cache directories to paths under `/tmp` and mounts that tmpfs with `exec`. Without those, `npx` and `uvx` servers cannot run at all: the sandbox user's passwd home is `/nonexistent`, and Docker applies `noexec` to every `--tmpfs` that does not name `exec` explicitly. Values you set on the connection are applied after these defaults, so you can override them.
+
+Only the env vars set on the connection reach the server. The backend's own environment (`SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`, provider API keys) is never forwarded; the MCP SDK supplies a safe default `PATH`/`HOME`/`SHELL`/`TERM`/`USER`/`LOGNAME` set on top.
+
+> **Operator-only escape hatches.** `HEYM_MCP_STDIO_SANDBOX=subprocess` and `HEYM_MCP_STDIO_FILES_HOST_DIR` are never settable by a workflow author, only by whoever runs the deployment. Both can remove the isolation this section describes, so treat them as trusted single-user / single-tenant options and leave them unset on anything multi-user.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_MCP_STDIO_SANDBOX` | Isolation for MCP `stdio` servers: `auto` (Docker required, fail-closed), `docker` (never falls back), or `subprocess`. Independent of `HEYM_PYTHON_TOOL_SANDBOX`. ⚠️ `subprocess` removes the boundary entirely and runs the caller's command on the backend host, which is the GHSA-378x-q589-34mv condition: **trusted single-user instances only, never on a shared or hosted deployment.** | `auto` |
+| `HEYM_MCP_STDIO_IMAGE` | Image used to run non-`docker` stdio commands (`npx`, `uvx`, `node`, `python`, …). Falls back to `HEYM_PYTHON_TOOL_IMAGE`, then `HEYM_CODEX_DOCKER_IMAGE` (which Compose and the single GHCR image both set), then `docker inspect` of the running backend container. If none resolve, stdio fails closed with an explanation rather than guessing a tag. The `docker run <image>` command form names its own image and is unaffected. | — |
+| `HEYM_MCP_STDIO_FILES_PATH` | Mount point inside the sandbox for the optional file mount below. | `/mnt/heym-files` |
+| `HEYM_MCP_STDIO_FILES_VOLUME` | Docker volume to expose to MCP servers. **Nothing is mounted unless you set this** (or the host-dir variant); there is no fallback to application volumes. | — |
+| `HEYM_MCP_STDIO_FILES_SUBPATH` | Mount only this subpath of the volume, so a shared volume can be scoped per tenant or per purpose. | — |
+| `HEYM_MCP_STDIO_FILES_HOST_DIR` | Absolute host path to expose instead of a volume. No fallback to `FILE_STORAGE_DIR`. ⚠️ This bind-mounts a backend host path into the sandbox, so a wide path (or one holding several tenants' data) weakens the boundary: scope it deliberately, and prefer a volume with `HEYM_MCP_STDIO_FILES_SUBPATH` on shared deployments. | — |
+| `HEYM_MCP_STDIO_FILES_WRITABLE` | Mount the file mount read-write. Read-only otherwise. | `false` |
+| `HEYM_MCP_STDIO_TMPFS_SIZE` | Size of the writable `/tmp` tmpfs, which holds the npm/uv caches and anything the server installs at startup. Raise it for large packages. | `512m` |
+| `HEYM_MCP_STDIO_MEMORY` | Memory limit for MCP stdio containers. | `512m` |
+| `HEYM_MCP_STDIO_CPUS` | CPU limit for MCP stdio containers. | `2` |
+| `HEYM_MCP_STDIO_PIDS` | PID limit for MCP stdio containers. | `256` |
+| `HEYM_MCP_STDIO_USER` | Non-root user for the MCP server, as a canonical `uid:gid` of two positive numbers. Anything else falls back to the default: a bare `uid` (Docker would put it in group root), a zero uid or gid in any spelling (`0`, `00`, `+0`, `:0`, `1000:0`), a user name, or a value with whitespace or extra fields. The value is re-rendered from the parsed numbers, so what is validated is what Docker receives. | `65534:65534` |
 
 ## Docker log access
 

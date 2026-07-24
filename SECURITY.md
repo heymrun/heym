@@ -82,9 +82,11 @@ vulnerabilities in Heym:
   request forgery (SSRF) in the MCP HTTP/SSE tool transports, for reporting a horizontal IDOR
   in template get-by-id (GHSA-5748-x76g-v68m) and a missing creator gate in team
   member management that let any member alter the roster and reach team-shared
-  credentials (GHSA-vxpw-x7j7-8723), and for reporting unsandboxed skill code
+  credentials (GHSA-vxpw-x7j7-8723), for reporting unsandboxed skill code
   execution where Agent Python skills ran outside the Docker isolation mandated
-  for Python tools (GHSA-hcv7-mg77-pg73).
+  for Python tools (GHSA-hcv7-mg77-pg73), and for reporting command execution via
+  the MCP `stdio` transport, where a caller-supplied command was started on the
+  backend host before any MCP validation could reject it (GHSA-378x-q589-34mv).
 - [@EQSTLab](https://github.com/EQSTLab) (reporter) and
   [@min8282](https://github.com/min8282) (finder) for reporting a backend remote
   code execution in the Playwright node, where the custom `playwrightCode` field

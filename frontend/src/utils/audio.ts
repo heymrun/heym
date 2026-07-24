@@ -1,3 +1,9 @@
+export function vibrate(pattern: number | number[] = 50): void {
+  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+    navigator.vibrate(pattern);
+  }
+}
+
 export function playSuccessSound(): void {
   const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
 

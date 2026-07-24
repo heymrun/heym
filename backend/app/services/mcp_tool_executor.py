@@ -6,8 +6,6 @@ import asyncio
 import ipaddress
 import json
 import logging
-import os
-import shutil
 import socket
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -29,6 +27,10 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.message import SessionMessage
 
 from app.config import settings
+from app.services.mcp_stdio_sandbox import (
+    build_sandboxed_command,
+    force_remove_container,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -491,19 +493,38 @@ async def _open_transport(
         user_env = conn.get("env")
         if not command:
             raise ValueError("stdio connection requires 'command'")
-        # Always inherit the process environment so PATH is available (e.g. to find
-        # docker, npx, uvx). User-supplied vars are merged on top.
-        merged_env = {**os.environ, **(user_env or {})} if user_env else None
-        # Resolve to absolute path using the current process PATH so the binary is
-        # always found regardless of what env the subprocess receives.
-        resolved_command = shutil.which(command) or command
-        server_params = StdioServerParameters(
-            command=resolved_command,
-            args=args if isinstance(args, list) else [],
-            env=merged_env,
+        # Rewrite the command so the MCP server starts inside a hardened, throwaway
+        # container instead of on the backend host (GHSA-378x-q589-34mv). This runs
+        # before anything is spawned: once the child exists its side effects have
+        # already fired, so no later check (including the MCP handshake, which needs
+        # the child's pipes) can undo them.
+        #
+        # Only the caller's own env vars are forwarded. The MCP SDK merges those
+        # over get_default_environment(), a deliberate allowlist (PATH, HOME, SHELL,
+        # TERM, USER, LOGNAME), so PATH stays available for docker/npx/uvx without
+        # handing the child SECRET_KEY, ENCRYPTION_KEY, DATABASE_URL or provider API
+        # keys. Merging os.environ here would defeat that allowlist.
+        sandboxed = build_sandboxed_command(
+            command,
+            args if isinstance(args, list) else [],
+            user_env if isinstance(user_env, dict) else None,
         )
-        async with stdio_client(server_params) as (read_stream, write_stream):
-            yield read_stream, write_stream
+        if sandboxed.notes:
+            logger.info("MCP stdio sandbox adjusted the command: %s", "; ".join(sandboxed.notes))
+        server_params = StdioServerParameters(
+            command=sandboxed.argv[0],
+            args=sandboxed.argv[1:],
+            env=sandboxed.env,
+        )
+        try:
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                yield read_stream, write_stream
+        finally:
+            # The MCP SDK terminates the `docker run` client process, but a
+            # detached container can outlive it (and with it the user's command).
+            # Remove it explicitly so nothing survives the session.
+            if sandboxed.container_name:
+                await asyncio.to_thread(force_remove_container, sandboxed.container_name)
 
     elif transport == "sse":
         url = conn.get("url", "")

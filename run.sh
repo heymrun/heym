@@ -244,6 +244,13 @@ if [ "${HEYM_PYTHON_TOOL_SANDBOX:-auto}" = "auto" ] && [ -z "${HEYM_PYTHON_TOOL_
     export HEYM_PYTHON_TOOL_SANDBOX=subprocess
 fi
 
+# MCP stdio isolation is deliberately NOT downgraded here. It has its own
+# setting (HEYM_MCP_STDIO_SANDBOX) precisely so the Python tool fallback above
+# cannot silently restore host command execution for MCP servers, which is the
+# GHSA-378x-q589-34mv issue. Native dev still has Docker (Postgres runs in it),
+# so `auto` works; an operator who genuinely wants host execution must opt in
+# explicitly with HEYM_MCP_STDIO_SANDBOX=subprocess.
+
 # Same for custom Playwright code (playwrightCode / Run Code mode): auto Docker
 # sandbox resolves the runner image via `docker inspect` of this process's
 # container, which fails on native run.sh. Default to the in-process path for

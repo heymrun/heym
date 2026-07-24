@@ -11,11 +11,12 @@ is never placed inside the OpenCode process/container.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from app.config import settings
@@ -23,9 +24,22 @@ from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
 from app.services.opencode_catalog import OPENCODE_DEFAULT_MODEL, OPENCODE_ZEN_BASE_URL
 
+logger = logging.getLogger(__name__)
+
 _REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
-    {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
+    {
+        "draft_pr",
+        "open_pr",
+        "commit_push",
+        "direct_commit",
+        "update_existing_pr",
+        "open_or_update_pr",
+    }
 )
+# Modes that update the agent's existing open PR when one exists, else open a new one.
+# ``open_or_update_pr`` is the intuitive single mode for re-runs; ``update_existing_pr`` is kept
+# for back-compat and behaves identically.
+_OPEN_OR_UPDATE_MODES: frozenset[str] = frozenset({"update_existing_pr", "open_or_update_pr"})
 _PR_SCREENSHOT_RELEASE_TAG = "opencode-pr-assets"
 
 _LOCAL_ONLY_RULES = (
@@ -39,11 +53,29 @@ _LOCAL_ONLY_RULES = (
     "and start a short-lived preview/dev server solely to capture the UI, then stop the server. "
     "Do not commit screenshot binaries into source; Heym uploads those images onto the pull "
     "request afterward. "
-    "End your final assistant message with a dedicated line "
+    "Capture screenshots BEFORE you write your final message. Your final assistant message MUST "
+    "be the `## Change Summary` (with the `PR_TITLE:` line) — never an announcement of a pending "
+    "step such as 'Now let me take a screenshot'. If you are about to announce a next step, "
+    "perform that step first, then report. "
+    "PR metadata is MANDATORY. End your final assistant message with a dedicated line "
     "`PR_TITLE: <imperative one-line change description, ideally <=72 chars>` — never use "
-    "placeholders such as Done, Fixed, or Update."
+    "placeholders such as Done, Fixed, Update, or Completed. "
+    "A good PR title is specific and action-oriented, e.g. "
+    "`PR_TITLE: Fix OpenCode fallback summary when no assistant message is returned` or "
+    "`PR_TITLE: Add case-insensitive screenshot discovery for OpenCode PRs`. "
+    "Bad titles are generic or incomplete, e.g. `PR_TITLE: Fix issue`, `PR_TITLE: Update code`, "
+    "`PR_TITLE: Done`, or `PR_TITLE: Apply changes`. "
+    "Your final assistant message MUST also contain a `## Change Summary` section describing "
+    "what changed and why — Heym publishes that section and nothing else, so a message that only "
+    "narrates your process (for example `Both pass. Let me do a final review:`) leaves the pull "
+    "request with no description. If you saved screenshots, mention their file paths so they can "
+    "be attached automatically. "
+    f"{pr_publish.PR_CONTENT_POLICY}"
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
+# Used when OpenCode produces no final assistant message. It never describes the change, so it
+# must not become a PR/commit subject — and it deliberately does not restate the task prompt.
+_NO_FINAL_MESSAGE_SUMMARY = "OpenCode completed without a final assistant message."
 
 
 @dataclass(frozen=True)
@@ -70,6 +102,9 @@ class OpenCodeRunResult:
     status: str = "completed"
     summary: str = ""
     validation: str = ""
+    # ``summary`` narrowed to what may be published to GitHub — see ``_publishable_summary``.
+    # Deliberately absent from ``to_output()``: it exists for the commit/PR seam, not the UI.
+    publish_summary: str = ""
     pull_request_title: str = ""
     pull_request_body: str = ""
     diff: str = ""
@@ -152,8 +187,16 @@ class OpenCodeRunnerService:
 
     # --- output parsing ---
     def parse_events(self, stdout: str) -> OpenCodeRunResult:
+        """Collect the run's events, preferring the agent's declared change summary.
+
+        OpenCode streams an assistant message per step, so the *last* one is often mid-run
+        narration rather than the final report. Scanning every message for the agreed
+        ``## Change Summary`` / ``PR_TITLE:`` markers keeps commentary out of the pull request.
+        """
         events: list[dict] = []
-        summary = ""
+        last_message = ""
+        change_summary = ""
+        pull_request_title = ""
         for raw in (stdout or "").splitlines():
             line = raw.strip()
             if not line:
@@ -166,17 +209,59 @@ class OpenCodeRunnerService:
                 continue
             events.append(event)
             text = self._event_assistant_text(event)
-            if text:
-                summary = text
-        if not summary:
-            summary = "OpenCode completed without a final assistant message."
-        pull_request_title, cleaned_summary = pr_publish.extract_pr_title_line(summary)
+            if not text:
+                continue
+            title, cleaned = pr_publish.extract_pr_title_line(text)
+            if title:
+                pull_request_title = title
+            section = pr_publish.extract_change_summary_section(cleaned)
+            if section:
+                change_summary = section
+            last_message = cleaned
         return OpenCodeRunResult(
             status="completed",
-            summary=cleaned_summary,
+            summary=change_summary or last_message or _NO_FINAL_MESSAGE_SUMMARY,
             pull_request_title=pull_request_title,
             raw_events=events,
         )
+
+    def _normalize_pr_metadata(self, result: OpenCodeRunResult, task_prompt: str) -> None:
+        """Shape the PR title/body for publishing, keeping the task prompt out of both.
+
+        ``task_prompt`` is used only to *remove* echoes of itself — never as a source of
+        published text (see ``pr_publish.PR_CONTENT_POLICY``).
+        """
+        result.summary = pr_publish.redact_task_prompt(result.summary, task_prompt)
+        result.pull_request_body = pr_publish.redact_task_prompt(
+            result.pull_request_body, task_prompt
+        )
+        result.publish_summary = self._publishable_summary(result)
+        result.pull_request_title = self._ensure_meaningful_pr_title(result)
+        result.pull_request_body = self._ensure_pr_body(result)
+
+    @staticmethod
+    def _publishable_summary(result: OpenCodeRunResult) -> str:
+        return pr_publish.publishable_summary(result.summary, placeholder=_NO_FINAL_MESSAGE_SUMMARY)
+
+    def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult) -> str:
+        """Return a meaningful PR title, derived only from what the agent said it changed."""
+        for candidate in (result.pull_request_title, result.publish_summary):
+            title = pr_publish.normalize_title_candidate(candidate)
+            if pr_publish.is_meaningful_commit_title(title):
+                return title
+        return "Apply OpenCode changes"
+
+    def _ensure_pr_body(self, result: OpenCodeRunResult) -> str:
+        """Return a PR body built only from the agent's description of the change."""
+        body = str(result.pull_request_body or "").strip()
+        if body:
+            return body
+        summary = result.publish_summary
+        if not summary:
+            return pr_publish.changed_files_body(result.changed_files, agent="OpenCode")
+        if summary.lstrip().startswith("#"):
+            return summary
+        return f"## Change Summary\n\n{summary}"
 
     @staticmethod
     def _event_assistant_text(event: dict) -> str:
@@ -269,9 +354,12 @@ class OpenCodeRunnerService:
         home = Path(f"{workspace}.oc-home")
         home.mkdir(parents=True, exist_ok=True)
 
-        # ``update_existing_pr`` clones the existing PR branch so OpenCode works on top of it; if
-        # that branch does not exist yet it falls back to the base branch (same as Codex).
-        if request.publish_mode == "update_existing_pr":
+        # update/open-or-update modes clone the existing PR branch so OpenCode works on top of it;
+        # if that branch does not exist yet it falls back to the base branch (same as Codex).
+        if request.publish_mode in _OPEN_OR_UPDATE_MODES:
+            # Resolve the real head branch of the agent's open PR: the configured branch name is
+            # often generated per run and would otherwise never match, opening a new PR instead.
+            request = replace(request, branch_name=self._resolve_existing_pr_branch(request))
             try:
                 self._clone_branch(workspace, request, request.branch_name)
             except ValueError:
@@ -290,20 +378,97 @@ class OpenCodeRunnerService:
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
+        # After ``changed_files``: the PR body falls back to the file list when the agent
+        # never produced a publishable change summary.
+        self._normalize_pr_metadata(result, request.task_prompt)
+        if request.publish_mode in _REMOTE_PUBLISH_MODES:
+            # Finish a run that stopped mid-task (e.g. announced a screenshot but never took it)
+            # so the screenshot and a real summary make it onto the pull request.
+            self._finish_incomplete_run(workspace, home, request, model, result)
         if result.status == "completed" and request.publish_mode in _REMOTE_PUBLISH_MODES:
             self._publish(workspace, request, result)
         return result
 
+    def _resolve_existing_pr_branch(self, request: OpenCodeRunRequest) -> str:
+        """Head branch of the agent's existing open PR to update, or the configured branch."""
+        owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
+        gh = GitHubService(request.github_config)
+        try:
+            return pr_publish.resolve_update_existing_pr_branch(
+                gh,
+                owner,
+                repo,
+                base_branch=request.base_branch,
+                configured_branch=request.branch_name,
+            )
+        finally:
+            gh.close()
+
+    def _finish_incomplete_run(
+        self,
+        workspace: Path,
+        home: Path,
+        request: OpenCodeRunRequest,
+        model: str,
+        result: OpenCodeRunResult,
+    ) -> None:
+        """Run one more OpenCode pass when the first ended before finishing the task.
+
+        The follow-up runs in the same workspace, so the in-progress edits are already on disk; it
+        only captures any promised screenshot and returns a real summary. Best-effort: a failure
+        never breaks the primary run. When a UI change still has no screenshot afterwards, a
+        visible note is added so the gap is never silent.
+        """
+        try:
+            has_screenshots = bool(pr_publish.discover_pr_screenshots(workspace, self._git_output))
+            if pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=result.changed_files,
+                publish_summary=result.publish_summary,
+                ui_change=pr_publish.changed_files_touch_ui(result.changed_files),
+                has_screenshots=has_screenshots,
+            ):
+                prompt = f"{_LOCAL_ONLY_RULES}\n\n{pr_publish.FINISHING_PASS_PREAMBLE}"
+                stdout = self._exec_opencode(
+                    workspace, home, request, model, prompt_override=prompt
+                )
+                finished = self.parse_events(stdout)
+                if finished.summary and finished.summary != _NO_FINAL_MESSAGE_SUMMARY:
+                    result.summary = finished.summary
+                if finished.pull_request_title:
+                    result.pull_request_title = finished.pull_request_title
+                result.pull_request_body = ""  # rebuilt from the fresh summary below
+                result.diff = self._git_output(["git", "diff", "--binary"], workspace)
+                result.changed_files = self._changed_files(workspace)
+                self._normalize_pr_metadata(result, request.task_prompt)
+        except Exception:  # noqa: BLE001 - a finishing pass must never fail the primary run
+            pass
+        if pr_publish.changed_files_touch_ui(
+            result.changed_files
+        ) and not pr_publish.discover_pr_screenshots(workspace, self._git_output):
+            result.pull_request_body = pr_publish.note_missing_ui_screenshot(
+                result.pull_request_body
+            )
+
     def build_run_command(
-        self, model: str, request: OpenCodeRunRequest, workspace: Path
+        self,
+        model: str,
+        request: OpenCodeRunRequest,
+        workspace: Path,
+        *,
+        prompt: str | None = None,
     ) -> list[str]:
         """The ``<cli_command> run …`` argv (host binary locally, docker wrapper in deployments).
 
         ``--dir`` pins OpenCode to the cloned workspace. Without it OpenCode resolves its project by
         walking up from the process cwd and can edit files in an enclosing repository (e.g. Heym's
         own checkout) instead of the clone — the run then reports success with an empty diff.
+
+        ``prompt`` overrides the default task prompt (used by the finishing pass).
         """
-        prompt = f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
+        prompt = (
+            prompt if prompt is not None else f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
+        )
         cmd = [
             self.cli_command,
             "run",
@@ -327,6 +492,7 @@ class OpenCodeRunnerService:
         home: Path,
         request: OpenCodeRunRequest,
         model: str,
+        prompt_override: str | None = None,
     ) -> str:
         # HOME/XDG point at the per-run OpenCode home on the workspace volume. The docker wrapper
         # forwards these into the sibling container; locally OpenCode reads them directly.
@@ -334,7 +500,7 @@ class OpenCodeRunnerService:
         env["HOME"] = str(home)
         env["XDG_CONFIG_HOME"] = str(home / ".config")
         env["XDG_DATA_HOME"] = str(home / ".local" / "share")
-        cmd = self.build_run_command(model, request, workspace)
+        cmd = self.build_run_command(model, request, workspace, prompt=prompt_override)
         try:
             completed = subprocess.run(
                 cmd,
@@ -452,7 +618,7 @@ class OpenCodeRunnerService:
             self._push_branch(workspace, request, request.base_branch)
             result.pushed_branch = request.base_branch
             return
-        if mode == "update_existing_pr":
+        if mode in _OPEN_OR_UPDATE_MODES:
             on_existing = self._current_branch(workspace) == request.branch_name
             self._commit_changes(workspace, request.branch_name, result, new_branch=not on_existing)
             self._push_branch(workspace, request, request.branch_name)
@@ -460,9 +626,9 @@ class OpenCodeRunnerService:
             existing_url = self._open_pr_url_for_head(request, request.branch_name)
             if existing_url:
                 result.pull_request_url = existing_url
-                pr_number = pr_publish.pr_number_from_url(existing_url)
-                if pr_number is not None:
-                    self._attach_pr_screenshots(workspace, request, result, pr_number)
+                self._update_pr_body_with_screenshots(
+                    workspace, request, result, request.branch_name, existing_url
+                )
             else:
                 result.pull_request_url = self._create_pr(
                     workspace, request, result, request.branch_name, draft=False
@@ -493,7 +659,7 @@ class OpenCodeRunnerService:
             self._run_command(["git", "checkout", "-B", branch], cwd=workspace)
         self._run_command(["git", "add", "-A"], cwd=workspace)
         title = pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply OpenCode changes"
+            result.pull_request_title, result.publish_summary, fallback="Apply OpenCode changes"
         )
         commit_cmd = [
             "git",
@@ -504,7 +670,7 @@ class OpenCodeRunnerService:
             "-m",
             title,
         ]
-        body = pr_publish.commit_body(result.summary, result.validation)
+        body = pr_publish.commit_body(result.publish_summary, result.validation)
         if body and body != title:
             commit_cmd.extend(["-m", body])
         self._run_command(commit_cmd, cwd=workspace)
@@ -570,10 +736,15 @@ class OpenCodeRunnerService:
         draft: bool,
     ) -> str | None:
         owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
-        title = pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply OpenCode changes"
-        )
-        pr_body = str(result.pull_request_body or "").strip() or result.summary or None
+        title = result.pull_request_title or "Apply OpenCode changes"
+        if not pr_publish.is_meaningful_commit_title(title):
+            logger.warning(
+                "OpenCode PR title is missing or low quality; creating PR with title: %s", title
+            )
+        # Embed screenshots BEFORE creating the PR so it opens already containing them.
+        pr_body = self._screenshot_body(workspace, request, result, head) or None
+        if not pr_body:
+            logger.warning("OpenCode PR body is empty; creating PR without a description")
         gh = GitHubService(request.github_config)
         try:
             pr = gh.create_pull_request(
@@ -581,54 +752,75 @@ class OpenCodeRunnerService:
             )
         finally:
             gh.close()
-        url = str(pr.get("html_url") or "").strip() or None
-        pr_number = pr.get("number")
-        if url and isinstance(pr_number, int):
-            self._attach_pr_screenshots(workspace, request, result, pr_number)
-        return url
+        return str(pr.get("html_url") or "").strip() or None
 
-    def _attach_pr_screenshots(
+    def _screenshot_body(
         self,
         workspace: Path,
         request: OpenCodeRunRequest,
         result: OpenCodeRunResult,
-        pr_number: int,
-    ) -> None:
+        head: str,
+    ) -> str:
+        """Return the PR body with any UI screenshots uploaded and embedded.
+
+        Uploads discovered screenshots as release assets (keyed on the branch, so this can run
+        before the PR exists) and injects a ``## Screenshots`` section. Best-effort: on any failure
+        the plain body is returned. Also updates ``result.pull_request_body``.
+        """
+        base_body = str(result.pull_request_body or "").strip() or result.publish_summary
         try:
             screenshots = pr_publish.discover_pr_screenshots(workspace, self._git_output)
-            if not screenshots:
-                return
+            if screenshots:
+                owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
+                gh = GitHubService(request.github_config)
+                try:
+                    injected = pr_publish.upload_and_inject_screenshots(
+                        gh,
+                        screenshots=screenshots,
+                        owner=owner,
+                        repo=repo,
+                        base_branch=request.base_branch,
+                        asset_slug=head,
+                        base_body=base_body,
+                        release_tag=_PR_SCREENSHOT_RELEASE_TAG,
+                        release_name="OpenCode PR screenshots",
+                        release_body=(
+                            "Shared bucket for Heym OpenCode UI screenshots attached to pull "
+                            "requests. Assets are named <branch>-… and are not part of source."
+                        ),
+                    )
+                finally:
+                    gh.close()
+                if injected:
+                    base_body = injected
+        except Exception:  # noqa: BLE001 - screenshot embedding is best-effort
+            pass
+        result.pull_request_body = base_body
+        return base_body
+
+    def _update_pr_body_with_screenshots(
+        self,
+        workspace: Path,
+        request: OpenCodeRunRequest,
+        result: OpenCodeRunResult,
+        head: str,
+        pr_url: str,
+    ) -> None:
+        """Embed screenshots and push the updated body onto an already-open PR."""
+        pr_number = pr_publish.pr_number_from_url(pr_url)
+        if pr_number is None:
+            return
+        body = self._screenshot_body(workspace, request, result, head)
+        if not body:
+            return
+        try:
             owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
             gh = GitHubService(request.github_config)
             try:
-                base_body = (
-                    str(result.pull_request_body or "").strip()
-                    or str(result.summary or "").strip()
-                    or ""
-                )
-                updated_body = pr_publish.upload_and_inject_screenshots(
-                    gh,
-                    screenshots=screenshots,
-                    owner=owner,
-                    repo=repo,
-                    base_branch=request.base_branch,
-                    pr_number=pr_number,
-                    base_body=base_body,
-                    release_tag=_PR_SCREENSHOT_RELEASE_TAG,
-                    release_name="OpenCode PR screenshots",
-                    release_body=(
-                        "Shared bucket for Heym OpenCode UI screenshots attached to pull requests. "
-                        "Assets are named pr-<number>-… and are not part of source."
-                    ),
-                )
-                if not updated_body:
-                    return
-                gh.update_issue(owner, repo, pr_number, body=updated_body)
-                result.pull_request_body = updated_body
+                gh.update_issue(owner, repo, pr_number, body=body)
             finally:
                 gh.close()
-        except Exception:
-            # Screenshot attach is best-effort; never fail the publish path for it.
+        except Exception:  # noqa: BLE001 - updating the body is best-effort
             return
 
     def cleanup_workspace(self, workspace_path: str | None) -> None:

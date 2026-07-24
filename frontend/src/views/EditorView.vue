@@ -270,6 +270,38 @@ function toggleRightPanel(): void {
 }
 
 const { analysisPanelOpen } = storeToRefs(workflowStore);
+const { staleSaveDialogOpen, staleSaveBlockedARun, staleSaveMode } =
+  storeToRefs(workflowStore);
+
+// Two conflicts, two remedies: this tab's edits would replace a newer version ("overwrite"), or
+// this tab has no edits and is simply showing an outdated workflow ("reload").
+const staleSaveDialogTitle = computed(() =>
+  staleSaveMode.value === "reload"
+    ? "Workflow Changed Elsewhere"
+    : "Stale Workflow Detected",
+);
+
+const staleSaveDialogMessage = computed(() => {
+  if (staleSaveMode.value === "reload") {
+    return "This workflow was saved elsewhere, so this tab is showing an older version. Running it now would execute the newer saved version instead of what you see here.";
+  }
+  return staleSaveBlockedARun.value
+    ? "A newer version of this workflow has been saved since you opened it. Running will overwrite it with your version. Continue?"
+    : "A newer version of this workflow has been saved since you opened it. Do you want to overwrite it?";
+});
+
+const staleSaveConfirmLabel = computed(() => {
+  if (staleSaveMode.value === "reload") return "Reload and Run";
+  return staleSaveBlockedARun.value ? "Override and Run" : "Override";
+});
+
+async function onConfirmStaleSave(): Promise<void> {
+  if (staleSaveMode.value === "reload") {
+    await workflowStore.reloadStaleWorkflowAndRun();
+    return;
+  }
+  await workflowStore.forceSaveWorkflow();
+}
 
 const analysisWorkflowId = computed(() => workflowStore.currentWorkflow?.id ?? "");
 const analysisWorkflowPayload = computed(() => ({
@@ -2309,6 +2341,44 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               >
                 Close
               </Button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="staleSaveDialogOpen"
+          class="fixed inset-0 z-50 flex items-center justify-center"
+        >
+          <div
+            class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            @click="workflowStore.cancelStaleSave()"
+          />
+          <div class="relative bg-card border rounded-lg shadow-xl w-[90vw] max-w-[440px]">
+            <div class="p-6">
+              <h3 class="font-semibold text-base mb-2">
+                {{ staleSaveDialogTitle }}
+              </h3>
+              <p class="text-sm text-muted-foreground mb-6">
+                {{ staleSaveDialogMessage }}
+              </p>
+              <div class="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  @click="workflowStore.cancelStaleSave()"
+                >
+                  {{ staleSaveBlockedARun ? "Cancel Run" : "Cancel" }}
+                </Button>
+                <Button
+                  variant="gradient"
+                  @click="onConfirmStaleSave()"
+                >
+                  {{ staleSaveConfirmLabel }}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

@@ -75,7 +75,9 @@ class TestAttachPrScreenshots(unittest.TestCase):
         self.runner = CodexRunnerService()
         self.workspace = Path("/tmp/ws")
 
-    def test_create_pr_attaches_screenshots_and_updates_body(self) -> None:
+    def test_create_pr_opens_already_containing_screenshots(self) -> None:
+        # Screenshots are uploaded and embedded BEFORE the PR is created, so it opens with them
+        # (no follow-up update_issue on the create path).
         shot = Path("/tmp/ws/frontend/.e2e-artifacts/ui.png")
         result = CodexRunResult(
             status="completed",
@@ -101,9 +103,9 @@ class TestAttachPrScreenshots(unittest.TestCase):
         }
         gh.upload_release_asset.return_value = {
             "browser_download_url": (
-                "https://github.com/acme/app/releases/download/codex-pr-assets/pr-347-ui.png"
+                "https://github.com/acme/app/releases/download/codex-pr-assets/codex-run-ui.png"
             ),
-            "name": "pr-347-ui.png",
+            "name": "codex-run-ui.png",
         }
 
         self.runner._discover_pr_screenshots = MagicMock(return_value=[shot])  # type: ignore[method-assign]
@@ -115,23 +117,20 @@ class TestAttachPrScreenshots(unittest.TestCase):
 
         self.assertEqual(url, "https://github.com/acme/app/pull/347")
         gh_cls.assert_called()
-        gh.get_release_by_tag.assert_called_once_with("acme", "app", "codex-pr-assets")
-        gh.create_release.assert_called_once()
-        self.assertEqual(gh.create_release.call_args.args[2], "codex-pr-assets")
         release_kwargs = gh.create_release.call_args.kwargs
         self.assertTrue(release_kwargs.get("prerelease"))
-        self.assertFalse(release_kwargs.get("draft"))
-        upload_kwargs = gh.upload_release_asset.call_args.kwargs
-        self.assertEqual(upload_kwargs["name"], "pr-347-ui.png")
-        gh.update_issue.assert_called_once()
-        updated_body = gh.update_issue.call_args.kwargs["body"]
+        # Asset name is keyed on the branch (available before the PR exists), not the PR number.
+        self.assertEqual(gh.upload_release_asset.call_args.kwargs["name"], "codex-run-ui.png")
+        # The PR is created with the screenshot already in its body; no post-create body update.
+        gh.update_issue.assert_not_called()
+        created_body = gh.create_pull_request.call_args.kwargs["body"]
         self.assertIn(
-            "https://github.com/acme/app/releases/download/codex-pr-assets/pr-347-ui.png",
-            updated_body,
+            "https://github.com/acme/app/releases/download/codex-pr-assets/codex-run-ui.png",
+            created_body,
         )
-        self.assertIn("![pr-347-ui.png]", updated_body)
-        self.assertNotIn("Attach the generated screenshot", updated_body)
-        self.assertEqual(result.pull_request_body, updated_body)
+        self.assertIn("![codex-run-ui.png]", created_body)
+        self.assertNotIn("Attach the generated screenshot", created_body)
+        self.assertEqual(result.pull_request_body, created_body)
 
     def test_reuses_shared_release_and_replaces_same_named_asset(self) -> None:
         shot = Path("/tmp/ws/frontend/.e2e-artifacts/ui.png")
@@ -145,13 +144,13 @@ class TestAttachPrScreenshots(unittest.TestCase):
             "id": 99,
             "upload_url": "https://uploads.github.com/repos/acme/app/releases/99/assets{?name,label}",
             "tag_name": "codex-pr-assets",
-            "assets": [{"id": 55, "name": "pr-347-ui.png"}],
+            "assets": [{"id": 55, "name": "codex-run-ui.png"}],
         }
         gh.upload_release_asset.return_value = {
             "browser_download_url": (
-                "https://github.com/acme/app/releases/download/codex-pr-assets/pr-347-ui.png"
+                "https://github.com/acme/app/releases/download/codex-pr-assets/codex-run-ui.png"
             ),
-            "name": "pr-347-ui.png",
+            "name": "codex-run-ui.png",
         }
         self.runner._discover_pr_screenshots = MagicMock(return_value=[shot])  # type: ignore[method-assign]
 
@@ -160,7 +159,7 @@ class TestAttachPrScreenshots(unittest.TestCase):
 
         gh.create_release.assert_not_called()
         gh.delete_release_asset.assert_called_once_with("acme", "app", 55)
-        self.assertEqual(gh.upload_release_asset.call_args.kwargs["name"], "pr-347-ui.png")
+        self.assertEqual(gh.upload_release_asset.call_args.kwargs["name"], "codex-run-ui.png")
 
     def test_attach_failure_does_not_raise(self) -> None:
         result = CodexRunResult(
@@ -186,7 +185,7 @@ class TestAttachPrScreenshots(unittest.TestCase):
         self.assertEqual(url, "https://github.com/acme/app/pull/1")
         gh.create_release.assert_not_called()
 
-    def test_update_existing_pr_also_attaches(self) -> None:
+    def test_update_existing_pr_updates_body_with_screenshots(self) -> None:
         result = CodexRunResult(status="completed", summary="done", changed_files=["a.vue"])
         self.runner._commit_changes = MagicMock()  # type: ignore[method-assign]
         self.runner._push_branch = MagicMock()  # type: ignore[method-assign]
@@ -194,17 +193,35 @@ class TestAttachPrScreenshots(unittest.TestCase):
         self.runner._open_pr_url_for_head = MagicMock(  # type: ignore[method-assign]
             return_value="https://github.com/acme/app/pull/42"
         )
-        self.runner._attach_pr_screenshots = MagicMock()  # type: ignore[method-assign]
+        self.runner._update_pr_body_with_screenshots = MagicMock()  # type: ignore[method-assign]
 
         self.runner._publish(self.workspace, _request("update_existing_pr"), result)
 
-        self.runner._attach_pr_screenshots.assert_called_once()
-        args = self.runner._attach_pr_screenshots.call_args
-        self.assertEqual(args.args[3], 42)
-        self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/42")
-        self.assertIs(args.args[2], result)
-        # shot path discovery happens inside attach; ensure we passed workspace
+        self.runner._update_pr_body_with_screenshots.assert_called_once()
+        args = self.runner._update_pr_body_with_screenshots.call_args
         self.assertEqual(args.args[0], self.workspace)
+        self.assertIs(args.args[2], result)
+        self.assertEqual(args.args[3], "codex/run")
+        self.assertEqual(args.args[4], "https://github.com/acme/app/pull/42")
+        self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/42")
+
+    def test_open_or_update_pr_updates_existing(self) -> None:
+        # The new intuitive mode shares the update-or-open path.
+        result = CodexRunResult(status="completed", summary="done", changed_files=["a.vue"])
+        self.runner._commit_changes = MagicMock()  # type: ignore[method-assign]
+        self.runner._push_branch = MagicMock()  # type: ignore[method-assign]
+        self.runner._current_branch = MagicMock(return_value="codex/run")  # type: ignore[method-assign]
+        self.runner._open_pr_url_for_head = MagicMock(  # type: ignore[method-assign]
+            return_value="https://github.com/acme/app/pull/42"
+        )
+        self.runner._update_pr_body_with_screenshots = MagicMock()  # type: ignore[method-assign]
+        self.runner._create_pr = MagicMock()  # type: ignore[method-assign]
+
+        self.runner._publish(self.workspace, _request("open_or_update_pr"), result)
+
+        self.runner._update_pr_body_with_screenshots.assert_called_once()
+        self.runner._create_pr.assert_not_called()
+        self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/42")
 
 
 class TestScreenshotBodyHelpers(unittest.TestCase):
@@ -219,14 +236,14 @@ class TestScreenshotBodyHelpers(unittest.TestCase):
         self.assertNotIn("Attach the generated", updated)
         self.assertIn("## Summary", updated)
 
-    def test_release_asset_name_prefixes_pr_number(self) -> None:
+    def test_release_asset_name_prefixes_sanitized_branch(self) -> None:
         self.assertEqual(
-            CodexRunnerService._release_asset_name(Path("ui.png"), 347, 0),
-            "pr-347-ui.png",
+            CodexRunnerService._release_asset_name(Path("ui.png"), "codex/run", 0),
+            "codex-run-ui.png",
         )
         self.assertEqual(
-            CodexRunnerService._release_asset_name(Path("board.png"), 42, 1),
-            "pr-42-board-1.png",
+            CodexRunnerService._release_asset_name(Path("board.png"), "codex/run", 1),
+            "codex-run-board-1.png",
         )
 
     def test_parse_pr_number_from_url(self) -> None:

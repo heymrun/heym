@@ -502,20 +502,33 @@ test("collapses toolbar labels to icons when tight and keeps them when wide, wit
 test("shows a failed workflow execution", async ({ page }) => {
   const workflow = await createWorkflow(page, `Failing Workflow ${Date.now()}`);
 
-  await page.goto(`/workflows/${workflow.id}`);
-  await page.getByTestId("node-palette-throwError").dblclick();
-  await page.getByTestId("save-workflow-button").click();
-  await page.getByRole("button", { name: "Run Workflow" }).click();
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByTestId("node-palette-throwError").dblclick();
+    const saveButton = page.getByTestId("save-workflow-button");
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await expect(saveButton).toBeDisabled();
 
-  await expect(page.getByText("Last Executed Node")).toBeVisible();
-  await expect(page.getByText("error", { exact: true })).toBeVisible();
-  // Scope to the output <pre> — the Execution Highlights popup also renders this
-  // node's output as a preview span, so an unscoped getByText is ambiguous.
-  await expect(
-    page.locator("pre").filter({ hasText: /"httpStatusCode":\s*400/ }),
-  ).toBeVisible();
+    const completionPromise = page.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === "POST" &&
+        new URL(candidate.url()).pathname === `/api/workflows/${workflow.id}/execute/stream`,
+      { timeout: 30_000 },
+    );
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+    await completionPromise;
 
-  await deleteWorkflow(page, workflow.id);
+    await expect(page.getByText("Last Executed Node")).toBeVisible();
+    await expect(page.getByText("error", { exact: true })).toBeVisible();
+    // Scope to the output <pre> — the Execution Highlights popup also renders this
+    // node's output as a preview span, so an unscoped getByText is ambiguous.
+    await expect(
+      page.locator("pre").filter({ hasText: /"httpStatusCode":\s*400/ }),
+    ).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
 });
 
 test("shows execution highlights after a workflow run", async ({ page }) => {
@@ -574,6 +587,66 @@ test("shows execution highlights after a workflow run", async ({ page }) => {
     await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
     await page.getByTestId("execution-highlights-open").click();
     await expect(highlightsPanel).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("keeps execution highlights collapsed by default on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const workflow = await createWorkflow(
+    page,
+    `Mobile Highlights ${Date.now()}`,
+    [
+      {
+        id: "set-highlight",
+        type: "set",
+        position: { x: 120, y: 120 },
+        data: {
+          label: "Build Highlight",
+          mappings: [{ key: "message", value: "Mobile highlight smoke" }],
+          highlight: true,
+        },
+      },
+      {
+        id: "output-final",
+        type: "output",
+        position: { x: 460, y: 120 },
+        data: { label: "Final Output", message: "$input.message" },
+      },
+    ],
+    [
+      {
+        id: "edge-highlight-output",
+        source: "set-highlight",
+        target: "output-final",
+        sourceHandle: "output",
+        targetHandle: "input",
+      },
+    ],
+  );
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.getByTestId("workflow-title")).toBeVisible();
+    await expect(page.getByText("Build Highlight")).toBeVisible();
+
+    // On mobile the properties panel starts closed and the Run label is icon-only
+    // below `sm`, so drive the run via the editor shortcut instead.
+    await page.keyboard.press("ControlOrMeta+Enter");
+
+    // The shortcut opens the properties panel; close it so the canvas chip is
+    // unobstructed on a narrow viewport.
+    await expect(page.locator(".properties-panel")).toBeVisible();
+    await page.locator("button.panel-toggle-right").click();
+    await expect(page.locator(".properties-panel")).toBeHidden();
+
+    await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
+    await expect(page.getByTestId("execution-highlights-panel")).toBeHidden();
+
+    await page.getByTestId("execution-highlights-open").click();
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible();
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

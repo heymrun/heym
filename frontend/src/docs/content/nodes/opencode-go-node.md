@@ -56,6 +56,7 @@ OpenCode Go's model roster changes often, so the **Model** field is populated li
 | `open_pr` | Commits to the branch, pushes it, and opens a review-ready (non-draft) pull request. |
 | `commit_push` | Commits to the branch and pushes it, without opening a pull request. |
 | `direct_commit` | Commits and pushes straight to the base branch (no separate branch or PR). |
+| `open_or_update_pr` | Updates the agent's existing open PR when one exists — even if the branch name differs, the runner finds it by author + base — otherwise opens a new one. Best for re-runs and "update the open PR" instructions. |
 | `update_existing_pr` | Adds a commit to the existing branch/PR; opens one if none exists yet. |
 | `patch_artifact` | Saves the diff as a downloadable file and returns `patchUrl`. Nothing is pushed. |
 
@@ -69,15 +70,25 @@ OpenCode Go's model roster changes often, so the **Model** field is populated li
 | `diff` | Git patch when files changed |
 | `changedFiles` | Changed file paths |
 | `branchName` | Working branch name |
-| `pullRequestUrl` | PR URL in `draft_pr`, `open_pr`, and `update_existing_pr` modes |
+| `pullRequestUrl` | PR URL in `draft_pr`, `open_pr`, `open_or_update_pr`, and `update_existing_pr` modes |
 | `pushedBranch` | Branch that was pushed in commit/PR modes |
 | `patchUrl` | Download link for the diff in `patch_artifact` mode |
 
 ## UI screenshots on pull requests
 
-For UI/frontend tasks, OpenCode should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). If frontend dependencies are missing, the runner prompt allows a targeted package install (for example `bun install`) plus a short-lived preview/`bun run dev` solely to capture the UI. After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`opencode-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description.
+For UI/frontend tasks, OpenCode should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). If frontend dependencies are missing, the runner prompt allows a targeted package install (for example `bun install`) plus a short-lived preview/`bun run dev` solely to capture the UI. Heym uploads those images to a single shared GitHub **prerelease** (`opencode-pr-assets`) as assets named `<branch>-…`, then embeds them in the PR description **before the pull request is opened**, so a new PR is created already containing its screenshots (existing PRs are updated in place).
 
 OpenCode is also instructed to end with a `PR_TITLE: …` line so Heym can open the pull request with a meaningful subject instead of placeholders such as `Done.`
+
+OpenCode sometimes ends a turn mid-task ("…Now let me take a screenshot"), which would finalize the run before the screenshot is captured. To prevent that, the runner prompt requires capturing screenshots **before** the final message, and if the run still finishes with no publishable summary or with a UI change but no screenshot, Heym runs one more OpenCode pass in the same workspace to finish. If a UI change still has no screenshot afterwards, a visible note is added to the PR body so the gap is never silent.
+
+## What gets published to GitHub
+
+Your **Task Prompt** is private input, not PR content. Only two things are published: a `## Change Summary` describing what the code change does, and a `## Screenshots` section when screenshots were captured. The PR title is derived from the change summary alone.
+
+The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message.
+
+Heym reads the `## Change Summary` section out of the agent's messages rather than taking whatever it said last, because OpenCode emits a message per step and the final one is often mid-run commentary. Step narration (`Both pass. Let me do a final review:`) is also rejected as a PR title or commit subject. If the run produces no usable change summary, the pull request falls back to listing the changed files instead of publishing commentary.
 
 ## As an agent tool
 

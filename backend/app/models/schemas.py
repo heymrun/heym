@@ -219,6 +219,10 @@ class WorkflowUpdate(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    # Optimistic concurrency: the `updated_at` the client's edit is based on. When supplied and the
+    # stored row is newer, the update is rejected with 409 instead of overwriting someone else's
+    # work. Omitted means "save unconditionally" (the explicit override path).
+    base_updated_at: datetime | None = None
 
 
 class WorkflowShareRequest(BaseModel):

@@ -433,31 +433,33 @@ class ExecuteMcpToolSessionToolListTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StdioEnvMergeTests(unittest.IsolatedAsyncioTestCase):
-    """stdio transport must inherit os.environ so PATH is available for commands like docker."""
+    """stdio transport must never hand os.environ to the MCP server it starts.
 
-    async def test_user_env_merged_with_os_environ(self) -> None:
-        captured: list[dict] = []
+    This class previously asserted the opposite, on the premise that os.environ
+    had to be merged in so PATH would be available for docker/npx/uvx. That
+    premise was wrong: the MCP SDK's get_default_environment() already includes
+    PATH (plus HOME, SHELL, TERM, USER, LOGNAME) and already merges the caller's
+    env over it, so merging os.environ only served to leak SECRET_KEY,
+    ENCRYPTION_KEY, DATABASE_URL and provider API keys into a third-party MCP
+    server. See GHSA-378x-q589-34mv.
+    """
 
-        async def fake_stdio_client(params):
-            captured.append({"env": params.env})
-
-            @asynccontextmanager
-            async def _ctx():
-                yield object(), object()
-
-            return _ctx()
-
+    async def test_user_env_passed_without_os_environ(self) -> None:
         with (
             patch("app.services.mcp_tool_executor.StdioServerParameters") as mock_params,
             patch("app.services.mcp_tool_executor.stdio_client") as mock_stdio_client,
+            patch.dict(
+                os.environ,
+                {"HEYM_MCP_STDIO_SANDBOX": "subprocess", "SECRET_KEY": "super-secret-value"},
+            ),
         ):
             mock_stdio_client.return_value.__aenter__ = AsyncMock(return_value=(object(), object()))
             mock_stdio_client.return_value.__aexit__ = AsyncMock(return_value=None)
 
             conn = {
                 "transport": "stdio",
-                "command": "docker",
-                "args": ["run", "-i", "--rm", "some-image"],
+                "command": "uvx",
+                "args": ["some-server"],
                 "env": {"SECRET_TOKEN": "abc123"},
             }
 
@@ -468,22 +470,21 @@ class StdioEnvMergeTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
             mock_params.assert_called_once()
-            call_kwargs = mock_params.call_args
-            passed_env = call_kwargs.kwargs.get("env") or (
-                call_kwargs.args[2] if len(call_kwargs.args) > 2 else None
-            )
-            if passed_env is None and call_kwargs.kwargs:
-                passed_env = call_kwargs.kwargs.get("env")
+            passed_env = mock_params.call_args.kwargs.get("env")
 
-            self.assertIsNotNone(passed_env, "env must be passed to StdioServerParameters")
-            self.assertIn("PATH", passed_env, "PATH must be inherited from os.environ")
-            self.assertEqual(passed_env.get("SECRET_TOKEN"), "abc123", "user env var present")
-            self.assertEqual(passed_env.get("PATH"), os.environ.get("PATH"))
+            self.assertEqual(
+                passed_env,
+                {"SECRET_TOKEN": "abc123"},
+                "only the caller's own env vars may reach the MCP server",
+            )
+            self.assertNotIn("SECRET_KEY", passed_env)
+            self.assertNotIn("PATH", passed_env, "PATH comes from the SDK's safe default, not us")
 
     async def test_no_user_env_passes_none(self) -> None:
         with (
             patch("app.services.mcp_tool_executor.StdioServerParameters") as mock_params,
             patch("app.services.mcp_tool_executor.stdio_client") as mock_stdio_client,
+            patch.dict(os.environ, {"HEYM_MCP_STDIO_SANDBOX": "subprocess"}),
         ):
             mock_stdio_client.return_value.__aenter__ = AsyncMock(return_value=(object(), object()))
             mock_stdio_client.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -497,8 +498,7 @@ class StdioEnvMergeTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
             mock_params.assert_called_once()
-            call_kwargs = mock_params.call_args
-            passed_env = call_kwargs.kwargs.get("env")
+            passed_env = mock_params.call_args.kwargs.get("env")
             self.assertIsNone(
-                passed_env, "None env should pass through unchanged (full inheritance)"
+                passed_env, "no user env -> SDK applies get_default_environment() alone"
             )

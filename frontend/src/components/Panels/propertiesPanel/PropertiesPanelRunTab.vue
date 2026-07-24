@@ -114,6 +114,7 @@ const {
           :class="isRunbookPlaying && 'runbook-pulse'"
           :loading="isExecuting"
           :disabled="!hasNodes || !!runBodyError"
+          :aria-label="isExecuting ? 'Executing...' : 'Run Workflow'"
           @click="handleExecute"
         >
           <Play class="w-4 h-4 shrink-0" />

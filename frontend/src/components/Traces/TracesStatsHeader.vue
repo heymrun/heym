@@ -169,64 +169,66 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
 
 <template>
   <div class="space-y-4">
-    <div class="grid gap-3 grid-cols-2 md:grid-cols-5">
+    <div class="grid grid-cols-5 gap-2 md:gap-3">
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
-        <div class="text-xs text-muted-foreground">
+        <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Calls
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-1 text-sm md:text-xl font-semibold truncate">
           {{ loading ? "…" : fmtNum(kpis?.total_calls ?? 0) }}
         </div>
       </Card>
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
-        <div class="text-xs text-muted-foreground">
+        <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Tokens
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-1 text-sm md:text-xl font-semibold truncate">
           {{ loading ? "…" : fmtNum(kpis?.total_tokens ?? 0) }}
         </div>
       </Card>
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
-        <div class="text-xs text-muted-foreground">
+        <div class="text-[10px] md:text-xs text-muted-foreground truncate">
           Cost
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-1 text-sm md:text-xl font-semibold truncate">
           {{ loading ? "…" : fmtCost(kpis?.total_cost_usd ?? "0") }}
         </div>
       </Card>
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
-        <div class="text-xs text-muted-foreground">
-          Avg Latency
+        <div class="text-[10px] md:text-xs text-muted-foreground truncate">
+          <span class="md:hidden">Lat.</span>
+          <span class="hidden md:inline">Avg Latency</span>
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-1 text-sm md:text-xl font-semibold truncate">
           {{ loading ? "…" : fmtMs(kpis?.avg_latency_ms ?? 0) }}
         </div>
       </Card>
       <Card
         variant="flat"
         :hover="false"
-        class="p-3"
+        class="px-3 py-2.5 md:p-3 min-w-0"
       >
-        <div class="text-xs text-muted-foreground">
-          Error %
+        <div class="text-[10px] md:text-xs text-muted-foreground truncate">
+          <span class="md:hidden">Err%</span>
+          <span class="hidden md:inline">Error %</span>
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-1 text-sm md:text-xl font-semibold truncate">
           {{ loading ? "…" : `${(kpis?.error_pct ?? 0).toFixed(1)}%` }}
         </div>
       </Card>

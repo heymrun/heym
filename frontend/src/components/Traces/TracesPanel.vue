@@ -8,6 +8,7 @@ import type { LLMTraceDetail, LLMTraceListItem, TraceStatsResponse, TraceTimeRan
 import type { WorkflowListItem } from "@/types/workflow";
 
 import TraceDurationChart, { type TraceSpan } from "@/components/Traces/TraceDurationChart.vue";
+import TraceJsonContent from "@/components/Traces/TraceJsonContent.vue";
 import TracesStatsHeader from "@/components/Traces/TracesStatsHeader.vue";
 import TracesTimeRangeSelect from "@/components/Traces/TracesTimeRangeSelect.vue";
 import TraceStepsTimeline from "@/components/Traces/TraceStepsTimeline.vue";
@@ -658,7 +659,7 @@ onMounted(async () => {
           Inspect AI assistant and workflow LLM calls in one place.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 w-full md:w-auto">
         <Button
           variant="outline"
           size="sm"
@@ -679,6 +680,7 @@ onMounted(async () => {
         <Button
           variant="destructive"
           size="sm"
+          class="ml-auto md:ml-0"
           :loading="clearing"
           :disabled="traces.length === 0"
           @click="clearTraces"
@@ -865,50 +867,61 @@ onMounted(async () => {
     <Dialog
       :open="detailOpen"
       title="Trace Details"
+      title-class="text-lg sm:text-lg md:text-xl"
       size="3xl"
       allow-fullscreen
       default-fullscreen
+      hide-fullscreen-toggle-on-mobile
       @close="closeDetail"
     >
       <template #header-actions>
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+        <div class="inline-flex items-center gap-2">
+          <div class="inline-flex items-center h-8 rounded-lg border border-border bg-muted/50 overflow-hidden">
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
               :disabled="!hasPreviousTrace || detailLoading"
+              aria-label="Previous trace"
               @click="goToPreviousTrace"
             >
-              <ChevronLeft class="w-3 h-3 md:w-4 md:h-4" />
-              <span class="hidden sm:inline">Prev</span>
-            </Button>
-            <span class="text-xs text-muted-foreground px-1 whitespace-nowrap">
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <span class="h-8 min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
               {{ tracePositionLabel }}
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
               :disabled="!hasNextTrace || detailLoading"
+              aria-label="Next trace"
               @click="goToNextTrace"
             >
-              <span class="hidden sm:inline">Next</span>
-              <ChevronRight class="w-3 h-3 md:w-4 md:h-4" />
-            </Button>
+              <ChevronRight class="w-4 h-4" />
+            </button>
           </div>
           <Button
             v-if="selectedTrace?.workflow_id"
             variant="outline"
             size="sm"
-            class="h-9 md:h-7 text-xs"
+            class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 hidden sm:inline-flex"
             @click="goToWorkflow"
           >
             <ExternalLink class="w-3 h-3 mr-1" />
-            <span class="hidden sm:inline">Go to Workflow</span>
-            <span class="sm:hidden">Workflow</span>
+            Go to Workflow
           </Button>
         </div>
+      </template>
+      <template #header-trailing>
+        <Button
+          v-if="selectedTrace?.workflow_id"
+          variant="outline"
+          size="sm"
+          class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 sm:hidden"
+          @click="goToWorkflow"
+        >
+          <ExternalLink class="w-3 h-3 mr-1" />
+          Workflow
+        </Button>
       </template>
       <div
         v-if="detailLoading"
@@ -1113,7 +1126,7 @@ onMounted(async () => {
             >
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-primary">
-                  {{ tc.name }}({{ JSON.stringify(tc.arguments) }})
+                  {{ tc.name }}
                 </span>
                 <span
                   v-if="tc.source === 'mcp'"
@@ -1134,8 +1147,28 @@ onMounted(async () => {
                   Workflow: {{ toolCallWorkflowLabel(tc) }}
                 </span>
               </div>
-              <div class="mt-2 text-xs text-muted-foreground break-all">
-                → {{ typeof tc.result === 'object' ? JSON.stringify(tc.result) : tc.result }}
+              <div class="mt-2 space-y-2">
+                <div class="space-y-1">
+                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Arguments
+                  </div>
+                  <TraceJsonContent
+                    :value="tc.arguments"
+                    max-height="small"
+                  />
+                </div>
+                <div
+                  v-if="tc.result !== undefined"
+                  class="space-y-1"
+                >
+                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Result
+                  </div>
+                  <TraceJsonContent
+                    :value="tc.result"
+                    max-height="small"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1146,55 +1179,59 @@ onMounted(async () => {
           :steps="steps"
         />
 
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">
-              Request
-            </div>
+        <TraceJsonContent
+          :value="selectedTrace.request"
+          max-height="large"
+        >
+          <template #title>
+            <span class="text-sm font-medium">Request</span>
+          </template>
+          <template #actions>
             <Button
               variant="ghost"
               size="sm"
-              class="h-6 px-2"
+              class="h-6 min-h-0 gap-1 rounded-md px-1.5 text-[10px]"
               @click="copyToClipboard(formatJson(selectedTrace.request), 'request')"
             >
               <Check
                 v-if="copiedRequest"
-                class="w-3 h-3 mr-1 text-emerald-500"
+                class="h-3 w-3 text-emerald-500"
               />
               <Copy
                 v-else
-                class="w-3 h-3 mr-1"
+                class="h-3 w-3"
               />
               {{ copiedRequest ? "Copied" : "Copy" }}
             </Button>
-          </div>
-          <pre class="text-xs bg-muted/30 border rounded-md p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap">{{ formatJson(selectedTrace.request) }}</pre>
-        </div>
+          </template>
+        </TraceJsonContent>
 
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">
-              Response
-            </div>
+        <TraceJsonContent
+          :value="selectedTrace.response"
+          max-height="large"
+        >
+          <template #title>
+            <span class="text-sm font-medium">Response</span>
+          </template>
+          <template #actions>
             <Button
               variant="ghost"
               size="sm"
-              class="h-6 px-2"
+              class="h-6 min-h-0 gap-1 rounded-md px-1.5 text-[10px]"
               @click="copyToClipboard(formatJson(selectedTrace.response), 'response')"
             >
               <Check
                 v-if="copiedResponse"
-                class="w-3 h-3 mr-1 text-emerald-500"
+                class="h-3 w-3 text-emerald-500"
               />
               <Copy
                 v-else
-                class="w-3 h-3 mr-1"
+                class="h-3 w-3"
               />
               {{ copiedResponse ? "Copied" : "Copy" }}
             </Button>
-          </div>
-          <pre class="text-xs bg-muted/30 border rounded-md p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap">{{ formatJson(selectedTrace.response) }}</pre>
-        </div>
+          </template>
+        </TraceJsonContent>
       </div>
     </Dialog>
   </div>

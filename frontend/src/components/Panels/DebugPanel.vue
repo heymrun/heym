@@ -5,7 +5,7 @@ import axios from "axios";
 import DOMPurify from "dompurify";
 import { jsonrepair } from "jsonrepair";
 import { marked } from "marked";
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, FileText, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -33,6 +33,7 @@ import {
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isRetryAttemptNodeResult } from "@/lib/executionLog";
+import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
@@ -72,7 +73,6 @@ const agentProgressLogs = computed(() => workflowStore.agentProgressLogs);
 const selectedNode = computed(() => workflowStore.selectedNode);
 const logsCopied = ref(false);
 const showTimeline = ref(false);
-const showMarkdownInExecutionLog = ref(true);
 
 const runningAgentNode = computed(() => {
   const id = runningNodeId.value;
@@ -189,6 +189,83 @@ watch(
     }
   },
   { flush: "post" },
+);
+
+const NODE_RESULT_SCROLL_TOP_OFFSET_PX = 10; // 0.75rem — keep entry from sitting flush against the panel top
+const NODE_RESULT_SCROLL_DURATION_MS = 400; // approximate smooth-scroll duration in Chromium/WebKit
+const NODE_RESULT_SCROLL_FLASH_AT_RATIO = 0.65;
+const NODE_RESULT_SCROLL_FLASH_MS = 700;
+const NODE_RESULT_SCROLL_FLASH_CLASSES = [
+  "debug-scroll-flash-success",
+  "debug-scroll-flash-error",
+  "debug-scroll-flash-warn",
+] as const;
+let nodeResultScrollFlashStartTimer: ReturnType<typeof setTimeout> | null = null;
+let nodeResultScrollFlashEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scrollFlashClassForStatus(status: string): (typeof NODE_RESULT_SCROLL_FLASH_CLASSES)[number] {
+  if (status === "success") return "debug-scroll-flash-success";
+  if (status === "error" || status === "failed") return "debug-scroll-flash-error";
+  // HITL (pending) and running share the yellow flash
+  return "debug-scroll-flash-warn";
+}
+
+function clearNodeResultScrollFlashTimers(): void {
+  if (nodeResultScrollFlashStartTimer !== null) {
+    clearTimeout(nodeResultScrollFlashStartTimer);
+    nodeResultScrollFlashStartTimer = null;
+  }
+  if (nodeResultScrollFlashEndTimer !== null) {
+    clearTimeout(nodeResultScrollFlashEndTimer);
+    nodeResultScrollFlashEndTimer = null;
+  }
+}
+
+function scrollToNodeResultEntry(el: HTMLElement): void {
+  const container = scrollContainer.value;
+  if (!container) return;
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = el.getBoundingClientRect();
+  const nextTop =
+    targetRect.top - containerRect.top + container.scrollTop - NODE_RESULT_SCROLL_TOP_OFFSET_PX;
+  container.scrollTo({ top: Math.max(0, nextTop), behavior: "smooth" });
+}
+
+function flashScrolledNodeResult(el: HTMLElement, status: string): void {
+  const flashClass = scrollFlashClassForStatus(status);
+  el.classList.remove(...NODE_RESULT_SCROLL_FLASH_CLASSES);
+  // Restart CSS animation when selecting nodes quickly
+  void el.offsetWidth;
+  el.classList.add(flashClass);
+  nodeResultScrollFlashEndTimer = setTimeout(() => {
+    el.classList.remove(flashClass);
+    nodeResultScrollFlashEndTimer = null;
+  }, NODE_RESULT_SCROLL_FLASH_MS);
+}
+
+watch(
+  () => selectedNode.value,
+  (node) => {
+    if (!node || isCollapsed.value || isExecuting.value) return;
+
+    nextTick(() => {
+      if (!scrollContainer.value) return;
+      const entries = scrollContainer.value.querySelectorAll(
+        `[data-testid="debug-node-result-${node.id}"]`,
+      );
+      if (entries.length === 0) return;
+      const target = entries[entries.length - 1] as HTMLElement;
+      clearNodeResultScrollFlashTimers();
+      scrollToNodeResultEntry(target);
+      const flashDelayMs = Math.round(
+        NODE_RESULT_SCROLL_DURATION_MS * NODE_RESULT_SCROLL_FLASH_AT_RATIO,
+      );
+      nodeResultScrollFlashStartTimer = setTimeout(() => {
+        nodeResultScrollFlashStartTimer = null;
+        flashScrolledNodeResult(target, target.dataset.status ?? "running");
+      }, flashDelayMs);
+    });
+  },
 );
 
 const delegatedSubAgentLabelSet = computed(() => {
@@ -676,6 +753,11 @@ function getMarkdownDisplayTextForResult(result: ResultOutputDisplayTarget): str
   return getMarkdownDisplayText(result.output);
 }
 
+function resultHasMarkdownView(result: ResultOutputDisplayTarget): boolean {
+  const text = getMarkdownDisplayTextForResult(result);
+  return text !== null && looksLikeMarkdown(text);
+}
+
 function getGenericResultOutputText(output: unknown): string {
   const text = getOutputText(output);
   if (getToolCalls(output)?.length && text !== null) {
@@ -864,6 +946,66 @@ function shouldShowGenericResultOutput(rawOutput: unknown): boolean {
     getHitlHistory(rawOutput).length === 0 &&
     !getCodexPendingPayload(rawOutput)
   );
+}
+
+const resultViewModes = ref<Record<string, "markdown" | "tree" | "plain">>({});
+
+function isValidJson(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object") {
+    return true;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    try {
+      const parsed = JSON.parse(trimmed);
+      return parsed !== null && typeof parsed === "object";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function parseJsonValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+type ResultViewMode = "markdown" | "tree" | "plain";
+
+function getDefaultResultViewMode(result: ResultOutputDisplayTarget): ResultViewMode {
+  if (resultHasMarkdownView(result)) return "markdown";
+  if (isValidJson(result.output)) return "tree";
+  return "plain";
+}
+
+function hasResultViewModeControls(result: ResultOutputDisplayTarget): boolean {
+  return resultHasMarkdownView(result) || isValidJson(result.output);
+}
+
+function getResultViewMode(displayKey: string, result: ResultOutputDisplayTarget): ResultViewMode {
+  const stored = resultViewModes.value[displayKey];
+  if (stored === "markdown" && !resultHasMarkdownView(result)) {
+    return getDefaultResultViewMode(result);
+  }
+  if (stored === "tree" && !isValidJson(result.output)) {
+    return getDefaultResultViewMode(result);
+  }
+  return stored ?? getDefaultResultViewMode(result);
+}
+
+function setResultViewMode(displayKey: string, mode: ResultViewMode): void {
+  resultViewModes.value = { ...resultViewModes.value, [displayKey]: mode };
 }
 
 interface HITLResolvedPayload {
@@ -1568,6 +1710,7 @@ onUnmounted(() => {
   unsubDismissOverlays = null;
   window.removeEventListener("keydown", handleDebugPanelWindowKeyDown, true);
   window.removeEventListener("keydown", handleDownloadDialogKeyDown, true);
+  clearNodeResultScrollFlashTimers();
   if (isResizing.value) {
     isResizing.value = false;
     workflowStore.setDebugPanelHeight(panelHeight.value);
@@ -2605,16 +2748,6 @@ function renderContent(content: string): string {
           <ChevronsUp class="w-3.5 h-3.5" />
         </Button>
         <Button
-          v-if="(executionResult || nodeResults.length > 0) && !isCollapsed"
-          :variant="showMarkdownInExecutionLog ? 'secondary' : 'ghost'"
-          size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
-          :title="showMarkdownInExecutionLog ? 'Show plain text' : 'Show markdown'"
-          @click.stop="showMarkdownInExecutionLog = !showMarkdownInExecutionLog"
-        >
-          <FileText class="w-3.5 h-3.5" />
-        </Button>
-        <Button
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
           variant="ghost"
           size="icon"
@@ -2753,6 +2886,7 @@ function renderContent(content: string): string {
           v-for="result in displayResults"
           :key="result.displayKey"
           :data-testid="`debug-node-result-${result.node_id}`"
+          :data-status="result.status"
           class="flex items-start gap-3 p-2 rounded-md bg-muted/30"
         >
           <component
@@ -2770,9 +2904,59 @@ function renderContent(content: string): string {
                   #{{ result.occurrence }}
                 </span>
               </span>
-              <span class="text-xs text-muted-foreground shrink-0">
-                {{ result.status === 'skipped' ? 'skipped' : `${result.execution_time_ms.toFixed(2)}ms` }}
-              </span>
+              <div class="flex items-center gap-2 shrink-0 pr-2.5">
+                <div
+                  v-if="!result.error && result.status !== 'running' && hasResultViewModeControls(result)"
+                  class="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/40 p-0.5"
+                  role="group"
+                  aria-label="Result view mode"
+                >
+                  <button
+                    v-if="resultHasMarkdownView(result)"
+                    type="button"
+                    class="h-6 rounded px-2 text-[11px] font-medium leading-none transition-colors"
+                    :class="
+                      getResultViewMode(result.displayKey, result) === 'markdown'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    "
+                    :aria-pressed="getResultViewMode(result.displayKey, result) === 'markdown'"
+                    @click="setResultViewMode(result.displayKey, 'markdown')"
+                  >
+                    Markdown
+                  </button>
+                  <button
+                    v-if="isValidJson(result.output)"
+                    type="button"
+                    class="h-6 rounded px-2 text-[11px] font-medium leading-none transition-colors"
+                    :class="
+                      getResultViewMode(result.displayKey, result) === 'tree'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    "
+                    :aria-pressed="getResultViewMode(result.displayKey, result) === 'tree'"
+                    @click="setResultViewMode(result.displayKey, 'tree')"
+                  >
+                    Tree
+                  </button>
+                  <button
+                    type="button"
+                    class="h-6 rounded px-2 text-[11px] font-medium leading-none transition-colors"
+                    :class="
+                      getResultViewMode(result.displayKey, result) === 'plain'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    "
+                    :aria-pressed="getResultViewMode(result.displayKey, result) === 'plain'"
+                    @click="setResultViewMode(result.displayKey, 'plain')"
+                  >
+                    Plain
+                  </button>
+                </div>
+                <span class="text-[12.5px] text-muted-foreground">
+                  {{ result.status === 'skipped' ? 'skipped' : `${result.execution_time_ms.toFixed(2)}ms` }}
+                </span>
+              </div>
             </div>
             <div
               v-if="result.error"
@@ -3159,10 +3343,10 @@ function renderContent(content: string): string {
               </div>
               <div
                 v-if="shouldShowGenericResultOutput(result.rawOutput)"
-                class="text-muted-foreground text-xs mt-1 min-w-0 max-w-full"
+                class="text-muted-foreground text-xs mt-2.5 min-w-0 max-w-full"
               >
                 <div
-                  v-if="showMarkdownInExecutionLog && getMarkdownDisplayTextForResult(result) !== null"
+                  v-if="getResultViewMode(result.displayKey, result) === 'markdown' && getMarkdownDisplayTextForResult(result) !== null"
                   class="execution-markdown-output break-words font-sans min-w-0 max-w-full"
                 >
                   <!-- eslint-disable vue/no-v-html -->
@@ -3171,6 +3355,16 @@ function renderContent(content: string): string {
                     v-html="renderExecutionMarkdown(getMarkdownDisplayTextForResult(result)!)"
                   />
                   <!-- eslint-enable vue/no-v-html -->
+                </div>
+                <div
+                  v-else-if="isValidJson(result.output) && getResultViewMode(result.displayKey, result) === 'tree'"
+                  class="text-xs font-mono"
+                >
+                  <JsonTree
+                    :data="parseJsonValue(result.output)"
+                    :auto-expand-depth="1"
+                    :root-expanded="true"
+                  />
                 </div>
                 <div
                   v-else
@@ -4193,5 +4387,59 @@ function renderContent(content: string): string {
 .mode-toggle-btn.active {
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
+}
+
+.debug-scroll-flash-success {
+  animation: debug-scroll-flash-success 0.7s ease-out;
+}
+
+.debug-scroll-flash-error {
+  animation: debug-scroll-flash-error 0.7s ease-out;
+}
+
+.debug-scroll-flash-warn {
+  animation: debug-scroll-flash-warn 0.7s ease-out;
+}
+
+@keyframes debug-scroll-flash-success {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(34 197 94 / 0.22),
+      0 0 0 1px rgb(34 197 94 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+@keyframes debug-scroll-flash-error {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(239 68 68 / 0.22),
+      0 0 0 1px rgb(239 68 68 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+@keyframes debug-scroll-flash-warn {
+  0% {
+    box-shadow:
+      inset 0 0 0 9999px rgb(234 179 8 / 0.22),
+      0 0 0 1px rgb(234 179 8 / 0.55);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 9999px transparent,
+      0 0 0 0 transparent;
+  }
 }
 </style>

@@ -23,10 +23,14 @@ if (!process.env.DATABASE_URL) {
 
 export default defineConfig({
   testDir: "./e2e",
+  // Parallelise across spec files but keep the tests inside a file sequential: several specs
+  // build up state across their own tests, while the shared E2E user makes cross-file ordering
+  // irrelevant. GitHub's public `ubuntu-latest` runner has 4 vCPUs; 3 browser workers leave room
+  // for the backend and Vite dev servers that run alongside them.
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1,
+  workers: process.env.CI ? 3 : "50%",
   outputDir: testResultsDir,
   reporter: process.env.CI
     ? [["line"], ["html", { open: "never", outputFolder: reportDir }]]

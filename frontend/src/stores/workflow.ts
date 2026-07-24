@@ -1,12 +1,14 @@
 import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
+import axios from "axios";
 
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
-import { workflowApi } from "@/services/api";
+import { lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
+import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
 import { useToast } from "@/composables/useToast";
 import type {
   AgentProgressEntry,
@@ -65,10 +67,21 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const isHistoryLoadingMore = ref(false);
   const isHistoryDetailLoading = ref(false);
   const currentExecutionId = ref<string | null>(null);
+  const currentExecutionWorkflowId = ref<string | null>(null);
   const isExecuting = ref(false);
   const isObservingExecution = ref(false);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
+  const workflowLoadedAt = ref<string | null>(null);
+  const staleSaveDialogOpen = ref(false);
+  const staleSaveServerUpdatedAt = ref<string | null>(null);
+  // A run that hit a stale-save conflict and is waiting on the dialog. Wrapped in an object so a
+  // legitimately undefined body is still distinguishable from "no run pending".
+  const pendingStaleSaveRun = ref<{ body: unknown } | null>(null);
+  const staleSaveBlockedARun = computed(() => pendingStaleSaveRun.value !== null);
+  // "overwrite": this tab has edits that would replace the newer server version.
+  // "reload": this tab has no edits, so it is simply showing an outdated workflow.
+  const staleSaveMode = ref<"overwrite" | "reload">("overwrite");
   const runningNodeId = ref<string | null>(null);
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
@@ -529,6 +542,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     runningNodeId.value = null;
     abortController.value = null;
     currentExecutionId.value = result.execution_history_id || null;
+    currentExecutionWorkflowId.value = null;
     if (!options?.preserveSelection) {
       clearSelection();
     }
@@ -546,24 +560,68 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   async function loadWorkflow(id: string): Promise<void> {
+    const activeExecutionId =
+      isExecuting.value && currentExecutionWorkflowId.value === id
+        ? currentExecutionId.value
+        : null;
     const workflow = await workflowApi.get(id);
     const loadedNodes = workflow.nodes || [];
     const loadedEdges = normalizeWorkflowEdges(workflow.edges, loadedNodes);
+    const preserveActiveExecution =
+      activeExecutionId !== null &&
+      isExecuting.value &&
+      currentExecutionWorkflowId.value === id &&
+      currentExecutionId.value === activeExecutionId;
+    const activeNodeRuntime = preserveActiveExecution
+      ? new Map(
+          nodes.value.map((node) => [
+            node.id,
+            {
+              status: node.data.status,
+              retryAttempt: node.data.retryAttempt,
+              batchRuntimeStatus: node.data.batchRuntimeStatus,
+              batchRuntimeRawStatus: node.data.batchRuntimeRawStatus,
+              batchRuntimeRequestCounts: node.data.batchRuntimeRequestCounts,
+            },
+          ]),
+        )
+      : null;
+    if (activeNodeRuntime) {
+      for (const node of loadedNodes) {
+        const runtime = activeNodeRuntime.get(node.id);
+        if (!runtime) continue;
+        node.data = { ...node.data, ...runtime };
+      }
+    }
     currentWorkflow.value = { ...workflow, nodes: loadedNodes, edges: loadedEdges };
     nodes.value = loadedNodes;
     edges.value = loadedEdges;
+    workflowLoadedAt.value = workflow.updated_at;
     void refreshAnalysisNoteEmpty();
-    clearRunInputs();
     hasUnsavedChanges.value = false;
-    executionResult.value = null;
     timelinePickedNodeResultIndex.value = null;
     clearEvaluateLoopSelection();
-    nodeResults.value = [];
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
     executionHistoryTotal.value = 0;
-    currentExecutionId.value = null;
-    clearNodeStatuses();
+    if (!preserveActiveExecution) {
+      clearRunInputs();
+      executionResult.value = null;
+      nodeResults.value = [];
+      currentExecutionId.value = null;
+      clearNodeStatuses();
+    } else {
+      nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
+      for (const nodeResult of nodeResults.value) {
+        setNodeStatus(
+          nodeResult.node_id,
+          nodeResult.status as "success" | "error" | "pending" | "skipped",
+        );
+      }
+      if (runningNodeId.value) {
+        setNodeStatus(runningNodeId.value, "running");
+      }
+    }
 
     history.value = [
       {
@@ -574,18 +632,104 @@ export const useWorkflowStore = defineStore("workflow", () => {
     historyIndex.value = 0;
   }
 
-  async function saveWorkflow(): Promise<void> {
-    if (!currentWorkflow.value) return;
+  function knownWorkflowRevision(id: string): string | null {
+    return pickPreferredRevision(
+      lastWrittenWorkflowRevision(id),
+      workflowLoadedAt.value,
+    );
+  }
+
+  /** Returns false when a concurrent edit blocked the save and the dialog was opened. */
+  async function saveWorkflow(): Promise<boolean> {
+    const wf = currentWorkflow.value;
+    if (!wf) return false;
+    return _executeSave(knownWorkflowRevision(wf.id));
+  }
+
+  /**
+   * Send the save. Passing `baseUpdatedAt` asks the server to reject the write when someone else
+   * has changed the workflow since; the check rides along with the write so a save is never lost
+   * to an extra round trip, and there is no window between checking and saving.
+   */
+  async function _executeSave(baseUpdatedAt: string | null = null): Promise<boolean> {
+    const wf = currentWorkflow.value;
+    if (!wf) return false;
 
     isSaving.value = true;
     try {
-      await workflowApi.update(currentWorkflow.value.id, {
+      const updated = await workflowApi.update(wf.id, {
         nodes: nodes.value,
         edges: edges.value,
+        ...(baseUpdatedAt ? { base_updated_at: baseUpdatedAt } : {}),
       });
+      workflowLoadedAt.value = updated.updated_at;
       hasUnsavedChanges.value = false;
+      return true;
+    } catch (error: unknown) {
+      if (!isStaleSaveConflict(error)) throw error;
+      // Keep hasUnsavedChanges true: the edits are still only in this tab.
+      staleSaveMode.value = "overwrite";
+      staleSaveServerUpdatedAt.value = conflictUpdatedAt(error);
+      staleSaveDialogOpen.value = true;
+      return false;
     } finally {
       isSaving.value = false;
+    }
+  }
+
+  function isStaleSaveConflict(error: unknown): boolean {
+    return axios.isAxiosError(error) && error.response?.status === 409;
+  }
+
+  function conflictUpdatedAt(error: unknown): string | null {
+    if (!axios.isAxiosError(error)) return null;
+    const detail = error.response?.data?.detail as { updated_at?: string } | undefined;
+    return detail?.updated_at ?? null;
+  }
+
+  /** Save regardless of the conflict, then resume the run that was waiting on it, if any. */
+  async function forceSaveWorkflow(): Promise<void> {
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
+    const pendingRun = pendingStaleSaveRun.value;
+    pendingStaleSaveRun.value = null;
+    const saved = await _executeSave();
+    if (saved && pendingRun) await executeWorkflow(pendingRun.body);
+  }
+
+  /** Dismiss the conflict, keeping the local edits — and abandon any run that was waiting. */
+  function cancelStaleSave(): void {
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
+    pendingStaleSaveRun.value = null;
+  }
+
+  /** Pull the newer server version into this tab, then resume the run that was waiting. */
+  async function reloadStaleWorkflowAndRun(): Promise<void> {
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
+    const pendingRun = pendingStaleSaveRun.value;
+    pendingStaleSaveRun.value = null;
+    const wf = currentWorkflow.value;
+    if (!wf) return;
+    await loadWorkflow(wf.id);
+    if (pendingRun) await executeWorkflow(pendingRun.body);
+  }
+
+  /**
+   * Server `updated_at` when another tab or user has saved since this tab last loaded or wrote,
+   * else null. Only used on the run path when there is nothing to save — with no write to race,
+   * the extra request cannot cost anyone their work.
+   */
+  async function outOfDateServerRevision(id: string): Promise<string | null> {
+    try {
+      const fresh = await workflowApi.get(id);
+      const known = knownWorkflowRevision(id);
+      if (!known) return null;
+      return isRevisionAfter(fresh.updated_at, known) ? fresh.updated_at : null;
+    } catch {
+      // A failed check must never block a run.
+      return null;
     }
   }
 
@@ -1165,7 +1309,32 @@ export const useWorkflowStore = defineStore("workflow", () => {
     const wf = currentWorkflow.value;
     if (!wf) return;
 
+    // Check freshness before touching any execution state, so cancelling leaves the editor
+    // exactly as it was. The dialog resumes the run through `forceSaveWorkflow` /
+    // `reloadStaleWorkflowAndRun`, or drops it through `cancelStaleSave`.
+    //
+    // The two stale cases need different remedies. With local edits, the run would save over the
+    // newer version, so the user is asked to confirm the overwrite. Without them there is nothing
+    // to overwrite, but the execution request carries only inputs — the backend runs the *stored*
+    // workflow — so the run would silently execute a definition this tab is not showing.
+    if (hasUnsavedChanges.value) {
+      if (!(await saveWorkflow())) {
+        pendingStaleSaveRun.value = { body };
+        return;
+      }
+    } else {
+      const serverUpdatedAt = await outOfDateServerRevision(wf.id);
+      if (serverUpdatedAt) {
+        staleSaveMode.value = "reload";
+        staleSaveServerUpdatedAt.value = serverUpdatedAt;
+        staleSaveDialogOpen.value = true;
+        pendingStaleSaveRun.value = { body };
+        return;
+      }
+    }
+
     isExecuting.value = true;
+    currentExecutionWorkflowId.value = wf.id;
     executionResult.value = null;
     timelinePickedNodeResultIndex.value = null;
     clearEvaluateLoopSelection();
@@ -1179,10 +1348,6 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentExecutionId.value = null;
 
     try {
-      if (hasUnsavedChanges.value) {
-        await saveWorkflow();
-      }
-
       nodes.value.forEach((node) => {
         setNodeStatus(node.id, "pending");
       });
@@ -1261,6 +1426,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
               runningNodeId.value = null;
               abortController.value = null;
               currentExecutionId.value = null;
+              currentExecutionWorkflowId.value = null;
               const slotId = (result.outputs as Record<string, unknown>)?.slot_id;
               if (typeof slotId === "string") {
                 void pollFileUploadSlot(slotId, streamAbort.signal, wf.id);
@@ -1313,6 +1479,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             runningNodeId.value = null;
             abortController.value = null;
             currentExecutionId.value = result.execution_history_id || null;
+            currentExecutionWorkflowId.value = null;
             settle(() => resolve());
           },
           (error: Error) => {
@@ -1321,6 +1488,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             runningNodeId.value = null;
             abortController.value = null;
             currentExecutionId.value = null;
+            currentExecutionWorkflowId.value = null;
             settle(() => reject(error));
           },
           true,
@@ -1423,6 +1591,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       runningNodeId.value = null;
       abortController.value = null;
       currentExecutionId.value = null;
+      currentExecutionWorkflowId.value = null;
       throw e;
     }
   }
@@ -1440,6 +1609,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     isExecuting.value = true;
     isObservingExecution.value = true;
     currentExecutionId.value = executionId;
+    currentExecutionWorkflowId.value = workflowId;
     executionResult.value = null;
     timelinePickedNodeResultIndex.value = null;
     clearEvaluateLoopSelection();
@@ -1449,89 +1619,110 @@ export const useWorkflowStore = defineStore("workflow", () => {
     clearNodeStatuses();
     nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
 
-    await new Promise<void>((resolve, reject) => {
-      workflowApi.streamActiveExecution(
-        workflowId,
-        executionId,
-        (data) => {
-          currentExecutionId.value = data.execution_id;
-          loadHistoryInputs(data.inputs);
-        },
-        (nodeId) => {
-          setNodeStatus(nodeId, "running");
-          const existingRunningResult = nodeResults.value.some(
-            (result) => result.node_id === nodeId && result.status === "running",
-          );
-          if (!existingRunningResult) {
-            const node = nodes.value.find((candidate) => candidate.id === nodeId);
-            nodeResults.value = [
-              ...nodeResults.value,
-              {
-                node_id: nodeId,
-                node_label: node?.data.label || nodeId,
-                node_type: node?.type || "unknown",
-                status: "running",
-                output: {},
-                execution_time_ms: 0,
-                error: null,
-              },
-            ];
-          }
-        },
-        (data) => {
-          setNodeStatus(
-            data.node_id,
-            data.status as "success" | "error" | "pending" | "skipped",
-          );
-          const row: NodeResult = {
-            node_id: data.node_id,
-            node_label: data.node_label || data.node_id,
-            node_type: data.node_type || "unknown",
-            status: data.status as "success" | "error" | "pending" | "skipped",
-            output: data.output,
-            execution_time_ms: data.execution_time_ms,
-            error: data.error ?? null,
-          };
-          if (data.metadata && typeof data.metadata === "object") {
-            row.metadata = data.metadata;
-          }
-          const runningResultIndex = nodeResults.value.findIndex(
-            (result) => result.node_id === data.node_id && result.status === "running",
-          );
-          if (runningResultIndex >= 0) {
-            const nextResults = [...nodeResults.value];
-            nextResults.splice(runningResultIndex, 1, row);
-            nodeResults.value = nextResults;
-          } else {
-            nodeResults.value = [...nodeResults.value, row];
-          }
-        },
-        async (result) => {
-          const historyId = result.execution_history_id;
-          const historyEntry = historyId
-            ? await fetchExecutionHistoryEntry(historyId, true)
-            : null;
-          if (historyEntry?.result) {
-            applyExecutionHistoryEntry(historyEntry);
-          } else {
-            applyExecutionResultSnapshot(result);
-          }
-          isObservingExecution.value = false;
+    while (!streamAbort.signal.aborted) {
+      let completed = false;
+
+      await new Promise<void>((resolve) => {
+        workflowApi.streamActiveExecution(
+          workflowId,
+          executionId,
+          (data) => {
+            currentExecutionId.value = data.execution_id;
+            loadHistoryInputs(data.inputs);
+            nodeResults.value = [];
+            clearNodeStatuses();
+            nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
+          },
+          (nodeId) => {
+            setNodeStatus(nodeId, "running");
+            const existingRunningResult = nodeResults.value.some(
+              (result) => result.node_id === nodeId && result.status === "running",
+            );
+            if (!existingRunningResult) {
+              const node = nodes.value.find((candidate) => candidate.id === nodeId);
+              nodeResults.value = [
+                ...nodeResults.value,
+                {
+                  node_id: nodeId,
+                  node_label: node?.data.label || nodeId,
+                  node_type: node?.type || "unknown",
+                  status: "running",
+                  output: {},
+                  execution_time_ms: 0,
+                  error: null,
+                },
+              ];
+            }
+          },
+          (data) => {
+            setNodeStatus(
+              data.node_id,
+              data.status as "success" | "error" | "pending" | "skipped",
+            );
+            const row: NodeResult = {
+              node_id: data.node_id,
+              node_label: data.node_label || data.node_id,
+              node_type: data.node_type || "unknown",
+              status: data.status as "success" | "error" | "pending" | "skipped",
+              output: data.output,
+              execution_time_ms: data.execution_time_ms,
+              error: data.error ?? null,
+            };
+            if (data.metadata && typeof data.metadata === "object") {
+              row.metadata = data.metadata;
+            }
+            const runningResultIndex = nodeResults.value.findIndex(
+              (result) => result.node_id === data.node_id && result.status === "running",
+            );
+            if (runningResultIndex >= 0) {
+              const nextResults = [...nodeResults.value];
+              nextResults.splice(runningResultIndex, 1, row);
+              nodeResults.value = nextResults;
+            } else {
+              nodeResults.value = [...nodeResults.value, row];
+            }
+          },
+          async (result) => {
+            completed = true;
+            const historyId = result.execution_history_id;
+            const historyEntry = historyId
+              ? await fetchExecutionHistoryEntry(historyId, true)
+              : null;
+            if (historyEntry?.result) {
+              applyExecutionHistoryEntry(historyEntry);
+            } else {
+              applyExecutionResultSnapshot(result);
+            }
+            isObservingExecution.value = false;
+            resolve();
+          },
+          (_error) => resolve(),
+          () => resolve(),
+          streamAbort.signal,
+        );
+      });
+
+      if (completed || streamAbort.signal.aborted) return;
+
+      const historyEntry = await fetchExecutionHistoryEntry(executionId, true);
+      if (historyEntry?.result) {
+        applyExecutionHistoryEntry(historyEntry);
+        isObservingExecution.value = false;
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        const handleAbort = (): void => {
+          window.clearTimeout(timeoutId);
           resolve();
-        },
-        (error) => {
-          clearNodeStatuses();
-          isExecuting.value = false;
-          isObservingExecution.value = false;
-          runningNodeId.value = null;
-          abortController.value = null;
-          currentExecutionId.value = null;
-          reject(error);
-        },
-        () => resolve(),
-        streamAbort.signal,
-      );
-    });
+        };
+        const timeoutId = window.setTimeout(() => {
+          streamAbort.signal.removeEventListener("abort", handleAbort);
+          resolve();
+        }, 1500);
+        streamAbort.signal.addEventListener("abort", handleAbort, { once: true });
+      });
+    }
   }
 
   function disconnectExecutionObservation(): void {
@@ -1541,6 +1732,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     isObservingExecution.value = false;
     isExecuting.value = false;
     currentExecutionId.value = null;
+    currentExecutionWorkflowId.value = null;
     clearNodeStatuses();
   }
 
@@ -1563,21 +1755,32 @@ export const useWorkflowStore = defineStore("workflow", () => {
     runningNodeId.value = null;
     clearNodeStatuses();
     currentExecutionId.value = null;
+    currentExecutionWorkflowId.value = null;
   }
 
   function clearWorkflow(): void {
+    const preserveActiveExecution =
+      isExecuting.value && currentExecutionId.value !== null;
     currentWorkflow.value = null;
     nodes.value = [];
     edges.value = [];
     selectedNodeId.value = null;
-    clearRunInputs();
-    executionResult.value = null;
     clearEvaluateLoopSelection();
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
     executionHistoryTotal.value = 0;
-    currentExecutionId.value = null;
+    if (!preserveActiveExecution) {
+      clearRunInputs();
+      executionResult.value = null;
+      nodeResults.value = [];
+      currentExecutionId.value = null;
+      currentExecutionWorkflowId.value = null;
+    }
     hasUnsavedChanges.value = false;
+    workflowLoadedAt.value = null;
+    staleSaveDialogOpen.value = false;
+    staleSaveServerUpdatedAt.value = null;
+    pendingStaleSaveRun.value = null;
   }
 
   function clearExecution(): void {
@@ -3126,6 +3329,14 @@ export const useWorkflowStore = defineStore("workflow", () => {
     canRedo,
     loadWorkflow,
     saveWorkflow,
+    forceSaveWorkflow,
+    cancelStaleSave,
+    workflowLoadedAt,
+    staleSaveDialogOpen,
+    staleSaveServerUpdatedAt,
+    staleSaveBlockedARun,
+    staleSaveMode,
+    reloadStaleWorkflowAndRun,
     updateMetadata,
     addNode,
     updateNode,

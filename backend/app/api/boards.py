@@ -1,6 +1,7 @@
 """Agentic kanban board API: boards, columns, cards, moves, runs, comments, sharing."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import (
     APIRouter,
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models import (
+    ActiveWorkflowExecution,
     Board,
     BoardCard,
     BoardCardActivity,
@@ -57,6 +59,7 @@ from app.models.board_schemas import (
 )
 from app.services import board_run_service
 from app.services.credential_access import get_accessible_credential
+from app.services.execution_cancellation import ACTIVE_EXECUTION_STALE_AFTER_SECONDS
 from app.services.file_storage import (
     build_download_url,
     create_access_token,
@@ -214,7 +217,7 @@ async def _column_workflow_responses(
     return grouped
 
 
-def _card_response(card: BoardCard) -> BoardCardResponse:
+def _card_response(card: BoardCard, *, actively_running: bool = False) -> BoardCardResponse:
     return BoardCardResponse(
         id=card.id,
         board_id=card.board_id,
@@ -222,11 +225,37 @@ def _card_response(card: BoardCard) -> BoardCardResponse:
         title=card.title,
         content=card.content,
         position=card.position,
-        run_status=card.run_status,
+        run_status="running" if actively_running else card.run_status,
         card_metadata=card.card_metadata or {},
         created_at=card.created_at,
         updated_at=card.updated_at,
     )
+
+
+async def _active_board_execution_ids(
+    db: AsyncSession, card_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, set[uuid.UUID]]:
+    """Return fresh workflow executions linked to each board card run."""
+    if not card_ids:
+        return {}
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
+    result = await db.execute(
+        select(BoardCardRun.card_id, BoardCardRun.active_execution_id)
+        .join(
+            ActiveWorkflowExecution,
+            ActiveWorkflowExecution.execution_id == BoardCardRun.active_execution_id,
+        )
+        .where(
+            BoardCardRun.card_id.in_(card_ids),
+            ActiveWorkflowExecution.heartbeat_at >= cutoff,
+            ActiveWorkflowExecution.cancel_requested_at.is_(None),
+        )
+    )
+    active_by_card: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for card_id, execution_id in result.all():
+        if execution_id is not None:
+            active_by_card.setdefault(card_id, set()).add(execution_id)
+    return active_by_card
 
 
 async def _validate_accessible_credential(
@@ -374,6 +403,7 @@ async def get_board_state(
         .limit(MAX_BOARD_CARDS)
     )
     cards = cards_result.scalars().all()
+    active_executions = await _active_board_execution_ids(db, [card.id for card in cards])
     workflows_by_column = await _column_workflow_responses(db, [c.id for c in columns])
     cred_name = await _mapper_credential_name(db, board)
     return BoardStateResponse(
@@ -396,8 +426,11 @@ async def get_board_state(
             )
             for column in columns
         ],
-        cards=[_card_response(card) for card in cards],
-        has_active_runs=any(card.run_status in ACTIVE_RUN_STATUSES for card in cards),
+        cards=[
+            _card_response(card, actively_running=card.id in active_executions) for card in cards
+        ],
+        has_active_runs=bool(active_executions)
+        or any(card.run_status in ACTIVE_RUN_STATUSES for card in cards),
     )
 
 
@@ -656,8 +689,11 @@ async def get_card_detail(
         .order_by(BoardCardRun.started_at.desc())
         .limit(50)
     )
+    runs = runs_result.scalars().all()
+    active_executions = await _active_board_execution_ids(db, [card.id])
+    active_execution_ids = active_executions.get(card.id, set())
     return CardDetailResponse(
-        card=_card_response(card),
+        card=_card_response(card, actively_running=bool(active_execution_ids)),
         activities=[
             CardActivityResponse(
                 id=a.id,
@@ -680,7 +716,7 @@ async def get_card_detail(
                 workflow_name=r.workflow_name,
                 chain_position=r.chain_position,
                 chain_length=r.chain_length,
-                status=r.status,
+                status=("running" if r.active_execution_id in active_execution_ids else r.status),
                 execution_history_id=r.execution_history_id,
                 active_execution_id=r.active_execution_id,
                 output=r.output or {},
@@ -688,7 +724,7 @@ async def get_card_detail(
                 started_at=r.started_at,
                 finished_at=r.finished_at,
             )
-            for r in runs_result.scalars().all()
+            for r in runs
         ],
     )
 

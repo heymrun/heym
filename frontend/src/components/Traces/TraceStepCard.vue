@@ -15,7 +15,9 @@ import {
 import type { TraceStep } from "@/lib/traceSteps";
 
 import CopyButton from "@/components/Traces/CopyButton.vue";
+import TraceJsonContent from "@/components/Traces/TraceJsonContent.vue";
 import { renderMarkdown } from "@/lib/markdown";
+import { getTraceJsonContent, isTraceJsonContent } from "@/lib/traceJson";
 
 const props = defineProps<{
   step: TraceStep;
@@ -43,21 +45,14 @@ function formatStepDuration(ms: number): string {
   return `${Math.round(ms)} ms`;
 }
 
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value ?? "");
-  }
-}
-
-const jsonText = computed(() => formatJson(props.step.json));
+const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
 </script>
 
 <template>
   <div
     class="rounded-lg border bg-muted/20 transition-colors"
     :class="open ? 'border-primary/40' : 'border-border/50'"
+    :data-testid="`trace-step-${step.id}`"
   >
     <button
       type="button"
@@ -114,35 +109,48 @@ const jsonText = computed(() => formatJson(props.step.json));
       <template v-if="step.kind === 'tool'">
         <div
           v-if="step.argumentsText"
-          class="space-y-1"
         >
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Arguments
-          </div>
-          <div class="relative">
-            <CopyButton
-              :text="step.argumentsText"
-              class="absolute right-1.5 top-1.5 z-[1]"
-            />
-            <pre class="text-xs bg-muted/40 rounded-md p-2 pr-10 overflow-auto whitespace-pre-wrap">{{ step.argumentsText }}</pre>
-          </div>
+          <TraceJsonContent
+            :value="step.argumentsText"
+            max-height="small"
+          >
+            <template #title>
+              <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Arguments
+              </span>
+            </template>
+            <template #actions>
+              <CopyButton :text="step.argumentsText" />
+            </template>
+          </TraceJsonContent>
         </div>
         <div
           v-if="step.resultText"
-          class="space-y-1"
         >
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Result
-          </div>
-          <div class="relative">
-            <CopyButton
-              :text="step.resultText"
-              class="absolute right-1.5 top-1.5 z-[1]"
-            />
-            <pre class="text-xs bg-muted/40 rounded-md p-2 pr-10 overflow-auto whitespace-pre-wrap max-h-60">{{ step.resultText }}</pre>
-          </div>
+          <TraceJsonContent
+            :value="step.resultText"
+            max-height="small"
+          >
+            <template #title>
+              <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Result
+              </span>
+            </template>
+            <template #actions>
+              <CopyButton :text="step.resultText" />
+            </template>
+          </TraceJsonContent>
         </div>
       </template>
+
+      <TraceJsonContent
+        v-else-if="step.detail && isTraceJsonContent(step.detail)"
+        :value="step.detail"
+      >
+        <template #actions>
+          <CopyButton :text="step.detail" />
+        </template>
+      </TraceJsonContent>
 
       <div
         v-else-if="step.detail && step.detailIsMarkdown"
@@ -173,18 +181,16 @@ const jsonText = computed(() => formatJson(props.step.json));
         </div>
       </div>
 
-      <div class="space-y-1">
-        <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Raw JSON
-        </div>
-        <div class="relative">
-          <CopyButton
-            :text="jsonText"
-            class="absolute right-1.5 top-1.5 z-[1]"
-          />
-          <pre class="text-xs bg-muted/30 border rounded-md p-2 pr-10 overflow-auto max-h-72 whitespace-pre-wrap">{{ jsonText }}</pre>
-        </div>
-      </div>
+      <TraceJsonContent :value="step.json">
+        <template #title>
+          <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Event JSON
+          </span>
+        </template>
+        <template #actions>
+          <CopyButton :text="jsonText" />
+        </template>
+      </TraceJsonContent>
     </div>
   </div>
 </template>

@@ -923,6 +923,15 @@ class GitHubService:
         response = self._request_json("GET", "/issues", params=params)
         return response if isinstance(response, list) else []
 
+    def get_authenticated_user(self) -> dict[str, Any]:
+        """Fetch the account behind the token (``GET /user``).
+
+        Used to scope ``update_existing_pr`` PR discovery to the coding agent's own open pull
+        requests so a re-run never adopts an unrelated contributor's PR.
+        """
+        response = self._request_json("GET", "/user")
+        return response if isinstance(response, dict) else {}
+
     def invite_user(self, organization: str, email: str) -> dict[str, Any]:
         """Invite a user to an organization by email."""
         response = self._request_json(

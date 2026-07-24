@@ -352,27 +352,28 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Header -->
-    <div class="flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div class="flex items-center gap-2 shrink-0">
         <HardDrive class="w-5 h-5 text-muted-foreground" />
         <h2 class="text-lg font-semibold">
           Drive
         </h2>
-        <span class="text-xs text-muted-foreground">({{ total }} files)</span>
+        <span class="text-xs text-muted-foreground whitespace-nowrap">({{ total }} files)</span>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <div class="relative">
+      <div class="grid grid-cols-[1fr_auto_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-end">
+        <div class="relative min-w-0">
           <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             v-model="searchQuery"
             placeholder="Search files..."
-            class="pl-8 h-8 text-xs w-48"
+            class="pl-8 h-8 text-xs w-full sm:w-48"
           />
         </div>
         <Button
           size="sm"
           variant="ghost"
           :disabled="loading"
+          class="px-2 sm:px-4"
           @click="loadFiles"
         >
           <RefreshCw
@@ -386,6 +387,7 @@ onBeforeUnmount(() => {
           variant="destructive"
           :loading="clearing"
           :disabled="loading || clearing"
+          class="px-2 sm:px-4"
           @click="clearAllFiles"
         >
           <Trash2 class="w-3.5 h-3.5" />

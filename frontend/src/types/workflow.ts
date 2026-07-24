@@ -431,6 +431,7 @@ export interface NodeData {
     | "commit_push"
     | "direct_commit"
     | "update_existing_pr"
+    | "open_or_update_pr"
     | "patch_artifact";
   branchName?: string;
   codexModel?: string;
