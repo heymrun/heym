@@ -29,8 +29,7 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "src/**/*.vue",
-    "playwright.config.ts"
+    "src/**/*.vue"
   ],
   "references": [
     {
