@@ -21,6 +21,7 @@ from app.services.agent_tool_observability import (
     sanitize_persisted_tool_entry,
     sanitize_tool_payload,
     summarize_tool_calls,
+    text_indicates_cancellation,
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -1064,7 +1065,11 @@ class LLMService:
                 )
                 if failure_status in {"timeout", "cancelled"}:
                     patched["status"] = failure_status
-                combined_tool_calls.append(sanitize_persisted_tool_entry(patched))
+                    patched["result"] = {
+                        "error": error_text,
+                        "status": failure_status,
+                    }
+                combined_tool_calls.append(patched)
             if combined_tool_calls:
                 result["tool_calls"] = combined_tool_calls
             _attach_tool_metrics(result)
@@ -1095,7 +1100,7 @@ class LLMService:
                     if isinstance(nested_error, str) and nested_error.strip():
                         candidates.append(nested_error.strip())
             for candidate in candidates:
-                if "cancel" in candidate.lower():
+                if text_indicates_cancellation(candidate):
                     return candidate
             return None
 
@@ -1311,6 +1316,10 @@ class LLMService:
                 review_markdown = pause_request.review_markdown.strip()
                 if not review_markdown:
                     review_markdown = "Human review is required before this agent continues."
+                pending_tool_calls = copy.deepcopy(tool_calls_collected)
+                if pending_tool_entry is not None:
+                    # pending_tool_entry is already sanitized in `_run_one_tool`.
+                    pending_tool_calls.append(copy.deepcopy(pending_tool_entry))
                 result = {
                     "text": review_markdown,
                     "model": model,
@@ -1327,7 +1336,7 @@ class LLMService:
                         "draft_text": review_markdown,
                         "agent_state": {
                             "messages": messages_before_tool_response,
-                            "tool_calls": copy.deepcopy(tool_calls_collected),
+                            "tool_calls": copy.deepcopy(pending_tool_calls),
                             "elapsed_ms": round(total_elapsed_ms, 2),
                             "prompt_tokens": total_prompt_tokens,
                             "completion_tokens": total_completion_tokens,
@@ -1340,11 +1349,6 @@ class LLMService:
                         "match_strategy": pause_request.match_strategy,
                     },
                 }
-                pending_tool_calls = copy.deepcopy(tool_calls_collected)
-                if pending_tool_entry is not None:
-                    pending_tool_calls.append(
-                        sanitize_persisted_tool_entry(copy.deepcopy(pending_tool_entry))
-                    )
                 if pending_tool_calls:
                     result["tool_calls"] = pending_tool_calls
                 _attach_tool_metrics(result)
@@ -1387,14 +1391,16 @@ class LLMService:
                             "timestamp": int(time.time() * 1000),
                         }
                     )
-                tool_start = time.time()
-                started_at = int(tool_start * 1000)
+                tool_start = time.monotonic()
+                started_at = int(time.time() * 1000)
                 tool_source = tool_def.get("_source") if tool_def else None
                 mcp_server = tool_def.get("_mcp_server") if tool_def else None
                 pending_pause: HumanReviewPause | None = None
                 pending_entry: dict[str, Any] | None = None
                 result_str = ""
                 tool_result: Any = None
+                abort_reason: str | None = None
+                tool_status = "success"
                 with tracing.agent_tool_span(
                     tool_name=name,
                     tool_call_id=tool_call_id,
@@ -1458,12 +1464,30 @@ class LLMService:
                             )
                             tool_result = {"error": str(exc), "status": failure_status}
                     if pending_pause is None:
+                        abort_reason = _abort_reason_from_tool_result(tool_result)
+                    if abort_reason is None and should_abort is not None:
+                        abort_reason = should_abort()
+                    if abort_reason is not None:
+                        # Prefer abort/cancel over an in-flight HITL pause or a prior success
+                        # payload so persisted status and result stay aligned.
+                        pending_pause = None
+                        pending_entry = None
+                        tool_status = classify_tool_failure_status(
+                            abort_reason,
+                            explicit_status=_tool_result_status(tool_result)
+                            if tool_result is not None
+                            else None,
+                        )
+                        tool_result = {"error": abort_reason, "status": tool_status}
+                        result_str = json.dumps(tool_result)
+                    if pending_pause is None:
                         tracing.set_span_attribute(
                             tool_span,
                             "heym.agent.tool.result_bytes",
                             len(result_str.encode("utf-8")),
                         )
-                        tool_status = _tool_result_status(tool_result)
+                        if abort_reason is None:
+                            tool_status = _tool_result_status(tool_result)
                         tracing.set_span_attribute(tool_span, "heym.agent.tool.status", tool_status)
                         if tool_status in {"error", "timeout", "cancelled"}:
                             from opentelemetry.trace import StatusCode
@@ -1473,7 +1497,7 @@ class LLMService:
                                 StatusCode.ERROR,
                                 _tool_result_error(tool_result) or tool_status,
                             )
-                tool_elapsed_ms = round((time.time() - tool_start) * 1000, 2)
+                tool_elapsed_ms = round((time.monotonic() - tool_start) * 1000, 2)
                 if pending_pause is not None and pending_entry is not None:
                     pending_entry["elapsed_ms"] = tool_elapsed_ms
                     pending_entry["finished_at"] = int(time.time() * 1000)
@@ -1503,7 +1527,6 @@ class LLMService:
                             }
                         )
                     return tc.id, None, pending_entry, pending_pause, None
-                tool_status = _tool_result_status(tool_result)
                 entry: dict[str, Any] = sanitize_persisted_tool_entry(
                     {
                         "tool_call_id": tool_call_id,
@@ -1537,12 +1560,9 @@ class LLMService:
                     )
                     # Emit a small, safe result summary.
                     summary: dict[str, Any] = {
-                        "has_error": tool_status in {"error", "timeout", "cancelled"}
+                        "has_error": tool_status in {"error", "timeout", "cancelled"},
+                        "status": tool_status,
                     }
-                    if isinstance(tool_result, dict) and isinstance(tool_result.get("status"), str):
-                        summary["status"] = tool_result["status"]
-                    elif tool_status != "success":
-                        summary["status"] = tool_status
                     if isinstance(tool_result, dict) and isinstance(
                         tool_result.get("execution_time_ms"), (int, float)
                     ):
@@ -1559,17 +1579,33 @@ class LLMService:
                             "timestamp": int(time.time() * 1000),
                         }
                     )
-                abort_reason = _abort_reason_from_tool_result(tool_result)
-                if abort_reason is None and should_abort is not None:
-                    abort_reason = should_abort()
-                if abort_reason is not None:
-                    entry["status"] = classify_tool_failure_status(
-                        abort_reason,
-                        explicit_status=entry.get("status")
-                        if isinstance(entry.get("status"), str)
-                        else None,
-                    )
                 return tc.id, result_str, entry, None, abort_reason
+
+            def _commit_completed_tool_slots() -> None:
+                """Persist finished tool slots before an early HITL/abort return."""
+                for slot, tc in enumerate(tool_calls):
+                    packed = slot_results[slot]
+                    if packed is None:
+                        continue
+                    result_str, entry = packed
+                    tool_calls_collected.append(entry)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result_str,
+                        }
+                    )
+                    slot_results[slot] = None
+
+            def _store_completed_tool_slot(
+                slot: int,
+                result_str: str | None,
+                entry: dict[str, Any] | None,
+            ) -> None:
+                if result_str is None or entry is None:
+                    return
+                slot_results[slot] = (result_str, entry)
 
             if hitl_tcs:
                 paused_tc = hitl_tcs[0]
@@ -1585,50 +1621,54 @@ class LLMService:
 
             if len(sub_agent_tcs) >= 2:
                 gathered = await asyncio.gather(*[_run_one_tool(tc) for tc in sub_agent_tcs])
+                pause_info: tuple[Any, HumanReviewPause, dict[str, Any] | None] | None = None
+                abort_info: tuple[str, dict[str, Any] | None] | None = None
                 for slot, tc, (_tid, result_str, entry, pause_request, abort_reason) in zip(
                     sub_slots, sub_agent_tcs, gathered
                 ):
                     if pause_request is not None:
-                        return _build_pending_result(tc.function.name, pause_request, entry)
-                    if abort_reason:
-                        return _build_error_result(abort_reason, entry)
-                    if result_str is None or entry is None:
+                        if pause_info is None:
+                            pause_info = (tc, pause_request, entry)
                         continue
-                    slot_results[slot] = (result_str, entry)
+                    if abort_reason:
+                        # Keep completed siblings; the first aborting entry is attached by
+                        # `_build_error_result`. Later aborting siblings are still recorded.
+                        if abort_info is None:
+                            abort_info = (abort_reason, entry)
+                        else:
+                            _store_completed_tool_slot(slot, result_str, entry)
+                        continue
+                    _store_completed_tool_slot(slot, result_str, entry)
+                if pause_info is not None:
+                    _commit_completed_tool_slots()
+                    paused_tc, pause_request, entry = pause_info
+                    return _build_pending_result(paused_tc.function.name, pause_request, entry)
+                if abort_info is not None:
+                    _commit_completed_tool_slots()
+                    abort_reason, entry = abort_info
+                    return _build_error_result(abort_reason, entry)
             else:
                 for slot, tc in zip(sub_slots, sub_agent_tcs):
                     _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                     if pause_request is not None:
+                        _commit_completed_tool_slots()
                         return _build_pending_result(tc.function.name, pause_request, entry)
                     if abort_reason:
+                        _commit_completed_tool_slots()
                         return _build_error_result(abort_reason, entry)
-                    if result_str is None or entry is None:
-                        continue
-                    slot_results[slot] = (result_str, entry)
+                    _store_completed_tool_slot(slot, result_str, entry)
 
             for slot, tc in zip(other_slots, other_tcs):
                 _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                 if pause_request is not None:
+                    _commit_completed_tool_slots()
                     return _build_pending_result(tc.function.name, pause_request, entry)
                 if abort_reason:
+                    _commit_completed_tool_slots()
                     return _build_error_result(abort_reason, entry)
-                if result_str is None or entry is None:
-                    continue
-                slot_results[slot] = (result_str, entry)
+                _store_completed_tool_slot(slot, result_str, entry)
 
-            for slot, tc in enumerate(tool_calls):
-                packed = slot_results[slot]
-                if packed is None:
-                    continue
-                result_str, entry = packed
-                tool_calls_collected.append(entry)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result_str,
-                    }
-                )
+            _commit_completed_tool_slots()
 
         # Final text-only completion when the loop exits immediately after tool results were
         # appended (max_tool_iterations exhausted before a non-tool assistant turn). This uses

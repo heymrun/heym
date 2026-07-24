@@ -38,11 +38,12 @@ A single **Time range** selector at the top of the filter bar drives both the st
 
 When you open a trace:
 
-- **Steps** – A top-to-bottom timeline that reads the trace as an ordered chain: System → User → Assistant → Tool → Answer. Each step is collapsible; expanding one shows a readable detail (message text, or a tool's arguments and result) followed by that step's JSON. JSON content in every event type—including MCP calls and JSON-RPC payloads—opens in an expandable tree by default, with the first level expanded. Use **Tree / Raw** to switch between the formatted structure and the original text. Malformed JSON remains visible as plain text. Tool steps display their duration and an MCP/Skill badge where applicable. Traces without a message chain (for example image generation) show a minimal Request → Response timeline.
+- **Steps** – A top-to-bottom timeline that reads the trace as an ordered chain: System → User → Assistant → Tool → Answer. Each step is collapsible; expanding one shows a readable detail (message text, or a tool's arguments and result) followed by that step's JSON. JSON content in every event type—including MCP calls and JSON-RPC payloads—opens in an expandable tree by default, with the first level expanded. Use **Tree / Raw** to switch between the formatted structure and the original text. Malformed JSON remains visible as plain text. Tool steps display their duration and an MCP/Skill badge where applicable, plus pending / timeout / cancelled badges when the tool-call status is set. The Answer step can show aggregate `tool_metrics` badges (call counts by status and total tool duration). Traces without a message chain (for example image generation) show a minimal Request → Response timeline.
 - **Request** – Full request payload sent to the LLM, with **Tree / Raw** JSON views
 - **Response** – Model response, including tool calls if any, with **Tree / Raw** JSON views
+- **Tool metrics** – When present on the response, a compact summary of tool call counts (`success` / `error` / `pending` / `timeout` / `cancelled`) and total tool duration
 - **Timing breakdown** – `llm_ms`, `tools_ms`, `mcp_list_ms` for performance analysis
-- **Tool calls** – Tool name, arguments, result, and elapsed time
+- **Tool calls** – Tool name, arguments, result, status, and elapsed time
 - **Skills included** – Skills passed to the model in the request
 - **Go to Workflow** – Jump directly to the related workflow from the trace detail dialog
 
@@ -62,5 +63,6 @@ When you open a trace:
 - [Agent Node](../nodes/agent-node.md) – Agent node with tool calling
 - [Node Types](../reference/node-types.md) – LLM and Agent nodes
 - [Credentials Tab](./credentials-tab.md) – Credentials used in traces
+- [OpenTelemetry Tracing](../reference/opentelemetry.md) – Opt-in OTel export for workflow, node, and Agent tool spans
 - [DataTable Tab](./datatable-tab.md) – Hosts the LLM Cost Table used by the cost chart
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

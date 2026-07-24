@@ -15,6 +15,7 @@ from app.services.agent_tool_observability import (
     sanitize_tool_payload,
     sanitize_trace_tool_payloads,
     summarize_tool_calls,
+    text_indicates_cancellation,
 )
 from app.services.llm_service import HumanReviewPause, LLMService, _tool_result_status
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -89,6 +90,22 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
         self.assertIn("_truncated", sanitized)
         self.assertLessEqual(len(json.dumps(sanitized, ensure_ascii=False)), 512 + 100)
 
+    def test_bounds_large_json_strings_without_parsing_or_leaking_secrets(self) -> None:
+        raw = '{"api_key":"secret-value","payload":"' + ("x" * 100_000) + '"}'
+
+        with patch("app.services.agent_tool_observability.json.loads") as loads:
+            sanitized = sanitize_tool_payload(
+                {"arguments": raw},
+                max_chars=256,
+                max_depth=6,
+                max_total_chars=512,
+            )
+
+        loads.assert_not_called()
+        serialized = json.dumps(sanitized)
+        self.assertNotIn("secret-value", serialized)
+        self.assertLessEqual(len(sanitized["arguments"]), 256)
+
     def test_sanitizes_tool_messages_inside_llm_trace_request(self) -> None:
         request = {
             "messages": [
@@ -135,6 +152,50 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
 
         self.assertIn("PAYLOAD_TRUNCATED", json.dumps(safe_request))
 
+    def test_sanitizes_hitl_tool_payloads_inside_trace_response(self) -> None:
+        response = {
+            "_hitl_pending": {
+                "tool_arguments": {"api_key": "secret-key", "safe": "value"},
+                "agent_state": {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {"function": {"arguments": '{"password":"secret-password"}'}}
+                            ],
+                        },
+                        {
+                            "role": "tool",
+                            "content": {"access_token": "secret-token"},
+                        },
+                    ],
+                    "tool_calls": [
+                        {
+                            "name": "child",
+                            "arguments": {"client_secret": "secret-client"},
+                        }
+                    ],
+                },
+            }
+        }
+
+        _, safe_response = sanitize_trace_tool_payloads(
+            {},
+            response,
+            max_chars=4096,
+            max_depth=6,
+        )
+
+        serialized = json.dumps(safe_response)
+        self.assertNotIn("secret-key", serialized)
+        self.assertNotIn("secret-password", serialized)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("secret-client", serialized)
+        self.assertEqual(
+            response["_hitl_pending"]["tool_arguments"]["api_key"],
+            "secret-key",
+        )
+
     def test_preserves_token_count_keys(self) -> None:
         payload = {"token_count": 12, "tokens": 3, "access_token": "secret"}
 
@@ -178,6 +239,9 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             classify_tool_failure_status("boom", explicit_status="timeout"),
             "timeout",
         )
+        self.assertEqual(classify_tool_failure_status("cannot cancel reservation"), "error")
+        self.assertFalse(text_indicates_cancellation("cannot cancel reservation"))
+        self.assertTrue(text_indicates_cancellation("Workflow execution cancelled"))
 
     def test_summarizes_tool_call_statuses_and_durations(self) -> None:
         summary = summarize_tool_calls(
@@ -198,6 +262,23 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
         summary = summarize_tool_calls([{"status": "failed"}, {"status": "unexpected"}])
 
         self.assertEqual(summary["error"], 2)
+
+    def test_excludes_context_compression_from_tool_metrics(self) -> None:
+        summary = summarize_tool_calls(
+            [
+                {
+                    "name": "_context_compression",
+                    "status": "compressed",
+                    "elapsed_ms": 25,
+                },
+                {"name": "child", "status": "success", "elapsed_ms": 10},
+            ]
+        )
+
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["success"], 1)
+        self.assertEqual(summary["error"], 0)
+        self.assertEqual(summary["total_duration_ms"], 10.0)
 
     def test_ok_and_completed_statuses_normalize_to_success(self) -> None:
         for status in ("ok", "completed", "complete", "done", "OK"):
@@ -305,6 +386,10 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         terminal_events = [event for event in events if event.get("phase") in {"end", "result"}]
         self.assertEqual(len(terminal_events), 2)
         self.assertTrue(all(event["status"] == "pending" for event in terminal_events))
+        pending_history = result["_hitl_pending"]["agent_state"]["tool_calls"]
+        self.assertEqual(pending_history, result["tool_calls"])
+        self.assertEqual(pending_history[-1]["tool_call_id"], "call-1")
+        self.assertEqual(pending_history[-1]["status"], "pending")
 
     async def test_real_tool_loop_reports_timeout_status(self) -> None:
         def boom(*_args: object) -> object:
@@ -349,6 +434,164 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         # Cancel in the tool result triggers abort; entry status should be cancelled.
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
         self.assertIn("error", result)
+
+    async def test_cancellation_during_tool_uses_cancelled_terminal_events(self) -> None:
+        responses = [self._response(content=None, tool_calls=[self._tool_call()])]
+
+        def create(**_kwargs: object) -> SimpleNamespace:
+            return responses.pop(0)
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+        events: list[dict] = []
+        abort_checks = 0
+
+        def should_abort() -> str | None:
+            nonlocal abort_checks
+            abort_checks += 1
+            return None if abort_checks == 1 else "Workflow execution cancelled"
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="run tool",
+                tools=[{"name": "child", "parameters": {"type": "object"}}],
+                tool_executor=lambda *_args: {"ok": True, "status": "success"},
+                on_tool_call=events.append,
+                should_abort=should_abort,
+            )
+
+        terminal_events = [event for event in events if event.get("phase") in {"end", "result"}]
+        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+        self.assertEqual(result["tool_calls"][0]["result"]["status"], "cancelled")
+        self.assertEqual(result["tool_calls"][0]["result"]["error"], "Workflow execution cancelled")
+        self.assertTrue(all(event["status"] == "cancelled" for event in terminal_events))
+        result_event = next(event for event in events if event.get("phase") == "result")
+        self.assertEqual(result_event["result"]["status"], "cancelled")
+        self.assertTrue(result_event["result"]["has_error"])
+
+    async def test_cannot_cancel_message_does_not_abort_as_cancelled(self) -> None:
+        result, events = await self._execute_with_tool_result(
+            {"error": "cannot cancel reservation"}
+        )
+
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertNotIn("error", result)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
+
+    async def test_parallel_sub_agents_keep_siblings_on_hitl_pause(self) -> None:
+        tool_a = SimpleNamespace(
+            id="call-a",
+            type="function",
+            function=SimpleNamespace(name="agent_a", arguments="{}"),
+        )
+        tool_b = SimpleNamespace(
+            id="call-b",
+            type="function",
+            function=SimpleNamespace(name="agent_b", arguments="{}"),
+        )
+        responses = [
+            self._response(content=None, tool_calls=[tool_a, tool_b]),
+        ]
+
+        def create(**_kwargs: object) -> SimpleNamespace:
+            return responses.pop(0)
+
+        def executor(tool_def: dict, name: str, *_args: object) -> object:
+            if name == "agent_a":
+                return {"ok": True, "status": "success"}
+            return HumanReviewPause(review_markdown="Need review")
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="run tools",
+                tools=[
+                    {"name": "agent_a", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                    {"name": "agent_b", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                ],
+                tool_executor=executor,
+            )
+
+        self.assertIn("_hitl_pending", result)
+        names = [tc["name"] for tc in result["tool_calls"]]
+        self.assertEqual(names, ["agent_a", "agent_b"])
+        self.assertEqual(result["tool_calls"][0]["status"], "success")
+        self.assertEqual(result["tool_calls"][1]["status"], "pending")
+        self.assertEqual(
+            [tc["name"] for tc in result["_hitl_pending"]["agent_state"]["tool_calls"]],
+            ["agent_a", "agent_b"],
+        )
+
+    async def test_success_tool_entry_includes_lifecycle_fields(self) -> None:
+        result, events = await self._execute_with_tool_result({"ok": True, "status": "success"})
+
+        entry = result["tool_calls"][0]
+        self.assertEqual(entry["tool_call_id"], "call-1")
+        self.assertEqual(entry["status"], "success")
+        self.assertIsInstance(entry["started_at"], int)
+        self.assertIsInstance(entry["finished_at"], int)
+        self.assertGreaterEqual(entry["finished_at"], entry["started_at"])
+        self.assertIn("elapsed_ms", entry)
+        start_event = next(event for event in events if event.get("phase") == "start")
+        self.assertEqual(start_event["tool_call_id"], "call-1")
+
+    async def test_parallel_sub_agents_keep_siblings_on_abort(self) -> None:
+        tool_a = SimpleNamespace(
+            id="call-a",
+            type="function",
+            function=SimpleNamespace(name="agent_a", arguments="{}"),
+        )
+        tool_b = SimpleNamespace(
+            id="call-b",
+            type="function",
+            function=SimpleNamespace(name="agent_b", arguments="{}"),
+        )
+        responses = [self._response(content=None, tool_calls=[tool_a, tool_b])]
+
+        def create(**_kwargs: object) -> SimpleNamespace:
+            return responses.pop(0)
+
+        def executor(_tool_def: dict, name: str, *_args: object) -> object:
+            if name == "agent_a":
+                return {"ok": True, "status": "success"}
+            return {"error": "Workflow execution cancelled"}
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="run tools",
+                tools=[
+                    {"name": "agent_a", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                    {"name": "agent_b", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                ],
+                tool_executor=executor,
+            )
+
+        self.assertIn("error", result)
+        names = [tc["name"] for tc in result["tool_calls"]]
+        self.assertEqual(names, ["agent_a", "agent_b"])
+        self.assertEqual(result["tool_calls"][0]["status"], "success")
+        self.assertEqual(result["tool_calls"][1]["status"], "cancelled")
 
     async def test_persisted_tool_entry_redacts_secrets(self) -> None:
         result, _events = await self._execute_with_tool_result(

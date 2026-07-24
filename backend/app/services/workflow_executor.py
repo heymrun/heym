@@ -5503,7 +5503,9 @@ class WorkflowExecutor:
                 tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") == "call_sub_agent"
             ]
             other_times = [
-                tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") != "call_sub_agent"
+                tc.get("elapsed_ms", 0)
+                for tc in tool_calls
+                if tc.get("name") not in {"call_sub_agent", "_context_compression"}
             ]
             tools_total_ms = (max(sub_agent_times) if sub_agent_times else 0) + sum(other_times)
             result["timing_breakdown"] = {

@@ -163,12 +163,20 @@ Each compression event is recorded as:
 - An `on_tool_call` event with `phase: "compression"` → rendered in the Debug panel as `Context compressed (N messages → summary)`
 - A `context.compression` LLM trace entry → visible in the Traces tab with before/after token estimates
 
+Agent tool calls also emit richer observability:
+
+- Per-call lifecycle fields on `tool_calls`: `tool_call_id`, `status` (`success` / `error` / `pending` / `timeout` / `cancelled`), `started_at`, `finished_at`, `elapsed_ms`
+- Aggregate `tool_metrics` on the agent result (counts by status plus total/max duration); `_context_compression` entries are excluded from those counts
+- Opt-in OpenTelemetry child spans named `heym.agent.tool.execute` (see [OpenTelemetry Tracing](./opentelemetry.md))
+- Persisted LLM trace / execution-history `tool_calls` payloads are redacted and size-bounded; live HITL resume state keeps originals for matching
+
 ## Related
 
 - [Why Heym](../getting-started/why-heym.md) – Multi-agent orchestration and AI-native features
 - [Agent Node](../nodes/agent-node.md) – Configuration and parameters
 - [Agent Persistent Memory](./agent-persistent-memory.md) – Knowledge graph per agent node and peer sharing
 - [Human-in-the-Loop](./human-in-the-loop.md) – Review links, pending payloads, and resume behavior
+- [OpenTelemetry Tracing](./opentelemetry.md) – Workflow, node, and Agent tool spans
 - [Node Types](./node-types.md) – Agent and related nodes
 - [Parallel Execution](./parallel-execution.md) – DAG-based and sub-agent parallel execution
 - [MCP Tab](../tabs/mcp-tab.md) – Configure MCP connections

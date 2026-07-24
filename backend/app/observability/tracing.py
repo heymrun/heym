@@ -15,6 +15,7 @@ Design rules:
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any, TypeVar
@@ -29,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 _provider: Any = None
 T = TypeVar("T")
+
+
+def _sanitize_span_text(value: str, *, max_chars: int) -> str:
+    """Return bounded, redacted span text without letting sanitization fail tracing."""
+    try:
+        from app.services.agent_tool_observability import sanitize_tool_payload
+
+        sanitized = sanitize_tool_payload(
+            value,
+            max_chars=max_chars,
+            max_depth=1,
+            max_total_chars=max_chars,
+        )
+        return sanitized if isinstance(sanitized, str) else "[REDACTED]"
+    except Exception:  # noqa: BLE001 - tracing must never break execution
+        return "[REDACTED]"
 
 
 def set_span_attribute(span: Any, key: str, value: Any) -> None:
@@ -48,7 +65,10 @@ def set_span_status(span: Any, status_code: Any, description: str | None = None)
     try:
         from opentelemetry.trace import Status
 
-        span.set_status(Status(status_code, description) if description else Status(status_code))
+        safe_description = _sanitize_span_text(description, max_chars=512) if description else None
+        span.set_status(
+            Status(status_code, safe_description) if safe_description else Status(status_code)
+        )
     except Exception:  # noqa: BLE001 - tracing must never break workflows
         logger.debug("Failed to set OTel span status", exc_info=True)
 
@@ -102,8 +122,21 @@ def record_agent_tool_exception(span: Any, exc: BaseException) -> None:
     try:
         from opentelemetry.trace import StatusCode
 
-        span.record_exception(exc)
-        set_span_status(span, StatusCode.ERROR, str(exc))
+        error_text = _sanitize_span_text(str(exc), max_chars=512)
+        stacktrace = _sanitize_span_text(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            max_chars=4096,
+        )
+        span.add_event(
+            "exception",
+            {
+                "exception.type": f"{type(exc).__module__}.{type(exc).__qualname__}",
+                "exception.message": error_text,
+                "exception.stacktrace": stacktrace,
+                "exception.escaped": False,
+            },
+        )
+        set_span_status(span, StatusCode.ERROR, error_text)
     except Exception:  # noqa: BLE001 - observability must never break execution
         pass
 

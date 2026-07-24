@@ -30,9 +30,19 @@ _SENSITIVE_VALUE_PATTERNS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)(basic\s+)[A-Za-z0-9+/=]+"),
     re.compile(
+        r"""(?ix)
+        ["']?
+        (?:api[_-]?key|authorization|cookie|password|secret|private[_-]?key|
+        access[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)
+        ["']?\s*:\s*
+        (?:"[^"]*"|'[^']*'|[^,\s}\]]+)
+        """
+    ),
+    re.compile(
         r"(?i)(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|api[_-]?key)\s*[=:]\s*[^\s,;]+"
     ),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.+?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*", re.DOTALL),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 )
 _REDACTED = "[REDACTED]"
@@ -40,6 +50,8 @@ _TRUNCATED = "...(truncated)"
 _PAYLOAD_TRUNCATED = "[PAYLOAD_TRUNCATED]"
 _MAX_DICT_KEYS = 200
 _MAX_LIST_ITEMS = 100
+_MAX_REDACTION_LOOKAHEAD_CHARS = 512
+_MAX_JSON_PARSE_CHARS = 65_536
 DEFAULT_MAX_PAYLOAD_CHARS = 4096
 DEFAULT_MAX_PAYLOAD_DEPTH = 6
 DEFAULT_MAX_PAYLOAD_TOTAL_CHARS = 32768
@@ -80,6 +92,30 @@ def normalize_tool_call_status(value: Any) -> str:
     return "unknown"
 
 
+_CANCEL_STATUS_RE = re.compile(
+    r"(?i)\b(?:cancelled|canceled|cancellation|cancelling|canceling)\b"
+    r"|\bcancel(?:led|ed)?\s+by\b"
+)
+_TIMEOUT_STATUS_RE = re.compile(
+    r"(?i)\btimed\s+out\b|\btimeout\s+after\b|\b(?:request|operation|tool|execution)\s+timeout\b"
+)
+
+
+def text_indicates_cancellation(text: str) -> bool:
+    """Return True when text clearly describes cancellation (not just the word cancel)."""
+    return bool(_CANCEL_STATUS_RE.search(text))
+
+
+def text_indicates_timeout(text: str) -> bool:
+    """Return True when text clearly describes a timeout failure."""
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+    if lowered.endswith(" timeout"):
+        return True
+    return bool(_TIMEOUT_STATUS_RE.search(lowered))
+
+
 def classify_tool_failure_status(
     error: BaseException | str | None,
     *,
@@ -94,12 +130,12 @@ def classify_tool_failure_status(
         return "timeout"
     if error is None:
         return "error"
-    text = str(error).strip().lower()
+    text = str(error).strip()
     if not text:
         return "error"
-    if "timed out" in text or text.endswith(" timeout") or "timeout after" in text:
+    if text_indicates_timeout(text):
         return "timeout"
-    if "cancel" in text:
+    if text_indicates_cancellation(text):
         return "cancelled"
     if explicit_status:
         normalized = normalize_tool_call_status(explicit_status)
@@ -131,8 +167,12 @@ class _PayloadBudget:
 
 
 def _truncate_text(value: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
     if len(value) <= max_chars:
         return value
+    if max_chars <= len(_TRUNCATED):
+        return _TRUNCATED[:max_chars]
     return value[: max(0, max_chars - len(_TRUNCATED))] + _TRUNCATED
 
 
@@ -146,6 +186,15 @@ def _redact_sensitive_text(value: str) -> str:
             replacement = _REDACTED
         redacted = pattern.sub(replacement, redacted)
     return redacted
+
+
+def _bounded_redact_text(value: str, max_chars: int) -> str:
+    """Redact and truncate without scanning arbitrarily large payload strings."""
+    if max_chars <= 0:
+        return ""
+    scan_limit = max_chars + _MAX_REDACTION_LOOKAHEAD_CHARS
+    bounded_input = value[:scan_limit]
+    return _truncate_text(_redact_sensitive_text(bounded_input), max_chars)
 
 
 def sanitize_tool_payload(
@@ -166,7 +215,7 @@ def sanitize_tool_payload(
     if isinstance(value, str):
         if budget.remaining <= 0:
             return _PAYLOAD_TRUNCATED
-        bounded = _truncate_text(_redact_sensitive_text(value), min(max_chars, budget.remaining))
+        bounded = _bounded_redact_text(value, min(max_chars, budget.remaining))
         budget.take(len(bounded))
         return bounded
     if value is None or isinstance(value, (bool, int, float)):
@@ -188,30 +237,40 @@ def sanitize_tool_payload(
             if _is_sensitive_key(key_text):
                 output[key_text] = _REDACTED
             elif key_text.lower() in {"args", "arguments", "result"} and isinstance(child, str):
-                try:
-                    parsed_child = json.loads(child)
-                except json.JSONDecodeError:
-                    bounded_child = _truncate_text(
-                        _redact_sensitive_text(child),
+                parse_limit = min(_MAX_JSON_PARSE_CHARS, max(max_chars * 4, max_chars))
+                if len(child) > parse_limit:
+                    bounded_child = _bounded_redact_text(
+                        child,
                         min(max_chars, budget.remaining),
                     )
                     budget.take(len(bounded_child))
                     output[key_text] = bounded_child
                 else:
-                    safe_child = sanitize_tool_payload(
-                        parsed_child,
-                        max_chars=max_chars,
-                        max_depth=max_depth,
-                        max_total_chars=max_total_chars,
-                        _depth=_depth + 1,
-                        _budget=budget,
-                        _active_ids=active_ids,
-                    )
-                    dumped = json.dumps(safe_child, ensure_ascii=False)
-                    if len(dumped) > max_chars or len(dumped) > budget.remaining:
-                        dumped = _truncate_text(dumped, min(max_chars, max(0, budget.remaining)))
-                    budget.take(len(dumped))
-                    output[key_text] = dumped
+                    try:
+                        parsed_child = json.loads(child)
+                    except json.JSONDecodeError:
+                        bounded_child = _bounded_redact_text(
+                            child,
+                            min(max_chars, budget.remaining),
+                        )
+                        budget.take(len(bounded_child))
+                        output[key_text] = bounded_child
+                    else:
+                        child_limit = min(max_chars, budget.remaining)
+                        safe_child = sanitize_tool_payload(
+                            parsed_child,
+                            max_chars=max_chars,
+                            max_depth=max_depth,
+                            max_total_chars=child_limit,
+                            _depth=_depth + 1,
+                            _budget=_PayloadBudget(child_limit),
+                        )
+                        dumped = _truncate_text(
+                            json.dumps(safe_child, ensure_ascii=False),
+                            child_limit,
+                        )
+                        budget.take(len(dumped))
+                        output[key_text] = dumped
             else:
                 output[key_text] = sanitize_tool_payload(
                     child,
@@ -243,7 +302,7 @@ def sanitize_tool_payload(
             )
         active_ids.remove(value_id)
         return output_list
-    bounded = _truncate_text(_redact_sensitive_text(str(value)), min(max_chars, budget.remaining))
+    bounded = _bounded_redact_text(str(value), min(max_chars, budget.remaining))
     budget.take(len(bounded))
     active_ids.remove(value_id)
     return bounded
@@ -310,7 +369,7 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
     if not isinstance(tool_calls, list):
         return {"count": 0, "success": 0, "error": 0, "pending": 0, "cancelled": 0, "timeout": 0}
     summary: dict[str, Any] = {
-        "count": len(tool_calls),
+        "count": 0,
         "success": 0,
         "error": 0,
         "pending": 0,
@@ -320,8 +379,9 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         "max_duration_ms": 0.0,
     }
     for entry in tool_calls:
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
             continue
+        summary["count"] += 1
         status = normalize_tool_call_status(entry.get("status"))
         if status == "unknown":
             status = "error"
@@ -334,6 +394,43 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
     summary["total_duration_ms"] = round(summary["total_duration_ms"], 2)
     summary["max_duration_ms"] = round(summary["max_duration_ms"], 2)
     return summary
+
+
+def _sanitize_trace_messages(
+    messages: Any,
+    *,
+    max_chars: int,
+    max_depth: int,
+    max_total_chars: int,
+    budget: _PayloadBudget,
+) -> Any:
+    """Copy messages while sanitizing only Agent tool-call payload sections."""
+    if not isinstance(messages, list):
+        return messages
+    safe_messages: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            safe_messages.append(message)
+            continue
+        safe_message = dict(message)
+        if message.get("role") == "assistant" and "tool_calls" in message:
+            safe_message["tool_calls"] = sanitize_tool_calls(
+                message["tool_calls"],
+                max_chars=max_chars,
+                max_depth=max_depth,
+                max_total_chars=max_total_chars,
+                _budget=budget,
+            )
+        elif message.get("role") == "tool" and "content" in message:
+            safe_message["content"] = sanitize_tool_payload(
+                message["content"],
+                max_chars=max_chars,
+                max_depth=max_depth,
+                max_total_chars=max_total_chars,
+                _budget=budget,
+            )
+        safe_messages.append(safe_message)
+    return safe_messages
 
 
 def sanitize_trace_tool_payloads(
@@ -367,30 +464,45 @@ def sanitize_trace_tool_payloads(
             _budget=budget,
         )
 
-    messages = request.get("messages")
-    if isinstance(messages, list):
-        safe_messages: list[Any] = []
-        for message in messages:
-            if not isinstance(message, dict):
-                safe_messages.append(message)
-                continue
-            safe_message = dict(message)
-            if message.get("role") == "assistant" and "tool_calls" in message:
-                safe_message["tool_calls"] = sanitize_tool_calls(
-                    message["tool_calls"],
+    if "messages" in request:
+        safe_request["messages"] = _sanitize_trace_messages(
+            request["messages"],
+            max_chars=max_chars,
+            max_depth=max_depth,
+            max_total_chars=max_total_chars,
+            budget=budget,
+        )
+
+    hitl_pending = response.get("_hitl_pending")
+    if isinstance(hitl_pending, dict):
+        safe_hitl_pending = dict(hitl_pending)
+        if "tool_arguments" in hitl_pending:
+            safe_hitl_pending["tool_arguments"] = sanitize_tool_payload(
+                hitl_pending["tool_arguments"],
+                max_chars=max_chars,
+                max_depth=max_depth,
+                max_total_chars=max_total_chars,
+                _budget=budget,
+            )
+        agent_state = hitl_pending.get("agent_state")
+        if isinstance(agent_state, dict):
+            safe_agent_state = dict(agent_state)
+            if "messages" in agent_state:
+                safe_agent_state["messages"] = _sanitize_trace_messages(
+                    agent_state["messages"],
+                    max_chars=max_chars,
+                    max_depth=max_depth,
+                    max_total_chars=max_total_chars,
+                    budget=budget,
+                )
+            if "tool_calls" in agent_state:
+                safe_agent_state["tool_calls"] = sanitize_tool_calls(
+                    agent_state["tool_calls"],
                     max_chars=max_chars,
                     max_depth=max_depth,
                     max_total_chars=max_total_chars,
                     _budget=budget,
                 )
-            elif message.get("role") == "tool" and "content" in message:
-                safe_message["content"] = sanitize_tool_payload(
-                    message["content"],
-                    max_chars=max_chars,
-                    max_depth=max_depth,
-                    max_total_chars=max_total_chars,
-                    _budget=budget,
-                )
-            safe_messages.append(safe_message)
-        safe_request["messages"] = safe_messages
+            safe_hitl_pending["agent_state"] = safe_agent_state
+        safe_response["_hitl_pending"] = safe_hitl_pending
     return safe_request, safe_response

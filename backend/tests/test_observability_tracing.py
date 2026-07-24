@@ -47,6 +47,17 @@ class TracingDisabledTest(unittest.TestCase):
             span.set_attribute("heym.test", 1)
         self.assertIsNotNone(tracer)
 
+    def test_agent_tool_span_is_noop_when_disabled(self) -> None:
+        self.assertFalse(tracing.is_enabled())
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-1",
+            source="node_tool",
+        ) as span:
+            self.assertIsNone(span)
+            tracing.set_span_attribute(span, "heym.agent.tool.status", "success")
+            tracing.record_agent_tool_exception(span, RuntimeError("ignored"))
+
     def test_execute_node_takes_noop_fast_path_when_disabled(self) -> None:
         executor = _make_executor()
         with patch.object(executor, "_execute_node_inner", return_value=_success_result()) as inner:
@@ -173,6 +184,32 @@ class NodeSpanTest(_EnabledTracingTestBase):
         )
         self.assertEqual(tool_span.status.status_code, trace.StatusCode.ERROR)
         self.assertTrue(any(event.name == "exception" for event in tool_span.events))
+
+    def test_agent_tool_exception_redacts_sensitive_error_text(self) -> None:
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-secret",
+            source="node_tool",
+        ) as span:
+            tracing.record_agent_tool_exception(
+                span,
+                RuntimeError("upstream failed: api_key=sk-super-secret"),
+            )
+
+        tool_span = next(
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        )
+        serialized = repr(
+            {
+                "status": tool_span.status.description,
+                "events": [
+                    {"name": event.name, "attributes": dict(event.attributes)}
+                    for event in tool_span.events
+                ],
+            }
+        )
+        self.assertNotIn("sk-super-secret", serialized)
+        self.assertIn("[REDACTED]", serialized)
 
     def test_set_span_status_failure_is_swallowed(self) -> None:
         class BrokenSpan:
