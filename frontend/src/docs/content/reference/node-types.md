@@ -52,6 +52,7 @@ See [Triggers](./triggers.md) for all entry points.
 | Node | Description | Inputs | Outputs |
 |------|-------------|--------|---------|
 | [HTTP](../nodes/http-node.md) | Make HTTP requests (cURL) | 0 or 1 | 1 |
+| [You.com Search](../nodes/youcom-search-node.md) | Search the web using You.com Search API | 0 or 1 | 1 |
 | [WebSocket Send](../nodes/websocket-send-node.md) | Connect to an external WebSocket and send one message | 1 | 1 |
 | [Telegram](../nodes/telegram-node.md) | Send Telegram bot messages | 1 | 1 |
 | [Slack](../nodes/slack-node.md) | Send Slack messages | 1 | 1 |

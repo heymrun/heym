@@ -64,6 +64,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "wait": "wait_node",
     "websocketSend": "websocket_send_node",
     "websocketTrigger": "websocket_trigger_node",
+    "youcomSearch": "youcom_search_node",
 }
 _HANDLER_CACHE: dict[str, NodeHandler] = {}
 
