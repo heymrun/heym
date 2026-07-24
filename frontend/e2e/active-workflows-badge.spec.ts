@@ -10,22 +10,31 @@ interface ActiveExecutionFixture {
   inputs: Record<string, unknown>;
   running_node_ids: string[];
   node_results: [];
+  status?: "running" | "pending";
+  pending_kind?: "hitl" | "codex" | null;
 }
 
 function makeActiveExecution(
   index: number,
   workflowIndex = index,
+  options: { status?: "running" | "pending"; pending_kind?: "hitl" | "codex" } = {},
 ): ActiveExecutionFixture {
   const suffix = String(index).padStart(12, "0");
   const workflowSuffix = String(workflowIndex).padStart(12, "0");
+  const status = options.status ?? "running";
   return {
     execution_id: `10000000-0000-4000-8000-${suffix}`,
     workflow_id: `20000000-0000-4000-8000-${workflowSuffix}`,
-    workflow_name: `Running workflow ${workflowIndex}`,
+    workflow_name:
+      status === "pending"
+        ? `Pending workflow ${workflowIndex}`
+        : `Running workflow ${workflowIndex}`,
     started_at: new Date(Date.UTC(2026, 0, 1, 12, index)).toISOString(),
     inputs: {},
-    running_node_ids: [`node-${index}`],
+    running_node_ids: status === "pending" ? [] : [`node-${index}`],
     node_results: [],
+    status,
+    pending_kind: options.pending_kind ?? null,
   };
 }
 
@@ -115,6 +124,31 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
     .getByRole("menuitem", { name: "Open Running workflow 4 live view" })
     .click();
   await expect(page).toHaveURL(`/workflows/${liveWorkflowId}/${liveExecutionId}`);
+});
+
+test("counts pending HITL reviews in the badge number", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/workflows/executions/active", async (route) => {
+    await route.fulfill({
+      json: [
+        makeActiveExecution(1, 1),
+        makeActiveExecution(2, 2, { status: "pending", pending_kind: "hitl" }),
+        makeActiveExecution(3, 3, { status: "pending", pending_kind: "codex" }),
+      ],
+    });
+  });
+
+  await page.goto("/");
+
+  const badge = page.getByTestId("active-workflows-badge");
+  await expect(badge).toHaveText("3");
+  await expect(badge).toHaveAttribute("title", "1 running · 2 pending reviews");
+
+  await badge.click();
+  const dropdown = page.getByTestId("active-workflows-dropdown");
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown.getByText("Pending human review")).toHaveCount(1);
+  await expect(dropdown.getByText("Pending Codex review")).toHaveCount(1);
 });
 
 test("keeps the zero state non-interactive and hides the badge on mobile", async ({ page }) => {

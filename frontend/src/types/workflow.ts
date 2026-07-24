@@ -1033,6 +1033,9 @@ export interface ActiveExecutionItem {
   inputs: Record<string, unknown>;
   running_node_ids: string[];
   node_results: NodeResult[];
+  /** running = live worker; pending = waiting on HITL / Codex review */
+  status?: "running" | "pending";
+  pending_kind?: "hitl" | "codex" | null;
 }
 
 export interface ServerExecutionHistory {

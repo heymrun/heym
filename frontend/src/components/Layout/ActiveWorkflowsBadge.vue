@@ -25,17 +25,41 @@ let requestGeneration = 0;
 let isUnmounted = false;
 
 const activeWorkflowCount = computed((): number => executions.value.length);
+const pendingReviewCount = computed(
+  (): number => executions.value.filter((item) => item.status === "pending").length,
+);
+const runningCount = computed(
+  (): number => activeWorkflowCount.value - pendingReviewCount.value,
+);
 const badgeTitle = computed((): string => {
   if (refreshFailed.value) {
     return activeWorkflowCount.value > 0
-      ? `${activeWorkflowCount.value} active workflows · Latest refresh failed`
+      ? `${activeWorkflowCount.value} active · Latest refresh failed`
       : "Active workflows unavailable";
   }
   if (activeWorkflowCount.value === 0) {
     return "No active workflows";
   }
-  return `${activeWorkflowCount.value} active workflows`;
+  const parts: string[] = [];
+  if (runningCount.value > 0) {
+    parts.push(
+      `${runningCount.value} running`,
+    );
+  }
+  if (pendingReviewCount.value > 0) {
+    parts.push(
+      `${pendingReviewCount.value} pending review${pendingReviewCount.value === 1 ? "" : "s"}`,
+    );
+  }
+  return parts.join(" · ");
 });
+const badgeAriaLabel = computed((): string => {
+  const summary = badgeTitle.value;
+  return `${summary}. Open live workflow list`;
+});
+const hasPendingOnly = computed(
+  (): boolean => pendingReviewCount.value > 0 && runningCount.value === 0,
+);
 
 async function refreshActiveWorkflows(): Promise<void> {
   if (!isDesktop.value || requestInFlight) return;
@@ -127,7 +151,7 @@ onUnmounted(() => {
       aria-live="polite"
       aria-atomic="true"
     >
-      {{ activeWorkflowCount }} active workflows
+      {{ badgeTitle }}
     </span>
 
     <span
@@ -157,15 +181,24 @@ onUnmounted(() => {
       <DropdownMenuTrigger as-child>
         <button
           type="button"
-          class="active-workflows-badge group relative flex items-center justify-center border border-emerald-500/35 bg-emerald-500/12 text-xs font-bold tabular-nums text-emerald-700 shadow-sm shadow-emerald-500/10 outline-none transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/55 hover:bg-emerald-500/18 hover:shadow-md focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-emerald-300"
-          :aria-label="`${activeWorkflowCount} active workflows. Open live workflow list`"
+          class="active-workflows-badge group relative flex items-center justify-center text-xs font-bold tabular-nums shadow-sm outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          :class="hasPendingOnly
+            ? 'border border-amber-500/40 bg-amber-500/12 text-amber-700 shadow-amber-500/10 hover:border-amber-500/55 hover:bg-amber-500/18 focus-visible:ring-amber-500/45 dark:text-amber-300'
+            : 'border border-emerald-500/35 bg-emerald-500/12 text-emerald-700 shadow-emerald-500/10 hover:border-emerald-500/55 hover:bg-emerald-500/18 focus-visible:ring-emerald-500/45 dark:text-emerald-300'"
+          :aria-label="badgeAriaLabel"
           :title="badgeTitle"
           data-testid="active-workflows-badge"
         >
           {{ activeWorkflowCount }}
           <span class="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 motion-reduce:animate-none" />
-            <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
+            <span
+              class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:animate-none"
+              :class="hasPendingOnly ? 'bg-amber-400' : 'bg-emerald-400'"
+            />
+            <span
+              class="relative inline-flex h-2.5 w-2.5 rounded-full ring-2 ring-background"
+              :class="hasPendingOnly ? 'bg-amber-500' : 'bg-emerald-500'"
+            />
           </span>
         </button>
       </DropdownMenuTrigger>

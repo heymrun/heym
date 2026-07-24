@@ -83,6 +83,7 @@ from app.services.execution_cancellation import (
     get_active_execution_inputs,
     get_active_execution_progress,
     list_active_executions,
+    list_pending_review_executions_for_user,
     list_persisted_active_executions_for_user,
     register_execution,
     request_persisted_execution_cancel,
@@ -998,7 +999,7 @@ async def list_active_workflow_executions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ActiveExecutionItem]:
-    """Return all currently running executions belonging to the authenticated user."""
+    """Return running and pending-review executions for the authenticated user."""
     persisted = await list_persisted_active_executions_for_user(db, current_user.id)
     items_by_execution_id = {
         record.execution_id: ActiveExecutionItem(
@@ -1009,6 +1010,7 @@ async def list_active_workflow_executions(
             inputs=record.inputs,
             running_node_ids=record.running_node_ids,
             node_results=record.node_results,
+            status="running",
         )
         for record in persisted
     }
@@ -1052,7 +1054,24 @@ async def list_active_workflow_executions(
                 inputs=dict(handle.inputs),
                 running_node_ids=running_node_ids,
                 node_results=node_results,
+                status="running",
             )
+
+    pending_reviews = await list_pending_review_executions_for_user(db, current_user.id)
+    for record in pending_reviews:
+        if record.execution_id in items_by_execution_id:
+            continue
+        items_by_execution_id[record.execution_id] = ActiveExecutionItem(
+            execution_id=str(record.execution_id),
+            workflow_id=str(record.workflow_id),
+            workflow_name=record.workflow_name,
+            started_at=record.started_at,
+            inputs=record.inputs,
+            running_node_ids=[],
+            node_results=record.node_results,
+            status="pending",
+            pending_kind=record.pending_kind,
+        )
 
     return sorted(
         items_by_execution_id.values(),
