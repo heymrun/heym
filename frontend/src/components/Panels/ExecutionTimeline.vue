@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ExternalLink, Eye, EyeOff } from "lucide-vue-next";
 
@@ -57,11 +57,57 @@ function onRowLabelClick(row: SpanRow, event: MouseEvent): void {
   emitSelectNode({ nodeId: row.nodeId, resultListIndex: null }, event);
 }
 
+const timelineNowMs = ref(Date.now());
+let timelineNowTimer: ReturnType<typeof setInterval> | null = null;
+
+const hasLiveHitlWait = computed(() =>
+  props.nodeResults.some(
+    (result) =>
+      result.status === "pending" &&
+      (result.node_type === "agent" ||
+        result.node_type === "codex" ||
+        Boolean(result.metadata?.hitl) ||
+        Boolean(result.metadata?.codex)),
+  ),
+);
+
+function syncTimelineNowTimer(): void {
+  if (hasLiveHitlWait.value) {
+    timelineNowMs.value = Date.now();
+    if (timelineNowTimer === null) {
+      timelineNowTimer = setInterval(() => {
+        timelineNowMs.value = Date.now();
+      }, 1000);
+    }
+    return;
+  }
+  if (timelineNowTimer !== null) {
+    clearInterval(timelineNowTimer);
+    timelineNowTimer = null;
+  }
+}
+
+onMounted(() => {
+  syncTimelineNowTimer();
+});
+
+onBeforeUnmount(() => {
+  if (timelineNowTimer !== null) {
+    clearInterval(timelineNowTimer);
+    timelineNowTimer = null;
+  }
+});
+
+watch(hasLiveHitlWait, () => {
+  syncTimelineNowTimer();
+});
+
 const fullTimelineModel = computed(() =>
   buildTimelineModel(
     props.nodeResults,
     props.totalTimeMs,
     props.subAgentLabelToParentId,
+    { nowMs: timelineNowMs.value },
   ),
 );
 
@@ -81,7 +127,10 @@ const timelineModel = computed(() =>
     visibleNodeResults.value,
     props.totalTimeMs,
     props.subAgentLabelToParentId,
-    { preserveTotalTime: !shouldZoomVisibleRange.value },
+    {
+      preserveTotalTime: !shouldZoomVisibleRange.value,
+      nowMs: timelineNowMs.value,
+    },
   ),
 );
 const visibleRows = computed(() => timelineModel.value.rows);
@@ -273,16 +322,23 @@ function showAllRows(): void {
             <div
               class="trace-span absolute rounded-sm border cursor-pointer transition-opacity overflow-hidden"
               :class="[
-                span.status === 'error' ? 'opacity-90' : 'opacity-70 group-hover:opacity-95',
+                span.isHitlWait
+                  ? 'opacity-80 group-hover:opacity-95 hitl-wait-span'
+                  : span.status === 'error'
+                    ? 'opacity-90'
+                    : 'opacity-70 group-hover:opacity-95',
               ]"
               :style="{
                 left: `${span.leftPct}%`,
                 width: `${span.widthPct}%`,
                 minWidth: '3px',
                 height: `${row.depth === 1 ? childBarHeightPx : topLevelBarHeightPx}px`,
-                backgroundColor: `hsl(var(--${span.colorVar}) / 0.55)`,
+                backgroundColor: span.isHitlWait
+                  ? undefined
+                  : `hsl(var(--${span.colorVar}) / 0.55)`,
                 borderColor: `hsl(var(--${span.colorVar}))`,
                 borderWidth: span.status === 'error' ? '1.5px' : '1px',
+                borderStyle: span.isHitlWait ? 'dashed' : 'solid',
                 top: '50%',
                 transform: 'translateY(-50%)',
               }"
@@ -313,22 +369,15 @@ function showAllRows(): void {
                   boxShadow: 'inset 0 0 0 1px rgb(120 53 15 / 0.35)',
                 }"
               />
+              <span
+                v-if="span.widthPct > 8 && row.depth === 0"
+                class="trace-span-duration"
+              >
+                {{ span.durationMs >= 1000
+                  ? `${(span.durationMs / 1000).toFixed(1)}s`
+                  : `${Math.round(span.durationMs)}ms` }}
+              </span>
             </div>
-
-            <span
-              v-if="span.widthPct > 8 && row.depth === 0"
-              class="absolute text-[9px] leading-none pointer-events-none font-mono select-none"
-              :style="{
-                left: `calc(${span.leftPct}% + 5px)`,
-                color: `hsl(var(--${span.colorVar}))`,
-                top: '50%',
-                transform: 'translateY(-50%)',
-              }"
-            >
-              {{ span.durationMs >= 1000
-                ? `${(span.durationMs / 1000).toFixed(1)}s`
-                : `${Math.round(span.durationMs)}ms` }}
-            </span>
           </template>
         </div>
       </div>
@@ -361,7 +410,7 @@ function showAllRows(): void {
         :style="{ backgroundColor: `hsl(var(--${hoveredSpan.colorVar}))` }"
       />
       <span class="font-medium text-foreground">
-        {{ hoveredSpan.nodeLabel }}<template v-if="hoveredSpan.occurrenceCount > 1"> #{{ hoveredSpan.occurrence }}</template>
+        <template v-if="hoveredSpan.isHitlWait">HITL wait · </template>{{ hoveredSpan.nodeLabel }}<template v-if="!hoveredSpan.isHitlWait && hoveredSpan.occurrenceCount > 1"> #{{ hoveredSpan.occurrence }}</template>
       </span>
       <span class="text-muted-foreground font-mono">
         {{ hoveredSpan.durationMs >= 1000
@@ -400,6 +449,35 @@ function showAllRows(): void {
 <style scoped>
 .trace-span {
   overflow: visible;
+}
+
+.trace-span-duration {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  padding: 0 3px;
+  border-radius: 2px;
+  background: hsl(var(--background) / 0.55);
+  color: hsl(var(--foreground) / 0.88);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.hitl-wait-span {
+  background: repeating-linear-gradient(
+    135deg,
+    hsl(var(--warning) / 0.55) 0px,
+    hsl(var(--warning) / 0.55) 3px,
+    hsl(var(--warning) / 0.28) 3px,
+    hsl(var(--warning) / 0.28) 6px
+  );
 }
 
 .trace-span-action {

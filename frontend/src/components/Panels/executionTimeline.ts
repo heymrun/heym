@@ -17,6 +17,8 @@ export interface TimeWindow {
 
 export interface BuildTimelineOptions {
   preserveTotalTime?: boolean;
+  /** Wall-clock "now" for synthesizing live HITL/Codex wait spans while a node is still pending. */
+  nowMs?: number;
 }
 
 /** Payload when selecting a row or span in the execution timeline (debug panel). */
@@ -50,6 +52,8 @@ export interface SpanItem {
   gcPauseMs: number;
   gcPauseCount: number;
   gcPauseSegments: GcPauseSegment[];
+  /** True when this span represents human-in-the-loop / Codex follow-up waiting. */
+  isHitlWait: boolean;
 }
 
 export interface SpanRow {
@@ -79,6 +83,7 @@ interface RawSpanItem {
   gcPauseMs: number;
   gcPauseCount: number;
   gcPauseIntervals: RawGcPauseInterval[];
+  isHitlWait: boolean;
 }
 
 interface SpanAccumulator extends SpanRow {
@@ -106,7 +111,24 @@ function nodeColorVar(nodeType: string): string {
   return def?.color ?? "primary";
 }
 
+function isHitlWaitResult(result: TimelineEntry): boolean {
+  return result.metadata?.hitl_wait === true;
+}
+
+function canSynthesizeLiveHitlWait(result: TimelineEntry): boolean {
+  if (result.status !== "pending") {
+    return false;
+  }
+  if (result.node_type === "agent" || result.node_type === "codex") {
+    return true;
+  }
+  return Boolean(result.metadata?.hitl) || Boolean(result.metadata?.codex);
+}
+
 function colorFor(result: TimelineEntry): string {
+  if (isHitlWaitResult(result)) {
+    return "warning";
+  }
   return result.status === "error" ? "node-error" : nodeColorVar(result.node_type);
 }
 
@@ -195,6 +217,7 @@ export function buildTimelineModel(
   options: BuildTimelineOptions = {},
 ): { rows: SpanRow[]; timeWindow: TimeWindow } {
   const preserveTotalTime = options.preserveTotalTime ?? true;
+  const nowMs = options.nowMs;
   const recordedTiming = hasRecordedTiming(nodeResults);
 
   let timeWindow: TimeWindow;
@@ -214,6 +237,14 @@ export function buildTimelineModel(
       if (!bounds) continue;
       minStartMs = Math.min(minStartMs, bounds.startMs);
       maxEndMs = Math.max(maxEndMs, bounds.endMs);
+      if (
+        typeof nowMs === "number" &&
+        Number.isFinite(nowMs) &&
+        canSynthesizeLiveHitlWait(result) &&
+        nowMs > bounds.endMs
+      ) {
+        maxEndMs = Math.max(maxEndMs, nowMs);
+      }
     }
     const recordedTotal = Math.max(maxEndMs - minStartMs, 1);
     timeWindow = {
@@ -227,6 +258,48 @@ export function buildTimelineModel(
   const childRowOrderByParent = new Map<string, string[]>();
   const orphanRowOrder: string[] = [];
   let syntheticCursorMs = 0;
+
+  const pushRawSpan = (
+    row: SpanAccumulator,
+    result: TimelineEntry,
+    index: number,
+    startMs: number,
+    endMs: number,
+    options: { isHitlWait: boolean; keySuffix?: string },
+  ): void => {
+    const isHitlWait = options.isHitlWait;
+    const keySuffix = options.keySuffix ?? "";
+    const sourceListIndex = result.sourceNodeResultsIndex ?? index;
+    const gcPauseIntervals = isHitlWait ? [] : getGcPauseIntervals(result);
+    const gcPauseMs = isHitlWait
+      ? 0
+      : (getMetadataNumber(result, "gc_pause_ms") ??
+        gcPauseIntervals.reduce((sum, interval) => sum + interval.durationMs, 0));
+    const gcPauseCount = isHitlWait
+      ? 0
+      : (getMetadataInteger(result, "gc_pause_count") ?? gcPauseIntervals.length);
+    row.rawSpans.push({
+      key: `${row.key}:${index}${keySuffix}`,
+      nodeId: result.node_id,
+      nodeLabel: result.node_label,
+      nodeType: result.node_type,
+      traceId: isHitlWait ? null : getTraceId(result),
+      status: isHitlWait ? "pending" : result.status,
+      durationMs: Math.max(endMs - startMs, isHitlWait ? 0 : result.execution_time_ms, 0),
+      error: isHitlWait ? null : result.error,
+      colorVar: isHitlWait ? "warning" : colorFor(result),
+      startMs,
+      endMs,
+      order: sourceListIndex,
+      retryFailedAttempts: isHitlWait ? 0 : (result.retryFailedAttempts ?? 0),
+      retryFinalAttempt: isHitlWait ? null : (result.retryFinalAttempt ?? null),
+      retryMaxAttempts: isHitlWait ? null : (result.retryMaxAttempts ?? null),
+      gcPauseMs,
+      gcPauseCount,
+      gcPauseIntervals,
+      isHitlWait,
+    });
+  };
 
   for (let index = 0; index < nodeResults.length; index++) {
     const result = nodeResults[index];
@@ -267,32 +340,22 @@ export function buildTimelineModel(
       syntheticCursorMs = endMs;
     }
 
-    const sourceListIndex = result.sourceNodeResultsIndex ?? index;
-    const gcPauseIntervals = getGcPauseIntervals(result);
-    const gcPauseMs =
-      getMetadataNumber(result, "gc_pause_ms") ??
-      gcPauseIntervals.reduce((sum, interval) => sum + interval.durationMs, 0);
-    const gcPauseCount = getMetadataInteger(result, "gc_pause_count") ?? gcPauseIntervals.length;
-    row.rawSpans.push({
-      key: `${rowKey}:${index}`,
-      nodeId: result.node_id,
-      nodeLabel: result.node_label,
-      nodeType: result.node_type,
-      traceId: getTraceId(result),
-      status: result.status,
-      durationMs: Math.max(endMs - startMs, result.execution_time_ms, 0),
-      error: result.error,
-      colorVar: colorFor(result),
-      startMs,
-      endMs,
-      order: sourceListIndex,
-      retryFailedAttempts: result.retryFailedAttempts ?? 0,
-      retryFinalAttempt: result.retryFinalAttempt ?? null,
-      retryMaxAttempts: result.retryMaxAttempts ?? null,
-      gcPauseMs,
-      gcPauseCount,
-      gcPauseIntervals,
+    pushRawSpan(row, result, index, startMs, endMs, {
+      isHitlWait: isHitlWaitResult(result),
     });
+
+    if (
+      recordedTiming &&
+      typeof nowMs === "number" &&
+      Number.isFinite(nowMs) &&
+      canSynthesizeLiveHitlWait(result) &&
+      nowMs > endMs
+    ) {
+      pushRawSpan(row, result, index, endMs, nowMs, {
+        isHitlWait: true,
+        keySuffix: ":hitl-wait",
+      });
+    }
   }
 
   const orderedRowKeys: string[] = [];
@@ -342,7 +405,7 @@ export function buildTimelineModel(
             0.5,
           );
           const gcPauseSegments =
-            span.durationMs > 0 && span.gcPauseMs >= GC_PAUSE_DISPLAY_MIN_MS
+            !span.isHitlWait && span.durationMs > 0 && span.gcPauseMs >= GC_PAUSE_DISPLAY_MIN_MS
               ? span.gcPauseIntervals.map((interval) => {
                   const segmentLeftPct = Math.min(
                     Math.max((interval.startMs / span.durationMs) * 100, 0),
@@ -365,7 +428,7 @@ export function buildTimelineModel(
                 })
               : [];
 
-          const showGcPause = span.gcPauseMs >= GC_PAUSE_DISPLAY_MIN_MS;
+          const showGcPause = !span.isHitlWait && span.gcPauseMs >= GC_PAUSE_DISPLAY_MIN_MS;
 
           return {
             key: span.key,
@@ -390,6 +453,7 @@ export function buildTimelineModel(
             gcPauseMs: showGcPause ? span.gcPauseMs : 0,
             gcPauseCount: showGcPause ? span.gcPauseCount : 0,
             gcPauseSegments,
+            isHitlWait: span.isHitlWait,
           };
         }),
       };

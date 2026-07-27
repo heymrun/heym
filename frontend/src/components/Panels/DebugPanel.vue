@@ -32,7 +32,7 @@ import {
 } from "@/utils/parseClarify";
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
-import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isRetryAttemptNodeResult } from "@/lib/executionLog";
+import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isHitlWaitNodeResult, isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
@@ -325,7 +325,13 @@ const displayResults = computed(() => {
   const results = rawRowsForExecutionPanel.value;
   const seenCounts = new Map<string, number>();
   return results
-    .filter(r => r.node_type !== "condition" && r.node_type !== "sticky" && r.status !== "skipped")
+    .filter(
+      (r) =>
+        r.node_type !== "condition" &&
+        r.node_type !== "sticky" &&
+        r.status !== "skipped" &&
+        !isHitlWaitNodeResult(r),
+    )
     .map((r, index) => {
       const occurrence = (seenCounts.get(r.node_id) || 0) + 1;
       seenCounts.set(r.node_id, occurrence);

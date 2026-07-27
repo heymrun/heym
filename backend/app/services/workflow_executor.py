@@ -4144,6 +4144,42 @@ class WorkflowExecutor:
         return any(re.search(pattern, lowered) for pattern in once_patterns)
 
     @staticmethod
+    def _hitl_policy_limits_to_single_review(policy_text: str) -> bool:
+        """True when the HITL instructions allow only one human-review pause per run.
+
+        Covers phrasings like "ask only once ... then never ask again". This governs the
+        generic `request_human_review` tool (a single pause for the whole run), distinct from
+        the per-tool MCP "once" scope handled by ``_resolve_mcp_approval_mode``.
+        """
+        lowered = (policy_text or "").lower()
+        if not lowered.strip():
+            return False
+        # "once per tool / per call / each" is the per-tool MCP scope, not a whole-run cap.
+        if re.search(r"\bonce\b\s*(?:per|for each|each|every)\b", lowered):
+            return False
+        single_review_patterns = (
+            r"\bnever ask again\b",
+            r"\bnever\b.{0,16}\bask\b.{0,16}\bagain\b",
+            r"\b(do not|don't|dont)\b.{0,16}\bask\b.{0,16}\bagain\b",
+            r"\bask\b.{0,24}\bonly once\b",
+            r"\bonly\b.{0,10}\bask\b.{0,10}\bonce\b",
+            r"\bjust once\b",
+            r"\bask\b.{0,24}\bfor (approval|review)\b.{0,24}\bonly once\b",
+        )
+        return any(re.search(pattern, lowered) for pattern in single_review_patterns)
+
+    def _build_single_review_consumed_tool_result(self) -> dict[str, str]:
+        return {
+            "status": "not_required",
+            "message": (
+                "Human review has already been completed once for this run. The HITL guidelines "
+                "for this agent say to ask only once and then never ask again, so this checkpoint "
+                "is already satisfied. Do not request human review again. Continue now and produce "
+                "the final answer directly using the already approved content."
+            ),
+        }
+
+    @staticmethod
     def _normalize_mcp_approval_mode(mode: str | None) -> str | None:
         normalized = (mode or "").strip().lower().replace("-", "_").replace(" ", "_")
         if normalized in {"always", "every_time", "each_time", "for_each", "on_each"}:
@@ -4571,8 +4607,15 @@ class WorkflowExecutor:
         node_id: str | None,
         hitl_fallback_summary: str | None = None,
         hitl_mcp_policy: dict | None = None,
+        hitl_suppress_after_first_review: bool = False,
     ) -> Callable:
-        """Build tool executor for agent nodes, including HITL, sub-agents, and sub-workflows."""
+        """Build tool executor for agent nodes, including HITL, sub-agents, and sub-workflows.
+
+        ``hitl_suppress_after_first_review`` is set on a resume when the node's HITL guidelines
+        allow only one review for the whole run and a prior checkpoint was already approved. It
+        makes further ``request_human_review`` calls resolve without pausing again, so a model
+        that ignores the "ask only once" instruction cannot loop back into another review.
+        """
 
         from app.services.llm_service import HumanReviewPause, _unified_tool_executor
 
@@ -4587,6 +4630,8 @@ class WorkflowExecutor:
             if tool_source == "hitl":
                 if edited_hitl_checkpoint is not None:
                     return self._build_edited_hitl_tool_result(edited_hitl_checkpoint)
+                if hitl_suppress_after_first_review:
+                    return self._build_single_review_consumed_tool_result()
                 review_markdown = str(
                     args.get("review_markdown") or args.get("markdown") or args.get("text") or ""
                 ).strip()
@@ -4835,6 +4880,11 @@ class WorkflowExecutor:
             else None
         )
 
+        # A "ask only once / never ask again" HITL policy caps the whole run to a single review.
+        hitl_single_review = hitl_enabled and self._hitl_policy_limits_to_single_review(
+            "\n\n".join(part for part in (base_system_instruction or "", hitl_guidelines) if part)
+        )
+
         skills = node_data.get("skills") or []
         skills_used: list[str] = [s.get("name", "") for s in skills if s.get("name")]
         skills_content_parts: list[str] = []
@@ -4932,6 +4982,35 @@ class WorkflowExecutor:
             edited_checkpoint_block = (
                 f"{edited_checkpoint_note}\n\n" if edited_checkpoint_note else ""
             )
+            # When the policy allows only one review, the resume prompt must not invite the model
+            # to ask again; otherwise it contradicts the "ask only once / never again" guideline.
+            if hitl_single_review:
+                resume_followup_clause = (
+                    "Do not request human review again for the rest of this run; the guidelines "
+                    "allow only one review. Continue and produce the final answer directly using "
+                    "the approved content."
+                )
+                review_context_followup = (
+                    "Do not request human review again; the guidelines allow only one review. "
+                    "Continue the task from here and finish without asking again."
+                )
+                task_followup_clause = (
+                    "Do not request another human review; only one review is allowed. Finish the "
+                    "task now using the approved plan."
+                )
+            else:
+                resume_followup_clause = (
+                    "If a different later step also requires human review, you may request another "
+                    "one at that point."
+                )
+                review_context_followup = (
+                    "If a later, different action still requires human review, you may request it "
+                    "again when needed."
+                )
+                task_followup_clause = (
+                    "You may ask for another human review later only if a different step genuinely "
+                    "requires it."
+                )
             approval_resume_text = (
                 "Human review decision received for a previous approval checkpoint.\n"
                 f"Decision: {hitl_decision}\n"
@@ -4941,16 +5020,14 @@ class WorkflowExecutor:
                 f"{edited_checkpoint_block}"
             ) + (
                 "Continue from this approved checkpoint. Do not repeat the same approval request "
-                "unless the approved plan materially changes. If a different later step also "
-                "requires human review, you may request another one at that point."
+                f"unless the approved plan materially changes. {resume_followup_clause}"
             )
             approval_resume_text = approval_resume_text.strip()
             review_context = (
                 "A human reviewer has already reviewed a prior checkpoint in this agent run.\n"
                 f"Decision: {hitl_decision}\n"
                 "Treat the approved Markdown below as the source of truth for that checkpoint.\n"
-                "Continue the task from there. If a later, different action still requires human "
-                "review, you may request it again when needed.\n\n"
+                f"Continue the task from there. {review_context_followup}\n\n"
                 f"{approved_markdown}"
             ).strip()
             if edited_checkpoint_note:
@@ -4964,8 +5041,8 @@ class WorkflowExecutor:
                 f"{edited_checkpoint_block}"
             ) + (
                 "Execute the approved plan now. Use tools, sub-agents, or sub-workflows only as "
-                "needed to carry it out. Do not repeat the exact same approval request. You may "
-                "ask for another human review later only if a different step genuinely requires it."
+                f"needed to carry it out. Do not repeat the exact same approval request. "
+                f"{task_followup_clause}"
             )
             user_message = user_message.strip()
             approval_history = [
@@ -5124,8 +5201,14 @@ class WorkflowExecutor:
                 "- `review_markdown`: a single Markdown body describing the plan or action to approve\n"
                 "- `reason`: the action currently blocked on human approval\n"
                 "If you omit `summary`, Heym derives one from the review Markdown.\n"
-                "You may call it multiple times in the same run if new approval-required steps "
-                "appear later."
+                + (
+                    "Request human review at most once for this entire run. After that single "
+                    "approval, continue and never request human review again; produce the final "
+                    "answer directly."
+                    if hitl_single_review
+                    else "You may call it multiple times in the same run if new approval-required "
+                    "steps appear later."
+                )
             )
             if system_instruction:
                 system_instruction = f"{system_instruction}\n\n{hitl_guidance}"
@@ -5427,11 +5510,18 @@ class WorkflowExecutor:
                     else:
                         attempt_system_instruction = interpreted_mcp_policy_hint
 
+            # Under a single-review policy, once a prior checkpoint has been approved/edited on
+            # this resume, suppress any further request_human_review pauses so the agent cannot
+            # loop back into another review of re-done work.
+            hitl_suppress_after_first_review = hitl_single_review and any(
+                str(entry.get("decision") or "") in {"accepted", "edited"} for entry in hitl_history
+            )
             custom_tool_executor = (
                 self._build_agent_tool_executor(
                     node_id=node_id,
                     hitl_fallback_summary=hitl_fallback_summary,
                     hitl_mcp_policy=effective_hitl_mcp_policy,
+                    hitl_suppress_after_first_review=hitl_suppress_after_first_review,
                 )
                 if needs_custom_executor
                 else None
@@ -8138,6 +8228,68 @@ def _snapshot_actor_user_id(
     return None
 
 
+def _build_hitl_resume_timeline_results(
+    pending: NodeResult,
+    *,
+    resume_now_ms: float,
+) -> tuple[NodeResult, NodeResult]:
+    """Preserve pre-HITL compute and materialize the wait gap for the execution timeline.
+
+    Resume used to drop the pending row, which left a wall-clock hole between the last
+    pre-pause span and the post-resume work. Keep the paused compute as ``pre_review`` and
+    emit an explicit ``hitl_wait`` span covering pause → resume.
+    """
+    pre_meta = dict(pending.metadata or {})
+    pre_meta["hitl_phase"] = "pre_review"
+    pending_output = pending.output if isinstance(pending.output, dict) else {}
+    # Keep a compact historical payload so DebugPanel does not treat this row as an
+    # actionable pending HITL review (that UI keys off decision === null + reviewUrl).
+    pre_output = {
+        "hitlPhase": "pre_review",
+        "summary": str(pending_output.get("summary") or "").strip(),
+        "draftText": str(
+            pending_output.get("draftText") or pending_output.get("text") or ""
+        ).strip(),
+    }
+    if pending_output.get("question"):
+        pre_output["question"] = str(pending_output.get("question") or "").strip()
+    pre_result = NodeResult(
+        node_id=pending.node_id,
+        node_label=pending.node_label,
+        node_type=pending.node_type,
+        status="success",
+        output=pre_output,
+        execution_time_ms=float(pending.execution_time_ms or 0.0),
+        error=pending.error,
+        metadata=pre_meta,
+    )
+
+    wait_start_raw = pre_meta.get("ended_at_ms")
+    wait_start = (
+        float(wait_start_raw)
+        if isinstance(wait_start_raw, (int, float)) and float(wait_start_raw) > 0
+        else float(resume_now_ms)
+    )
+    wait_end = max(float(resume_now_ms), wait_start)
+    wait_ms = max(wait_end - wait_start, 0.0)
+    wait_sequence = (_node_result_sequence_value(pending) or 0) + 1
+    wait_result = NodeResult(
+        node_id=pending.node_id,
+        node_label=pending.node_label,
+        node_type=pending.node_type,
+        status="success",
+        output={"hitlWait": True, "durationMs": wait_ms},
+        execution_time_ms=wait_ms,
+        metadata={
+            "hitl_wait": True,
+            "started_at_ms": wait_start,
+            "ended_at_ms": wait_end,
+            "sequence": wait_sequence,
+        },
+    )
+    return pre_result, wait_result
+
+
 def resume_workflow_execution(
     *,
     snapshot: dict,
@@ -8198,12 +8350,25 @@ def resume_workflow_execution(
     hitl_approved_tool_call = copy.deepcopy(snapshot.get("hitl_approved_tool_call") or {})
 
     paused_result_ms = 0.0
+    pending_paused_result: NodeResult | None = None
     filtered_results: list[NodeResult] = []
     for result in node_results:
         if result.node_id == paused_node_id and result.status == "pending":
             paused_result_ms = result.execution_time_ms
+            pending_paused_result = result
             continue
         filtered_results.append(result)
+
+    resume_now_ms = time.time() * 1000
+    if pending_paused_result is not None:
+        pre_review_result, hitl_wait_result = _build_hitl_resume_timeline_results(
+            pending_paused_result,
+            resume_now_ms=resume_now_ms,
+        )
+        filtered_results.append(pre_review_result)
+        filtered_results.append(hitl_wait_result)
+        wf_executor._node_result_sequence = _max_node_result_sequence(filtered_results)
+
     node_results = filtered_results
 
     if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
@@ -8235,7 +8400,14 @@ def resume_workflow_execution(
             node_type=wf_executor.nodes.get(paused_node_id, {}).get("type", "agent"),
             status="success",
             output=copy.deepcopy(resolved_output),
-            execution_time_ms=paused_result_ms,
+            execution_time_ms=0.0,
+            metadata={
+                "hitl_phase": "resolved",
+                "started_at_ms": resume_now_ms,
+                "ended_at_ms": resume_now_ms,
+                # Keep prior compute duration discoverable without relocating the span.
+                "pre_review_execution_time_ms": paused_result_ms,
+            },
         )
         node_results.append(wf_executor._stamp_node_result(resumed_result))
         completed_nodes.add(paused_node_id)

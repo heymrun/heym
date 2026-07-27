@@ -89,7 +89,7 @@ The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. Wh
 |----------|-------------|---------|
 | `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED` | Allow executing custom `playwrightCode` / Run Code mode. | `false` |
 | `HEYM_PLAYWRIGHT_SANDBOX` | `auto`/`docker` (sibling container, fail-closed) or `subprocess` (in-process; trusted/local only). `./run.sh` sets `subprocess` when no image is configured. | `auto` |
-| `HEYM_PLAYWRIGHT_SANDBOX_IMAGE` | Sibling runner image. Compose defaults to `heym-backend:local`; GHCR release image defaults to `ghcr.io/heymrun/heym:<version>`. Empty falls back to `HEYM_CODEX_DOCKER_IMAGE`, then container inspect. | — |
+| `HEYM_PLAYWRIGHT_SANDBOX_IMAGE` | Sibling runner image. Compose defaults to `HEYM_BACKEND_IMAGE`; GHCR release image defaults to `ghcr.io/heymrun/heym:<version>`. Empty falls back to `HEYM_CODEX_DOCKER_IMAGE`, then container inspect. | — |
 | `HEYM_PLAYWRIGHT_SANDBOX_PYTHON` | Interpreter inside the sibling image. Empty auto-detects `/app/backend/.venv/bin/python` (GHCR) or `/app/.venv/bin/python` (Compose). | auto |
 
 ## Agent Python tool sandbox
@@ -130,6 +130,10 @@ A `docker run [flags] IMAGE [args]` command keeps working: Heym starts `IMAGE` i
 
 Inside the container the root filesystem is read-only and `/tmp` is a throwaway tmpfs, so the sandbox sets `HOME` and the npm/uv cache directories to paths under `/tmp` and mounts that tmpfs with `exec`. Without those, `npx` and `uvx` servers cannot run at all: the sandbox user's passwd home is `/nonexistent`, and Docker applies `noexec` to every `--tmpfs` that does not name `exec` explicitly. Values you set on the connection are applied after these defaults, so you can override them.
 
+The working directory is that same tmpfs, not the runner image's `WORKDIR`: `/app` in the backend image is the Heym backend project itself, so a `uv run …` server would try to sync it and fail on the read-only root filesystem. A `docker run IMAGE` command keeps its own image's `WORKDIR` unless it passes `-w`.
+
+These variables are wired through `docker-compose.yml`, so setting them in `.env` works for `./deploy.sh`.
+
 Only the env vars set on the connection reach the server. The backend's own environment (`SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`, provider API keys) is never forwarded; the MCP SDK supplies a safe default `PATH`/`HOME`/`SHELL`/`TERM`/`USER`/`LOGNAME` set on top.
 
 > **Operator-only escape hatches.** `HEYM_MCP_STDIO_SANDBOX=subprocess` and `HEYM_MCP_STDIO_FILES_HOST_DIR` are never settable by a workflow author, only by whoever runs the deployment. Both can remove the isolation this section describes, so treat them as trusted single-user / single-tenant options and leave them unset on anything multi-user.
@@ -137,7 +141,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HEYM_MCP_STDIO_SANDBOX` | Isolation for MCP `stdio` servers: `auto` (Docker required, fail-closed), `docker` (never falls back), or `subprocess`. Independent of `HEYM_PYTHON_TOOL_SANDBOX`. ⚠️ `subprocess` removes the boundary entirely and runs the caller's command on the backend host, which is the GHSA-378x-q589-34mv condition: **trusted single-user instances only, never on a shared or hosted deployment.** | `auto` |
-| `HEYM_MCP_STDIO_IMAGE` | Image used to run non-`docker` stdio commands (`npx`, `uvx`, `node`, `python`, …). Falls back to `HEYM_PYTHON_TOOL_IMAGE`, then `HEYM_CODEX_DOCKER_IMAGE` (which Compose and the single GHCR image both set), then `docker inspect` of the running backend container. If none resolve, stdio fails closed with an explanation rather than guessing a tag. The `docker run <image>` command form names its own image and is unaffected. | — |
+| `HEYM_MCP_STDIO_IMAGE` | Image used to run non-`docker` stdio commands (`npx`, `uvx`, `node`, `python`, …). Compose defaults it to `HEYM_BACKEND_IMAGE`, the GHCR image to its own release tag; set it only for native `run.sh` (`heym-backend:local`) or a custom runner. Falls back to `HEYM_PYTHON_TOOL_IMAGE`, then `HEYM_CODEX_DOCKER_IMAGE`, then container inspect, then fails closed. The `docker run <image>` form names its own image. | — |
 | `HEYM_MCP_STDIO_FILES_PATH` | Mount point inside the sandbox for the optional file mount below. | `/mnt/heym-files` |
 | `HEYM_MCP_STDIO_FILES_VOLUME` | Docker volume to expose to MCP servers. **Nothing is mounted unless you set this** (or the host-dir variant); there is no fallback to application volumes. | — |
 | `HEYM_MCP_STDIO_FILES_SUBPATH` | Mount only this subpath of the volume, so a shared volume can be scoped per tenant or per purpose. | — |
@@ -227,6 +231,7 @@ The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs
 |----------|-------------|---------|
 | `HEYM_LLM_PRICING_SYNC_ENABLED` | Periodically sync model pricing data. | `true` |
 | `APP_VERSION` | Override the reported app version. Empty reads the `VERSION` file. | — |
+| `HEYM_BACKEND_IMAGE` | Compose only (`./deploy.sh`): tag the backend is built and run as. Every sibling sandbox image (MCP stdio, Playwright, Codex, OpenCode) defaults to it. | `heym-backend:local` |
 
 ## Frontend build-time
 

@@ -37,6 +37,7 @@
 [![Bun](https://img.shields.io/badge/Bun-runtime-14151A?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![Security](https://img.shields.io/badge/Security-policy-2A6F97?style=flat-square)](SECURITY.md)
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fheymrun%2Fheym.svg)](https://mcptoplist.com/server/glama%2Fheymrun%2Fheym)
 
 <br/>
 
@@ -55,6 +56,18 @@ Heym is an **AI-native automation platform** built from the ground up around LLM
 Unlike platforms that started as classic trigger-action automation and layered AI on later, in Heym **AI is the execution model**.
 
 Explore the product site at **[heym.run](https://heym.run)**.
+
+## 🎬 Product Tour
+
+One e-commerce sales campaign, followed end to end: workflow generation with the AI Assistant, human review, board execution, structured data, dashboards, traces, RAG, MCP, analytics, and team collaboration.
+
+<div align="center">
+
+<a href="https://www.youtube.com/watch?v=CWUy2zynCqc">
+  <img src="https://img.youtube.com/vi/CWUy2zynCqc/maxresdefault.jpg" width="100%" alt="Watch the Heym product tour on YouTube"/>
+</a>
+
+</div>
 
 ## Build, Observe, Call
 
@@ -338,7 +351,7 @@ docker run \
 Open the editor in your browser at port `4017` in either setup.
 See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
 For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
-The Docker socket mount supports Docker-based MCP stdio tools and grants broad host control. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
+The Docker socket mount lets Heym start hardened sibling containers and grants broad host control. Every MCP `stdio` server needs it, since the caller-supplied command always runs in a throwaway container rather than on the backend host; without a Docker daemon, stdio fails closed. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
 
 ## Deploy & Call Workflows
 
@@ -742,7 +755,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.76" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.77" />
 </a>
 
 </div>

@@ -492,3 +492,69 @@ class TestAgentNodeToolIntegration(unittest.TestCase):
         self.assertEqual(drive_tool["_actor_user_id"], str(actor_user_id))
         self.assertIs(plain_tool["_drive_files_enabled"], False)
         self.assertIn("Drive files are enabled for this skill", captured_system_instructions[0])
+
+
+class TestHitlSingleReviewPolicy(unittest.TestCase):
+    """A HITL "ask only once / never ask again" policy must not re-pause after approval."""
+
+    def _make_executor(self) -> WorkflowExecutor:
+        ex = WorkflowExecutor.__new__(WorkflowExecutor)
+        ex.nodes = {}
+        ex.edges = []
+        ex.node_results = {}
+        ex.actor_user_id = None
+        ex.hitl_resume_context = {}
+        return ex
+
+    def test_policy_detection_single_review(self) -> None:
+        ex = self._make_executor()
+        single = (
+            "First prepare the post but before posting the final prepared tweet, ask only "
+            "once for approval then continue and never ask again."
+        )
+        multi = (
+            "Ask for human review before deleting records and before sending emails. "
+            "Different critical steps each need their own approval."
+        )
+        self.assertTrue(ex._hitl_policy_limits_to_single_review(single))
+        self.assertTrue(ex._hitl_policy_limits_to_single_review("Always ask only once using HITL."))
+        self.assertFalse(ex._hitl_policy_limits_to_single_review(multi))
+        self.assertFalse(ex._hitl_policy_limits_to_single_review(""))
+        # "once per step" is a per-tool/per-step scope, not a whole-run single review.
+        self.assertFalse(
+            ex._hitl_policy_limits_to_single_review(
+                "For each step, ask once per step for approval."
+            )
+        )
+
+    def test_executor_suppresses_second_review_after_first_approval(self) -> None:
+        from app.services.llm_service import HumanReviewPause
+
+        ex = self._make_executor()
+        tool_def = {"name": "request_human_review", "_source": "hitl"}
+        args = {
+            "review_markdown": "## Proposed Tweet\nAnother distinct tweet",
+            "reason": "Tweet proposal for multi-agent orchestration feature",
+        }
+
+        # Prior approval already happened AND policy is single-review -> do not pause again.
+        suppressed_executor = ex._build_agent_tool_executor(
+            node_id="n3",
+            hitl_fallback_summary="agent requires review.",
+            hitl_mcp_policy=None,
+            hitl_suppress_after_first_review=True,
+        )
+        result = suppressed_executor(tool_def, "request_human_review", args, 30.0)
+        self.assertNotIsInstance(result, HumanReviewPause)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("status"), "not_required")
+
+        # Without a satisfied single-review policy, the tool still pauses for review.
+        normal_executor = ex._build_agent_tool_executor(
+            node_id="n3",
+            hitl_fallback_summary="agent requires review.",
+            hitl_mcp_policy=None,
+            hitl_suppress_after_first_review=False,
+        )
+        pause = normal_executor(tool_def, "request_human_review", args, 30.0)
+        self.assertIsInstance(pause, HumanReviewPause)

@@ -72,13 +72,13 @@ services:
       # in-process path for trusted / local dev only.
       HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED: ${HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED:-false}
       HEYM_PLAYWRIGHT_SANDBOX: ${HEYM_PLAYWRIGHT_SANDBOX:-auto}
-      # Same default as HEYM_BACKEND_IMAGE / Codex runner so sibling sandbox
-      # resolution does not depend on `docker inspect` of the container hostname.
-      HEYM_PLAYWRIGHT_SANDBOX_IMAGE: ${HEYM_PLAYWRIGHT_SANDBOX_IMAGE:-heym-backend:local}
+      # Sibling sandbox images follow HEYM_BACKEND_IMAGE, so repointing the
+      # backend does not leave them chasing a tag this deployment never built.
+      HEYM_PLAYWRIGHT_SANDBOX_IMAGE: ${HEYM_PLAYWRIGHT_SANDBOX_IMAGE:-${HEYM_BACKEND_IMAGE:-heym-backend:local}}
       # Codex node: run Codex CLI in a dedicated sibling runner container so
       # bubblewrap sandboxing works inside Docker without exposing backend secrets.
       HEYM_CODEX_CLI_COMMAND: ${HEYM_CODEX_CLI_COMMAND:-/usr/local/bin/heym-codex-docker}
-      HEYM_CODEX_DOCKER_IMAGE: ${HEYM_CODEX_DOCKER_IMAGE:-heym-backend:local}
+      HEYM_CODEX_DOCKER_IMAGE: ${HEYM_CODEX_DOCKER_IMAGE:-${HEYM_BACKEND_IMAGE:-heym-backend:local}}
       HEYM_CODEX_DOCKER_WORKSPACE_VOLUME: ${HEYM_CODEX_DOCKER_WORKSPACE_VOLUME:-heym-codex-workspaces}
       HEYM_CODEX_WORKSPACE_DIR: ${HEYM_CODEX_WORKSPACE_DIR:-/app/data/codex-workspaces}
       HEYM_CODEX_NETWORK_ACCESS: ${HEYM_CODEX_NETWORK_ACCESS:-true}
@@ -87,7 +87,7 @@ services:
       # OpenCode Go node: run the OpenCode CLI in a dedicated hardened sibling runner container
       # sharing the workspace named volume (mirrors the Codex setup).
       HEYM_OPENCODE_CLI_COMMAND: ${HEYM_OPENCODE_CLI_COMMAND:-/usr/local/bin/heym-opencode-docker}
-      HEYM_OPENCODE_DOCKER_IMAGE: ${HEYM_OPENCODE_DOCKER_IMAGE:-heym-backend:local}
+      HEYM_OPENCODE_DOCKER_IMAGE: ${HEYM_OPENCODE_DOCKER_IMAGE:-${HEYM_BACKEND_IMAGE:-heym-backend:local}}
       HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME: ${HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME:-heym-opencode-workspaces}
       HEYM_OPENCODE_WORKSPACE_DIR: ${HEYM_OPENCODE_WORKSPACE_DIR:-/app/data/opencode-workspaces}
       HEYM_OPENCODE_DOCKER_CPUS: ${HEYM_OPENCODE_DOCKER_CPUS:-2}
@@ -97,6 +97,21 @@ services:
       # Empty image = auto-detect this backend image.
       HEYM_PYTHON_TOOL_SANDBOX: ${HEYM_PYTHON_TOOL_SANDBOX:-auto}
       HEYM_PYTHON_TOOL_IMAGE: ${HEYM_PYTHON_TOOL_IMAGE:-}
+      # MCP stdio sandbox (GHSA-378x-q589-34mv). Its own setting, independent of
+      # HEYM_PYTHON_TOOL_SANDBOX. Declared here because Compose forwards nothing
+      # it has not declared; blank means "use the default".
+      HEYM_MCP_STDIO_SANDBOX: ${HEYM_MCP_STDIO_SANDBOX:-auto}
+      HEYM_MCP_STDIO_IMAGE: ${HEYM_MCP_STDIO_IMAGE:-${HEYM_BACKEND_IMAGE:-heym-backend:local}}
+      HEYM_MCP_STDIO_FILES_VOLUME: ${HEYM_MCP_STDIO_FILES_VOLUME:-}
+      HEYM_MCP_STDIO_FILES_SUBPATH: ${HEYM_MCP_STDIO_FILES_SUBPATH:-}
+      HEYM_MCP_STDIO_FILES_HOST_DIR: ${HEYM_MCP_STDIO_FILES_HOST_DIR:-}
+      HEYM_MCP_STDIO_FILES_PATH: ${HEYM_MCP_STDIO_FILES_PATH:-}
+      HEYM_MCP_STDIO_FILES_WRITABLE: ${HEYM_MCP_STDIO_FILES_WRITABLE:-}
+      HEYM_MCP_STDIO_TMPFS_SIZE: ${HEYM_MCP_STDIO_TMPFS_SIZE:-}
+      HEYM_MCP_STDIO_MEMORY: ${HEYM_MCP_STDIO_MEMORY:-}
+      HEYM_MCP_STDIO_CPUS: ${HEYM_MCP_STDIO_CPUS:-}
+      HEYM_MCP_STDIO_PIDS: ${HEYM_MCP_STDIO_PIDS:-}
+      HEYM_MCP_STDIO_USER: ${HEYM_MCP_STDIO_USER:-}
       # OpenTelemetry tracing. When run inside compose, the backend reaches the
       # bundled Jaeger by its service name (not localhost, which is the host-only
       # value used by run.sh). Toggle with HEYM_OTEL_ENABLED in .env.

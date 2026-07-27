@@ -56,6 +56,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.workflows.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
             patch("app.api.workflows.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
@@ -76,6 +80,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.workflows.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[_make_record(wf_id, ex_id)]),
             ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
             patch("app.api.workflows.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
@@ -85,6 +93,7 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].workflow_id, str(wf_id))
         self.assertEqual(result[0].workflow_name, "My Workflow")
         self.assertEqual(result[0].inputs, {"text": "persisted input"})
+        self.assertEqual(result[0].status, "running")
         self.assertIsInstance(result[0], ActiveExecutionItem)
         db.execute.assert_not_called()
 
@@ -102,6 +111,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.workflows.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=records),
             ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
             patch("app.api.workflows.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
@@ -112,6 +125,60 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
             {str(execution_id) for execution_id in execution_ids},
         )
         self.assertEqual({item.workflow_id for item in result}, {str(workflow_id)})
+
+    async def test_includes_pending_hitl_and_codex_reviews_in_count(self) -> None:
+        from app.services.execution_cancellation import PendingReviewExecutionRecord
+
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = AsyncMock()
+
+        running_wf = uuid.uuid4()
+        running_ex = uuid.uuid4()
+        hitl_wf = uuid.uuid4()
+        hitl_ex = uuid.uuid4()
+        codex_wf = uuid.uuid4()
+        codex_ex = uuid.uuid4()
+
+        pending = [
+            PendingReviewExecutionRecord(
+                execution_id=hitl_ex,
+                workflow_id=hitl_wf,
+                workflow_name="HITL Workflow",
+                started_at=datetime.datetime(2025, 1, 1, 11, 0, 0),
+                inputs={},
+                pending_kind="hitl",
+            ),
+            PendingReviewExecutionRecord(
+                execution_id=codex_ex,
+                workflow_id=codex_wf,
+                workflow_name="Codex Workflow",
+                started_at=datetime.datetime(2025, 1, 1, 10, 0, 0),
+                inputs={},
+                pending_kind="codex",
+            ),
+        ]
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[_make_record(running_wf, running_ex)]),
+            ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(return_value=pending),
+            ),
+            patch("app.api.workflows.list_active_executions", return_value=[]),
+        ):
+            result = await list_active_workflow_executions(current_user=user, db=db)
+
+        self.assertEqual(len(result), 3)
+        by_id = {item.execution_id: item for item in result}
+        self.assertEqual(by_id[str(running_ex)].status, "running")
+        self.assertEqual(by_id[str(hitl_ex)].status, "pending")
+        self.assertEqual(by_id[str(hitl_ex)].pending_kind, "hitl")
+        self.assertEqual(by_id[str(codex_ex)].status, "pending")
+        self.assertEqual(by_id[str(codex_ex)].pending_kind, "codex")
 
     async def test_filters_local_fallback_to_accessible_workflows(self) -> None:
         user = MagicMock()
@@ -139,6 +206,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch(
                 "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch("app.api.workflows.list_active_executions", return_value=handles),
@@ -178,6 +249,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.workflows.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
             patch("app.api.workflows.list_active_executions", return_value=[handle]),
             patch(
                 "app.api.workflows.get_active_execution_progress",
@@ -202,6 +277,10 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch(
                 "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch("app.api.workflows.list_active_executions", return_value=[handle]),

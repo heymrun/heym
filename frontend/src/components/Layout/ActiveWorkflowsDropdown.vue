@@ -5,7 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuPortal,
 } from "radix-vue";
-import { Activity, ArrowUpRight, CircleAlert } from "lucide-vue-next";
+import { Activity, ArrowUpRight, CircleAlert, PauseCircle } from "lucide-vue-next";
 
 import type { ActiveExecutionItem } from "@/types/workflow";
 
@@ -27,12 +27,29 @@ const startedAtFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
-function formatStartedAt(value: string): string {
-  const startedAt = new Date(value);
+function isPendingReview(workflow: ActiveExecutionItem): boolean {
+  return workflow.status === "pending";
+}
+
+function formatStartedAt(workflow: ActiveExecutionItem): string {
+  if (isPendingReview(workflow)) {
+    if (workflow.pending_kind === "codex") {
+      return "Pending Codex review";
+    }
+    return "Pending human review";
+  }
+  const startedAt = new Date(workflow.started_at);
   if (Number.isNaN(startedAt.getTime())) {
     return "Running now";
   }
   return `Started at ${startedAtFormatter.format(startedAt)}`;
+}
+
+function itemAriaLabel(workflow: ActiveExecutionItem): string {
+  if (isPendingReview(workflow)) {
+    return `Open ${workflow.workflow_name} pending review`;
+  }
+  return `Open ${workflow.workflow_name} live view`;
 }
 </script>
 
@@ -52,10 +69,10 @@ function formatStartedAt(value: string): string {
           </span>
           <div>
             <p class="text-sm font-semibold leading-tight">
-              Active workflows
+              Live Activity
             </p>
             <p class="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-              Select a workflow to open its live view
+              Click to open a run or pending review
             </p>
           </div>
         </div>
@@ -80,14 +97,32 @@ function formatStartedAt(value: string): string {
         <DropdownMenuItem
           v-for="workflow in workflows"
           :key="workflow.execution_id"
-          class="group flex h-14 cursor-pointer select-none items-center gap-3 rounded-xl px-3 outline-none transition-colors data-[highlighted]:bg-emerald-500/10 data-[highlighted]:text-foreground"
-          :aria-label="`Open ${workflow.workflow_name} live view`"
+          class="group flex h-14 cursor-pointer select-none items-center gap-3 rounded-xl px-3 outline-none transition-colors data-[highlighted]:text-foreground"
+          :class="isPendingReview(workflow)
+            ? 'data-[highlighted]:bg-amber-500/10'
+            : 'data-[highlighted]:bg-emerald-500/10'"
+          :aria-label="itemAriaLabel(workflow)"
           :data-testid="`active-workflow-${workflow.execution_id}`"
           @select="emit('select', workflow)"
         >
-          <span class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-            <Activity class="h-4 w-4" />
-            <span class="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-popover" />
+          <span
+            class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+            :class="isPendingReview(workflow)
+              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'"
+          >
+            <PauseCircle
+              v-if="isPendingReview(workflow)"
+              class="h-4 w-4"
+            />
+            <Activity
+              v-else
+              class="h-4 w-4"
+            />
+            <span
+              class="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-popover"
+              :class="isPendingReview(workflow) ? 'bg-amber-500' : 'bg-emerald-500'"
+            />
           </span>
           <span class="min-w-0 flex-1">
             <span
@@ -97,10 +132,15 @@ function formatStartedAt(value: string): string {
               {{ workflow.workflow_name }}
             </span>
             <span class="mt-0.5 block text-[11px] text-muted-foreground">
-              {{ formatStartedAt(workflow.started_at) }}
+              {{ formatStartedAt(workflow) }}
             </span>
           </span>
-          <ArrowUpRight class="h-4 w-4 shrink-0 text-muted-foreground/60 transition-colors group-data-[highlighted]:text-emerald-600 dark:group-data-[highlighted]:text-emerald-400" />
+          <ArrowUpRight
+            class="h-4 w-4 shrink-0 text-muted-foreground/60 transition-colors"
+            :class="isPendingReview(workflow)
+              ? 'group-data-[highlighted]:text-amber-600 dark:group-data-[highlighted]:text-amber-400'
+              : 'group-data-[highlighted]:text-emerald-600 dark:group-data-[highlighted]:text-emerald-400'"
+          />
         </DropdownMenuItem>
       </div>
 

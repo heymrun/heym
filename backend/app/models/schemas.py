@@ -457,7 +457,7 @@ class HistoryListResponse(BaseModel):
 
 
 class ActiveExecutionItem(BaseModel):
-    """Single currently-running execution visible to the requesting user."""
+    """Single currently-running or pending-review execution visible to the requesting user."""
 
     execution_id: str
     workflow_id: str
@@ -466,6 +466,8 @@ class ActiveExecutionItem(BaseModel):
     inputs: dict = Field(default_factory=dict)
     running_node_ids: list[str] = Field(default_factory=list)
     node_results: list[dict] = Field(default_factory=list)
+    status: Literal["running", "pending"] = "running"
+    pending_kind: Literal["hitl", "codex"] | None = None
 
 
 class LLMTraceListItem(BaseModel):

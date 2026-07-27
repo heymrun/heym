@@ -71,6 +71,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
+            HEYM_RELEASE_IMAGE=ghcr.io/${{ github.repository_owner }}/heym:${{ steps.version.outputs.value }}
             VITE_HEYM_WEB_URL=${{ vars.HEYM_WEB_URL || 'https://heym.run' }}
             OCI_SOURCE=https://github.com/heymrun/heym
             OCI_URL=https://heym.run

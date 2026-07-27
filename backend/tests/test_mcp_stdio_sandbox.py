@@ -12,6 +12,7 @@ properties that keep that from being host command execution:
 
 import os
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -591,6 +592,125 @@ class ContainerRuntimeUsabilityTests(unittest.TestCase):
         with patch.dict(os.environ, {"HEYM_MCP_STDIO_TMPFS_SIZE": "1g"}):
             spec = self._tmpfs_spec(build_sandboxed_command("npx", [], None).argv)
         self.assertIn("size=1g", spec)
+
+
+class SandboxWorkingDirectoryTests(unittest.TestCase):
+    """The sandbox must not start in the backend image's own project directory.
+
+    /app is the Heym backend project, so `uv run ...` discovered it, tried to
+    sync it, and died on the read-only rootfs before speaking MCP.
+    """
+
+    def setUp(self) -> None:
+        reset_docker_available_cache()
+        self.addCleanup(reset_docker_available_cache)
+        self._patches = [
+            patch.dict(
+                os.environ,
+                {
+                    "HEYM_MCP_STDIO_SANDBOX": "docker",
+                    "HEYM_MCP_STDIO_IMAGE": "heym-backend:local",
+                },
+            ),
+            patch("app.services.mcp_stdio_sandbox.docker_available", return_value=True),
+        ]
+        for p in self._patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_backend_image_commands_start_in_the_writable_tmpfs(self) -> None:
+        for command in ("uv", "uvx", "npx", "node", "python"):
+            with self.subTest(command=command):
+                argv = build_sandboxed_command(command, ["run"], None).argv
+                self.assertEqual(_flag_value(argv, "--workdir"), "/tmp")
+
+    def test_workdir_is_the_tmpfs_mount_point(self) -> None:
+        """A workdir outside the tmpfs would be read-only, so the two must agree."""
+        argv = build_sandboxed_command("uv", ["run", "server"], None).argv
+        workdir = _flag_value(argv, "--workdir") or ""
+        self.assertTrue((_flag_value(argv, "--tmpfs") or "").startswith(f"{workdir}:"))
+
+    def test_workdir_is_never_the_backend_project_directory(self) -> None:
+        argv = build_sandboxed_command("uv", ["run", "server"], None).argv
+        self.assertNotIn(_flag_value(argv, "--workdir"), ("/app", "/app/backend"))
+
+    def test_moving_the_workdir_did_not_loosen_the_sandbox(self) -> None:
+        argv = build_sandboxed_command("uv", ["run", "server"], None).argv
+        self.assertIn("--read-only", argv)
+        self.assertEqual(_flag_value(argv, "--cap-drop"), "ALL")
+        self.assertEqual(_flag_value(argv, "--user"), "65534:65534")
+        self.assertNotIn("docker.sock", " ".join(argv))
+
+    def test_docker_run_form_keeps_its_own_image_workdir(self) -> None:
+        """Only Heym's image has the /app collision; caller images keep theirs."""
+        argv = build_sandboxed_command("docker", ["run", "mcp/fetch"], None).argv
+        self.assertIsNone(_flag_value(argv, "--workdir"))
+
+    def test_docker_run_form_honours_an_explicit_caller_workdir(self) -> None:
+        argv = build_sandboxed_command("docker", ["run", "-w", "/srv/app", "mcp/fetch"], None).argv
+        self.assertEqual(_flag_value(argv, "--workdir"), "/srv/app")
+
+
+class DeploymentWiringTests(unittest.TestCase):
+    """Every HEYM_MCP_STDIO_* knob must actually reach the backend container.
+
+    Compose forwards nothing it has not declared, so a documented variable
+    missing from docker-compose.yml is silently inert under ./deploy.sh.
+    """
+
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._compose = (cls._REPO_ROOT / "docker-compose.yml").read_text()
+        cls._release_dockerfile = (cls._REPO_ROOT / "docker" / "release.Dockerfile").read_text()
+
+    def test_compose_declares_every_documented_knob(self) -> None:
+        for var in (
+            "HEYM_MCP_STDIO_SANDBOX",
+            "HEYM_MCP_STDIO_IMAGE",
+            "HEYM_MCP_STDIO_FILES_PATH",
+            "HEYM_MCP_STDIO_FILES_VOLUME",
+            "HEYM_MCP_STDIO_FILES_SUBPATH",
+            "HEYM_MCP_STDIO_FILES_HOST_DIR",
+            "HEYM_MCP_STDIO_FILES_WRITABLE",
+            "HEYM_MCP_STDIO_TMPFS_SIZE",
+            "HEYM_MCP_STDIO_MEMORY",
+            "HEYM_MCP_STDIO_CPUS",
+            "HEYM_MCP_STDIO_PIDS",
+            "HEYM_MCP_STDIO_USER",
+        ):
+            with self.subTest(var=var):
+                # assertTrue, not assertIn: assertIn dumps the whole compose file.
+                self.assertTrue(
+                    f"{var}: " in self._compose,
+                    f"{var} is documented but docker-compose.yml never declares it",
+                )
+
+    def test_compose_sandbox_image_follows_the_backend_image(self) -> None:
+        """A deployment that repoints the backend must not chase a tag it never built."""
+        self.assertTrue(
+            "HEYM_MCP_STDIO_IMAGE: "
+            "${HEYM_MCP_STDIO_IMAGE:-${HEYM_BACKEND_IMAGE:-heym-backend:local}}" in self._compose,
+            "Compose must default the MCP stdio sandbox image to HEYM_BACKEND_IMAGE",
+        )
+
+    def test_release_image_names_its_own_sandbox_image(self) -> None:
+        self.assertTrue(
+            "HEYM_MCP_STDIO_IMAGE=${HEYM_RELEASE_IMAGE}" in self._release_dockerfile,
+            "the single GHCR image must name its own MCP stdio sandbox image",
+        )
+
+    def test_release_self_reference_is_never_a_dangling_tag(self) -> None:
+        """An argless local build must not bake in `ghcr.io/heymrun/heym:`."""
+        self.assertTrue(
+            "ARG HEYM_RELEASE_IMAGE=ghcr.io/heymrun/heym:latest" in self._release_dockerfile,
+            "the release self-reference needs a valid default for argless local builds",
+        )
+        self.assertFalse(
+            "ghcr.io/heymrun/heym:${APP_VERSION}" in self._release_dockerfile,
+            "APP_VERSION is empty on local builds, so it must not be used as an image tag",
+        )
 
 
 class DockerRunRewriteTests(unittest.TestCase):

@@ -129,6 +129,9 @@ _DOCKER_REFUSED_FLAGS = {
 # mounted here unless an operator names a volume or host directory explicitly.
 _FILES_MOUNT_PATH = (os.getenv("HEYM_MCP_STDIO_FILES_PATH") or "").strip() or "/mnt/heym-files"
 
+# The only writable path in the sandbox, so also the only usable working directory.
+_SANDBOX_TMPFS_PATH = "/tmp"
+
 # Nobody:nogroup. Root in the sandbox is refused even if explicitly configured.
 _DEFAULT_SANDBOX_USER = "65534:65534"
 
@@ -257,12 +260,9 @@ def reset_docker_available_cache() -> None:
 def _sandbox_image() -> str | None:
     """Resolve the image used for non-``docker`` commands (it ships node and uv).
 
-    Mirrors the Playwright and Python tool runners so every deployment shape
-    works: an explicit override first, then the Codex/OpenCode runner image
-    (Compose and the GHCR release image both set ``HEYM_CODEX_DOCKER_IMAGE`` to
-    the backend image), then ``docker inspect`` of this container. Hardcoding a
-    Compose-only tag here would break the single GHCR image, where that tag does
-    not exist. Returns None when nothing resolves, so the caller can fail with an
+    Compose and the GHCR release image both set ``HEYM_MCP_STDIO_IMAGE``; the
+    Codex and ``docker inspect`` fallbacks cover deployments that do not.
+    Returns None when nothing resolves, so the caller can fail with an
     explanation instead of running ``docker run`` against a missing image.
     """
     override = (
@@ -350,7 +350,7 @@ def _sandbox_user() -> str:
     return f"{uid}:{gid}"
 
 
-def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
+def _hardening_flags(name: str, network: str = "bridge", workdir: str | None = None) -> list[str]:
     """Flags shared by every sandboxed MCP server container.
 
     ``-i`` is mandatory: the MCP protocol is a bidirectional stream over the
@@ -373,6 +373,12 @@ def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
     * cache directories. npm and uv both want to write under ``HOME`` or
       ``XDG_CACHE_HOME``; pointing them at the tmpfs keeps them off the
       read-only rootfs.
+
+    ``workdir`` is passed for the backend-image path only. The backend image's
+    WORKDIR is ``/app``, which *is* the Heym backend project, so ``uv run ...``
+    discovers it and dies syncing it against the read-only rootfs. Starting in
+    the tmpfs is a narrowing, not a loosening. The ``docker run IMAGE`` form
+    keeps its own image's WORKDIR.
     """
     return [
         "--rm",
@@ -383,7 +389,8 @@ def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
         network,
         "--read-only",
         "--tmpfs",
-        f"/tmp:rw,exec,nosuid,size={_tunable('HEYM_MCP_STDIO_TMPFS_SIZE', '512m')}",
+        f"{_SANDBOX_TMPFS_PATH}:rw,exec,nosuid,size={_tunable('HEYM_MCP_STDIO_TMPFS_SIZE', '512m')}",
+        *(["--workdir", workdir] if workdir else []),
         "--env",
         "HOME=/tmp",
         "--env",
@@ -555,7 +562,13 @@ def build_sandboxed_command(
             "be resolved. Set HEYM_MCP_STDIO_IMAGE (or HEYM_PYTHON_TOOL_IMAGE) to the backend "
             "image, or use the `docker run <image>` form, which names its own image."
         )
-    argv = ["docker", "run", *_hardening_flags(name), "--entrypoint", command]
+    argv = [
+        "docker",
+        "run",
+        *_hardening_flags(name, workdir=_SANDBOX_TMPFS_PATH),
+        "--entrypoint",
+        command,
+    ]
     for key, value in (env or {}).items():
         argv.extend(["--env", f"{key}={value}"])
     argv.extend([image, *args])

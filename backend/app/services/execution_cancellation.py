@@ -585,4 +585,103 @@ async def list_persisted_active_executions_for_user(
     ]
 
 
+@dataclass(frozen=True)
+class PendingReviewExecutionRecord:
+    """Execution waiting on HITL or Codex human input."""
+
+    execution_id: uuid.UUID
+    workflow_id: uuid.UUID
+    workflow_name: str
+    started_at: datetime
+    inputs: dict = field(default_factory=dict)
+    node_results: list[dict[str, Any]] = field(default_factory=list)
+    pending_kind: Literal["hitl", "codex"] = "hitl"
+
+
+async def list_pending_review_executions_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> list[PendingReviewExecutionRecord]:
+    """Return non-expired pending HITL/Codex review executions for accessible workflows."""
+    from sqlalchemy import literal, or_, select, union_all
+
+    from app.db.models import (
+        CodexFollowupRequest,
+        ExecutionHistory,
+        HITLRequest,
+        Workflow,
+        WorkflowShare,
+    )
+
+    now = _utcnow()
+    accessible_workflow = or_(
+        Workflow.owner_id == user_id,
+        Workflow.id.in_(select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)),
+    )
+
+    hitl_stmt = (
+        select(
+            HITLRequest.execution_history_id.label("execution_id"),
+            HITLRequest.workflow_id.label("workflow_id"),
+            HITLRequest.workflow_name.label("workflow_name"),
+            ExecutionHistory.started_at.label("started_at"),
+            ExecutionHistory.inputs.label("inputs"),
+            ExecutionHistory.node_results.label("node_results"),
+            literal("hitl").label("pending_kind"),
+        )
+        .join(ExecutionHistory, ExecutionHistory.id == HITLRequest.execution_history_id)
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(
+            HITLRequest.status == "pending",
+            HITLRequest.expires_at >= now,
+            accessible_workflow,
+        )
+    )
+    codex_stmt = (
+        select(
+            CodexFollowupRequest.execution_history_id.label("execution_id"),
+            CodexFollowupRequest.workflow_id.label("workflow_id"),
+            CodexFollowupRequest.workflow_name.label("workflow_name"),
+            ExecutionHistory.started_at.label("started_at"),
+            ExecutionHistory.inputs.label("inputs"),
+            ExecutionHistory.node_results.label("node_results"),
+            literal("codex").label("pending_kind"),
+        )
+        .join(
+            ExecutionHistory,
+            ExecutionHistory.id == CodexFollowupRequest.execution_history_id,
+        )
+        .join(Workflow, Workflow.id == CodexFollowupRequest.workflow_id)
+        .where(
+            CodexFollowupRequest.status == "pending",
+            CodexFollowupRequest.expires_at >= now,
+            accessible_workflow,
+        )
+    )
+
+    result = await db.execute(union_all(hitl_stmt, codex_stmt))
+
+    records: list[PendingReviewExecutionRecord] = []
+    seen: set[uuid.UUID] = set()
+    for row in result.all():
+        execution_id = row.execution_id
+        if execution_id in seen:
+            continue
+        seen.add(execution_id)
+        kind: Literal["hitl", "codex"] = "codex" if row.pending_kind == "codex" else "hitl"
+        records.append(
+            PendingReviewExecutionRecord(
+                execution_id=execution_id,
+                workflow_id=row.workflow_id,
+                workflow_name=row.workflow_name,
+                started_at=row.started_at,
+                inputs=dict(row.inputs or {}),
+                node_results=list(row.node_results or []),
+                pending_kind=kind,
+            )
+        )
+    records.sort(key=lambda item: item.started_at, reverse=True)
+    return records
+
+
 active_execution_registry = ActiveExecutionRegistry()

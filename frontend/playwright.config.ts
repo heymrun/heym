@@ -14,12 +14,8 @@ const frontendPort = Number(process.env.E2E_FRONTEND_PORT || "4018");
 const backendPort = Number(process.env.E2E_BACKEND_PORT || "10106");
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
-
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL is required for Playwright E2E tests. Run ./run_e2e.sh from the repository root.",
-  );
-}
+const missingDatabaseUrlMessage =
+  "DATABASE_URL is required for Playwright E2E tests. Run ./run_e2e.sh from the repository root.";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -58,6 +54,7 @@ export default defineConfig({
     {
       command: [
         "cd ../backend &&",
+        `test -n "$DATABASE_URL" || { echo "${missingDatabaseUrlMessage}" >&2; exit 1; } &&`,
         "SECRET_KEY=e2e-test-secret-key-for-playwright-only",
         "ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         `FRONTEND_URL=${frontendUrl}`,

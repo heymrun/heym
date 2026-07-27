@@ -84,6 +84,11 @@ RUN pip install uv
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 
+# Image the sibling sandboxes below start. The release workflow passes the
+# published tag; the default keeps an argless local build from baking in a
+# dangling `ghcr.io/heymrun/heym:` (APP_VERSION is empty there).
+ARG HEYM_RELEASE_IMAGE=ghcr.io/heymrun/heym:latest
+
 ARG OCI_SOURCE=https://github.com/heymrun/heym
 ARG OCI_URL=https://heym.run
 ARG OCI_DOCUMENTATION_URL=https://github.com/heymrun/heym
@@ -119,13 +124,14 @@ COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
 RUN cd /app/backend && uv run python -m playwright install --with-deps chromium
 
 ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
-    HEYM_CODEX_DOCKER_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
+    HEYM_CODEX_DOCKER_IMAGE=${HEYM_RELEASE_IMAGE} \
     HEYM_CODEX_DOCKER_WORKSPACE_VOLUME=heym-codex-workspaces \
     HEYM_CODEX_NETWORK_ACCESS=true \
     HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces \
-    HEYM_SKILL_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
-    HEYM_PLAYWRIGHT_SANDBOX_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
-    HEYM_PLAYWRIGHT_SANDBOX_PYTHON=/app/backend/.venv/bin/python
+    HEYM_SKILL_IMAGE=${HEYM_RELEASE_IMAGE} \
+    HEYM_PLAYWRIGHT_SANDBOX_IMAGE=${HEYM_RELEASE_IMAGE} \
+    HEYM_PLAYWRIGHT_SANDBOX_PYTHON=/app/backend/.venv/bin/python \
+    HEYM_MCP_STDIO_IMAGE=${HEYM_RELEASE_IMAGE}
 
 RUN chmod +x /app/release-entrypoint.sh /usr/local/bin/heym-codex-docker
 
