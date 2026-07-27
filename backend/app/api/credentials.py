@@ -217,6 +217,11 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
             return "connected"
         client_id = config.get("client_id", "")
         return mask_api_key(client_id) if client_id else None
+    elif credential_type == CredentialType.google_drive:
+        if config.get("refresh_token", "").strip():
+            return "connected"
+        client_id = config.get("client_id", "")
+        return mask_api_key(client_id) if client_id else None
     elif credential_type == CredentialType.supabase:
         supabase_url = str(config.get("supabase_url", "")).strip()
         supabase_schema = str(config.get("supabase_schema", "public")).strip() or "public"
@@ -1604,6 +1609,17 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="BigQuery credential requires client_secret",
+            )
+    elif credential_type == CredentialType.google_drive:
+        if "client_id" not in config or not config["client_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google Drive credential requires client_id",
+            )
+        if "client_secret" not in config or not config["client_secret"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google Drive credential requires client_secret",
             )
     elif credential_type == CredentialType.supabase:
         if "supabase_url" not in config or not str(config["supabase_url"]).strip():
