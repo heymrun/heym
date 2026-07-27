@@ -1415,6 +1415,14 @@ export const credentialsApi = {
     return response.data;
   },
 
+  googleDriveOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/google-drive/oauth/authorize",
+      { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
   bigQueryOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
     const response = await api.post<{ auth_url: string }>(
       "/credentials/bigquery/oauth/authorize",

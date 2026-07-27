@@ -122,6 +122,11 @@ const gsOAuthConnected = ref(false);
 const gsOAuthConnecting = ref(false);
 // Holds the credential fetched after a successful OAuth flow in this session
 const gsConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
+const gdClientId = ref("");
+const gdClientSecret = ref("");
+const gdOAuthConnected = ref(false);
+const gdOAuthConnecting = ref(false);
+const gdConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
 const bqClientId = ref("");
 const bqClientSecret = ref("");
 const bqOAuthConnected = ref(false);
@@ -236,6 +241,7 @@ const typeOptions = [
   { value: "cohere", label: CREDENTIAL_TYPE_LABELS.cohere },
   { value: "flaresolverr", label: CREDENTIAL_TYPE_LABELS.flaresolverr },
   { value: "google_sheets", label: CREDENTIAL_TYPE_LABELS.google_sheets },
+  { value: "google_drive", label: CREDENTIAL_TYPE_LABELS.google_drive },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
   { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
@@ -328,6 +334,10 @@ watch(
         // Detect connected state from masked_value set by the backend
         gsOAuthConnected.value = props.credential.masked_value === "connected";
         gsConnectedCredential.value = null;
+        gdClientId.value = "";
+        gdClientSecret.value = "";
+        gdOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "google_drive";
+        gdConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "bigquery";
@@ -437,6 +447,10 @@ watch(
         gsClientSecret.value = "";
         gsOAuthConnected.value = false;
         gsConnectedCredential.value = null;
+        gdClientId.value = "";
+        gdClientSecret.value = "";
+        gdOAuthConnected.value = false;
+        gdConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = false;
@@ -584,6 +598,8 @@ const isValid = computed(() => {
   } else if (type.value === "google_sheets") {
     // Valid only when OAuth was completed (new) or when editing an existing credential
     return gsOAuthConnected.value || isEditing.value;
+  } else if (type.value === "google_drive") {
+    return gdOAuthConnected.value || isEditing.value;
   } else if (type.value === "bigquery") {
     return bqOAuthConnected.value || isEditing.value;
   } else if (type.value === "supabase") {
@@ -836,6 +852,11 @@ function buildConfig(): CredentialConfig {
       client_id: gsClientId.value.trim(),
       client_secret: gsClientSecret.value.trim(),
     };
+  } else if (type.value === "google_drive") {
+    return {
+      client_id: gdClientId.value.trim(),
+      client_secret: gdClientSecret.value.trim(),
+    };
   } else if (type.value === "bigquery") {
     return {
       client_id: bqClientId.value.trim(),
@@ -868,6 +889,83 @@ function buildConfig(): CredentialConfig {
     return { webhook_url: webhookUrl.value.trim() };
   } else {
     return { webhook_url: webhookUrl.value.trim() };
+  }
+}
+
+async function startGoogleDriveOAuth(): Promise<void> {
+  if (!gdClientId.value.trim() || !gdClientSecret.value.trim()) {
+    error.value = "Enter Client ID and Client Secret before connecting.";
+    return;
+  }
+  if (!name.value.trim()) {
+    error.value = "Enter a name for this credential before connecting.";
+    return;
+  }
+
+  gdOAuthConnecting.value = true;
+  error.value = "";
+
+  try {
+    // Save or update the credential first so the backend has client_id / client_secret
+    let credId: string;
+    if (isEditing.value && props.credential) {
+      await credentialsApi.update(props.credential.id, {
+        name: name.value,
+        config: buildConfig(),
+      });
+      credId = props.credential.id;
+    } else {
+      const saved = await credentialsApi.create({
+        name: name.value,
+        type: "google_drive",
+        config: buildConfig(),
+      });
+      credId = saved.id;
+    }
+
+    const { auth_url } = await credentialsApi.googleDriveOAuthAuthorize(credId);
+
+    const popup = window.open(auth_url, "google-oauth", "width=520,height=620");
+    if (!popup) {
+      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
+    }
+
+    const onMessage = (evt: MessageEvent): void => {
+      if (!isTrustedOAuthMessage(evt, popup)) {
+        return;
+      }
+      if (evt.data?.type === "google-oauth-success" && evt.data.credentialId === credId) {
+        window.removeEventListener("message", onMessage);
+        clearInterval(pollClosed);
+        popup?.close();
+        credentialsApi.get(credId).then((cred) => {
+          gdConnectedCredential.value = cred;
+          gdOAuthConnected.value = true;
+          gdOAuthConnecting.value = false;
+        }).catch(() => {
+          gdOAuthConnected.value = true;
+          gdOAuthConnecting.value = false;
+        });
+      } else if (evt.data?.type === "google-oauth-error") {
+        window.removeEventListener("message", onMessage);
+        clearInterval(pollClosed);
+        gdOAuthConnecting.value = false;
+        error.value = evt.data.message || "OAuth authorization failed";
+      }
+    };
+
+    const pollClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(pollClosed);
+        window.removeEventListener("message", onMessage);
+        gdOAuthConnecting.value = false;
+      }
+    }, 500);
+
+    window.addEventListener("message", onMessage);
+  } catch (err) {
+    gdOAuthConnecting.value = false;
+    error.value = err instanceof Error ? err.message : "OAuth authorization failed";
   }
 }
 
@@ -1417,6 +1515,7 @@ async function handleSave(): Promise<void> {
       // OAuth configs are managed by their callbacks after connection.
       const hasConfigChange =
         type.value !== "google_sheets" &&
+        type.value !== "google_drive" &&
         type.value !== "bigquery" &&
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
@@ -1476,6 +1575,9 @@ async function handleSave(): Promise<void> {
     } else if (type.value === "google_sheets" && gsConnectedCredential.value) {
       // Credential was already created and tokens stored by the OAuth callback
       saved = gsConnectedCredential.value;
+    } else if (type.value === "google_drive" && gdConnectedCredential.value) {
+      // Credential was already created and tokens stored by the OAuth callback
+      saved = gdConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
     } else if (type.value === "notion" && notionConnectedCredential.value) {
@@ -2954,6 +3056,92 @@ async function handleSave(): Promise<void> {
         </div>
       </template>
 
+      <template v-if="type === 'google_drive'">
+        <div class="space-y-2">
+          <Label for="cred-gd-client-id">Google Client ID</Label>
+          <Input
+            id="cred-gd-client-id"
+            v-model="gdClientId"
+            :placeholder="isEditing ? '(re-enter to update)' : '1234567890-abc.apps.googleusercontent.com'"
+            :disabled="saving || gdOAuthConnecting"
+          />
+          <p class="text-xs text-muted-foreground">
+            OAuth2 Client ID from your Google Cloud Console project (Drive scope).
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-gd-client-secret">Google Client Secret</Label>
+          <div class="relative">
+            <Input
+              id="cred-gd-client-secret"
+              v-model="gdClientSecret"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'GOCSPX-...'"
+              :disabled="saving || gdOAuthConnecting"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            OAuth2 Client Secret from your Google Cloud Console project.
+          </p>
+        </div>
+
+        <div class="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+          <p class="text-xs text-amber-600 dark:text-amber-400">
+            This credential requests <strong>full Drive access</strong>, because the node works on
+            files you already own. Sharing it with a team gives every member the ability to read,
+            modify, and delete anything in your Google Drive through a workflow.
+          </p>
+        </div>
+
+        <div class="rounded-md border p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">
+                Google Account
+              </p>
+              <p
+                v-if="gdOAuthConnected"
+                class="text-xs text-green-600 dark:text-green-400"
+              >
+                Connected
+              </p>
+              <p
+                v-else
+                class="text-xs text-muted-foreground"
+              >
+                Not connected — click to authorize
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :loading="gdOAuthConnecting"
+              :disabled="saving || gdOAuthConnecting || !gdClientId.trim() || !gdClientSecret.trim()"
+              @click="startGoogleDriveOAuth"
+            >
+              {{ gdOAuthConnected ? 'Reconnect' : 'Connect' }}
+            </Button>
+          </div>
+        </div>
+      </template>
+
       <template v-if="type === 'bigquery'">
         <div class="space-y-2">
           <Label for="cred-bq-client-id">Google Client ID</Label>
@@ -3332,7 +3520,7 @@ async function handleSave(): Promise<void> {
           :loading="saving"
           :disabled="!isValid"
         >
-          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
+          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
         </Button>
       </div>
     </form>
