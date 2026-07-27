@@ -32,6 +32,7 @@ from app.api import (
     files,
     folders,
     global_variables,
+    google_drive_oauth,
     google_sheets_oauth,
     hitl,
     linear_oauth,
@@ -292,6 +293,11 @@ app.include_router(
     google_sheets_oauth.router,
     prefix="/api/credentials/google-sheets/oauth",
     tags=["Google Sheets OAuth"],
+)
+app.include_router(
+    google_drive_oauth.router,
+    prefix="/api/credentials/google-drive/oauth",
+    tags=["Google Drive OAuth"],
 )
 app.include_router(
     bigquery_oauth.router,
