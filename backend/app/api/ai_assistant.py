@@ -1103,6 +1103,7 @@ _PLACEHOLDER_CREDENTIAL_PATTERNS = (
     "rabbitmq-credential-uuid",
     "flaresolverr-cred-id",
     "openai-cred-id",
+    "google-drive-credential-uuid",
 )
 
 _INTEGRATION_CREDENTIAL_NODE_TYPES = {
@@ -1118,6 +1119,7 @@ _INTEGRATION_CREDENTIAL_NODE_TYPES = {
     "rabbitmq",
     "crawler",
     "googleSheets",
+    "googleDrive",
     "slackTrigger",
     "bigquery",
     "supabase",

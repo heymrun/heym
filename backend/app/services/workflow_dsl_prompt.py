@@ -4367,6 +4367,161 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 42. googleDrive (Google Drive Operations)
+- **Purpose**: List, download, update, and delete Google Drive files and folders via OAuth2, and copy Drive files into Heym Drive
+- **Inputs**: 1 | **Outputs**: 1
+- **Data fields**:
+  - `label`: Node identifier
+  - `credentialId`: UUID of the Google Drive (OAuth2) credential
+  - `gdOperation`: Operation type - "listFolderFiles" | "downloadFile" | "syncToHeymDrive" | "updateFile" | "removeFile" | "removeFolder"
+  - `gdFolderId`: Folder ID or full Drive folder URL (listFolderFiles, removeFolder). Empty means the Drive root. Supports expressions.
+  - `gdFileId`: File ID or full Drive/Docs URL (downloadFile, syncToHeymDrive, updateFile, removeFile). Supports expressions.
+  - `gdMaxResults`: for `listFolderFiles` — maximum files to return, default 100. Supports expressions.
+  - `gdQuery`: for `listFolderFiles` — optional extra Drive query ANDed with the parent filter, e.g. `mimeType='application/pdf'`. Supports expressions.
+  - `gdIncludeTrashed`: boolean, optional for `listFolderFiles` — when true, trashed files are included. Default false.
+  - `gdExportFormat`: for `downloadFile` and `syncToHeymDrive` — optional `"pdf"` | `"docx"` | `"xlsx"` | `"pptx"` | `"csv"` | `"txt"`. Empty means automatic. Ignored for non-Google-native files.
+  - `gdFilename`: for `syncToHeymDrive` — optional filename override for the stored Heym Drive file. Supports expressions.
+  - `gdBase64Content`: for `updateFile` — optional base64 string or `data:` URL that replaces the file content. Supports expressions.
+  - `gdNewName`: for `updateFile` — optional new filename (rename). Supports expressions.
+  - `gdNewParentId`: for `updateFile` — optional destination folder ID or URL (move). Supports expressions.
+  - `gdPermanentDelete`: boolean, optional for `removeFile`/`removeFolder` — when false (default) the item is moved to Drive trash and is recoverable; when true it is permanently deleted.
+
+**SETUP**: Requires a Google Drive credential created via the OAuth2 "Bring Your Own App" flow.
+The backend **FRONTEND_URL** env var must be the public app URL (scheme + host); the Google redirect URI is `{FRONTEND_URL}/api/credentials/google-drive/oauth/callback` only (not derived from client headers).
+1. Set **FRONTEND_URL** in production (e.g. `https://heym.example.com`).
+2. Create a project in Google Cloud Console and enable the Google Drive API.
+3. Create OAuth2 credentials (Web application type) and add that exact callback URL as an authorized redirect URI.
+4. In Heym Dashboard → Credentials → New → Google Drive (OAuth2), enter your Client ID and Client Secret, then click **Connect** to authorize via browser popup.
+
+The credential requests the full `https://www.googleapis.com/auth/drive` scope, because the node operates on files the user already owns rather than only files it created.
+
+**Note**: This node is Google Drive. It is **not** the `drive` node, which is Heym's own internal file storage (Heym Drive). The `syncToHeymDrive` operation is the bridge between the two.
+
+**File and folder IDs**: `gdFileId`, `gdFolderId`, and `gdNewParentId` accept either the bare ID or a full URL (`/file/d/<id>/`, `/drive/folders/<id>`, `/document/d/<id>/`, `?id=<id>`) — Heym extracts the ID automatically.
+
+**Google-native files**: Google Docs, Sheets, and Slides have no downloadable bytes. `downloadFile` and `syncToHeymDrive` detect them and export instead — Docs to PDF, Sheets to XLSX, Slides to PPTX by default — so no operation ever fails purely because the target is a native document. Set `gdExportFormat` to override the target.
+
+**Operations**:
+
+| Operation | Required Fields | Description |
+|-----------|-----------------|-------------|
+| `listFolderFiles` | (none; `gdFolderId` empty = root) | List files in a folder with optional query filter |
+| `downloadFile` | gdFileId | Download file bytes as base64, exporting native docs automatically |
+| `syncToHeymDrive` | gdFileId | Download from Google Drive and store the result in Heym Drive |
+| `updateFile` | gdFileId + at least one of gdBase64Content, gdNewName, gdNewParentId | Replace content, rename, and/or move |
+| `removeFile` | gdFileId | Trash (default) or permanently delete a file |
+| `removeFolder` | gdFolderId | Trash (default) or permanently delete a folder and its contents |
+
+**Output Formats**:
+
+**listFolderFiles**:
+```json
+{
+  "status": "success",
+  "operation": "listFolderFiles",
+  "folder_id": "1FolderXyz",
+  "count": 2,
+  "files": [
+    {
+      "id": "1AbC",
+      "name": "report.pdf",
+      "mime_type": "application/pdf",
+      "size_bytes": 20481,
+      "modified_time": "2026-07-01T10:00:00.000Z",
+      "web_view_link": "https://drive.google.com/file/d/1AbC/view",
+      "is_folder": false
+    }
+  ]
+}
+```
+
+**downloadFile**:
+```json
+{
+  "status": "success",
+  "operation": "downloadFile",
+  "id": "1AbC",
+  "filename": "Notes.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 20481,
+  "exported": true,
+  "export_format": "pdf",
+  "content_base64": "JVBERi0xLjQ..."
+}
+```
+
+**syncToHeymDrive**:
+```json
+{
+  "status": "success",
+  "operation": "syncToHeymDrive",
+  "id": "9f1c2b3d-0000-4000-8000-000000000001",
+  "google_file_id": "1AbC",
+  "filename": "Notes.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 20481,
+  "exported": true,
+  "download_url": "https://heym.example.com/api/files/dl/TOKEN"
+}
+```
+
+**updateFile**:
+```json
+{
+  "status": "success",
+  "operation": "updateFile",
+  "id": "1AbC",
+  "name": "renamed.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 20481,
+  "modified_time": "2026-07-27T10:00:00.000Z",
+  "updated": ["content", "name"]
+}
+```
+
+**removeFile / removeFolder**:
+```json
+{
+  "status": "success",
+  "operation": "removeFile",
+  "id": "1AbC",
+  "name": "report.pdf",
+  "deleted": "trashed"
+}
+```
+
+**Example — back up a Drive folder into Heym Drive**:
+```json
+{
+  "id": "list-drive",
+  "type": "googleDrive",
+  "position": { "x": 300, "y": 100 },
+  "data": {
+    "label": "ListReports",
+    "credentialId": "google-drive-credential-uuid",
+    "gdOperation": "listFolderFiles",
+    "gdFolderId": "https://drive.google.com/drive/folders/1FolderXyz",
+    "gdMaxResults": "50",
+    "gdQuery": "mimeType='application/pdf'"
+  }
+}
+```
+
+```json
+{
+  "id": "sync-drive",
+  "type": "googleDrive",
+  "position": { "x": 600, "y": 100 },
+  "data": {
+    "label": "BackupToHeym",
+    "credentialId": "google-drive-credential-uuid",
+    "gdOperation": "syncToHeymDrive",
+    "gdFileId": "$loop.item.id",
+    "gdFilename": "$loop.item.name"
+  }
+}
+```
+
 ## Edge Connections
 
 Edges connect nodes. Handle specification depends on the node type:
@@ -4504,7 +4659,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.
