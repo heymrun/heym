@@ -37,6 +37,7 @@ import JiraNodeProperties from "./JiraNodeProperties.vue";
 import LinearNodeProperties from "./LinearNodeProperties.vue";
 import GithubNodeProperties from "./GithubNodeProperties.vue";
 import GoogleSheetsNodeProperties from "./GoogleSheetsNodeProperties.vue";
+import GoogleDriveNodeProperties from "./GoogleDriveNodeProperties.vue";
 import BigqueryNodeProperties from "./BigqueryNodeProperties.vue";
 import SupabaseNodeProperties from "./SupabaseNodeProperties.vue";
 import ClickhouseNodeProperties from "./ClickhouseNodeProperties.vue";
@@ -96,6 +97,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <LinearNodeProperties v-else-if="selectedNode?.type === 'linear'" />
   <GithubNodeProperties v-else-if="selectedNode?.type === 'github'" />
   <GoogleSheetsNodeProperties v-else-if="selectedNode?.type === 'googleSheets'" />
+  <GoogleDriveNodeProperties v-else-if="selectedNode?.type === 'googleDrive'" />
   <BigqueryNodeProperties v-else-if="selectedNode?.type === 'bigquery'" />
   <SupabaseNodeProperties v-else-if="selectedNode?.type === 'supabase'" />
   <ClickhouseNodeProperties v-else-if="selectedNode?.type === 'clickhouse'" />

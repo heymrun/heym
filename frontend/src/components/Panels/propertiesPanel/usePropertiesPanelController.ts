@@ -9,6 +9,7 @@ import {
   watch,
   type ComponentPublicInstance,
   type InjectionKey,
+  type Ref,
 } from "vue";
 import { useRouter } from "vue-router";
 import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
@@ -50,6 +51,8 @@ import {
   driveOperationOptions,
   githubOperationGroups,
   githubOperationOptions,
+  googleDriveOperationOptions,
+  googleDriveExportFormatOptions,
   googleSheetsOperationOptions,
   gristOperationOptions,
   jiraOperationGroups,
@@ -574,6 +577,7 @@ export function usePropertiesPanelController() {
   const jiraCredentials = ref<CredentialListItem[]>([]);
   const linearCredentials = ref<CredentialListItem[]>([]);
   const googleSheetsCredentials = ref<CredentialListItem[]>([]);
+  const googleDriveCredentials = ref<CredentialListItem[]>([]);
   const bigqueryCredentials = ref<CredentialListItem[]>([]);
   const supabaseCredentials = ref<CredentialListItem[]>([]);
   const clickhouseCredentials = ref<CredentialListItem[]>([]);
@@ -763,6 +767,15 @@ export function usePropertiesPanelController() {
   const googleSheetsSheetNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const googleSheetsValuesInputRef = ref<ExpandableFieldRef | null>(null);
   const currentGoogleSheetsExpressionFieldIndex = ref(0);
+  const googleDriveFolderIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveFileIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveMaxResultsExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveFilenameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveContentExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveNewNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleDriveNewParentExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const currentGoogleDriveExpressionFieldIndex = ref(0);
   const bqProjectIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const bqQueryExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const bqDatasetIdExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -1127,6 +1140,14 @@ export function usePropertiesPanelController() {
           googleSheetsCredentials.value = await credentialsApi.listByType("google_sheets");
         } catch {
           googleSheetsCredentials.value = [];
+        }
+      }
+
+      if (type === "googleDrive") {
+        try {
+          googleDriveCredentials.value = await credentialsApi.listByType("google_drive");
+        } catch {
+          googleDriveCredentials.value = [];
         }
       }
 
@@ -2228,6 +2249,7 @@ export function usePropertiesPanelController() {
     googleSheetsSpreadsheetIdExpressionInputRef.value?.closeExpandDialog();
     googleSheetsSheetNameExpressionInputRef.value?.closeExpandDialog();
     googleSheetsValuesInputRef.value?.closeExpandDialog();
+    closeGoogleDriveExpressionDialogs();
     closeBigQueryExpressionDialogs();
     closeClickhouseExpressionDialogs();
     closeNotionExpressionDialogs();
@@ -2923,6 +2945,22 @@ export function usePropertiesPanelController() {
         }
         if (googleSheetsSpreadsheetIdExpressionInputRef.value) {
           nextTick(() => openGoogleSheetsExpressionFieldAtIndex(0));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "googleDrive") {
+      currentGoogleDriveExpressionFieldIndex.value = 0;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        if (
+          googleDriveFolderIdExpressionInputRef.value ||
+          googleDriveFileIdExpressionInputRef.value
+        ) {
+          nextTick(() => openGoogleDriveExpressionFieldAtIndex(0));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -3661,6 +3699,86 @@ export function usePropertiesPanelController() {
 
   function onGoogleSheetsRegisterExpressionFieldIndex(index: number): void {
     currentGoogleSheetsExpressionFieldIndex.value = index;
+  }
+
+  // Every expression-capable field per operation, in navigation order. The evaluate
+  // dialog must reach all of them, not just the primary id.
+  const GOOGLE_DRIVE_EXPRESSION_FIELDS: Record<string, string[]> = {
+    listFolderFiles: ["gdFolderId", "gdMaxResults", "gdQuery"],
+    downloadFile: ["gdFileId"],
+    syncToHeymDrive: ["gdFileId", "gdFilename"],
+    updateFile: ["gdFileId", "gdBase64Content", "gdNewName", "gdNewParentId"],
+    removeFile: ["gdFileId"],
+    removeFolder: ["gdFolderId"],
+  };
+
+  const googleDriveExpressionFieldRefs: Record<
+    string,
+    Ref<ExpandableFieldRef | null>
+  > = {
+    gdFolderId: googleDriveFolderIdExpressionInputRef,
+    gdFileId: googleDriveFileIdExpressionInputRef,
+    gdMaxResults: googleDriveMaxResultsExpressionInputRef,
+    gdQuery: googleDriveQueryExpressionInputRef,
+    gdFilename: googleDriveFilenameExpressionInputRef,
+    gdBase64Content: googleDriveContentExpressionInputRef,
+    gdNewName: googleDriveNewNameExpressionInputRef,
+    gdNewParentId: googleDriveNewParentExpressionInputRef,
+  };
+
+  const googleDriveExpressionFieldCount = computed((): number => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "googleDrive") {
+      return 1;
+    }
+    const op = (n.data.gdOperation as string | undefined) || "";
+    return GOOGLE_DRIVE_EXPRESSION_FIELDS[op]?.length ?? 1;
+  });
+
+  function openGoogleDriveExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "googleDrive") {
+      return;
+    }
+    currentGoogleDriveExpressionFieldIndex.value = index;
+    const op = (n.data.gdOperation as string | undefined) || "";
+    const fieldKey = GOOGLE_DRIVE_EXPRESSION_FIELDS[op]?.[index];
+    if (!fieldKey) {
+      return;
+    }
+    googleDriveExpressionFieldRefs[fieldKey]?.value?.openExpandDialog();
+  }
+
+  function handleGoogleDriveExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "googleDrive") {
+      return;
+    }
+    const total = googleDriveExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentGoogleDriveExpressionFieldIndex.value - 1
+        : currentGoogleDriveExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    Object.values(googleDriveExpressionFieldRefs).forEach((fieldRef) => {
+      fieldRef.value?.closeExpandDialog();
+    });
+    currentGoogleDriveExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openGoogleDriveExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onGoogleDriveRegisterExpressionFieldIndex(index: number): void {
+    currentGoogleDriveExpressionFieldIndex.value = index;
+  }
+
+  function closeGoogleDriveExpressionDialogs(): void {
+    Object.values(googleDriveExpressionFieldRefs).forEach((fieldRef) => {
+      fieldRef.value?.closeExpandDialog();
+    });
   }
 
   const bigQueryExpressionFieldCount = computed((): number => {
@@ -6090,6 +6208,21 @@ export function usePropertiesPanelController() {
   function usesGitHubPerPage(operation: string | undefined): boolean {
     return githubPerPageOperations.has(operation || "");
   }
+
+  const googleDriveCredentialOptions = computed(() => {
+    const node = selectedNode.value;
+    const selectedCredentialId =
+      node && node.type === "googleDrive"
+        ? (node.data.credentialId as string | undefined)
+        : undefined;
+
+    return buildCredentialOptions(
+      googleDriveCredentials.value,
+      selectedCredentialId,
+      "Select Google Drive credential...",
+      "Shared Google Drive credential (from owner)",
+    );
+  });
 
   const googleSheetsCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -8856,6 +8989,14 @@ export function usePropertiesPanelController() {
     linearCommentIdExpressionInputRef,
     linearCommentBodyExpressionInputRef,
     linearParentCommentIdExpressionInputRef,
+    googleDriveFolderIdExpressionInputRef,
+    googleDriveFileIdExpressionInputRef,
+    googleDriveMaxResultsExpressionInputRef,
+    googleDriveQueryExpressionInputRef,
+    googleDriveFilenameExpressionInputRef,
+    googleDriveContentExpressionInputRef,
+    googleDriveNewNameExpressionInputRef,
+    googleDriveNewParentExpressionInputRef,
     googleSheetsSpreadsheetIdExpressionInputRef,
     googleSheetsSheetNameExpressionInputRef,
     googleSheetsValuesInputRef,
@@ -8984,6 +9125,9 @@ export function usePropertiesPanelController() {
     gristExpressionFieldCount,
     handleGristExpressionFieldNavigate,
     onGristRegisterExpressionFieldIndex,
+    googleDriveExpressionFieldCount,
+    handleGoogleDriveExpressionFieldNavigate,
+    onGoogleDriveRegisterExpressionFieldIndex,
     googleSheetsExpressionFieldCount,
     handleGoogleSheetsExpressionFieldNavigate,
     onGoogleSheetsRegisterExpressionFieldIndex,
@@ -9086,6 +9230,9 @@ export function usePropertiesPanelController() {
     isGitHubRepoRequired,
     isGitHubOwnerRequired,
     usesGitHubPerPage,
+    googleDriveCredentialOptions,
+    googleDriveOperationOptions,
+    googleDriveExportFormatOptions,
     googleSheetsCredentialOptions,
     cohereCredentialOptions,
     gristOperationOptions,

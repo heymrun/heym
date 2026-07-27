@@ -258,6 +258,26 @@ export const googleSheetsOperationOptions: OperationOption[] = [
   { value: "getSheetInfo", label: "Get Sheet Info" },
 ];
 
+export const googleDriveOperationOptions: OperationOption[] = [
+  { value: "", label: "Select operation..." },
+  { value: "listFolderFiles", label: "List Folder Files" },
+  { value: "downloadFile", label: "Download File" },
+  { value: "syncToHeymDrive", label: "Sync to Heym Drive" },
+  { value: "updateFile", label: "Update File" },
+  { value: "removeFile", label: "Remove File" },
+  { value: "removeFolder", label: "Remove Folder" },
+];
+
+export const googleDriveExportFormatOptions: OperationOption[] = [
+  { value: "", label: "Automatic (Docs→PDF, Sheets→XLSX, Slides→PPTX)" },
+  { value: "pdf", label: "PDF" },
+  { value: "docx", label: "Word (DOCX)" },
+  { value: "xlsx", label: "Excel (XLSX)" },
+  { value: "pptx", label: "PowerPoint (PPTX)" },
+  { value: "csv", label: "CSV" },
+  { value: "txt", label: "Plain text" },
+];
+
 export const bigQueryOperationOptions: OperationOption[] = [
   { value: "", label: "Select operation..." },
   { value: "query", label: "Run Query" },

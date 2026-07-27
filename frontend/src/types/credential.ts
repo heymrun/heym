@@ -24,6 +24,7 @@ export type CredentialType =
   | "cohere"
   | "flaresolverr"
   | "google_sheets"
+  | "google_drive"
   | "bigquery"
   | "supabase"
   | "notion"
@@ -410,6 +411,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   cohere: "Cohere Reranker",
   flaresolverr: "FlareSolverr",
   google_sheets: "Google Sheets (OAuth2)",
+  google_drive: "Google Drive (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
   clickhouse: "ClickHouse",
@@ -446,6 +448,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   cohere: "Connect to Cohere API for reranking search results",
   flaresolverr: "Connect to FlareSolverr for web scraping with browser automation",
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
+  google_drive: "Connect to Google Drive via OAuth2 — list, download, update, and delete files",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
   clickhouse:
