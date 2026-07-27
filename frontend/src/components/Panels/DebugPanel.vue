@@ -2419,6 +2419,7 @@ function sanitizeIntegrationCredentialFields(node: WorkflowNode): WorkflowNode {
     "rabbitmq",
     "crawler",
     "googleSheets",
+    "googleDrive",
     "slackTrigger",
     "discordTrigger",
     "bigquery",

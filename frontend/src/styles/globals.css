@@ -70,6 +70,7 @@
     --node-jira: 217 91% 50%;
     --node-linear: 252 83% 58%;
     --node-google-sheets: 153 82% 33%;
+    --node-google-drive: 38 92% 42%;
     --node-datatable: 190 95% 39%;
     --node-notion: 0 0% 18%;
     --node-sentry: 8 78% 52%;
@@ -145,6 +146,7 @@
     --node-jira: 217 91% 62%;
     --node-linear: 252 83% 68%;
     --node-google-sheets: 153 82% 42%;
+    --node-google-drive: 38 92% 55%;
     --node-datatable: 190 95% 49%;
     --node-notion: 0 0% 88%;
     --node-sentry: 8 88% 70%;

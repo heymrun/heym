@@ -3158,21 +3158,24 @@ Finally, import the operation options at the top of the file next to `googleShee
 After `onGoogleSheetsRegisterExpressionFieldIndex` (which ends at line 3661), add:
 
 ```typescript
+  // Every expression-capable field per operation, in navigation order. AGENTS.md
+  // requires the evaluate dialog to reach all of them, not just the primary id.
+  const GOOGLE_DRIVE_EXPRESSION_FIELDS: Record<string, string[]> = {
+    listFolderFiles: ["gdFolderId", "gdMaxResults", "gdQuery"],
+    downloadFile: ["gdFileId"],
+    syncToHeymDrive: ["gdFileId", "gdFilename"],
+    updateFile: ["gdFileId", "gdBase64Content", "gdNewName", "gdNewParentId"],
+    removeFile: ["gdFileId"],
+    removeFolder: ["gdFolderId"],
+  };
+
   const googleDriveExpressionFieldCount = computed((): number => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "googleDrive") {
       return 1;
     }
     const op = (n.data.gdOperation as string | undefined) || "";
-    if (!op) {
-      return 1;
-    }
-    // listFolderFiles exposes folder id + max results; every other operation has
-    // a single navigable primary id field.
-    if (op === "listFolderFiles") {
-      return 2;
-    }
-    return 1;
+    return GOOGLE_DRIVE_EXPRESSION_FIELDS[op]?.length ?? 1;
   });
 
   function openGoogleDriveExpressionFieldAtIndex(index: number): void {

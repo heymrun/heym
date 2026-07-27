@@ -164,6 +164,7 @@ export type NodeType =
   | "jira"
   | "linear"
   | "googleSheets"
+  | "googleDrive"
   | "bigquery"
   | "supabase"
   | "clickhouse"
@@ -894,6 +895,20 @@ export interface NodeData {
   gsValuesSelectiveRows?: string;
   gsValuesSelectiveCols?: string;
   gsValues?: string;
+  gdOperation?: string;
+  gdFolderId?: string;
+  gdFileId?: string;
+  gdMaxResults?: string;
+  gdQuery?: string;
+  gdIncludeTrashed?: boolean;
+  /** Export target for Google-native files; empty means automatic (Docs→PDF, Sheets→XLSX, Slides→PPTX). */
+  gdExportFormat?: string;
+  gdFilename?: string;
+  gdBase64Content?: string;
+  gdNewName?: string;
+  gdNewParentId?: string;
+  /** When false (default) the item is trashed and recoverable; true deletes permanently. */
+  gdPermanentDelete?: boolean;
   connection?: AgentMCPConnection;
   selectedTool?: string;
   toolArguments?: Record<string, string>;

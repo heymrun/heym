@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -62,6 +62,7 @@ const icons = {
   jira: ListTodo,
   linear: ListTodo,
   googleSheets: Sheet,
+  googleDrive: FolderOpen,
   bigquery: Database,
   supabase: Database,
   clickhouse: Database,
@@ -120,6 +121,7 @@ const nodeColorMap = {
   jira: "node-jira",
   linear: "node-linear",
   googleSheets: "node-google-sheets",
+  googleDrive: "node-google-drive",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
   clickhouse: "node-datatable",

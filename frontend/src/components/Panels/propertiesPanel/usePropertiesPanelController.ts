@@ -11,7 +11,7 @@ import {
   type InjectionKey,
 } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
 import {
@@ -129,6 +129,7 @@ export function usePropertiesPanelController() {
     jira: ListTodo,
     linear: ListTodo,
     googleSheets: Sheet,
+    googleDrive: FolderOpen,
     bigquery: Database,
     supabase: Database,
     clickhouse: Database,
@@ -187,6 +188,7 @@ export function usePropertiesPanelController() {
     jira: "node-jira",
     linear: "node-linear",
     googleSheets: "node-google-sheets",
+    googleDrive: "node-google-drive",
     bigquery: "node-google-sheets",
     supabase: "node-datatable",
     clickhouse: "node-datatable",
@@ -245,6 +247,7 @@ export function usePropertiesPanelController() {
     jira: "jira-node",
     linear: "linear-node",
     googleSheets: "google-sheets-node",
+    googleDrive: "google-drive-node",
     bigquery: "bigquery-node",
     supabase: "supabase-node",
     clickhouse: "clickhouse-node",
