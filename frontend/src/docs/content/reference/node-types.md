@@ -63,6 +63,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Jira](../nodes/jira-node.md) | Manage Jira projects, issues, comments, attachments, users, notifications, and workflow transitions through the Jira REST API | 1 | 1 |
 | [Linear](../nodes/linear-node.md) | Manage Linear teams, projects, issues, workflow states, and comments through GraphQL | 1 | 1 |
 | [Google Sheets](../nodes/google-sheets-node.md) | Read/write Google Sheets via OAuth2 | 1 | 1 |
+| [Google Drive](../nodes/google-drive-node.md) | List, download, update, and delete Google Drive files via OAuth2 | 1 | 1 |
 | [BigQuery](../nodes/bigquery-node.md) | Run SQL queries and insert rows in BigQuery | 1 | 1 |
 | [Supabase](../nodes/supabase-node.md) | Query and mutate Supabase tables through PostgREST | 1 | 1 |
 | [ClickHouse](../nodes/clickhouse-node.md) | Run SQL, CRUD, and count operations against ClickHouse | 1 | 1 |

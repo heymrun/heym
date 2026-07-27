@@ -16,6 +16,14 @@ You can also share credentials with [Teams](./teams.md):
 
 Shared credentials show an indicator in the [Credentials Tab](../tabs/credentials-tab.md) UI.
 
+## Broad-Scope Credentials
+
+Sharing a credential grants the recipient everything that credential can do. For most integrations that is scoped to one workspace or one API key's permissions, but some credentials are far broader.
+
+> **Google Drive credentials grant full Drive access.** The [Google Drive](../nodes/google-drive-node.md) credential is authorized with the `https://www.googleapis.com/auth/drive` scope so the node can operate on files you already own. Sharing it with a user or a team gives every one of them the ability to **read, modify, and permanently delete anything in your Google Drive** through a workflow — not just the files you had in mind. Share it only with people you would give full Drive access to directly.
+
+If you need to limit exposure, create a dedicated Google account with access to only the folders the workflow needs, and connect the credential with that account instead of your primary one.
+
 ## Sharing with Workflow Collaborators
 
 When you share a workflow, collaborators can open and run it but cannot use your credentials unless you share those credentials with them too. This applies to credentials in the main workflow and in any sub-workflows it calls. Share each credential with the same users or teams you invited to the workflow. Sub-workflows must also be shared separately from the child workflow's editor. See [Workflow Organization](./workflow-organization.md#sharing-workflows).

@@ -69,6 +69,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "jira-node", title: "Jira" },
       { slug: "linear-node", title: "Linear" },
       { slug: "google-sheets-node", title: "Google Sheets" },
+      { slug: "google-drive-node", title: "Google Drive" },
       { slug: "bigquery-node", title: "BigQuery" },
       { slug: "supabase-node", title: "Supabase" },
       { slug: "clickhouse-node", title: "ClickHouse" },

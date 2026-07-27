@@ -24,6 +24,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
 | **Grist** | [Grist node](../nodes/grist-node.md) | `api_key`, `server_url` |
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
+| **Google Drive** | [Google Drive node](../nodes/google-drive-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
 | **ClickHouse** | [ClickHouse node](../nodes/clickhouse-node.md) | `host`, `port`, `username`, `password`, `database`, `secure` |
@@ -355,6 +356,50 @@ Tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and refreshe
 ### Used By
 
 - [Google Sheets node](../nodes/google-sheets-node.md)
+
+---
+
+## Google Drive (OAuth2)
+
+The Google Drive credential connects Heym to the Google Drive API using the same OAuth2 "Bring Your Own App" model as Google Sheets. You supply a Google Cloud OAuth2 Client ID and Client Secret, then authorize access via a browser popup. Tokens are refreshed automatically in the background.
+
+### Setup
+
+1. Open [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services** → **Library** → search for and enable **Google Drive API**.
+2. Go to **Credentials** → **Create Credentials** → **OAuth client ID** → application type **Web application**.
+3. Under **Authorized redirect URIs** add: `https://your-heym-domain/api/credentials/google-drive/oauth/callback`
+4. Copy the generated **Client ID** and **Client Secret**.
+5. In Heym Dashboard → **Credentials** → **New** → type **Google Drive (OAuth2)**.
+6. Enter the Client ID, Client Secret, and a name, then click **Connect** to open the Google consent popup and authorize access.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `client_id` | OAuth2 Client ID from Google Cloud Console |
+| `client_secret` | OAuth2 Client Secret from Google Cloud Console |
+
+Tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and refreshed automatically — you do not manage them directly.
+
+### Scope
+
+Google Drive requests the **full Drive scope** (`https://www.googleapis.com/auth/drive`).
+
+This is required because the node operates on files you already own. The narrower `drive.file` scope only grants access to files the OAuth client itself created, which would make `listFolderFiles`, `updateFile`, `removeFile`, and `removeFolder` see nothing of your existing Drive.
+
+Because you supply your own Client ID and Secret from your own Google Cloud project, the Google app-verification requirements for this scope apply to your project, not to Heym.
+
+### Notes
+
+- Heym uses the refresh token to obtain new access tokens before they expire (60-second safety buffer).
+- If you rotate the Client Secret in Google Cloud Console, reconnect the credential via the **Connect** button.
+- Shared drives are supported — the node sets `supportsAllDrives` on every API call.
+- **Production:** Set backend **`FRONTEND_URL`** to the exact public URL users open in the browser. Heym builds the Google OAuth redirect URI from this value only — it does **not** trust `Origin` or `X-Forwarded-*` headers. Register `{FRONTEND_URL}/api/credentials/google-drive/oauth/callback` in Google Cloud Console.
+- See [Credential Sharing](./credentials-sharing.md) before sharing this credential with a team.
+
+### Used By
+
+- [Google Drive node](../nodes/google-drive-node.md)
 
 ---
 
