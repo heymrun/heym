@@ -121,7 +121,15 @@ class GoogleDriveService:
         """Return a valid access token, refreshing if necessary."""
         if self._is_token_expired():
             self._refresh_token()
-        return self._config["access_token"]
+        token = str(self._config.get("access_token") or "").strip()
+        if not token:
+            # Without this, httpx sends "Bearer " and Google answers with an opaque
+            # "unregistered callers" error instead of anything actionable.
+            raise ValueError(
+                "Google Drive node: credential has no access token — reconnect it in "
+                "Dashboard → Credentials"
+            )
+        return token
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._get_valid_token()}"}

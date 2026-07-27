@@ -104,6 +104,43 @@ def _content_response(body: bytes) -> MagicMock:
     return resp
 
 
+class TestAuthHeaders(unittest.TestCase):
+    def test_list_sends_bearer_token(self) -> None:
+        """Google answers 'unregistered callers' when the token never reaches it."""
+        service = _valid_service()
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"files": []}
+
+        with patch("app.services.google_drive_service.httpx.get", return_value=response) as get:
+            service.list_folder_files("folder-1", max_results=10)
+
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer old-token")
+
+    def test_missing_access_token_raises_a_clear_error(self) -> None:
+        config = _config(datetime.now(timezone.utc) + timedelta(hours=1))
+        config["access_token"] = ""
+        service = GoogleDriveService("cred-1", config, MagicMock())
+
+        with self.assertRaises(ValueError) as ctx:
+            service.list_folder_files("folder-1", max_results=10)
+        self.assertIn("reconnect", str(ctx.exception).lower())
+
+    def test_blank_query_produces_no_empty_clause(self) -> None:
+        """A blank gdQuery must not add 'and ()' to the Drive query."""
+        service = _valid_service()
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"files": []}
+
+        with patch("app.services.google_drive_service.httpx.get", return_value=response) as get:
+            service.list_folder_files("folder-1", max_results=10, query="   ")
+
+        self.assertEqual(
+            get.call_args.kwargs["params"]["q"], "'folder-1' in parents and trashed = false"
+        )
+
+
 class TestListFolderFiles(unittest.TestCase):
     def test_builds_query_and_maps_fields(self) -> None:
         service = _valid_service()

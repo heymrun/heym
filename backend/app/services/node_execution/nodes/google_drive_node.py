@@ -137,9 +137,17 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Google Drive credential not found or invalid")
 
     def field(name: str, default: str = "") -> str:
-        return self.evaluate_message_template(
-            str(node_data.get(name, default) or default), inputs, node_id
-        ).strip()
+        """Resolve a node field, leaving blank optional fields blank.
+
+        evaluate_message_template returns str(inputs) for an empty template, so a blank
+        field routed through it comes back as the literal "{}". Optional fields must
+        short-circuit before that.
+        """
+        raw = node_data.get(name, default)
+        text = str(raw) if raw not in (None, "") else str(default)
+        if not text.strip():
+            return ""
+        return self.evaluate_message_template(text, inputs, node_id).strip()
 
     max_bytes = settings.file_max_size_mb * 1024 * 1024
     permanent = bool(node_data.get("gdPermanentDelete", False))

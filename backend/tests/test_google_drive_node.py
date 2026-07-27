@@ -16,8 +16,12 @@ def _ctx(node_data: dict) -> NodeExecutionContext:
     executor.trace_user_id = "00000000-0000-0000-0000-000000000001"
     executor.workflow_id = "00000000-0000-0000-0000-0000000000ff"
     executor._base_url = "https://app.test"
-    # The handler resolves every field through this; echo the raw value back.
-    executor.evaluate_message_template.side_effect = lambda v, *_args, **_kw: str(v)
+    # The handler resolves every field through this. Mirror the real executor: an empty
+    # template returns str(inputs), which is "{}" here — the behaviour that leaked "{}"
+    # into Drive queries and rename targets.
+    executor.evaluate_message_template.side_effect = lambda v, ev_inputs=None, *_a, **_kw: (
+        str(v) if v else str(ev_inputs or {})
+    )
     executor._get_accessible_credential.return_value = MagicMock(encrypted_config="enc")
     node = {"id": "node-1", "type": "googleDrive", "data": node_data}
     return NodeExecutionContext(
@@ -220,6 +224,116 @@ class TestOperationDispatch(GoogleDriveNodeTestBase):
             )
         )
         self.assertTrue(self.service.remove_folder.call_args.kwargs["permanent"])
+
+
+class TestBlankOptionalFields(GoogleDriveNodeTestBase):
+    """Blank optional fields must stay blank.
+
+    evaluate_message_template returns str(inputs) for an empty template, so routing a
+    blank field through it yields the literal "{}" — which leaked into Drive queries,
+    export formats, and rename targets.
+    """
+
+    def test_blank_query_is_not_sent(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.list_folder_files.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "listFolderFiles",
+                    "gdFolderId": "folder-1",
+                    "gdQuery": "",
+                }
+            )
+        )
+        self.assertEqual(self.service.list_folder_files.call_args.kwargs["query"], "")
+
+    def test_blank_folder_id_stays_blank_so_root_is_used(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.list_folder_files.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "listFolderFiles",
+                    "gdFolderId": "",
+                }
+            )
+        )
+        self.assertEqual(self.service.list_folder_files.call_args.args[0], "")
+
+    def test_blank_export_format_is_not_sent(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.download_file_base64.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "downloadFile",
+                    "gdFileId": "file-1",
+                    "gdExportFormat": "",
+                }
+            )
+        )
+        self.assertEqual(self.service.download_file_base64.call_args.kwargs["export_format"], "")
+
+    def test_blank_update_fields_do_not_become_a_rename(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.update_file.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "updateFile",
+                    "gdFileId": "file-1",
+                    "gdNewName": "renamed.txt",
+                    "gdNewParentId": "",
+                    "gdBase64Content": "",
+                }
+            )
+        )
+        kwargs = self.service.update_file.call_args.kwargs
+        self.assertEqual(kwargs["new_name"], "renamed.txt")
+        self.assertEqual(kwargs["new_parent_id"], "")
+        self.assertIsNone(kwargs["content"])
+
+    def test_blank_max_results_falls_back_to_default(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.list_folder_files.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "listFolderFiles",
+                    "gdMaxResults": "",
+                }
+            )
+        )
+        self.assertEqual(self.service.list_folder_files.call_args.kwargs["max_results"], 100)
+
+    def test_expressions_still_resolve(self) -> None:
+        """The blank-field guard must not stop real templates from being evaluated."""
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.list_folder_files.return_value = {"status": "success"}
+        ctx = _ctx(
+            {
+                "credentialId": "cred-1",
+                "gdOperation": "listFolderFiles",
+                "gdFolderId": "$input.folder",
+            }
+        )
+        ctx.executor.evaluate_message_template.side_effect = lambda v, *_a, **_kw: (
+            "resolved-folder" if v == "$input.folder" else str(v)
+        )
+        google_drive_node.execute(ctx)
+        self.assertEqual(self.service.list_folder_files.call_args.args[0], "resolved-folder")
 
 
 class TestSyncToHeymDrive(GoogleDriveNodeTestBase):
