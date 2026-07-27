@@ -27,6 +27,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "execute": "execute_node",
     "fileUploadTrigger": "file_upload_trigger_node",
     "github": "github_node",
+    "googleDrive": "google_drive_node",
     "googleSheets": "google_sheets_node",
     "grist": "grist_node",
     "http": "http_node",
