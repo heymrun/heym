@@ -80,6 +80,26 @@ _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
 
 
+def _reconcile_resumed_tool_calls(
+    tool_calls: list[dict[str, Any]],
+    *,
+    decision: str,
+    finished_at: int,
+) -> list[dict[str, Any]]:
+    """Replace persisted HITL pending records with the completed review decision."""
+    reconciled = copy.deepcopy(tool_calls)
+    for tool_call in reconciled:
+        if tool_call.get("status") != "pending":
+            continue
+        tool_call["status"] = "success"
+        tool_call["result"] = {
+            "decision": decision,
+            "reviewed": True,
+        }
+        tool_call["finished_at"] = finished_at
+    return reconciled
+
+
 def _slugify_tool_name(label: str) -> str:
     slug = _SLUG_RE.sub("_", label.strip()).strip("_").lower()
     return slug[:64] or "node_tool"
@@ -4970,7 +4990,12 @@ class WorkflowExecutor:
             if hitl_agent_state:
                 resume_messages = copy.deepcopy(hitl_agent_state.get("messages") or [])
                 resume_messages.append({"role": "user", "content": approval_resume_text})
-                resume_tool_calls = copy.deepcopy(hitl_agent_state.get("tool_calls") or [])
+                raw_resume_tool_calls = hitl_agent_state.get("tool_calls") or []
+                resume_tool_calls = _reconcile_resumed_tool_calls(
+                    [entry for entry in raw_resume_tool_calls if isinstance(entry, dict)],
+                    decision=hitl_decision,
+                    finished_at=int(time.time() * 1000),
+                )
                 resume_elapsed_ms = float(hitl_agent_state.get("elapsed_ms") or 0.0)
                 resume_prompt_tokens = int(hitl_agent_state.get("prompt_tokens") or 0)
                 resume_completion_tokens = int(hitl_agent_state.get("completion_tokens") or 0)
@@ -5497,8 +5522,6 @@ class WorkflowExecutor:
             if mcp_list_ms > 0:
                 result["mcp_list_ms"] = mcp_list_ms
             tool_calls = result.get("tool_calls") or []
-            from app.services.agent_tool_observability import summarize_tool_calls
-
             sub_agent_times = [
                 tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") == "call_sub_agent"
             ]
@@ -5513,7 +5536,6 @@ class WorkflowExecutor:
                 "tools_ms": round(tools_total_ms, 2),
                 "mcp_list_ms": mcp_list_ms,
             }
-            result["tool_metrics"] = summarize_tool_calls(tool_calls)
             if is_hitl_resume and hitl_history:
                 result["hitlHistory"] = copy.deepcopy(hitl_history)
             if is_hitl_resume and not result.get("error") and "_hitl_pending" not in result:

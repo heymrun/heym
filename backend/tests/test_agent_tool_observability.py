@@ -19,6 +19,7 @@ from app.services.agent_tool_observability import (
 )
 from app.services.llm_service import HumanReviewPause, LLMService, _tool_result_status
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.workflow_executor import _reconcile_resumed_tool_calls
 
 
 class ToolCallStatusCompatibilityTests(unittest.TestCase):
@@ -150,7 +151,41 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             max_total_chars=80,
         )
 
-        self.assertIn("PAYLOAD_TRUNCATED", json.dumps(safe_request))
+        serialized = json.dumps(safe_request)
+        self.assertIn("truncated", serialized)
+        self.assertIn("tool_calls", safe_request)
+        self.assertEqual(len(safe_request["messages"]), 2)
+
+    def test_trace_budget_preserves_later_tool_identity_and_status(self) -> None:
+        response = {
+            "tool_calls": [
+                {
+                    "tool_call_id": "first",
+                    "name": "large",
+                    "status": "success",
+                    "result": "A" * 10_000,
+                },
+                {
+                    "tool_call_id": "second",
+                    "name": "later",
+                    "status": "timeout",
+                    "result": {"error": "operation timeout"},
+                },
+            ]
+        }
+
+        _, safe_response = sanitize_trace_tool_payloads(
+            {},
+            response,
+            max_chars=100,
+            max_depth=6,
+            max_total_chars=160,
+        )
+
+        later = safe_response["tool_calls"][1]
+        self.assertEqual(later["tool_call_id"], "second")
+        self.assertEqual(later["name"], "later")
+        self.assertEqual(later["status"], "timeout")
 
     def test_sanitizes_hitl_tool_payloads_inside_trace_response(self) -> None:
         response = {
@@ -226,6 +261,37 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
 
         self.assertEqual(sanitized["arguments"]["api_key"], "secret")
 
+    def test_sanitize_persisted_entry_reserves_generated_file_metadata(self) -> None:
+        entry = {
+            "name": "run_skill",
+            "result": {
+                "output": "A" * 40_000,
+                "logs": ["L" * 2_000 for _ in range(30)],
+                "_generated_files": [
+                    {
+                        "id": "abc-123",
+                        "filename": "r.pdf",
+                        "download_url": "https://example.test/r.pdf",
+                        "internal_path": "/secret/workspace/r.pdf",
+                    }
+                ],
+            },
+        }
+
+        sanitized = sanitize_persisted_tool_entry(entry)
+
+        self.assertEqual(
+            sanitized["result"]["_generated_files"],
+            [
+                {
+                    "id": "abc-123",
+                    "filename": "r.pdf",
+                    "download_url": "https://example.test/r.pdf",
+                }
+            ],
+        )
+        self.assertNotIn("internal_path", json.dumps(sanitized))
+
     def test_classifies_timeout_and_cancelled_failures(self) -> None:
         self.assertEqual(
             classify_tool_failure_status(TimeoutError("Tool execution timed out after 30 seconds")),
@@ -259,9 +325,43 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
         self.assertEqual(summary["total_duration_ms"], 35.0)
 
     def test_summarizes_legacy_failed_and_unknown_status_as_errors(self) -> None:
-        summary = summarize_tool_calls([{"status": "failed"}, {"status": "unexpected"}])
+        summary = summarize_tool_calls(
+            [
+                {"status": "failed"},
+                {"status": "unexpected"},
+                {"result": {"error": "legacy failure"}},
+            ]
+        )
 
-        self.assertEqual(summary["error"], 2)
+        self.assertEqual(summary["error"], 3)
+        self.assertEqual(summary["success"], 0)
+
+    def test_reconciles_pending_hitl_record_before_resume(self) -> None:
+        original = [
+            {
+                "tool_call_id": "call-review",
+                "name": "request_review",
+                "status": "pending",
+                "result": None,
+                "finished_at": 0,
+            },
+            {"tool_call_id": "call-done", "name": "lookup", "status": "success"},
+        ]
+
+        reconciled = _reconcile_resumed_tool_calls(
+            original,
+            decision="accepted",
+            finished_at=1234,
+        )
+
+        self.assertEqual(reconciled[0]["status"], "success")
+        self.assertEqual(
+            reconciled[0]["result"],
+            {"decision": "accepted", "reviewed": True},
+        )
+        self.assertEqual(reconciled[0]["finished_at"], 1234)
+        self.assertEqual(reconciled[1], original[1])
+        self.assertEqual(original[0]["status"], "pending")
 
     def test_excludes_context_compression_from_tool_metrics(self) -> None:
         summary = summarize_tool_calls(
@@ -375,7 +475,7 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_calls"][0]["status"], "error")
         end_event = next(event for event in events if event.get("phase") == "end")
         self.assertEqual(end_event["status"], "error")
-        self.assertNotIn("child failed", json.dumps(events))
+        self.assertIn("child failed", json.dumps(events))
 
     async def test_real_tool_loop_reports_pending_terminal_events(self) -> None:
         result, events = await self._execute_with_tool_result(
@@ -435,7 +535,7 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
         self.assertIn("error", result)
 
-    async def test_cancellation_during_tool_uses_cancelled_terminal_events(self) -> None:
+    async def test_cancellation_after_tool_completion_preserves_success_result(self) -> None:
         responses = [self._response(content=None, tool_calls=[self._tool_call()])]
 
         def create(**_kwargs: object) -> SimpleNamespace:
@@ -466,13 +566,11 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
             )
 
         terminal_events = [event for event in events if event.get("phase") in {"end", "result"}]
-        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
-        self.assertEqual(result["tool_calls"][0]["result"]["status"], "cancelled")
-        self.assertEqual(result["tool_calls"][0]["result"]["error"], "Workflow execution cancelled")
-        self.assertTrue(all(event["status"] == "cancelled" for event in terminal_events))
+        self.assertEqual(result["tool_calls"][0]["status"], "success")
+        self.assertEqual(result["tool_calls"][0]["result"], {"ok": True, "status": "success"})
+        self.assertTrue(all(event["status"] == "success" for event in terminal_events))
         result_event = next(event for event in events if event.get("phase") == "result")
-        self.assertEqual(result_event["result"]["status"], "cancelled")
-        self.assertTrue(result_event["result"]["has_error"])
+        self.assertEqual(result_event["result"], {"ok": True, "status": "success"})
 
     async def test_cannot_cancel_message_does_not_abort_as_cancelled(self) -> None:
         result, events = await self._execute_with_tool_result(

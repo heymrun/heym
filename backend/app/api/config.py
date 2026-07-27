@@ -43,5 +43,5 @@ async def get_observability_status(
         sampler_ratio=settings.otel_traces_sampler_ratio,
         capture_node_io=settings.otel_capture_node_io,
         instrumented=["fastapi", "httpx"] if enabled else [],
-        spans=["workflow", "node"] if enabled else [],
+        spans=["workflow", "node", "agent_tool"] if enabled else [],
     )

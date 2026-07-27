@@ -1465,11 +1465,16 @@ class LLMService:
                             tool_result = {"error": str(exc), "status": failure_status}
                     if pending_pause is None:
                         abort_reason = _abort_reason_from_tool_result(tool_result)
-                    if abort_reason is None and should_abort is not None:
+                    if (
+                        abort_reason is None
+                        and pending_pause is not None
+                        and should_abort is not None
+                    ):
                         abort_reason = should_abort()
                     if abort_reason is not None:
-                        # Prefer abort/cancel over an in-flight HITL pause or a prior success
-                        # payload so persisted status and result stay aligned.
+                        # An in-flight HITL pause may be cancelled. Once a tool has returned,
+                        # preserve its actual result; the loop-level abort check handles a
+                        # cancellation before the next LLM/tool operation.
                         pending_pause = None
                         pending_entry = None
                         tool_status = classify_tool_failure_status(
@@ -1558,20 +1563,13 @@ class LLMService:
                             "timestamp": int(time.time() * 1000),
                         }
                     )
-                    # Emit a small, safe result summary.
-                    summary: dict[str, Any] = {
-                        "has_error": tool_status in {"error", "timeout", "cancelled"},
-                        "status": tool_status,
-                    }
-                    if isinstance(tool_result, dict) and isinstance(
-                        tool_result.get("execution_time_ms"), (int, float)
-                    ):
-                        summary["execution_time_ms"] = float(tool_result["execution_time_ms"])
+                    # The persisted entry is already redacted and bounded. Reuse that same
+                    # privacy boundary so the live Debug panel retains useful result evidence.
                     on_tool_call(
                         {
                             "name": name,
                             "arguments": _progress_safe_tool_arguments(name, tool_def, args),
-                            "result": summary,
+                            "result": entry.get("result"),
                             "elapsed_ms": tool_elapsed_ms,
                             "phase": "result",
                             "status": tool_status,

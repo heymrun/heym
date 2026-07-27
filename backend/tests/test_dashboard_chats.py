@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import unittest
 import uuid
 from collections.abc import AsyncGenerator
@@ -632,6 +633,21 @@ class TestGenerateConversationTitle(unittest.IsolatedAsyncioTestCase):
 
 
 class IngestToolEventTests(unittest.TestCase):
+    def test_sse_tool_end_infers_extended_lifecycle_statuses(self) -> None:
+        from app.api.ai_assistant import _tool_end_yield
+
+        cases = {
+            "Status: pending": "pending",
+            "Operation timed out after 30 seconds": "timeout",
+            "Workflow execution cancelled": "cancelled",
+            "Error: failed": "error",
+        }
+        for summary, expected in cases.items():
+            with self.subTest(summary=summary):
+                chunk = _tool_end_yield("tc_1", summary, 42.0)
+                payload = json.loads(chunk.removeprefix("data: ").strip())
+                self.assertEqual(payload["status"], expected)
+
     def test_tool_start_appends_running_entry(self) -> None:
         from app.api.chats import _ingest_tool_event
 

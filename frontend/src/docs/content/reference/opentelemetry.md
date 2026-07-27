@@ -77,10 +77,11 @@ Raw tool arguments and results are not attached to spans by default.
 
 ## Agent tool payload safety
 
-Persisted Agent observability payloads are redacted and truncated in code (`4096` chars per string, depth `6`, `32768` total chars per LLM trace write):
+Persisted Agent observability payloads are redacted and truncated in code (`4096` chars per string, depth `6`, `32768` total chars per LLM trace write). The total trace budget is divided across tool records so an early large result cannot hide the identity and lifecycle status of later calls. Bounded `_generated_files` download metadata is reserved separately from bulky skill output:
 
 - LLM trace `request` / `response` tool sections, including `_hitl_pending` copies written to the trace store
 - Agent result `tool_calls` records shown in execution history
+- Live Debug panel tool-result events, which reuse the same bounded sanitized record
 
 Live tool execution, model-bound tool messages, and the in-memory HITL resume state (`_hitl_pending.agent_state.messages` / `tool_arguments`) keep the original values so resume and exact-arg matching still work. Only stored observability copies are sanitized.
 

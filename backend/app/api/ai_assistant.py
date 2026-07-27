@@ -2493,7 +2493,39 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
-def _tool_end_yield(tc_id: str, summary: str, ms: float, status: str = "success") -> str:
+def _chat_tool_lifecycle_status(summary: str, explicit_status: str | None = None) -> str:
+    """Normalize dashboard-chat tool completion into the shared lifecycle vocabulary."""
+    from app.services.agent_tool_observability import (
+        normalize_tool_call_status,
+        text_indicates_cancellation,
+        text_indicates_timeout,
+    )
+
+    if explicit_status:
+        normalized = normalize_tool_call_status(explicit_status)
+        if normalized != "unknown":
+            return normalized
+    lowered = summary.strip().lower()
+    if text_indicates_cancellation(summary):
+        return "cancelled"
+    if text_indicates_timeout(summary):
+        return "timeout"
+    if lowered.startswith("status: pending") or (
+        "status after" in lowered and "(pending)" in lowered
+    ):
+        return "pending"
+    if lowered.startswith("error:"):
+        return "error"
+    return "success"
+
+
+def _tool_end_yield(
+    tc_id: str,
+    summary: str,
+    ms: float,
+    status: str | None = None,
+) -> str:
+    lifecycle_status = _chat_tool_lifecycle_status(summary, status)
     return (
         "data: "
         + json.dumps(
@@ -2502,7 +2534,7 @@ def _tool_end_yield(tc_id: str, summary: str, ms: float, status: str = "success"
                 "id": tc_id,
                 "response_summary": summary,
                 "elapsed_ms": ms,
-                "status": status,
+                "status": lifecycle_status,
             }
         )
         + "\n\n"

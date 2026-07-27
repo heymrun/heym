@@ -170,6 +170,39 @@ class NodeSpanTest(_EnabledTracingTestBase):
         self.assertEqual(attrs["heym.agent.tool.iteration"], 2)
         self.assertEqual(attrs["heym.agent.tool.status"], "success")
 
+    def test_agent_tool_span_nests_under_agent_node_span(self) -> None:
+        executor = WorkflowExecutor(
+            nodes=[{"id": "agent-1", "type": "agent", "data": {"label": "Research Agent"}}],
+            edges=[],
+            workflow_id=uuid.uuid4(),
+        )
+        node_result = NodeResult(
+            node_id="agent-1",
+            node_label="Research Agent",
+            node_type="agent",
+            status="success",
+            output={"text": "done"},
+            execution_time_ms=2.0,
+        )
+
+        def fake_agent_inner(*_args: object, **_kwargs: object) -> NodeResult:
+            with tracing.agent_tool_span(
+                tool_name="fetch_data",
+                tool_call_id="call-child",
+                source="node_tool",
+            ):
+                pass
+            return node_result
+
+        with patch.object(executor, "_execute_node_inner", side_effect=fake_agent_inner):
+            executor.execute_node("agent-1", {})
+
+        spans = self.exporter.get_finished_spans()
+        node_span = next(span for span in spans if span.name == "heym.node.execute")
+        tool_span = next(span for span in spans if span.name == "heym.agent.tool.execute")
+        self.assertEqual(tool_span.parent.span_id, node_span.context.span_id)
+        self.assertEqual(tool_span.context.trace_id, node_span.context.trace_id)
+
     def test_agent_tool_span_records_uncaught_exception(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "tool exploded"):
             with tracing.agent_tool_span(
@@ -360,7 +393,7 @@ class ObservabilityStatusEndpointTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(dumped["enabled"])
         self.assertEqual(dumped["endpoint"], "http://collector:4318")
         self.assertEqual(dumped["instrumented"], ["fastapi", "httpx"])
-        self.assertEqual(dumped["spans"], ["workflow", "node"])
+        self.assertEqual(dumped["spans"], ["workflow", "node", "agent_tool"])
         # No secret/header value anywhere in the serialized status.
         self.assertNotIn("secret", str(dumped).lower())
         self.assertNotIn("authorization", str(dumped).lower())

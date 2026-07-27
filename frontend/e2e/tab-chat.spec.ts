@@ -6,6 +6,96 @@ test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
 });
 
+test("renders persisted pending, timeout, and cancelled tool statuses", async ({ page }) => {
+  const conversationId = "11111111-1111-4111-8111-111111111119";
+  const credentialId = "22222222-2222-4222-8222-222222222229";
+  const now = "2026-07-27T12:00:00Z";
+  const toolCalls = [
+    {
+      id: "tool-pending",
+      name: "wait_for_review",
+      label: "Waiting for review",
+      args: {},
+      response_summary: "Approval required",
+      status: "pending",
+    },
+    {
+      id: "tool-timeout",
+      name: "slow_tool",
+      label: "Slow tool",
+      args: {},
+      response_summary: "Operation timed out",
+      status: "timeout",
+    },
+    {
+      id: "tool-cancelled",
+      name: "cancelled_tool",
+      label: "Cancelled tool",
+      args: {},
+      response_summary: "Cancelled",
+      status: "cancelled",
+    },
+  ];
+
+  await page.route("**/api/credentials/llm", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/workflows", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/chats", async (route) => {
+    await route.fulfill({
+      json: {
+        conversations: [
+          {
+            id: conversationId,
+            title: "Lifecycle Chat",
+            is_pinned: false,
+            is_running: false,
+            has_unread: false,
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(`**/api/chats/${conversationId}`, async (route) => {
+    await route.fulfill({
+      json: {
+        id: conversationId,
+        title: "Lifecycle Chat",
+        is_pinned: false,
+        is_running: false,
+        has_unread: false,
+        last_credential_id: credentialId,
+        last_model: "gpt-4o",
+        created_at: now,
+        updated_at: now,
+        queued_messages: [],
+        messages: [
+          {
+            id: "33333333-3333-4333-8333-333333333339",
+            role: "assistant",
+            content: "Tool lifecycle summary",
+            created_at: now,
+            tool_calls: toolCalls,
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto(`/chats/${conversationId}`);
+
+  const pending = page.getByText("Waiting for review").locator("..");
+  const timeout = page.getByText("Slow tool").locator("..");
+  const cancelled = page.getByText("Cancelled tool").locator("..");
+  await expect(pending.locator(".lucide-clock-3")).toBeVisible();
+  await expect(timeout.locator(".lucide-triangle-alert")).toBeVisible();
+  await expect(cancelled.locator(".lucide-ban")).toBeVisible();
+});
+
 async function createConversation(page: import("@playwright/test").Page): Promise<string> {
   await page.getByRole("button", { name: "New Chat", exact: true }).click();
   await expect(page).toHaveURL(/\/chats\/[0-9a-f-]+$/);

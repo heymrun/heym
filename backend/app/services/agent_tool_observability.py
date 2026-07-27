@@ -55,6 +55,15 @@ _MAX_JSON_PARSE_CHARS = 65_536
 DEFAULT_MAX_PAYLOAD_CHARS = 4096
 DEFAULT_MAX_PAYLOAD_DEPTH = 6
 DEFAULT_MAX_PAYLOAD_TOTAL_CHARS = 32768
+_GENERATED_FILE_FIELDS = (
+    "id",
+    "filename",
+    "download_url",
+    "mime_type",
+    "size_bytes",
+)
+_GENERATED_FILES_MAX_ITEMS = 20
+_GENERATED_FILES_RESERVED_CHARS = 4096
 
 
 def _is_sensitive_key(key_text: str) -> bool:
@@ -317,12 +326,72 @@ def sanitize_tool_calls(
     _budget: _PayloadBudget | None = None,
 ) -> Any:
     """Sanitize persisted tool-call records while preserving their shape."""
+    if isinstance(tool_calls, list) and _budget is None:
+        bounded_calls = tool_calls[:_MAX_LIST_ITEMS]
+        if not bounded_calls:
+            return []
+        per_entry_chars = max(1, max_total_chars // len(bounded_calls))
+        priority_keys = (
+            "tool_call_id",
+            "id",
+            "name",
+            "status",
+            "source",
+            "mcp_server",
+            "elapsed_ms",
+            "started_at",
+            "finished_at",
+        )
+        safe_calls = []
+        for entry in bounded_calls:
+            prioritized_entry = entry
+            if isinstance(entry, dict):
+                prioritized_entry = {
+                    **{key: entry[key] for key in priority_keys if key in entry},
+                    **{key: value for key, value in entry.items() if key not in priority_keys},
+                }
+            safe_calls.append(
+                sanitize_tool_payload(
+                    prioritized_entry,
+                    max_chars=min(max_chars, per_entry_chars),
+                    max_depth=max_depth,
+                    max_total_chars=per_entry_chars,
+                )
+            )
+        if len(tool_calls) > len(bounded_calls):
+            safe_calls.append(_PAYLOAD_TRUNCATED)
+        return safe_calls
     return sanitize_tool_payload(
         tool_calls,
         max_chars=max_chars,
         max_depth=max_depth,
         max_total_chars=max_total_chars,
         _budget=_budget,
+    )
+
+
+def _sanitize_generated_files(
+    value: Any,
+    *,
+    max_chars: int,
+    max_depth: int,
+    max_total_chars: int,
+) -> list[Any]:
+    """Preserve bounded file-download metadata independently of bulky tool output."""
+    if not isinstance(value, list):
+        return []
+    minimal_files: list[dict[str, Any]] = []
+    for item in value[:_GENERATED_FILES_MAX_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        minimal_files.append({key: item[key] for key in _GENERATED_FILE_FIELDS if key in item})
+    if not minimal_files:
+        return []
+    return sanitize_tool_payload(
+        minimal_files,
+        max_chars=max_chars,
+        max_depth=max_depth,
+        max_total_chars=min(max_total_chars, _GENERATED_FILES_RESERVED_CHARS),
     )
 
 
@@ -355,12 +424,36 @@ def sanitize_persisted_tool_entry(
             max_total_chars=total,
         )
     if "result" in safe and safe["result"] is not None:
-        safe["result"] = sanitize_tool_payload(
-            safe["result"],
+        raw_result = safe["result"]
+        generated_files: list[Any] = []
+        result_without_files = raw_result
+        if isinstance(raw_result, dict) and "_generated_files" in raw_result:
+            generated_files = _sanitize_generated_files(
+                raw_result["_generated_files"],
+                max_chars=chars,
+                max_depth=depth,
+                max_total_chars=total,
+            )
+            result_without_files = {
+                key: value for key, value in raw_result.items() if key != "_generated_files"
+            }
+        reserved_chars = (
+            min(
+                total,
+                len(json.dumps({"_generated_files": generated_files}, ensure_ascii=False)),
+            )
+            if generated_files
+            else 0
+        )
+        safe_result = sanitize_tool_payload(
+            result_without_files,
             max_chars=chars,
             max_depth=depth,
-            max_total_chars=total,
+            max_total_chars=max(0, total - reserved_chars),
         )
+        if generated_files and isinstance(safe_result, dict):
+            safe_result["_generated_files"] = generated_files
+        safe["result"] = safe_result
     return safe
 
 
@@ -382,7 +475,15 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
             continue
         summary["count"] += 1
-        status = normalize_tool_call_status(entry.get("status"))
+        raw_status = entry.get("status")
+        status = normalize_tool_call_status(raw_status)
+        result = entry.get("result")
+        if (
+            (raw_status is None or raw_status == "")
+            and isinstance(result, dict)
+            and result.get("error")
+        ):
+            status = classify_tool_failure_status(str(result["error"]))
         if status == "unknown":
             status = "error"
         if status in summary:
@@ -402,7 +503,7 @@ def _sanitize_trace_messages(
     max_chars: int,
     max_depth: int,
     max_total_chars: int,
-    budget: _PayloadBudget,
+    per_record_chars: int,
 ) -> Any:
     """Copy messages while sanitizing only Agent tool-call payload sections."""
     if not isinstance(messages, list):
@@ -418,19 +519,64 @@ def _sanitize_trace_messages(
                 message["tool_calls"],
                 max_chars=max_chars,
                 max_depth=max_depth,
-                max_total_chars=max_total_chars,
-                _budget=budget,
+                max_total_chars=_tool_calls_total_budget(
+                    message["tool_calls"],
+                    per_record_chars,
+                ),
             )
         elif message.get("role") == "tool" and "content" in message:
             safe_message["content"] = sanitize_tool_payload(
                 message["content"],
                 max_chars=max_chars,
                 max_depth=max_depth,
-                max_total_chars=max_total_chars,
-                _budget=budget,
+                max_total_chars=per_record_chars,
             )
         safe_messages.append(safe_message)
     return safe_messages
+
+
+def _trace_tool_record_count(request: dict[str, Any], response: dict[str, Any]) -> int:
+    """Count independently useful tool payload records before allocating the total budget."""
+    count = 0
+
+    def count_calls(value: Any) -> None:
+        nonlocal count
+        if isinstance(value, list):
+            count += max(1, min(len(value), _MAX_LIST_ITEMS))
+        elif value is not None:
+            count += 1
+
+    def count_messages(value: Any) -> None:
+        nonlocal count
+        if not isinstance(value, list):
+            return
+        for message in value:
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "assistant" and "tool_calls" in message:
+                count_calls(message["tool_calls"])
+            elif message.get("role") == "tool" and "content" in message:
+                count += 1
+
+    count_calls(request.get("tool_calls"))
+    count_calls(response.get("tool_calls"))
+    count_messages(request.get("messages"))
+    hitl_pending = response.get("_hitl_pending")
+    if isinstance(hitl_pending, dict):
+        if "tool_arguments" in hitl_pending:
+            count += 1
+        agent_state = hitl_pending.get("agent_state")
+        if isinstance(agent_state, dict):
+            count_messages(agent_state.get("messages"))
+            count_calls(agent_state.get("tool_calls"))
+    return max(1, count)
+
+
+def _tool_calls_total_budget(value: Any, per_record_chars: int) -> int:
+    """Return the fair total allocation for one tool-call collection."""
+    if isinstance(value, list):
+        return per_record_chars * max(1, min(len(value), _MAX_LIST_ITEMS))
+    return per_record_chars
 
 
 def sanitize_trace_tool_payloads(
@@ -446,22 +592,26 @@ def sanitize_trace_tool_payloads(
     # A very large tool result would otherwise defeat the sanitizer's memory bound.
     safe_request = dict(request)
     safe_response = dict(response)
-    budget = _PayloadBudget(max_total_chars)
+    per_record_chars = max(1, max_total_chars // _trace_tool_record_count(request, response))
     if "tool_calls" in safe_request:
         safe_request["tool_calls"] = sanitize_tool_calls(
             safe_request["tool_calls"],
             max_chars=max_chars,
             max_depth=max_depth,
-            max_total_chars=max_total_chars,
-            _budget=budget,
+            max_total_chars=_tool_calls_total_budget(
+                safe_request["tool_calls"],
+                per_record_chars,
+            ),
         )
     if "tool_calls" in safe_response:
         safe_response["tool_calls"] = sanitize_tool_calls(
             safe_response["tool_calls"],
             max_chars=max_chars,
             max_depth=max_depth,
-            max_total_chars=max_total_chars,
-            _budget=budget,
+            max_total_chars=_tool_calls_total_budget(
+                safe_response["tool_calls"],
+                per_record_chars,
+            ),
         )
 
     if "messages" in request:
@@ -469,8 +619,8 @@ def sanitize_trace_tool_payloads(
             request["messages"],
             max_chars=max_chars,
             max_depth=max_depth,
-            max_total_chars=max_total_chars,
-            budget=budget,
+            max_total_chars=per_record_chars,
+            per_record_chars=per_record_chars,
         )
 
     hitl_pending = response.get("_hitl_pending")
@@ -481,8 +631,7 @@ def sanitize_trace_tool_payloads(
                 hitl_pending["tool_arguments"],
                 max_chars=max_chars,
                 max_depth=max_depth,
-                max_total_chars=max_total_chars,
-                _budget=budget,
+                max_total_chars=per_record_chars,
             )
         agent_state = hitl_pending.get("agent_state")
         if isinstance(agent_state, dict):
@@ -492,16 +641,18 @@ def sanitize_trace_tool_payloads(
                     agent_state["messages"],
                     max_chars=max_chars,
                     max_depth=max_depth,
-                    max_total_chars=max_total_chars,
-                    budget=budget,
+                    max_total_chars=per_record_chars,
+                    per_record_chars=per_record_chars,
                 )
             if "tool_calls" in agent_state:
                 safe_agent_state["tool_calls"] = sanitize_tool_calls(
                     agent_state["tool_calls"],
                     max_chars=max_chars,
                     max_depth=max_depth,
-                    max_total_chars=max_total_chars,
-                    _budget=budget,
+                    max_total_chars=_tool_calls_total_budget(
+                        agent_state["tool_calls"],
+                        per_record_chars,
+                    ),
                 )
             safe_hitl_pending["agent_state"] = safe_agent_state
         safe_response["_hitl_pending"] = safe_hitl_pending
