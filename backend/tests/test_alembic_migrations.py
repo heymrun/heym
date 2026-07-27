@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["102_merge_user_ai_live_heads"])
+        self.assertEqual(self.script.get_heads(), ["103_add_google_drive_cred_type"])
 
     def test_live_execution_snapshot_revision_follows_opencode_revision(self) -> None:
         live_execution_revision = self.script.get_revision("101_add_live_execution_snapshots")
