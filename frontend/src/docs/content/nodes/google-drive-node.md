@@ -189,7 +189,7 @@ For a regular file, `exported` is `false` and `export_format` is `null`.
 1. **[Cron](./cron-node.md)** — run daily.
 2. **Google Drive** — `listFolderFiles` on the source folder, with `gdQuery` set to `mimeType='application/pdf'` if you only want PDFs.
 3. **[Loop](./loop-node.md)** — iterate `$ListReports.files`.
-4. **Google Drive** — `syncToHeymDrive` with `gdFileId` set to `$loop.item.id` and `gdFilename` set to `$loop.item.name`.
+4. **Google Drive** — `syncToHeymDrive` with `gdFileId` set to `$BackupLoop.item.id` and `gdFilename` set to `$BackupLoop.item.name`.
 5. **[Slack](./slack-node.md)** — post a summary of what was backed up.
 
 ## Notes

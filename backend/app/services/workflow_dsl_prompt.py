@@ -4516,8 +4516,8 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
     "label": "BackupToHeym",
     "credentialId": "google-drive-credential-uuid",
     "gdOperation": "syncToHeymDrive",
-    "gdFileId": "$loop.item.id",
-    "gdFilename": "$loop.item.name"
+    "gdFileId": "$BackupLoop.item.id",
+    "gdFilename": "$BackupLoop.item.name"
   }
 }
 ```
