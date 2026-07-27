@@ -538,6 +538,7 @@ class CredentialType(str, Enum):
     elevenlabs = "elevenlabs"
     clickhouse = "clickhouse"
     opencode = "opencode"
+    google_drive = "google_drive"
 
 
 class CredentialConfigOpenAI(BaseModel):

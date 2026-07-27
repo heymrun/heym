@@ -34,7 +34,7 @@
 
 | Path | Responsibility |
 | --- | --- |
-| `backend/alembic/versions/103_add_google_drive_credential_type.py` | Add `google_drive` to the `credential_type` PG enum |
+| `backend/alembic/versions/103_add_google_drive_cred_type.py` | Add `google_drive` to the `credential_type` PG enum |
 | `backend/app/api/google_drive_oauth.py` | OAuth authorize + callback endpoints |
 | `backend/app/services/google_drive_service.py` | Drive v3 client, token refresh, all six operations |
 | `backend/app/services/node_execution/nodes/google_drive_node.py` | Thin handler: resolve fields → dispatch → return |
@@ -55,7 +55,7 @@
 **Files:**
 - Modify: `backend/app/db/models.py:60`
 - Modify: `backend/app/models/schemas.py:540`
-- Create: `backend/alembic/versions/103_add_google_drive_credential_type.py`
+- Create: `backend/alembic/versions/103_add_google_drive_cred_type.py`
 
 - [ ] **Step 1: Add the enum member to the ORM model**
 
@@ -79,12 +79,12 @@ In `backend/app/models/schemas.py`, the credential type enum ends with `opencode
 
 The current sole Alembic head is `102_merge_user_ai_live_heads` (verified with `uv run alembic heads`). The Postgres enum type is named `credential_type`.
 
-Create `backend/alembic/versions/103_add_google_drive_credential_type.py`:
+Create `backend/alembic/versions/103_add_google_drive_cred_type.py`:
 
 ```python
 """add google drive credential type
 
-Revision ID: 103_add_google_drive_credential_type
+Revision ID: 103_add_google_drive_cred_type
 Revises: 102_merge_user_ai_live_heads
 Create Date: 2026-07-27 00:00:00.000000
 
@@ -94,7 +94,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "103_add_google_drive_credential_type"
+revision: str = "103_add_google_drive_cred_type"
 down_revision: Union[str, None] = "102_merge_user_ai_live_heads"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -112,7 +112,7 @@ def downgrade() -> None:
 - [ ] **Step 4: Verify there is still a single head**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes uv run alembic heads`
-Expected: `103_add_google_drive_credential_type (head)` — exactly one line.
+Expected: `103_add_google_drive_cred_type (head)` — exactly one line.
 
 - [ ] **Step 5: Apply the migration**
 
@@ -122,7 +122,7 @@ Expected: no error; the enum value is added.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/db/models.py backend/app/models/schemas.py backend/alembic/versions/103_add_google_drive_credential_type.py
+git add backend/app/db/models.py backend/app/models/schemas.py backend/alembic/versions/103_add_google_drive_cred_type.py
 git commit -m "feat(credentials): add google_drive credential type"
 ```
 

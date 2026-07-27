@@ -58,6 +58,7 @@ class CredentialType(str, PyEnum):
     elevenlabs = "elevenlabs"
     clickhouse = "clickhouse"
     opencode = "opencode"
+    google_drive = "google_drive"
 
 
 class WorkflowAuthType(str, PyEnum):

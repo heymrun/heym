@@ -281,7 +281,7 @@ Common Google errors are translated into actionable messages:
 ### Backend
 
 - `app/db/models.py` — add `google_drive = "google_drive"` to `CredentialType`.
-- `alembic/versions/103_add_google_drive_credential_type.py` — new; `down_revision = "102_merge_user_ai_live_heads"`
+- `alembic/versions/103_add_google_drive_cred_type.py` — new; `down_revision = "102_merge_user_ai_live_heads"`
   (verified sole head). Adds the enum value.
 - `app/models/schemas.py` — add `google_drive` to the credential type enum near line 532.
 - `app/api/credentials.py` — credential validation branches (two sites, mirroring `google_sheets` at
