@@ -215,8 +215,15 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
   await page.goto("/?tab=traces");
   await page.getByRole("button", { name: /JSON event workflow/ }).click();
   await expect(page.getByText("Trace Details", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 timeout", { exact: true })).toBeVisible();
-  await expect(page.getByText("Timeout", { exact: true }).first()).toBeVisible();
+  const toolMetrics = page.getByTestId("trace-tool-metrics");
+  await expect(toolMetrics.getByText("1 calls", { exact: true })).toBeVisible();
+  await expect(toolMetrics.getByText("1 timeout", { exact: true })).toBeVisible();
+
+  const answerStep = page.getByTestId("trace-step-answer");
+  await expect(answerStep.getByText("1 timeout", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("trace-step-tool-call-1").getByText("Timeout", { exact: true }),
+  ).toBeVisible();
 
   const userStep = page.getByTestId("trace-step-msg-0");
   await userStep.getByRole("button").first().click();

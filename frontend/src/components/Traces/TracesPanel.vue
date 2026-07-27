@@ -1006,6 +1006,7 @@ onMounted(async () => {
         <div
           v-if="selectedToolMetrics && (selectedToolMetrics.count ?? 0) > 0"
           class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+          data-testid="trace-tool-metrics"
         >
           <span class="font-medium text-foreground">Tools</span>
           <span>{{ selectedToolMetrics.count }} calls</span>
