@@ -633,20 +633,81 @@ class TestGenerateConversationTitle(unittest.IsolatedAsyncioTestCase):
 
 
 class IngestToolEventTests(unittest.TestCase):
-    def test_sse_tool_end_infers_extended_lifecycle_statuses(self) -> None:
-        from app.api.ai_assistant import _tool_end_yield
+    def test_sse_tool_end_uses_structured_result_not_display_summary(self) -> None:
+        from app.api.ai_assistant import _chat_tool_lifecycle_status, _tool_end_yield
 
-        cases = {
-            "Status: pending": "pending",
-            "Operation timed out after 30 seconds": "timeout",
-            "Workflow execution cancelled": "cancelled",
-            "Error: failed": "error",
-        }
-        for summary, expected in cases.items():
+        cases = [
+            (
+                "create_board_task",
+                "Created task 'Fix request timeout' on board 'Infra'",
+                {"task": {"title": "Fix request timeout"}, "board": {"name": "Infra"}},
+                "success",
+            ),
+            (
+                "get_card_detail",
+                "Card 'Cancelled deployment': active, 2 comment(s), 1 run(s)",
+                {"title": "Cancelled deployment", "status": "active"},
+                "success",
+            ),
+            (
+                "get_card_detail",
+                "Card 'Foo': error, 0 comment(s), 0 run(s)",
+                {"title": "Foo", "status": "error"},
+                "success",
+            ),
+            (
+                "execute_workflow",
+                "Workflow execution finished",
+                {"status": "timeout", "error": "Execution timed out"},
+                "timeout",
+            ),
+            (
+                "execute_workflow",
+                "Waiting for approval",
+                {"status": "pending"},
+                "pending",
+            ),
+            (
+                "execute_workflow",
+                "Execution stopped",
+                {"status": "cancelled", "error": "Workflow execution cancelled"},
+                "cancelled",
+            ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"error": "Search backend failed"},
+                "error",
+            ),
+        ]
+        for tool_name, summary, tool_result, expected in cases:
             with self.subTest(summary=summary):
-                chunk = _tool_end_yield("tc_1", summary, 42.0)
+                status = _chat_tool_lifecycle_status(tool_name, tool_result)
+                chunk = _tool_end_yield("tc_1", summary, 42.0, status=status)
                 payload = json.loads(chunk.removeprefix("data: ").strip())
                 self.assertEqual(payload["status"], expected)
+
+    def test_cancelled_tool_end_closes_started_tool_with_cancelled_status(self) -> None:
+        from app.api.ai_assistant import _cancelled_tool_end_yield
+
+        run_steps: list[dict] = []
+        result = json.dumps({"status": "cancelled", "error": "Execution cancelled"})
+        chunk = _cancelled_tool_end_yield(
+            "tc_cancel",
+            name="execute_workflow",
+            step_label="Running workflow...",
+            request={"workflow_id": "wf-1"},
+            result=result,
+            step_start=0.0,
+            run_steps=run_steps,
+        )
+        payload = json.loads(chunk.removeprefix("data: ").strip())
+        self.assertEqual(payload["type"], "tool_end")
+        self.assertEqual(payload["id"], "tc_cancel")
+        self.assertEqual(payload["status"], "cancelled")
+        self.assertEqual(len(run_steps), 1)
+        self.assertEqual(run_steps[0]["tool"], "execute_workflow")
+        self.assertEqual(run_steps[0]["request"], {"workflow_id": "wf-1"})
 
     def test_tool_start_appends_running_entry(self) -> None:
         from app.api.chats import _ingest_tool_event

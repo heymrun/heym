@@ -535,8 +535,14 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
         self.assertIn("error", result)
 
-    async def test_cancellation_after_tool_completion_preserves_success_result(self) -> None:
-        responses = [self._response(content=None, tool_calls=[self._tool_call()])]
+    async def test_cancellation_after_tool_completion_stops_before_next_tool(self) -> None:
+        first_tool = self._tool_call()
+        second_tool = SimpleNamespace(
+            id="call-2",
+            type="function",
+            function=SimpleNamespace(name="later-child", arguments="{}"),
+        )
+        responses = [self._response(content=None, tool_calls=[first_tool, second_tool])]
 
         def create(**_kwargs: object) -> SimpleNamespace:
             return responses.pop(0)
@@ -548,23 +554,34 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         service = LLMService(CredentialType.openai, "test-key")
         events: list[dict] = []
         abort_checks = 0
+        invoked_tools: list[str] = []
 
         def should_abort() -> str | None:
             nonlocal abort_checks
             abort_checks += 1
             return None if abort_checks == 1 else "Workflow execution cancelled"
 
+        def execute_tool(_tool_def: dict, name: str, *_args: object) -> dict[str, object]:
+            invoked_tools.append(name)
+            return {"ok": True, "status": "success"}
+
         with patch.object(service, "_get_client", return_value=(client, "Test")):
             result = await service.execute_with_tools(
                 model="test-model",
                 system_instruction=None,
                 user_message="run tool",
-                tools=[{"name": "child", "parameters": {"type": "object"}}],
-                tool_executor=lambda *_args: {"ok": True, "status": "success"},
+                tools=[
+                    {"name": "child", "parameters": {"type": "object"}},
+                    {"name": "later-child", "parameters": {"type": "object"}},
+                ],
+                tool_executor=execute_tool,
                 on_tool_call=events.append,
                 should_abort=should_abort,
             )
 
+        self.assertEqual(invoked_tools, ["child"])
+        self.assertEqual(result["error"], "Workflow execution cancelled")
+        self.assertEqual(len(result["tool_calls"]), 1)
         terminal_events = [event for event in events if event.get("phase") in {"end", "result"}]
         self.assertEqual(result["tool_calls"][0]["status"], "success")
         self.assertEqual(result["tool_calls"][0]["result"], {"ok": True, "status": "success"})

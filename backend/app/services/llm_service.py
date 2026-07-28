@@ -1057,13 +1057,16 @@ class LLMService:
             combined_tool_calls = copy.deepcopy(tool_calls_collected)
             if extra_tool_entry is not None:
                 patched = copy.deepcopy(extra_tool_entry)
+                explicit_status = (
+                    patched.get("status") if isinstance(patched.get("status"), str) else None
+                )
                 failure_status = classify_tool_failure_status(
                     error_text,
-                    explicit_status=patched.get("status")
-                    if isinstance(patched.get("status"), str)
-                    else None,
+                    explicit_status=explicit_status,
                 )
-                if failure_status in {"timeout", "cancelled"}:
+                if explicit_status not in {"success", "error", "timeout", "cancelled"} and (
+                    failure_status in {"timeout", "cancelled"}
+                ):
                     patched["status"] = failure_status
                     patched["result"] = {
                         "error": error_text,
@@ -1400,6 +1403,7 @@ class LLMService:
                 result_str = ""
                 tool_result: Any = None
                 abort_reason: str | None = None
+                completed_tool_abort_reason: str | None = None
                 tool_status = "success"
                 with tracing.agent_tool_span(
                     tool_name=name,
@@ -1471,10 +1475,11 @@ class LLMService:
                         and should_abort is not None
                     ):
                         abort_reason = should_abort()
+                    elif abort_reason is None and should_abort is not None:
+                        completed_tool_abort_reason = should_abort()
                     if abort_reason is not None:
                         # An in-flight HITL pause may be cancelled. Once a tool has returned,
-                        # preserve its actual result; the loop-level abort check handles a
-                        # cancellation before the next LLM/tool operation.
+                        # preserve cancellation reported by the tool itself.
                         pending_pause = None
                         pending_entry = None
                         tool_status = classify_tool_failure_status(
@@ -1577,7 +1582,7 @@ class LLMService:
                             "timestamp": int(time.time() * 1000),
                         }
                     )
-                return tc.id, result_str, entry, None, abort_reason
+                return tc.id, result_str, entry, None, abort_reason or completed_tool_abort_reason
 
             def _commit_completed_tool_slots() -> None:
                 """Persist finished tool slots before an early HITL/abort return."""

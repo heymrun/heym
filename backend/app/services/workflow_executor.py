@@ -268,8 +268,15 @@ def run_async(coro):
         if loop.is_running():
             import concurrent.futures
 
+            # Preserve the active Agent/workflow span when we must hop to a worker
+            # thread to host a fresh asyncio.run() loop.
+            otel_ctx = tracing.capture_context()
+
+            def _run_with_otel() -> object:
+                return tracing.run_with_context(otel_ctx, lambda: asyncio.run(coro))
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
+                future = pool.submit(_run_with_otel)
                 return future.result()
         else:
             return loop.run_until_complete(coro)
