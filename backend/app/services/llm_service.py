@@ -91,7 +91,9 @@ def _tool_result_status(tool_result: Any) -> str:
             return normalized
     error_text = _tool_result_error(tool_result)
     if error_text:
-        return classify_tool_failure_status(error_text)
+        # Free-form error text may contain domain data such as "request timeout" or
+        # "Cancelled deployment". Without a structured lifecycle status, it is an error.
+        return "error"
     return "success"
 
 

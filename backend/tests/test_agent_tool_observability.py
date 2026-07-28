@@ -394,6 +394,18 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             "error",
         )
 
+    def test_tool_result_error_text_does_not_override_structured_status(self) -> None:
+        cases = [
+            ({"status": "error", "error": "Variable 'request timeout' not found"}, "error"),
+            ({"status": "error", "error": "Cancelled deployment"}, "error"),
+            ({"error": "Variable 'request timeout' not found"}, "error"),
+            ({"error": "Cancelled deployment"}, "error"),
+        ]
+
+        for result, expected in cases:
+            with self.subTest(result=result):
+                self.assertEqual(_tool_result_status(result), expected)
+
     def test_trace_sanitization_does_not_mutate_original_messages(self) -> None:
         request = {"messages": [{"role": "tool", "content": {"token": "secret"}}]}
 

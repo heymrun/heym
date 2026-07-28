@@ -679,6 +679,30 @@ class IngestToolEventTests(unittest.TestCase):
                 {"error": "Search backend failed"},
                 "error",
             ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"status": "error", "error": "Variable 'request timeout' not found"},
+                "error",
+            ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"status": "error", "error": "Cancelled deployment"},
+                "error",
+            ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"error": "Variable 'request timeout' not found"},
+                "error",
+            ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"error": "Cancelled deployment"},
+                "error",
+            ),
         ]
         for tool_name, summary, tool_result, expected in cases:
             with self.subTest(summary=summary):

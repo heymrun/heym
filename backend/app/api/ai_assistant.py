@@ -2499,10 +2499,7 @@ def _chat_tool_lifecycle_status(
     explicit_status: str | None = None,
 ) -> str:
     """Derive dashboard-chat tool status from structured execution data."""
-    from app.services.agent_tool_observability import (
-        classify_tool_failure_status,
-        normalize_tool_call_status,
-    )
+    from app.services.agent_tool_observability import normalize_tool_call_status
 
     if explicit_status:
         normalized = normalize_tool_call_status(explicit_status)
@@ -2521,10 +2518,11 @@ def _chat_tool_lifecycle_status(
     error = structured_result.get("error")
     if error is not None:
         status = structured_result.get("status")
-        return classify_tool_failure_status(
-            str(error),
-            explicit_status=status if isinstance(status, str) else None,
-        )
+        if isinstance(status, str):
+            normalized = normalize_tool_call_status(status)
+            if normalized != "unknown":
+                return normalized
+        return "error"
 
     # Card status is domain data (for example active/error), not tool lifecycle state.
     if tool_name != "get_card_detail":
@@ -2539,10 +2537,11 @@ def _chat_tool_lifecycle_status(
         nested_error = execution.get("error")
         nested_status = execution.get("status")
         if nested_error is not None:
-            return classify_tool_failure_status(
-                str(nested_error),
-                explicit_status=nested_status if isinstance(nested_status, str) else None,
-            )
+            if isinstance(nested_status, str):
+                normalized = normalize_tool_call_status(nested_status)
+                if normalized != "unknown":
+                    return normalized
+            return "error"
         if isinstance(nested_status, str):
             normalized = normalize_tool_call_status(nested_status)
             if normalized != "unknown":
