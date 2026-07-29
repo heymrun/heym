@@ -97,18 +97,33 @@ def _tool_result_status(tool_result: Any) -> str:
     return "success"
 
 
+def _coerce_tool_error_text(error: Any) -> str | None:
+    """Normalize string or structured tool errors into display/status text."""
+    if error is None:
+        return None
+    if isinstance(error, str):
+        return error.strip() or None
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+        try:
+            return json.dumps(error, default=str)
+        except (TypeError, ValueError):
+            return str(error)
+    return str(error)
+
+
 def _tool_result_error(tool_result: Any) -> str | None:
     """Return the most useful error text from a tool result, including nested outputs."""
     if not isinstance(tool_result, dict):
         return None
-    error = tool_result.get("error")
-    if isinstance(error, str) and error.strip():
-        return error.strip()
+    formatted = _coerce_tool_error_text(tool_result.get("error"))
+    if formatted:
+        return formatted
     outputs = tool_result.get("outputs")
     if isinstance(outputs, dict):
-        nested_error = outputs.get("error")
-        if isinstance(nested_error, str) and nested_error.strip():
-            return nested_error.strip()
+        return _coerce_tool_error_text(outputs.get("error"))
     return None
 
 
@@ -1093,20 +1108,25 @@ class LLMService:
             return result
 
         def _abort_reason_from_tool_result(tool_result: Any) -> str | None:
-            candidates: list[str] = []
-            if isinstance(tool_result, dict):
-                for key in ("error",):
-                    value = tool_result.get(key)
-                    if isinstance(value, str) and value.strip():
-                        candidates.append(value.strip())
-                outputs = tool_result.get("outputs")
-                if isinstance(outputs, dict):
-                    nested_error = outputs.get("error")
-                    if isinstance(nested_error, str) and nested_error.strip():
-                        candidates.append(nested_error.strip())
-            for candidate in candidates:
-                if text_indicates_cancellation(candidate):
-                    return candidate
+            """Return an abort reason only for real cancellation outcomes.
+
+            Domain error text such as "Cancelled deployment" must not stop the
+            agent loop. Explicit ``status: cancelled`` and known workflow-cancel
+            phrases (including structured ``error.message``) still do.
+            """
+            if not isinstance(tool_result, dict):
+                return None
+            status = tool_result.get("status")
+            if isinstance(status, str):
+                normalized = normalize_tool_call_status(status)
+                if normalized == "cancelled":
+                    return _tool_result_error(tool_result) or "Workflow execution cancelled"
+                # Recognized non-cancel statuses win over free-form error text.
+                if normalized != "unknown":
+                    return None
+            error_text = _tool_result_error(tool_result)
+            if error_text and text_indicates_cancellation(error_text):
+                return error_text
             return None
 
         for iteration in range(max_tool_iterations):
@@ -1382,6 +1402,12 @@ class LLMService:
                 except json.JSONDecodeError:
                     args = {}
                 tool_def = tools_by_name.get(name)
+                # Preflight: stop before start/executor when the run was cancelled after
+                # a prior tool's terminal callbacks (or between sequential tools).
+                if should_abort is not None:
+                    preflight_abort = should_abort()
+                    if preflight_abort:
+                        return tc.id, None, None, None, preflight_abort
                 # Emit "tool started" progress early (do not include values to avoid secrets).
                 if on_tool_call:
                     safe_args = _progress_safe_tool_arguments(name, tool_def, args)
@@ -1476,9 +1502,8 @@ class LLMService:
                         and pending_pause is not None
                         and should_abort is not None
                     ):
+                        # HITL pause is in-flight: cancel can arrive before terminal events.
                         abort_reason = should_abort()
-                    elif abort_reason is None and should_abort is not None:
-                        completed_tool_abort_reason = should_abort()
                     if abort_reason is not None:
                         # An in-flight HITL pause may be cancelled. Once a tool has returned,
                         # preserve cancellation reported by the tool itself.
@@ -1584,6 +1609,10 @@ class LLMService:
                             "timestamp": int(time.time() * 1000),
                         }
                     )
+                # After terminal callbacks so Stop pressed on the first result is observed
+                # before the next sequential tool emits start / reaches the executor.
+                if abort_reason is None and should_abort is not None:
+                    completed_tool_abort_reason = should_abort()
                 return tc.id, result_str, entry, None, abort_reason or completed_tool_abort_reason
 
             def _commit_completed_tool_slots() -> None:

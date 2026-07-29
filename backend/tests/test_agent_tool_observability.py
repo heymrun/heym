@@ -16,6 +16,7 @@ from app.services.agent_tool_observability import (
     sanitize_trace_tool_payloads,
     summarize_tool_calls,
     text_indicates_cancellation,
+    text_indicates_timeout,
 )
 from app.services.llm_service import HumanReviewPause, LLMService, _tool_result_status
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -307,7 +308,15 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
         )
         self.assertEqual(classify_tool_failure_status("cannot cancel reservation"), "error")
         self.assertFalse(text_indicates_cancellation("cannot cancel reservation"))
+        self.assertFalse(text_indicates_cancellation("Cancelled deployment"))
         self.assertTrue(text_indicates_cancellation("Workflow execution cancelled"))
+        self.assertFalse(text_indicates_timeout("Variable 'request timeout' not found"))
+        self.assertTrue(text_indicates_timeout("request timeout"))
+        self.assertEqual(classify_tool_failure_status("Cancelled deployment"), "error")
+        self.assertEqual(
+            classify_tool_failure_status("Variable 'request timeout' not found"),
+            "error",
+        )
 
     def test_summarizes_tool_call_statuses_and_durations(self) -> None:
         summary = summarize_tool_calls(
@@ -334,6 +343,21 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["error"], 3)
+        self.assertEqual(summary["success"], 0)
+
+    def test_summarize_honors_result_status_then_defaults_error_text_to_error(self) -> None:
+        summary = summarize_tool_calls(
+            [
+                {"result": {"status": "timeout", "error": "request timeout"}},
+                {"result": {"error": "Variable 'request timeout' not found"}},
+                {"result": {"status": "error", "error": "Cancelled deployment"}},
+                {"result": {"error": {"message": "Cancelled deployment"}}},
+            ]
+        )
+
+        self.assertEqual(summary["timeout"], 1)
+        self.assertEqual(summary["error"], 3)
+        self.assertEqual(summary["cancelled"], 0)
         self.assertEqual(summary["success"], 0)
 
     def test_reconciles_pending_hitl_record_before_resume(self) -> None:
@@ -400,6 +424,8 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             ({"status": "error", "error": "Cancelled deployment"}, "error"),
             ({"error": "Variable 'request timeout' not found"}, "error"),
             ({"error": "Cancelled deployment"}, "error"),
+            ({"error": {"message": "Variable 'request timeout' not found"}}, "error"),
+            ({"error": {"message": "Cancelled deployment"}}, "error"),
         ]
 
         for result, expected in cases:
@@ -547,6 +573,32 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
         self.assertIn("error", result)
 
+    async def test_domain_cancelled_text_does_not_abort_agent_loop(self) -> None:
+        result, events = await self._execute_with_tool_result({"error": "Cancelled deployment"})
+
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["error"], 1)
+        self.assertEqual(result["tool_metrics"]["cancelled"], 0)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
+
+    async def test_structured_workflow_cancel_message_aborts_agent_loop(self) -> None:
+        result, _events = await self._execute_with_tool_result(
+            {"error": {"message": "Workflow execution cancelled"}}
+        )
+
+        self.assertEqual(result["error"], "Workflow execution cancelled")
+        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+
+    async def test_explicit_cancelled_status_aborts_agent_loop(self) -> None:
+        result, _events = await self._execute_with_tool_result(
+            {"status": "cancelled", "error": "stopped by operator"}
+        )
+
+        self.assertEqual(result["error"], "stopped by operator")
+        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+
     async def test_cancellation_after_tool_completion_stops_before_next_tool(self) -> None:
         first_tool = self._tool_call()
         second_tool = SimpleNamespace(
@@ -565,13 +617,21 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         )
         service = LLMService(CredentialType.openai, "test-key")
         events: list[dict] = []
-        abort_checks = 0
+        abort_after_first_result = False
         invoked_tools: list[str] = []
+        start_events: list[str] = []
 
         def should_abort() -> str | None:
-            nonlocal abort_checks
-            abort_checks += 1
-            return None if abort_checks == 1 else "Workflow execution cancelled"
+            return "Workflow execution cancelled" if abort_after_first_result else None
+
+        def on_tool_call(event: dict) -> None:
+            events.append(event)
+            if event.get("phase") == "start" and isinstance(event.get("name"), str):
+                start_events.append(event["name"])
+            # Simulate Stop after the first tool's terminal result is visible.
+            if event.get("phase") == "result" and event.get("name") == "child":
+                nonlocal abort_after_first_result
+                abort_after_first_result = True
 
         def execute_tool(_tool_def: dict, name: str, *_args: object) -> dict[str, object]:
             invoked_tools.append(name)
@@ -587,11 +647,12 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
                     {"name": "later-child", "parameters": {"type": "object"}},
                 ],
                 tool_executor=execute_tool,
-                on_tool_call=events.append,
+                on_tool_call=on_tool_call,
                 should_abort=should_abort,
             )
 
         self.assertEqual(invoked_tools, ["child"])
+        self.assertEqual(start_events, ["child"])
         self.assertEqual(result["error"], "Workflow execution cancelled")
         self.assertEqual(len(result["tool_calls"]), 1)
         terminal_events = [event for event in events if event.get("phase") in {"end", "result"}]
@@ -600,6 +661,16 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(event["status"] == "success" for event in terminal_events))
         result_event = next(event for event in events if event.get("phase") == "result")
         self.assertEqual(result_event["result"], {"ok": True, "status": "success"})
+
+    async def test_structured_object_error_is_not_reported_as_success(self) -> None:
+        result, events = await self._execute_with_tool_result(
+            {"error": {"message": "Variable 'request timeout' not found"}}
+        )
+
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["error"], 1)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
 
     async def test_cannot_cancel_message_does_not_abort_as_cancelled(self) -> None:
         result, events = await self._execute_with_tool_result(

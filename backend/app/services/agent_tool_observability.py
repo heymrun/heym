@@ -102,17 +102,27 @@ def normalize_tool_call_status(value: Any) -> str:
 
 
 _CANCEL_STATUS_RE = re.compile(
-    r"(?i)\b(?:cancelled|canceled|cancellation|cancelling|canceling)\b"
-    r"|\bcancel(?:led|ed)?\s+by\b"
+    r"(?i)"
+    r"(?:"
+    r"\b(?:workflow\s+)?execution\s+cancell?ed\b"
+    r"|\bworkflow\s+cancell?ed\b"
+    r"|\b(?:operation|request|tool|run)\s+cancell?ed\b"
+    r"|\bcancell?ed\s+by\b"
+    r"|\bcancellation\b"
+    r"|\bcancell?ing\b"
+    r")"
 )
-_TIMEOUT_STATUS_RE = re.compile(
-    r"(?i)\btimed\s+out\b|\btimeout\s+after\b|\b(?:request|operation|tool|execution)\s+timeout\b"
-)
+_TIMEOUT_STATUS_RE = re.compile(r"(?i)\btimed\s+out\b|\btimeout\s+after\b")
 
 
 def text_indicates_cancellation(text: str) -> bool:
     """Return True when text clearly describes cancellation (not just the word cancel)."""
-    return bool(_CANCEL_STATUS_RE.search(text))
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+    if lowered in {"cancelled", "canceled", "cancellation"}:
+        return True
+    return bool(_CANCEL_STATUS_RE.search(lowered))
 
 
 def text_indicates_timeout(text: str) -> bool:
@@ -120,6 +130,8 @@ def text_indicates_timeout(text: str) -> bool:
     lowered = text.strip().lower()
     if not lowered:
         return False
+    # Whole-message forms like "request timeout" — not embedded domain phrases such as
+    # "Variable 'request timeout' not found".
     if lowered.endswith(" timeout"):
         return True
     return bool(_TIMEOUT_STATUS_RE.search(lowered))
@@ -478,12 +490,19 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         raw_status = entry.get("status")
         status = normalize_tool_call_status(raw_status)
         result = entry.get("result")
-        if (
-            (raw_status is None or raw_status == "")
-            and isinstance(result, dict)
-            and result.get("error")
-        ):
-            status = classify_tool_failure_status(str(result["error"]))
+        # Legacy entries may omit top-level status. Prefer structured result.status,
+        # then treat any non-null result.error as error — never reclassify from
+        # free-form error text (e.g. "request timeout" in a variable name).
+        if (raw_status is None or raw_status == "") and isinstance(result, dict):
+            result_status = result.get("status")
+            if isinstance(result_status, str):
+                normalized_result_status = normalize_tool_call_status(result_status)
+                if normalized_result_status != "unknown":
+                    status = normalized_result_status
+                elif result.get("error") is not None:
+                    status = "error"
+            elif result.get("error") is not None:
+                status = "error"
         if status == "unknown":
             status = "error"
         if status in summary:
