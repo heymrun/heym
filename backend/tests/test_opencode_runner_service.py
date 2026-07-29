@@ -87,6 +87,37 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[cmd.index("--dir") + 1], str(_WS))
 
+    def test_run_command_timeout_stays_value_error_for_git_recovery(self) -> None:
+        import subprocess
+
+        with patch(
+            "app.services.opencode_runner_service.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["git", "clone"], timeout=1),
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                self.svc._run_command(["git", "clone", "repo"], cwd=_WS)
+        self.assertIn("timed out", str(ctx.exception))
+
+    def test_opencode_exec_timeout_raises_timeout_error(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            home = Path(f"{tmp}.oc-home")
+            home.mkdir()
+            with patch(
+                "app.services.opencode_runner_service.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd=["opencode"], timeout=1),
+            ):
+                with self.assertRaises(TimeoutError) as ctx:
+                    self.svc._exec_opencode(
+                        workspace,
+                        home,
+                        _request(timeout_seconds=1),
+                        "opencode/kimi-k3",
+                    )
+        self.assertIn("OpenCode timed out", str(ctx.exception))
+
     def test_run_command_includes_variant(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(variant="high"), _WS)
         self.assertEqual(cmd[cmd.index("--variant") + 1], "high")

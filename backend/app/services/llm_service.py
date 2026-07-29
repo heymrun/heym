@@ -21,7 +21,6 @@ from app.services.agent_tool_observability import (
     sanitize_persisted_tool_entry,
     sanitize_tool_payload,
     summarize_tool_calls,
-    text_indicates_cancellation,
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -85,7 +84,8 @@ def _tool_result_status(tool_result: Any) -> str:
     if not isinstance(tool_result, dict):
         return "success"
     status = tool_result.get("status")
-    if isinstance(status, str):
+    # Empty / whitespace-only status is absent — fall through to error detection.
+    if isinstance(status, str) and status.strip():
         normalized = normalize_tool_call_status(status)
         if normalized != "unknown":
             return normalized
@@ -1108,25 +1108,18 @@ class LLMService:
             return result
 
         def _abort_reason_from_tool_result(tool_result: Any) -> str | None:
-            """Return an abort reason only for real cancellation outcomes.
+            """Return an abort reason only for explicit cancelled tool outcomes.
 
-            Domain error text such as "Cancelled deployment" must not stop the
-            agent loop. Explicit ``status: cancelled`` and known workflow-cancel
-            phrases (including structured ``error.message``) still do.
+            Free-form error text (including MCP/server-controlled strings) must
+            not stop the agent loop. Only ``status: cancelled`` is a trusted
+            cancel signal from a returned tool payload; parent Stop uses
+            ``should_abort()``.
             """
             if not isinstance(tool_result, dict):
                 return None
             status = tool_result.get("status")
-            if isinstance(status, str):
-                normalized = normalize_tool_call_status(status)
-                if normalized == "cancelled":
-                    return _tool_result_error(tool_result) or "Workflow execution cancelled"
-                # Recognized non-cancel statuses win over free-form error text.
-                if normalized != "unknown":
-                    return None
-            error_text = _tool_result_error(tool_result)
-            if error_text and text_indicates_cancellation(error_text):
-                return error_text
+            if isinstance(status, str) and normalize_tool_call_status(status) == "cancelled":
+                return _tool_result_error(tool_result) or "Workflow execution cancelled"
             return None
 
         for iteration in range(max_tool_iterations):
@@ -1656,7 +1649,7 @@ class LLMService:
             if len(sub_agent_tcs) >= 2:
                 gathered = await asyncio.gather(*[_run_one_tool(tc) for tc in sub_agent_tcs])
                 pause_info: tuple[Any, HumanReviewPause, dict[str, Any] | None] | None = None
-                abort_info: tuple[str, dict[str, Any] | None] | None = None
+                abort_reason_for_parallel: str | None = None
                 for slot, tc, (_tid, result_str, entry, pause_request, abort_reason) in zip(
                     sub_slots, sub_agent_tcs, gathered
                 ):
@@ -1665,22 +1658,21 @@ class LLMService:
                             pause_info = (tc, pause_request, entry)
                         continue
                     if abort_reason:
-                        # Keep completed siblings; the first aborting entry is attached by
-                        # `_build_error_result`. Later aborting siblings are still recorded.
-                        if abort_info is None:
-                            abort_info = (abort_reason, entry)
-                        else:
-                            _store_completed_tool_slot(slot, result_str, entry)
+                        # Keep completed siblings in slot order. Store every finished
+                        # aborting entry here so commit order matches model tool order;
+                        # `_build_error_result` must not re-append the first abort last.
+                        if abort_reason_for_parallel is None:
+                            abort_reason_for_parallel = abort_reason
+                        _store_completed_tool_slot(slot, result_str, entry)
                         continue
                     _store_completed_tool_slot(slot, result_str, entry)
                 if pause_info is not None:
                     _commit_completed_tool_slots()
                     paused_tc, pause_request, entry = pause_info
                     return _build_pending_result(paused_tc.function.name, pause_request, entry)
-                if abort_info is not None:
+                if abort_reason_for_parallel is not None:
                     _commit_completed_tool_slots()
-                    abort_reason, entry = abort_info
-                    return _build_error_result(abort_reason, entry)
+                    return _build_error_result(abort_reason_for_parallel)
             else:
                 for slot, tc in zip(sub_slots, sub_agent_tcs):
                     _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)

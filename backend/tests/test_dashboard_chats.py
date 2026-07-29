@@ -703,6 +703,18 @@ class IngestToolEventTests(unittest.TestCase):
                 {"error": "Cancelled deployment"},
                 "error",
             ),
+            (
+                "search_documentation",
+                "Search finished",
+                {"status": "", "error": "boom"},
+                "error",
+            ),
+            (
+                "execute_workflow",
+                "Execution stopped",
+                {"status": "canceled", "error": "Execution canceled"},
+                "cancelled",
+            ),
         ]
         for tool_name, summary, tool_result, expected in cases:
             with self.subTest(summary=summary):

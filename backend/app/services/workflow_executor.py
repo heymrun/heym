@@ -3911,11 +3911,18 @@ class WorkflowExecutor:
                     "error": "HITL is not supported inside sub-agent tools. Request review from the parent agent before calling the sub-agent.",
                 }
             elapsed_ms = round((time.time() * 1000) - start_ms)
-            status = "error" if result.get("error") else "success"
             log_output = _build_agent_execution_log_output(result)
-            llm_tool_result = {"text": result.get("text", "")}
+            llm_tool_result: dict[str, Any] = {"text": result.get("text", "")}
+            # NodeResult keeps success/error for canvas/Debug UI compatibility.
+            # Lifecycle cancelled/timeout belongs only on the tool payload returned
+            # to the parent agent loop.
             if result.get("error"):
+                lifecycle = self._sub_agent_tool_lifecycle_status(result) or "error"
                 llm_tool_result["error"] = result["error"]
+                llm_tool_result["status"] = lifecycle
+                node_status = "error"
+            else:
+                node_status = "success"
             metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
             if trace_id:
                 metadata["trace_id"] = trace_id
@@ -3924,7 +3931,7 @@ class WorkflowExecutor:
                     node_id=target_node_id,
                     node_label=sub_agent_label_display,
                     node_type="agent",
-                    status=status,
+                    status=node_status,
                     output=log_output,
                     execution_time_ms=float(elapsed_ms),
                     error=result.get("error"),
@@ -3937,30 +3944,101 @@ class WorkflowExecutor:
                     _build_node_complete_event(delegated_result, log_output)
                 )
             return llm_tool_result
-        except Exception as exc:
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
-            trace_id = getattr(exc, "trace_id", None)
-            if isinstance(trace_id, str) and trace_id:
-                metadata["trace_id"] = trace_id
-            delegated_result = self._stamp_node_result(
-                NodeResult(
-                    node_id=target_node_id,
-                    node_label=sub_agent_label_display,
-                    node_type="agent",
-                    status="error",
-                    output={},
-                    execution_time_ms=float(elapsed_ms),
-                    error=str(exc),
-                    metadata=metadata,
-                )
+        except WorkflowTimeoutError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="timeout",
+                error=str(exc) or "Workflow execution timed out",
+                exc=exc,
             )
-            self.delegated_agent_node_results.append(delegated_result)
-            if self.agent_progress_queue is not None:
-                self.agent_progress_queue.put(_build_node_complete_event(delegated_result, {}))
-            return {"text": "", "error": str(exc)}
+        except WorkflowCancelledError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="cancelled",
+                error=str(exc) or "Workflow execution cancelled",
+                exc=exc,
+            )
+        except Exception as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="error",
+                error=str(exc),
+                exc=exc,
+            )
         finally:
             self._sub_agent_call_depth -= 1
+
+    def _sub_agent_tool_lifecycle_status(self, result: dict[str, Any]) -> str | None:
+        """Return cancelled for a failed sub-agent when trusted cancel signals exist.
+
+        Does not infer from free-form error text. Parent Stop sets ``cancel_event``;
+        nested tools that abort the agent loop with explicit ``cancelled`` populate
+        tool_calls / tool_metrics.
+
+        Nested ``timeout`` is intentionally ignored here: timeouts do not abort the
+        agent loop, so a later unrelated ``result.error`` must stay ``error``.
+        Timeout status is reserved for ``WorkflowTimeoutError`` at the exception
+        boundary.
+        """
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            return "cancelled"
+        metrics = result.get("tool_metrics")
+        if isinstance(metrics, dict) and int(metrics.get("cancelled") or 0) > 0:
+            return "cancelled"
+        tool_calls = result.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for entry in tool_calls:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("status") == "cancelled":
+                    return "cancelled"
+                nested = entry.get("result")
+                if isinstance(nested, dict) and nested.get("status") == "cancelled":
+                    return "cancelled"
+        return None
+
+    def _finalize_sub_agent_tool_failure(
+        self,
+        *,
+        target_node_id: str,
+        sub_agent_label_display: str,
+        start_ms: float,
+        status: str,
+        error: str,
+        exc: BaseException,
+    ) -> dict[str, Any]:
+        """Record a failed sub-agent invocation and return a status-tagged tool payload.
+
+        ``NodeResult.status`` stays ``error`` so Debug/timeline UI keep working;
+        the tool payload carries the precise lifecycle status for the parent loop.
+        """
+        elapsed_ms = round((time.time() * 1000) - start_ms)
+        metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
+        trace_id = getattr(exc, "trace_id", None)
+        if isinstance(trace_id, str) and trace_id:
+            metadata["trace_id"] = trace_id
+        delegated_result = self._stamp_node_result(
+            NodeResult(
+                node_id=target_node_id,
+                node_label=sub_agent_label_display,
+                node_type="agent",
+                status="error",
+                output={},
+                execution_time_ms=float(elapsed_ms),
+                error=error,
+                metadata=metadata,
+            )
+        )
+        self.delegated_agent_node_results.append(delegated_result)
+        if self.agent_progress_queue is not None:
+            self.agent_progress_queue.put(_build_node_complete_event(delegated_result, {}))
+        return {"text": "", "status": status, "error": error}
 
     def _execute_sub_workflow_tool(
         self,
@@ -4079,6 +4157,24 @@ class WorkflowExecutor:
                             out["error"] = nr["error"]
                             break
             return out
+        except WorkflowTimeoutError as exc:
+            # Preserve lifecycle status at the source so the agent loop can abort
+            # on explicit cancelled/timeout without inferring from error text.
+            elapsed_ms = round((time.time() * 1000) - start_ms)
+            return {
+                "status": "timeout",
+                "outputs": {},
+                "execution_time_ms": elapsed_ms,
+                "error": str(exc) or "Workflow execution timed out",
+            }
+        except WorkflowCancelledError as exc:
+            elapsed_ms = round((time.time() * 1000) - start_ms)
+            return {
+                "status": "cancelled",
+                "outputs": {},
+                "execution_time_ms": elapsed_ms,
+                "error": str(exc) or "Workflow execution cancelled",
+            }
         except Exception as exc:
             elapsed_ms = round((time.time() * 1000) - start_ms)
             return {

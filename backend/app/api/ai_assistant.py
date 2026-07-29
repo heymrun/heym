@@ -2501,9 +2501,15 @@ def _chat_tool_lifecycle_status(
     """Derive dashboard-chat tool status from structured execution data."""
     from app.services.agent_tool_observability import normalize_tool_call_status
 
+    def _normalized_lifecycle(status: Any) -> str | None:
+        if not isinstance(status, str) or not status.strip():
+            return None
+        normalized = normalize_tool_call_status(status)
+        return None if normalized == "unknown" else normalized
+
     if explicit_status:
-        normalized = normalize_tool_call_status(explicit_status)
-        if normalized != "unknown":
+        normalized = _normalized_lifecycle(explicit_status)
+        if normalized is not None:
             return normalized
 
     structured_result = tool_result
@@ -2517,35 +2523,29 @@ def _chat_tool_lifecycle_status(
 
     error = structured_result.get("error")
     if error is not None:
-        status = structured_result.get("status")
-        if isinstance(status, str):
-            normalized = normalize_tool_call_status(status)
-            if normalized != "unknown":
-                return normalized
+        normalized = _normalized_lifecycle(structured_result.get("status"))
+        if normalized is not None:
+            return normalized
         return "error"
 
     # Card status is domain data (for example active/error), not tool lifecycle state.
     if tool_name != "get_card_detail":
-        status = structured_result.get("status")
-        if isinstance(status, str):
-            normalized = normalize_tool_call_status(status)
-            if normalized != "unknown":
-                return normalized
+        normalized = _normalized_lifecycle(structured_result.get("status"))
+        if normalized is not None:
+            return normalized
 
     execution = structured_result.get("execution")
     if isinstance(execution, dict):
         nested_error = execution.get("error")
         nested_status = execution.get("status")
         if nested_error is not None:
-            if isinstance(nested_status, str):
-                normalized = normalize_tool_call_status(nested_status)
-                if normalized != "unknown":
-                    return normalized
-            return "error"
-        if isinstance(nested_status, str):
-            normalized = normalize_tool_call_status(nested_status)
-            if normalized != "unknown":
+            normalized = _normalized_lifecycle(nested_status)
+            if normalized is not None:
                 return normalized
+            return "error"
+        normalized = _normalized_lifecycle(nested_status)
+        if normalized is not None:
+            return normalized
     return "success"
 
 

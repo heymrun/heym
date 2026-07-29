@@ -96,8 +96,10 @@ def normalize_tool_call_status(value: Any) -> str:
         return "success"
     if status in {"error", "failed", "failure"}:
         return "error"
-    if status in {"pending", "timeout", "cancelled"}:
+    if status in {"pending", "timeout"}:
         return status
+    if status in {"cancelled", "canceled"}:
+        return "cancelled"
     return "unknown"
 
 
@@ -137,18 +139,49 @@ def text_indicates_timeout(text: str) -> bool:
     return bool(_TIMEOUT_STATUS_RE.search(lowered))
 
 
+def _trusted_exception_lifecycle_status(error: BaseException) -> str | None:
+    """Map only trusted cancel/timeout exception types to a lifecycle status.
+
+    Generic exceptions often carry user- or server-controlled messages (MCP tool
+    text, variable names, etc.). Inferring cancel/timeout from those strings is
+    unsafe — only TimeoutError and workflow cancel/timeout types qualify.
+    """
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    for cls in type(error).mro():
+        name = cls.__name__
+        if name == "WorkflowTimeoutError":
+            return "timeout"
+        if name == "WorkflowCancelledError":
+            return "cancelled"
+    return None
+
+
 def classify_tool_failure_status(
     error: BaseException | str | None,
     *,
     explicit_status: str | None = None,
 ) -> str:
-    """Map exceptions / abort reasons onto timeout / cancelled / error."""
+    """Map exceptions / abort reasons onto timeout / cancelled / error.
+
+    Trusted abort *strings* (for example from ``should_abort()``) may still be
+    classified by text. Exception messages are never used for cancel/timeout
+    inference — only trusted exception types are.
+    """
     if explicit_status:
         normalized = normalize_tool_call_status(explicit_status)
         if normalized in {"timeout", "cancelled", "pending"}:
             return normalized
-    if isinstance(error, TimeoutError):
-        return "timeout"
+    if isinstance(error, BaseException):
+        trusted = _trusted_exception_lifecycle_status(error)
+        if trusted is not None:
+            return trusted
+        if explicit_status:
+            normalized = normalize_tool_call_status(explicit_status)
+            if normalized == "unknown":
+                return "error"
+            return normalized
+        return "error"
     if error is None:
         return "error"
     text = str(error).strip()
@@ -469,6 +502,14 @@ def sanitize_persisted_tool_entry(
     return safe
 
 
+def _result_indicates_error(result: dict[str, Any]) -> bool:
+    """True when a tool result carries a top-level or nested outputs error."""
+    if result.get("error") is not None:
+        return True
+    outputs = result.get("outputs")
+    return isinstance(outputs, dict) and outputs.get("error") is not None
+
+
 def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
     """Summarize tool-call counts and durations without exposing payloads."""
     if not isinstance(tool_calls, list):
@@ -491,17 +532,17 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         status = normalize_tool_call_status(raw_status)
         result = entry.get("result")
         # Legacy entries may omit top-level status. Prefer structured result.status,
-        # then treat any non-null result.error as error — never reclassify from
-        # free-form error text (e.g. "request timeout" in a variable name).
+        # then treat any non-null result.error / outputs.error as error — never
+        # reclassify from free-form error text (e.g. "request timeout" in a name).
         if (raw_status is None or raw_status == "") and isinstance(result, dict):
             result_status = result.get("status")
-            if isinstance(result_status, str):
+            if isinstance(result_status, str) and result_status.strip():
                 normalized_result_status = normalize_tool_call_status(result_status)
                 if normalized_result_status != "unknown":
                     status = normalized_result_status
-                elif result.get("error") is not None:
+                elif _result_indicates_error(result):
                     status = "error"
-            elif result.get("error") is not None:
+            elif _result_indicates_error(result):
                 status = "error"
         if status == "unknown":
             status = "error"

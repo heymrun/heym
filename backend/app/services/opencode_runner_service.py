@@ -517,7 +517,7 @@ class OpenCodeRunnerService:
                 "OpenCode CLI is not installed or not on PATH (install 'opencode')"
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise ValueError(
+            raise TimeoutError(
                 f"OpenCode timed out after {request.timeout_seconds:.0f} seconds"
             ) from exc
         if completed.returncode != 0:

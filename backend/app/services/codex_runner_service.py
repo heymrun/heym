@@ -563,7 +563,7 @@ class CodexRunnerService:
                 "Codex CLI is not installed or not on PATH (install '@openai/codex')"
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise ValueError(f"Codex timed out after {timeout_seconds:.0f} seconds") from exc
+            raise TimeoutError(f"Codex timed out after {timeout_seconds:.0f} seconds") from exc
 
         # codex exec reports real failures as JSONL error events on stdout; the process may still
         # exit non-zero with only status noise on stderr. Prefer the stdout error message.

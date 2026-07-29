@@ -317,6 +317,31 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             classify_tool_failure_status("Variable 'request timeout' not found"),
             "error",
         )
+        # Generic exceptions must not infer cancel/timeout from user-controlled text.
+        self.assertEqual(
+            classify_tool_failure_status(
+                ValueError("Variable 'Workflow execution cancelled' not found")
+            ),
+            "error",
+        )
+        self.assertEqual(
+            classify_tool_failure_status(ValueError("Command timed out after 30 seconds")),
+            "error",
+        )
+
+    def test_classifies_trusted_workflow_cancel_and_timeout_exceptions(self) -> None:
+        from app.services.workflow_executor import WorkflowCancelledError, WorkflowTimeoutError
+
+        self.assertEqual(
+            classify_tool_failure_status(WorkflowCancelledError("Workflow execution cancelled")),
+            "cancelled",
+        )
+        self.assertEqual(
+            classify_tool_failure_status(
+                WorkflowTimeoutError("Workflow timed out after 30 seconds")
+            ),
+            "timeout",
+        )
 
     def test_summarizes_tool_call_statuses_and_durations(self) -> None:
         summary = summarize_tool_calls(
@@ -352,12 +377,24 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
                 {"result": {"error": "Variable 'request timeout' not found"}},
                 {"result": {"status": "error", "error": "Cancelled deployment"}},
                 {"result": {"error": {"message": "Cancelled deployment"}}},
+                {"result": {"outputs": {"error": "child failed"}}},
             ]
         )
 
         self.assertEqual(summary["timeout"], 1)
-        self.assertEqual(summary["error"], 3)
+        self.assertEqual(summary["error"], 4)
         self.assertEqual(summary["cancelled"], 0)
+        self.assertEqual(summary["success"], 0)
+
+    def test_summarize_empty_status_with_error_counts_as_error(self) -> None:
+        summary = summarize_tool_calls(
+            [
+                {"status": "", "result": {"error": "boom"}},
+                {"status": "", "result": {"outputs": {"error": "nested boom"}}},
+            ]
+        )
+
+        self.assertEqual(summary["error"], 2)
         self.assertEqual(summary["success"], 0)
 
     def test_reconciles_pending_hitl_record_before_resume(self) -> None:
@@ -409,6 +446,19 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
             with self.subTest(status=status):
                 self.assertEqual(normalize_tool_call_status(status), "success")
                 self.assertEqual(_tool_result_status({"status": status}), "success")
+
+    def test_canceled_spelling_normalizes_to_cancelled(self) -> None:
+        self.assertEqual(normalize_tool_call_status("canceled"), "cancelled")
+        self.assertEqual(normalize_tool_call_status("Cancelled"), "cancelled")
+        self.assertEqual(_tool_result_status({"status": "canceled"}), "cancelled")
+
+    def test_empty_status_with_error_is_not_reported_as_success(self) -> None:
+        self.assertEqual(_tool_result_status({"status": "", "error": "boom"}), "error")
+        self.assertEqual(_tool_result_status({"status": "  ", "error": "boom"}), "error")
+        self.assertEqual(
+            _tool_result_status({"status": "", "outputs": {"error": "child failed"}}),
+            "error",
+        )
 
     def test_unknown_status_falls_back_to_error_field(self) -> None:
         self.assertEqual(normalize_tool_call_status("unexpected"), "unknown")
@@ -564,14 +614,17 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         end_event = next(event for event in events if event.get("phase") == "end")
         self.assertEqual(end_event["status"], "timeout")
 
-    async def test_real_tool_loop_reports_cancelled_on_abort(self) -> None:
-        result, _events = await self._execute_with_tool_result(
-            {"error": "Workflow execution cancelled"}
+    async def test_cancel_phrase_in_error_text_does_not_abort_agent_loop(self) -> None:
+        result, events = await self._execute_with_tool_result(
+            {"error": "Variable 'Workflow execution cancelled' not found"}
         )
 
-        # Cancel in the tool result triggers abort; entry status should be cancelled.
-        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
-        self.assertIn("error", result)
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["cancelled"], 0)
+        self.assertEqual(result["tool_metrics"]["error"], 1)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
 
     async def test_domain_cancelled_text_does_not_abort_agent_loop(self) -> None:
         result, events = await self._execute_with_tool_result({"error": "Cancelled deployment"})
@@ -583,13 +636,28 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         end_event = next(event for event in events if event.get("phase") == "end")
         self.assertEqual(end_event["status"], "error")
 
-    async def test_structured_workflow_cancel_message_aborts_agent_loop(self) -> None:
-        result, _events = await self._execute_with_tool_result(
-            {"error": {"message": "Workflow execution cancelled"}}
+    async def test_structured_cancel_phrase_in_error_does_not_abort_agent_loop(self) -> None:
+        result, events = await self._execute_with_tool_result(
+            {"error": {"message": "Variable 'Workflow execution cancelled' not found"}}
         )
 
-        self.assertEqual(result["error"], "Workflow execution cancelled")
-        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["cancelled"], 0)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
+
+    async def test_status_error_with_cancel_phrase_does_not_abort_agent_loop(self) -> None:
+        # Sub-workflow cancel used to return status=error + cancel text; that must not abort.
+        result, events = await self._execute_with_tool_result(
+            {"status": "error", "error": "Workflow execution cancelled"}
+        )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["cancelled"], 0)
+        end_event = next(event for event in events if event.get("phase") == "end")
+        self.assertEqual(end_event["status"], "error")
 
     async def test_explicit_cancelled_status_aborts_agent_loop(self) -> None:
         result, _events = await self._execute_with_tool_result(
@@ -598,6 +666,50 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["error"], "stopped by operator")
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+
+    async def test_independently_cancelled_sub_workflow_payload_aborts_agent_loop(
+        self,
+    ) -> None:
+        # Payload shape produced by `_execute_sub_workflow_tool` after a child cancel.
+        result, _events = await self._execute_with_tool_result(
+            {"status": "cancelled", "error": "Workflow execution cancelled", "outputs": {}}
+        )
+
+        self.assertEqual(result["error"], "Workflow execution cancelled")
+        self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
+        self.assertEqual(result["tool_metrics"]["cancelled"], 1)
+
+    async def test_generic_value_error_with_cancel_phrase_stays_error(self) -> None:
+        def boom(*_args: object) -> object:
+            raise ValueError("Variable 'Workflow execution cancelled' not found")
+
+        responses = [
+            self._response(content=None, tool_calls=[self._tool_call()]),
+            self._response(content="done", tool_calls=[]),
+        ]
+
+        def create(**_kwargs: object) -> SimpleNamespace:
+            return responses.pop(0)
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="run tool",
+                tools=[{"name": "child", "parameters": {"type": "object"}}],
+                tool_executor=boom,
+            )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tool_calls"][0]["status"], "error")
+        self.assertEqual(result["tool_metrics"]["cancelled"], 0)
+        self.assertEqual(result["tool_metrics"]["error"], 1)
 
     async def test_cancellation_after_tool_completion_stops_before_next_tool(self) -> None:
         first_tool = self._tool_call()
@@ -765,7 +877,7 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         def executor(_tool_def: dict, name: str, *_args: object) -> object:
             if name == "agent_a":
                 return {"ok": True, "status": "success"}
-            return {"error": "Workflow execution cancelled"}
+            return {"status": "cancelled", "error": "Workflow execution cancelled"}
 
         client = SimpleNamespace(
             base_url="http://test",
@@ -790,6 +902,61 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, ["agent_a", "agent_b"])
         self.assertEqual(result["tool_calls"][0]["status"], "success")
         self.assertEqual(result["tool_calls"][1]["status"], "cancelled")
+
+    async def test_parallel_sub_agents_preserve_slot_order_when_first_aborts(self) -> None:
+        tool_a = SimpleNamespace(
+            id="call-a",
+            type="function",
+            function=SimpleNamespace(name="agent_a", arguments="{}"),
+        )
+        tool_b = SimpleNamespace(
+            id="call-b",
+            type="function",
+            function=SimpleNamespace(name="agent_b", arguments="{}"),
+        )
+        tool_c = SimpleNamespace(
+            id="call-c",
+            type="function",
+            function=SimpleNamespace(name="agent_c", arguments="{}"),
+        )
+        responses = [self._response(content=None, tool_calls=[tool_a, tool_b, tool_c])]
+
+        def create(**_kwargs: object) -> SimpleNamespace:
+            return responses.pop(0)
+
+        def executor(_tool_def: dict, name: str, *_args: object) -> object:
+            if name == "agent_a":
+                return {"status": "cancelled", "error": "Workflow execution cancelled"}
+            if name == "agent_b":
+                return {"ok": True, "status": "success"}
+            return {"status": "cancelled", "error": "later cancel"}
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="run tools",
+                tools=[
+                    {"name": "agent_a", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                    {"name": "agent_b", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                    {"name": "agent_c", "parameters": {"type": "object"}, "_source": "sub_agent"},
+                ],
+                tool_executor=executor,
+            )
+
+        self.assertIn("error", result)
+        names = [tc["name"] for tc in result["tool_calls"]]
+        self.assertEqual(names, ["agent_a", "agent_b", "agent_c"])
+        self.assertEqual(
+            [tc["status"] for tc in result["tool_calls"]],
+            ["cancelled", "success", "cancelled"],
+        )
 
     async def test_persisted_tool_entry_redacts_secrets(self) -> None:
         result, _events = await self._execute_with_tool_result(

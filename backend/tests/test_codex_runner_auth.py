@@ -87,6 +87,39 @@ class TestCodexRunnerAuth(unittest.TestCase):
             self.runner._run_command(["definitely-not-git-xyz", "status"], cwd=self.workspace)
         self.assertIn("definitely-not-git-xyz", str(ctx.exception))
 
+    def test_run_command_timeout_stays_value_error_for_git_recovery(self) -> None:
+        """Git helpers catch ValueError; shared _run_command must not raise TimeoutError."""
+        import subprocess
+        from unittest.mock import patch
+
+        with patch(
+            "app.services.codex_runner_service.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["git", "clone"], timeout=1),
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                self.runner._run_command(["git", "clone", "repo"], cwd=self.workspace)
+        self.assertIn("timed out", str(ctx.exception))
+
+    def test_codex_exec_timeout_raises_timeout_error(self) -> None:
+        import subprocess
+        from unittest.mock import patch
+
+        with patch(
+            "app.services.codex_runner_service.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["codex", "exec"], timeout=1),
+        ):
+            with self.assertRaises(TimeoutError) as ctx:
+                self.runner._run_codex_exec(
+                    workspace=self.workspace,
+                    prompt="hi",
+                    timeout_seconds=1,
+                    resume_thread_id=None,
+                    codex_access_token="tok",
+                    model="gpt-test",
+                    reasoning_effort="",
+                )
+        self.assertIn("Codex timed out", str(ctx.exception))
+
     def _run_exec_with(
         self,
         model: str = "",

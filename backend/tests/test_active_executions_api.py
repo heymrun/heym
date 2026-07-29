@@ -22,7 +22,12 @@ from app.services.execution_cancellation import (
     record_execution_node_started,
     register_execution,
 )
-from app.services.workflow_executor import ExecutionResult, WorkflowExecutor
+from app.services.workflow_executor import (
+    ExecutionResult,
+    WorkflowCancelledError,
+    WorkflowExecutor,
+    WorkflowTimeoutError,
+)
 
 
 def _make_handle(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ExecutionCancellationHandle:
@@ -595,6 +600,53 @@ class SubWorkflowActiveTrackingTests(unittest.TestCase):
         # clear must have been called despite the exception
         self.assertEqual(len(cleared), 1)
         self.assertEqual(registered, cleared)
+
+    def test_independently_cancelled_sub_workflow_returns_cancelled_status(self) -> None:
+        """Child-only cancel must surface explicit cancelled status, not status=error."""
+        sub_wf_id = str(uuid.uuid4())
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        executor.workflow_cache = {
+            sub_wf_id: {"nodes": [], "edges": [], "name": "Sub WF", "input_fields": []}
+        }
+
+        with (
+            patch(
+                "app.services.workflow_executor._register_sub_execution",
+                return_value=threading.Event(),
+            ),
+            patch("app.services.workflow_executor._clear_sub_execution"),
+        ):
+            result = self._call_sub_workflow_tool(
+                executor,
+                sub_wf_id,
+                side_effect=WorkflowCancelledError("Workflow execution cancelled"),
+            )
+
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(result["error"], "Workflow execution cancelled")
+
+    def test_independently_timed_out_sub_workflow_returns_timeout_status(self) -> None:
+        sub_wf_id = str(uuid.uuid4())
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        executor.workflow_cache = {
+            sub_wf_id: {"nodes": [], "edges": [], "name": "Sub WF", "input_fields": []}
+        }
+
+        with (
+            patch(
+                "app.services.workflow_executor._register_sub_execution",
+                return_value=threading.Event(),
+            ),
+            patch("app.services.workflow_executor._clear_sub_execution"),
+        ):
+            result = self._call_sub_workflow_tool(
+                executor,
+                sub_wf_id,
+                side_effect=WorkflowTimeoutError("Workflow timed out after 30 seconds"),
+            )
+
+        self.assertEqual(result["status"], "timeout")
+        self.assertIn("timed out", result["error"])
 
     def test_sub_workflow_visible_in_active_list_during_execution(self) -> None:
         """Integration: sub-workflow workflow_id appears in list_active_executions while running."""
