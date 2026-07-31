@@ -1423,7 +1423,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
     <div class="min-h-screen bg-background overflow-x-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
         <template #before-docs>
-          <ActiveWorkflowsBadge v-if="activeTab === 'workflows'" />
+          <ActiveWorkflowsBadge />
         </template>
         <template #actions>
           <Button
