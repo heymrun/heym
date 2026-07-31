@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { BookOpen, ExternalLink, LogOut, Moon, Search, Settings, Sun } from "lucide-vue-next";
 
+import ActiveWorkflowsBadge from "@/components/Layout/ActiveWorkflowsBadge.vue";
 import UserSettingsDialog from "@/components/Layout/UserSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
@@ -101,6 +102,7 @@ async function handleLogout(): Promise<void> {
       </div>
 
       <div class="flex items-center gap-1.5 sm:gap-2">
+        <ActiveWorkflowsBadge />
         <slot name="before-docs" />
         <router-link
           v-if="!hideDocsLink"
