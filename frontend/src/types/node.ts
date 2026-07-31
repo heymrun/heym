@@ -43,6 +43,19 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       cronExpression: "0 * * * *",
     },
   },
+  calTrigger: {
+    type: "calTrigger",
+    label: "Cal.com Trigger",
+    description: "Receive signed Cal.com webhook events",
+    color: "node-cron",
+    icon: "CalendarClock",
+    inputs: 0,
+    outputs: 1,
+    defaultData: {
+      label: "calTrigger",
+      credentialId: "",
+    },
+  },
   telegramTrigger: {
     type: "telegramTrigger",
     label: "Telegram Trigger",

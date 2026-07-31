@@ -517,6 +517,7 @@ class CredentialType(str, Enum):
     header = "header"
     discord = "discord"
     discord_trigger = "discord_trigger"
+    cal_trigger = "cal_trigger"
     telegram = "telegram"
     slack = "slack"
     slack_trigger = "slack_trigger"

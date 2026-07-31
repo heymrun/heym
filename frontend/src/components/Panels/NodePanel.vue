@@ -214,6 +214,7 @@ function scrollToSelectedNode(): void {
 const icons = {
   textInput: Type,
   cron: CalendarClock,
+  calTrigger: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
   fileUploadTrigger: Upload,
@@ -281,6 +282,7 @@ const RUNBOOK_PANEL_NODE_TYPES: NodeType[] = ["textInput", "wait", "consoleLog"]
 const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "textInput",
   "cron",
+  "calTrigger",
   "telegramTrigger",
   "slackTrigger",
   "discordTrigger",

@@ -1095,6 +1095,7 @@ _PLACEHOLDER_CREDENTIAL_PATTERNS = (
     "credential-uuid",
     "llm-credential-uuid",
     "slack-credential-uuid",
+    "cal-trigger-credential-uuid",
     "telegram-credential-uuid",
     "imap-credential-uuid",
     "smtp-credential-uuid",
@@ -1109,6 +1110,7 @@ _PLACEHOLDER_CREDENTIAL_PATTERNS = (
 _INTEGRATION_CREDENTIAL_NODE_TYPES = {
     "discord",
     "discordTrigger",
+    "calTrigger",
     "slack",
     "telegram",
     "imapTrigger",

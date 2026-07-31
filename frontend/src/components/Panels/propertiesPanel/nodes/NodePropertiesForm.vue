@@ -5,6 +5,7 @@ import FileUploadTriggerNodeProperties from "./FileUploadTriggerNodeProperties.v
 import TelegramTriggerNodeProperties from "./TelegramTriggerNodeProperties.vue";
 import SlackTriggerNodeProperties from "./SlackTriggerNodeProperties.vue";
 import DiscordTriggerNodeProperties from "./DiscordTriggerNodeProperties.vue";
+import CalTriggerNodeProperties from "./CalTriggerNodeProperties.vue";
 import ImapTriggerNodeProperties from "./ImapTriggerNodeProperties.vue";
 import WebsocketTriggerNodeProperties from "./WebsocketTriggerNodeProperties.vue";
 import LlmNodeProperties from "./LlmNodeProperties.vue";
@@ -65,6 +66,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <TelegramTriggerNodeProperties v-else-if="selectedNode?.type === 'telegramTrigger'" />
   <SlackTriggerNodeProperties v-else-if="selectedNode?.type === 'slackTrigger'" />
   <DiscordTriggerNodeProperties v-else-if="selectedNode?.type === 'discordTrigger'" />
+  <CalTriggerNodeProperties v-else-if="selectedNode?.type === 'calTrigger'" />
   <ImapTriggerNodeProperties v-else-if="selectedNode?.type === 'imapTrigger'" />
   <WebsocketTriggerNodeProperties v-else-if="selectedNode?.type === 'websocketTrigger'" />
   <LlmNodeProperties v-else-if="selectedNode?.type === 'llm'" />

@@ -84,6 +84,12 @@ The Slack Trigger node receives Slack Events API webhooks and starts a workflow 
 
 Pairs with [Slack](../nodes/slack-node.md), [Agent Node](../nodes/agent-node.md), and [Third-Party Integrations](./integrations.md).
 
+#### [Cal.com Trigger](../nodes/cal-trigger-node.md)
+
+The Cal.com Trigger node receives booking and meeting webhooks, verifies their HMAC-SHA256 signature with the selected `cal_trigger` credential, and starts the workflow. It exposes the event name, complete event body, event-specific payload, sanitized headers, and trigger timestamp.
+
+Pairs with [Condition](../nodes/condition-node.md), [Switch](../nodes/switch-node.md), [Slack](../nodes/slack-node.md), and [Third-Party Integrations](./integrations.md).
+
 #### [Discord Trigger](../nodes/discord-trigger-node.md)
 
 The Discord Trigger node receives Discord Interactions API webhooks, verifies Ed25519 signatures with the selected `discord_trigger` credential, and starts the workflow. It exposes the full interaction payload, command data, sanitized headers, and trigger metadata for downstream routing or replies.
@@ -401,6 +407,8 @@ Pairs with [Condition](../nodes/condition-node.md), [Error Handler](../nodes/err
 ### [Node Types](./node-types.md)
 
 Heym provides a variety of node types: triggers such as [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Slack Trigger](../nodes/slack-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), and [Error Handler](../nodes/error-handler-node.md); AI nodes such as [LLM](../nodes/llm-node.md), [Agent Node](../nodes/agent-node.md), [Codex](../nodes/codex-node.md), [OpenCode Go](../nodes/opencode-go-node.md), [Qdrant RAG](../nodes/rag-node.md), and [MCP Call](../nodes/mcp-call-node.md); logic nodes like [Condition](../nodes/condition-node.md), [Switch](../nodes/switch-node.md), [Merge](../nodes/merge-node.md), and [Loop](../nodes/loop-node.md); data nodes like [Set](../nodes/set-node.md), [Variable](../nodes/variable-node.md), and [Execute](../nodes/execute-node.md); integrations such as [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md), [Jira](../nodes/jira-node.md), [Linear](../nodes/linear-node.md), [Notion](../nodes/notion-node.md), [Sentry](../nodes/sentry-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), [Discord](../nodes/discord-node.md), [Send Email](../nodes/send-email-node.md), [Redis](../nodes/redis-node.md), [Grist](../nodes/grist-node.md), [Google Sheets](../nodes/google-sheets-node.md), [Google Drive](../nodes/google-drive-node.md), [BigQuery](../nodes/bigquery-node.md), [Supabase](../nodes/supabase-node.md), [ClickHouse](../nodes/clickhouse-node.md), [DataTable](../nodes/datatable-node.md), and [Drive](../nodes/drive-node.md); automation nodes like [Crawler](../nodes/crawler-node.md) and [Playwright](../nodes/playwright-node.md); and utilities such as [Wait](../nodes/wait-node.md), [Output](../nodes/output-node.md), [JSON output mapper](../nodes/json-output-mapper-node.md), [Console Log](../nodes/console-log-node.md), [Throw Error](../nodes/throw-error-node.md), [Disable Node](../nodes/disable-node.md), and [Sticky Note](../nodes/sticky-note-node.md). Use expressions like `$input.text` and `$nodeLabel.field` in node configuration.
+
+[Cal.com Trigger](../nodes/cal-trigger-node.md) is also available as a signed webhook trigger for booking and meeting automation.
 
 See also [Triggers](./triggers.md), [Third-Party Integrations](./integrations.md), and [Parallel Execution](./parallel-execution.md).
 

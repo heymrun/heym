@@ -2422,6 +2422,7 @@ function sanitizeIntegrationCredentialFields(node: WorkflowNode): WorkflowNode {
     "googleDrive",
     "slackTrigger",
     "discordTrigger",
+    "calTrigger",
     "bigquery",
     "supabase",
     "notion",

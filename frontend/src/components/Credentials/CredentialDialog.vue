@@ -82,6 +82,7 @@ const telegramSecretToken = ref("");
 const webhookUrl = ref("");
 const signingSecret = ref("");
 const discordPublicKey = ref("");
+const calWebhookSecret = ref("");
 const imapHost = ref("");
 const imapPort = ref("993");
 const imapUsername = ref("");
@@ -229,6 +230,7 @@ const typeOptions = [
   { value: "telegram", label: CREDENTIAL_TYPE_LABELS.telegram },
   { value: "discord", label: CREDENTIAL_TYPE_LABELS.discord },
   { value: "discord_trigger", label: CREDENTIAL_TYPE_LABELS.discord_trigger },
+  { value: "cal_trigger", label: CREDENTIAL_TYPE_LABELS.cal_trigger },
   { value: "slack", label: CREDENTIAL_TYPE_LABELS.slack },
   { value: "slack_trigger", label: CREDENTIAL_TYPE_LABELS.slack_trigger },
   { value: "imap", label: CREDENTIAL_TYPE_LABELS.imap },
@@ -295,6 +297,7 @@ watch(
         webhookUrl.value = "";
         signingSecret.value = "";
         discordPublicKey.value = "";
+        calWebhookSecret.value = "";
         imapHost.value = "";
         imapPort.value = "993";
         imapUsername.value = "";
@@ -409,6 +412,7 @@ watch(
         webhookUrl.value = "";
         signingSecret.value = "";
         discordPublicKey.value = "";
+        calWebhookSecret.value = "";
         imapHost.value = "";
         imapPort.value = "993";
         imapUsername.value = "";
@@ -551,6 +555,8 @@ const isValid = computed(() => {
     return !!signingSecret.value.trim() || isEditing.value;
   } else if (type.value === "discord_trigger") {
     return !!discordPublicKey.value.trim() || isEditing.value;
+  } else if (type.value === "cal_trigger") {
+    return !!calWebhookSecret.value.trim() || isEditing.value;
   } else if (type.value === "imap") {
     return (
       !!imapHost.value.trim() &&
@@ -845,6 +851,8 @@ function buildConfig(): CredentialConfig {
     return { signing_secret: signingSecret.value };
   } else if (type.value === "discord_trigger") {
     return { public_key: discordPublicKey.value.trim() };
+  } else if (type.value === "cal_trigger") {
+    return { webhook_secret: calWebhookSecret.value.trim() };
   } else if (type.value === "flaresolverr") {
     return { flaresolverr_url: flaresolverrUrl.value };
   } else if (type.value === "google_sheets") {
@@ -1531,6 +1539,7 @@ async function handleSave(): Promise<void> {
           webhookUrl.value.trim() ||
           signingSecret.value.trim() ||
           discordPublicKey.value.trim() ||
+          calWebhookSecret.value.trim() ||
           imapHost.value.trim() ||
           imapPort.value.trim() ||
           imapUsername.value.trim() ||
@@ -2332,6 +2341,23 @@ async function handleSave(): Promise<void> {
           />
           <p class="text-xs text-muted-foreground">
             Found in the Discord Developer Portal → your application → General Information → Public Key.
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'cal_trigger'">
+        <div class="space-y-2">
+          <Label for="cred-cal-webhook-secret">Webhook Secret</Label>
+          <Input
+            id="cred-cal-webhook-secret"
+            v-model="calWebhookSecret"
+            type="password"
+            :placeholder="isEditing ? '(re-enter to update)' : 'Enter a strong webhook secret'"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            Enter the same secret when creating the webhook in Cal.com. It signs each request with
+            HMAC-SHA256.
           </p>
         </div>
       </template>

@@ -7849,6 +7849,9 @@ class WorkflowExecutor:
             elif node.get("type") == "discordTrigger":
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "calTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
             elif node.get("type") == "telegramTrigger":
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
@@ -9585,6 +9588,9 @@ def _execute_workflow_streaming_impl(
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
         elif node.get("type") == "discordTrigger":
+            node["data"] = node.get("data", {})
+            node["data"]["_initial_inputs"] = inputs
+        elif node.get("type") == "calTrigger":
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
         elif node.get("type") == "telegramTrigger":

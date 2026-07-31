@@ -11,6 +11,7 @@ export type CredentialType =
   | "header"
   | "discord"
   | "discord_trigger"
+  | "cal_trigger"
   | "telegram"
   | "slack"
   | "slack_trigger"
@@ -176,6 +177,10 @@ export interface CredentialConfigDiscordTrigger {
   public_key: string;
 }
 
+export interface CredentialConfigCalTrigger {
+  webhook_secret: string;
+}
+
 export interface CredentialConfigTelegram {
   bot_token: string;
   secret_token?: string;
@@ -299,6 +304,7 @@ export type CredentialConfig =
   | CredentialConfigSlack
   | CredentialConfigDiscord
   | CredentialConfigDiscordTrigger
+  | CredentialConfigCalTrigger
   | CredentialConfigSlackTrigger
   | CredentialConfigImap
   | CredentialConfigSmtp
@@ -399,6 +405,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   telegram: "Telegram Bot",
   discord: "Discord Webhook",
   discord_trigger: "Discord Trigger (Public Key)",
+  cal_trigger: "Cal.com Trigger (Webhook Secret)",
   slack: "Slack Webhook",
   slack_trigger: "Slack Trigger (Signing Secret)",
   imap: "IMAP Email Inbox",
@@ -435,6 +442,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   telegram: "Connect a Telegram bot for inbound webhook triggers and outbound bot messages",
   discord: "Send messages via Discord incoming webhooks",
   discord_trigger: "Verify incoming Discord interaction webhooks using an application public key",
+  cal_trigger: "Verify incoming Cal.com webhooks using a shared HMAC secret",
   slack: "Send messages via Slack incoming webhooks",
   slack_trigger: "Verify incoming Slack event webhooks using a signing secret",
   imap: "Poll an IMAP inbox for new emails and trigger workflows when mail arrives",

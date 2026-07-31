@@ -96,6 +96,7 @@ export function usePropertiesPanelController() {
     chartOutput: BarChart3,
     textInput: Type,
     cron: CalendarClock,
+    calTrigger: CalendarClock,
     websocketTrigger: Radio,
     fileUploadTrigger: Upload,
     llm: Brain,
@@ -155,6 +156,7 @@ export function usePropertiesPanelController() {
     chartOutput: "node-output",
     textInput: "node-input",
     cron: "node-cron",
+    calTrigger: "node-cron",
     websocketTrigger: "node-websocket",
     fileUploadTrigger: "node-websocket",
     llm: "node-llm",
@@ -214,6 +216,7 @@ export function usePropertiesPanelController() {
     chartOutput: "chart-output-node",
     textInput: "input-node",
     cron: "cron-node",
+    calTrigger: "cal-trigger-node",
     websocketTrigger: "websocket-trigger-node",
     fileUploadTrigger: "file-upload-trigger-node",
     llm: "llm-node",
@@ -401,6 +404,11 @@ export function usePropertiesPanelController() {
     return `${window.location.origin}/api/discord/webhook/${selectedNode.value.id}`;
   });
 
+  const calTriggerWebhookUrl = computed((): string => {
+    if (!selectedNode.value || selectedNode.value.type !== "calTrigger") return "";
+    return `${window.location.origin}/api/cal/webhook/${selectedNode.value.id}`;
+  });
+
   const telegramTriggerWebhookUrl = computed((): string => {
     if (!selectedNode.value || selectedNode.value.type !== "telegramTrigger") return "";
     return `${window.location.origin}/api/telegram/webhook/${selectedNode.value.id}`;
@@ -412,6 +420,10 @@ export function usePropertiesPanelController() {
 
   function copyDiscordWebhookUrl(): void {
     navigator.clipboard.writeText(discordTriggerWebhookUrl.value);
+  }
+
+  function copyCalWebhookUrl(): void {
+    navigator.clipboard.writeText(calTriggerWebhookUrl.value);
   }
 
   function copyTelegramWebhookUrl(): void {
@@ -567,6 +579,7 @@ export function usePropertiesPanelController() {
   const slackTriggerCredentials = ref<CredentialListItem[]>([]);
   const discordCredentials = ref<CredentialListItem[]>([]);
   const discordTriggerCredentials = ref<CredentialListItem[]>([]);
+  const calTriggerCredentials = ref<CredentialListItem[]>([]);
   const imapTriggerCredentials = ref<CredentialListItem[]>([]);
   const smtpCredentials = ref<CredentialListItem[]>([]);
   const redisCredentials = ref<CredentialListItem[]>([]);
@@ -1219,6 +1232,13 @@ export function usePropertiesPanelController() {
           discordTriggerCredentials.value = await credentialsApi.listByType("discord_trigger");
         } catch {
           discordTriggerCredentials.value = [];
+        }
+      }
+      if (type === "calTrigger") {
+        try {
+          calTriggerCredentials.value = await credentialsApi.listByType("cal_trigger");
+        } catch {
+          calTriggerCredentials.value = [];
         }
       }
 
@@ -8795,9 +8815,11 @@ export function usePropertiesPanelController() {
     isGenericWebhookBodyMode,
     slackTriggerWebhookUrl,
     discordTriggerWebhookUrl,
+    calTriggerWebhookUrl,
     telegramTriggerWebhookUrl,
     copySlackWebhookUrl,
     copyDiscordWebhookUrl,
+    copyCalWebhookUrl,
     copyTelegramWebhookUrl,
     runBodyError,
     genericBodyPlaceholder,
@@ -8863,6 +8885,7 @@ export function usePropertiesPanelController() {
     jsonFormatError,
     slackTriggerCredentials,
     discordTriggerCredentials,
+    calTriggerCredentials,
     loadingNotionDataSources,
     notionDataSourcesError,
     notionDataSourceSearch,

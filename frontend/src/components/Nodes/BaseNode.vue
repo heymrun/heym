@@ -26,6 +26,7 @@ const icons = {
   chartOutput: BarChart3,
   textInput: Type,
   cron: CalendarClock,
+  calTrigger: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
   fileUploadTrigger: Upload,
@@ -85,6 +86,7 @@ const nodeColorMap = {
   chartOutput: "node-output",
   textInput: "node-input",
   cron: "node-cron",
+  calTrigger: "node-cron",
   telegramTrigger: "node-telegram",
   websocketTrigger: "node-websocket",
   fileUploadTrigger: "node-websocket",
@@ -154,6 +156,7 @@ const hasInput = computed(
     && !isSubAgentNode.value
     && props.type !== "textInput"
     && props.type !== "cron"
+    && props.type !== "calTrigger"
     && props.type !== "sticky"
     && props.type !== "merge"
     && props.type !== "errorHandler"

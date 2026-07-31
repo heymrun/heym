@@ -49,6 +49,7 @@ import type { NodeType } from "@/types/workflow";
 export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   textInput: Type,
   cron: CalendarClock,
+  calTrigger: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
   fileUploadTrigger: Upload,
@@ -110,6 +111,7 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   chartOutput: "text-node-output",
   textInput: "text-node-input",
   cron: "text-node-cron",
+  calTrigger: "text-node-cron",
   telegramTrigger: "text-node-telegram",
   websocketTrigger: "text-node-websocket",
   fileUploadTrigger: "text-node-websocket",

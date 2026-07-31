@@ -35,6 +35,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Telegram** | [Telegram Trigger node](../nodes/telegram-trigger-node.md), [Telegram node](../nodes/telegram-node.md) | `bot_token`, optional `secret_token` |
 | **Discord** | [Discord node](../nodes/discord-node.md) | `webhook_url` |
 | **Discord Trigger** | [Discord Trigger node](../nodes/discord-trigger-node.md) | `public_key` |
+| **Cal.com Trigger** | [Cal.com Trigger node](../nodes/cal-trigger-node.md) | `webhook_secret` |
 | **RabbitMQ** | [RabbitMQ node](../nodes/rabbitmq-node.md) | `rabbitmq_host`, `rabbitmq_username`, `rabbitmq_password` |
 | **Redis** | [Redis node](../nodes/redis-node.md) | `host`, `port`, `password` |
 | **Slack** | [Slack node](../nodes/slack-node.md) | `webhook_url` |

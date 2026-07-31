@@ -10,6 +10,7 @@ Start nodes (no incoming edges) that initiate execution:
 |-----------|-------------|
 | [Input](../nodes/input-node.md) (textInput) | HTTP entry point. Receives `body`, `headers`, `query` from requests. |
 | [Cron](../nodes/cron-node.md) | Runs on a schedule (cron expression, e.g. `0 * * * *` for hourly). |
+| [Cal.com Trigger](../nodes/cal-trigger-node.md) | Starts when Cal.com sends a signed webhook to the node-specific endpoint. |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
@@ -81,6 +82,10 @@ Telegram sends bot webhook updates to `POST /api/telegram/webhook/{node_id}`. Th
 
 Discord sends interaction webhooks to `POST /api/discord/webhook/{node_id}`. The payload is passed into the workflow as `interaction`, `type`, `data`, sanitized `headers`, `triggered_by`, `trigger_node_id`, and `triggered_at`. Heym verifies the request using Ed25519 and the selected `discord_trigger` credential's application public key before execution.
 
+### Cal.com
+
+Cal.com sends webhooks to `POST /api/cal/webhook/{node_id}`. Heym verifies `x-cal-signature-256` by calculating HMAC-SHA256 over the raw body with the selected `cal_trigger` credential. Downstream output includes the complete `event`, `triggerEvent`, event-specific `payload`, sanitized `headers`, and `triggered_at`. Valid events run in the background and are recorded with `trigger_source: "Cal.com"`.
+
 ### RabbitMQ
 
 The RabbitMQ consumer starts when the leader worker initializes. Workflows with `rabbitmq` nodes where `rabbitmqOperation === "receive"` get a consumer. Input includes `message_data` (body, headers, routing_key, etc.) and `triggered_by: "rabbitmq"`.
@@ -95,6 +100,7 @@ Execution history records `trigger_source` for every entry point:
 | `"Canvas"` | Run from the workflow editor canvas |
 | `"Quick Drawer"` | Run from the editor quick-drawer panel |
 | `"cron"` | Cron scheduler |
+| `"Cal.com"` | Verified Cal.com webhook |
 | `"imap"` | IMAP trigger manager |
 | `"websocket"` | Outbound WebSocket trigger manager |
 | `"file_upload"` | File Upload Trigger upload endpoint |

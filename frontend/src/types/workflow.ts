@@ -131,6 +131,7 @@ export interface AgentSkill {
 export type NodeType =
   | "textInput"
   | "cron"
+  | "calTrigger"
   | "telegramTrigger"
   | "websocketTrigger"
   | "fileUploadTrigger"

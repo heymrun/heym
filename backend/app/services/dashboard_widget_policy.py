@@ -6,6 +6,7 @@ DASHBOARD_WIDGET_BLOCKED_NODE_TYPES: frozenset[str] = frozenset(
     {
         "textInput",
         "cron",
+        "calTrigger",
         "telegramTrigger",
         "slackTrigger",
         "discordTrigger",

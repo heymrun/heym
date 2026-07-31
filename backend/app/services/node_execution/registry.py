@@ -11,6 +11,7 @@ NodeHandler = Callable[[NodeExecutionContext], object]
 _HANDLER_MODULES: dict[str, str] = {
     "agent": "agent_node",
     "bigquery": "bigquery_node",
+    "calTrigger": "cal_trigger_node",
     "chartOutput": "chart_output_node",
     "clickhouse": "clickhouse_node",
     "codex": "codex_node",

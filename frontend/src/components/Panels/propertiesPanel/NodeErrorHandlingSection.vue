@@ -12,7 +12,7 @@ const {
 <template>
   <template v-if="selectedNode">
     <div
-      v-if="!['textInput', 'cron', 'sticky', 'errorHandler', 'output', 'throwError', 'telegramTrigger', 'websocketTrigger', 'slackTrigger', 'discordTrigger', 'imapTrigger'].includes(selectedNode.type) && !(selectedNode.type === 'rabbitmq' && selectedNode.data.rabbitmqOperation === 'receive')"
+      v-if="!['textInput', 'cron', 'calTrigger', 'sticky', 'errorHandler', 'output', 'throwError', 'telegramTrigger', 'websocketTrigger', 'slackTrigger', 'discordTrigger', 'imapTrigger'].includes(selectedNode.type) && !(selectedNode.type === 'rabbitmq' && selectedNode.data.rabbitmqOperation === 'receive')"
       class="space-y-4 pt-4 border-t"
     >
       <Label class="text-muted-foreground">Error Handling</Label>

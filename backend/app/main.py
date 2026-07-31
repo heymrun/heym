@@ -18,6 +18,7 @@ from app.api import (
     auth,
     bigquery_oauth,
     boards,
+    cal,
     chats,
     codex_followups,
     codex_oauth,
@@ -351,6 +352,7 @@ app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
 app.include_router(data_tables.router, prefix="/api/data-tables", tags=["Data Tables"])
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
+app.include_router(cal.router, prefix="/api/cal", tags=["Cal.com"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])
 
