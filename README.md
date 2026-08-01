@@ -230,7 +230,7 @@ For a complete list of all features with short descriptions, see **[Full Feature
 
 </div>
 
-Heym is Built for developers who want control and enterprise teams that need a trusted path to production. Star Heym ⭐ on GitHub to follow releases and help more builders discover it.
+Heym is built for developers who want control and enterprise teams that need a trusted path to production. Star Heym ⭐ on GitHub to follow releases and help more builders discover it.
 
 ---
 
@@ -472,7 +472,7 @@ cp .env.example .env
 | **AI** | LLM, AI Agent, Qdrant RAG |
 | **Logic** | Condition, Switch, Loop, Merge |
 | **Data** | Set, Variable, DataTable, Execute (sub-workflow) |
-| **Integrations** | HTTP, Slack, Send Email, Redis, RabbitMQ Send, Grist, Drive |
+| **Integrations** | HTTP, Slack, Send Email, Redis, RabbitMQ Send, Grist, Drive.. |
 | **Automation** | Crawler, Playwright |
 | **Utilities** | Wait, Output, Console Log, Throw Error, Disable Node, Sticky Note |
 
