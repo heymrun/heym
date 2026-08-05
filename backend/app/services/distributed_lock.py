@@ -127,14 +127,7 @@ class DistributedLockService:
         if not self._leader_conn:
             return False
         try:
-            await self._leader_conn.execute(
-                text("SELECT pg_advisory_lock_shared(:lock_id)"),
-                {"lock_id": self._leader_lock_id},
-            )
-            await self._leader_conn.execute(
-                text("SELECT pg_advisory_unlock_shared(:lock_id)"),
-                {"lock_id": self._leader_lock_id},
-            )
+            await self._leader_conn.execute(text("SELECT 1"))
             return True
         except Exception:
             return False
