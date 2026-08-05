@@ -17,11 +17,20 @@ class AlembicMigrationGraphTest(unittest.TestCase):
     def test_revision_graph_has_one_head(self) -> None:
         self.assertEqual(self.script.get_heads(), ["106_add_cal_trigger_credential"])
 
-    def test_cal_trigger_revision_follows_rag_revision(self) -> None:
+    def test_cal_trigger_revision_merges_rag_and_legacy_cal_revisions(self) -> None:
         cal_trigger_revision = self.script.get_revision("106_add_cal_trigger_credential")
 
         self.assertIsNotNone(cal_trigger_revision)
-        self.assertEqual(cal_trigger_revision.down_revision, "105_add_rag_credential_type")
+        self.assertEqual(
+            set(cal_trigger_revision.down_revision),
+            {"105_add_rag_credential_type", "104_add_cal_trigger_credential"},
+        )
+
+    def test_legacy_cal_revision_is_preserved_for_existing_databases(self) -> None:
+        legacy_cal_revision = self.script.get_revision("104_add_cal_trigger_credential")
+
+        self.assertIsNotNone(legacy_cal_revision)
+        self.assertEqual(legacy_cal_revision.down_revision, "103_add_google_drive_cred_type")
 
     def test_rag_credential_revision_follows_cron_slot_revision(self) -> None:
         rag_revision = self.script.get_revision("105_add_rag_credential_type")
