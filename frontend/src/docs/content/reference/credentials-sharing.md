@@ -71,7 +71,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 | [ClickHouse](../nodes/clickhouse-node.md) | `credentialId` | ClickHouse connection details (host, port, auth, database) |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md), [Telegram](../nodes/telegram-node.md) | `credentialId` | Telegram bot credential |
 | [Discord Trigger](../nodes/discord-trigger-node.md), [Discord](../nodes/discord-node.md) | `credentialId` | Discord public key or webhook credential |
-| [Cal.com Trigger](../nodes/cal-trigger-node.md) | `credentialId` | Cal.com webhook secret credential |
+| [Cal.com Trigger](../nodes/cal-trigger-node.md) | `credentialId` / `calApiCredentialId` | Manual webhook secret or managed Cal.com API credential |
 | Vector Store | `credential_id` | Qdrant or Postgres (pgvector) vector DB |
 | Evals | `credential_id`, `judge_credential_id` | Model credentials |
 | [Playwright](../nodes/playwright-node.md) AI step | `credentialId` | LLM/Vision model (for AI step and [Auto Heal](../nodes/playwright-node.md#ai-auto-heal)) |

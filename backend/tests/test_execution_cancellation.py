@@ -3,6 +3,7 @@ import threading
 import unittest
 import uuid
 from datetime import timezone
+from unittest.mock import AsyncMock, patch
 
 from app.services.execution_cancellation import (
     _ACTIVE_EXECUTIONS,
@@ -10,6 +11,7 @@ from app.services.execution_cancellation import (
     clear_execution,
     list_active_executions,
     register_execution,
+    unregister_local_execution,
 )
 
 
@@ -92,6 +94,34 @@ class RegisterExecutionRecoveryFieldsTests(unittest.TestCase):
         self.assertTrue(handle.recoverable)
 
 
+class PersistRegisteredExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        _flush()
+
+    async def test_persists_registered_handle_in_callers_transaction(self) -> None:
+        from app.services.execution_cancellation import persist_registered_execution
+
+        execution_id = uuid.uuid4()
+        register_execution(
+            workflow_id=uuid.uuid4(),
+            execution_id=execution_id,
+            inputs={"event": {"id": 1}},
+            trigger_source="Cal.com",
+            actor_user_id=uuid.uuid4(),
+        )
+        db = AsyncMock()
+
+        await persist_registered_execution(db, execution_id)
+
+        db.execute.assert_awaited_once()
+
+    async def test_rejects_unregistered_execution(self) -> None:
+        from app.services.execution_cancellation import persist_registered_execution
+
+        with self.assertRaises(ValueError):
+            await persist_registered_execution(AsyncMock(), uuid.uuid4())
+
+
 class CancelExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         _flush()
@@ -153,6 +183,18 @@ class ClearExecutionTests(unittest.TestCase):
 
         result = cancel_execution(workflow_id=wf_id, execution_id=ex_id)
         self.assertFalse(result)
+
+    def test_unregister_local_stops_heartbeat_without_deleting_persisted_record(self) -> None:
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=uuid.uuid4(), execution_id=execution_id)
+
+        with patch(
+            "app.services.execution_cancellation.active_execution_registry.record_finished"
+        ) as record_finished:
+            unregister_local_execution(execution_id)
+
+        self.assertNotIn(execution_id, _ACTIVE_EXECUTIONS)
+        record_finished.assert_not_called()
 
 
 class ListActiveExecutionsTests(unittest.TestCase):

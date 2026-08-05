@@ -1343,6 +1343,25 @@ async def update_workflow(
     sanitized_nodes = _sanitize_invalid_unicode(workflow_data.nodes)
     sanitized_edges = _sanitize_invalid_unicode(workflow_data.edges)
     sanitized_sse_node_config = _sanitize_invalid_unicode(workflow_data.sse_node_config)
+    removed_managed_cal_nodes: set[str] = set()
+
+    if sanitized_nodes is not None:
+        old_managed_cal_nodes = {
+            str(node.get("id"))
+            for node in old_nodes or []
+            if isinstance(node, dict)
+            and node.get("type") == "calTrigger"
+            and node.get("data", {}).get("setupMode") == "managed"
+        }
+        new_active_managed_cal_nodes = {
+            str(node.get("id"))
+            for node in sanitized_nodes
+            if isinstance(node, dict)
+            and node.get("type") == "calTrigger"
+            and node.get("data", {}).get("setupMode") == "managed"
+            and node.get("data", {}).get("active") is not False
+        }
+        removed_managed_cal_nodes = old_managed_cal_nodes - new_active_managed_cal_nodes
 
     if getattr(workflow, "kind", None) == "dashboard_widget" and (
         sanitized_nodes is not None or sanitized_edges is not None
@@ -1484,6 +1503,22 @@ async def update_workflow(
         )
         db.add(workflow_version)
 
+    if removed_managed_cal_nodes:
+        from app.services.cal_api_service import CalApiError, delete_managed_cal_subscriptions
+
+        try:
+            await delete_managed_cal_subscriptions(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                node_ids=removed_managed_cal_nodes,
+            )
+        except CalApiError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Unable to remove the managed Cal.com webhook: {exc}",
+            ) from exc
+
     await db.flush()
     await db.commit()
     await db.refresh(workflow)
@@ -1549,7 +1584,23 @@ async def delete_workflow(
         ),
         {"workflow_id": str(workflow_id)},
     )
+    from app.services.cal_api_service import CalApiError, delete_managed_cal_subscriptions
+
+    try:
+        await delete_managed_cal_subscriptions(
+            db,
+            workflow_id=workflow.id,
+            owner_id=workflow.owner_id,
+        )
+    except CalApiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unable to remove the managed Cal.com webhook: {exc}",
+        ) from exc
     await db.delete(workflow)
+    # Make subscription cleanup visible before clients issue immediate follow-up
+    # requests, such as deleting the Cal.com API credential used by this workflow.
+    await db.commit()
 
 
 @router.put("/{workflow_id}/schedule-deletion", response_model=WorkflowListResponse)

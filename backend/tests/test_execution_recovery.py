@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -170,8 +171,62 @@ class RecoverOneTests(unittest.IsolatedAsyncioTestCase):
         rerun.assert_awaited_once()
         finalize.assert_not_called()
 
+    async def test_failed_rerun_is_finalized_and_local_heartbeat_is_removed(self) -> None:
+        from app.services.execution_recovery import ExecutionRecoveryService
+
+        svc = ExecutionRecoveryService()
+        orphan = _orphan(attempt=1)
+        workflow = MagicMock(auto_recover_runs=True)
+        with (
+            patch.object(svc, "_load_workflow", AsyncMock(return_value=workflow)),
+            patch.object(svc, "_rerun", AsyncMock(side_effect=RuntimeError("boom"))),
+            patch.object(svc, "_finalize", AsyncMock()) as finalize,
+            patch("app.services.execution_cancellation.unregister_local_execution") as unregister,
+        ):
+            await svc._recover_one(orphan)
+
+        unregister.assert_called_once_with(orphan.execution_id)
+        finalize.assert_awaited_once_with(orphan=orphan, workflow=workflow, status="failed")
+
 
 class RerunCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rerun_failure_propagates_to_recovery_coordinator(self) -> None:
+        from app.services.execution_recovery import ExecutionRecoveryService
+
+        svc = ExecutionRecoveryService()
+        orphan = _orphan(trigger_source="Cal.com")
+        workflow = SimpleNamespace(
+            id=orphan.workflow_id,
+            owner_id=uuid.uuid4(),
+            name="Cal recovery",
+            nodes=[],
+            edges=[],
+        )
+        session = AsyncMock()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("app.db.session.async_session_maker", return_value=session_context),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch("app.services.execution_cancellation.register_execution", MagicMock()),
+            patch("app.services.execution_cancellation.clear_execution") as clear_execution,
+            patch(
+                "app.services.execution_recovery.asyncio.to_thread",
+                AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                await svc._rerun(orphan, workflow)
+
+        clear_execution.assert_not_called()
+
     async def test_board_recovery_syncs_card_after_history_is_persisted(self) -> None:
         from app.services.execution_recovery import ExecutionRecoveryService
 
@@ -181,6 +236,8 @@ class RerunCompletionTests(unittest.IsolatedAsyncioTestCase):
             id=orphan.workflow_id,
             owner_id=uuid.uuid4(),
             name="Deploy",
+            description="Deploy the service",
+            workflow_timeout_seconds=45,
             nodes=[],
             edges=[],
         )
@@ -210,7 +267,7 @@ class RerunCompletionTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.execution_cancellation.clear_execution", MagicMock()),
             patch(
                 "app.services.execution_recovery.asyncio.to_thread", AsyncMock(return_value=result)
-            ),
+            ) as to_thread,
             patch("app.api.analytics.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch(
                 "app.api.workflows._persist_global_variables_from_execution",
@@ -224,4 +281,40 @@ class RerunCompletionTests(unittest.IsolatedAsyncioTestCase):
             await svc._rerun(orphan, workflow)
 
         session.commit.assert_awaited_once()
+        self.assertEqual(to_thread.await_args.kwargs["timeout_seconds"], 45)
+        self.assertEqual(to_thread.await_args.kwargs["workflow_name"], "Deploy")
+        self.assertEqual(
+            to_thread.await_args.kwargs["workflow_description"],
+            "Deploy the service",
+        )
         sync_board.assert_awaited_once_with(orphan.execution_id)
+
+
+class RecoveryTaskLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_awaits_claimed_recovery_tasks_without_cancelling(self) -> None:
+        from app.services.execution_recovery import ExecutionRecoveryService
+
+        svc = ExecutionRecoveryService()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        completed = asyncio.Event()
+
+        async def recovery_task() -> None:
+            started.set()
+            await release.wait()
+            completed.set()
+
+        task = asyncio.create_task(recovery_task())
+        svc._recovery_tasks.add(task)
+        await started.wait()
+
+        stop_task = asyncio.create_task(svc.stop())
+        await asyncio.sleep(0)
+
+        self.assertFalse(stop_task.done())
+        self.assertFalse(task.cancelled())
+        release.set()
+        await stop_task
+
+        self.assertTrue(completed.is_set())
+        self.assertTrue(task.done())

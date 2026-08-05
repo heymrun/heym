@@ -74,6 +74,7 @@ function getTypeIcon(type: CredentialType): typeof Brain {
       return MessageSquare;
     case "discord":
     case "discord_trigger":
+    case "cal_api":
     case "cal_trigger":
       return MessageSquare;
     case "slack":
@@ -113,6 +114,7 @@ function getTypeColor(type: CredentialType): string {
     case "discord":
     case "discord_trigger":
       return "bg-indigo-500/10 text-indigo-500";
+    case "cal_api":
     case "cal_trigger":
       return "bg-orange-500/10 text-orange-500";
     case "slack":

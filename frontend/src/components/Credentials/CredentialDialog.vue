@@ -230,6 +230,7 @@ const typeOptions = [
   { value: "telegram", label: CREDENTIAL_TYPE_LABELS.telegram },
   { value: "discord", label: CREDENTIAL_TYPE_LABELS.discord },
   { value: "discord_trigger", label: CREDENTIAL_TYPE_LABELS.discord_trigger },
+  { value: "cal_api", label: CREDENTIAL_TYPE_LABELS.cal_api },
   { value: "cal_trigger", label: CREDENTIAL_TYPE_LABELS.cal_trigger },
   { value: "slack", label: CREDENTIAL_TYPE_LABELS.slack },
   { value: "slack_trigger", label: CREDENTIAL_TYPE_LABELS.slack_trigger },
@@ -273,7 +274,7 @@ watch(
         codexSignedInAccount.value =
           props.credential.public_fields?.account_id || "";
         baseUrl.value =
-          props.credential.type === "jira"
+          props.credential.type === "jira" || props.credential.type === "cal_api"
             ? props.credential.public_fields?.base_url ?? ""
             : "";
         jiraEmail.value =
@@ -555,6 +556,8 @@ const isValid = computed(() => {
     return !!signingSecret.value.trim() || isEditing.value;
   } else if (type.value === "discord_trigger") {
     return !!discordPublicKey.value.trim() || isEditing.value;
+  } else if (type.value === "cal_api") {
+    return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "cal_trigger") {
     return !!calWebhookSecret.value.trim() || isEditing.value;
   } else if (type.value === "imap") {
@@ -851,6 +854,11 @@ function buildConfig(): CredentialConfig {
     return { signing_secret: signingSecret.value };
   } else if (type.value === "discord_trigger") {
     return { public_key: discordPublicKey.value.trim() };
+  } else if (type.value === "cal_api") {
+    return {
+      api_key: apiKey.value.trim(),
+      base_url: baseUrl.value.trim() || "https://api.cal.com",
+    };
   } else if (type.value === "cal_trigger") {
     return { webhook_secret: calWebhookSecret.value.trim() };
   } else if (type.value === "flaresolverr") {
@@ -2358,6 +2366,34 @@ async function handleSave(): Promise<void> {
           <p class="text-xs text-muted-foreground">
             Enter the same secret when creating the webhook in Cal.com. It signs each request with
             HMAC-SHA256.
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'cal_api'">
+        <div class="space-y-2">
+          <Label for="cred-cal-api-key">API Key</Label>
+          <Input
+            id="cred-cal-api-key"
+            v-model="apiKey"
+            type="password"
+            :placeholder="isEditing ? '(re-enter to update)' : 'Paste your Cal.com API key'"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            Used only by Heym to create, update, and remove managed Cal.com webhooks.
+          </p>
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-cal-api-base-url">Base URL</Label>
+          <Input
+            id="cred-cal-api-base-url"
+            v-model="baseUrl"
+            placeholder="https://api.cal.com"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            Keep the default for Cal.com Cloud, or enter your self-hosted Cal.com API URL.
           </p>
         </div>
       </template>

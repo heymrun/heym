@@ -11,6 +11,7 @@ export type CredentialType =
   | "header"
   | "discord"
   | "discord_trigger"
+  | "cal_api"
   | "cal_trigger"
   | "telegram"
   | "slack"
@@ -405,6 +406,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   telegram: "Telegram Bot",
   discord: "Discord Webhook",
   discord_trigger: "Discord Trigger (Public Key)",
+  cal_api: "Cal.com API",
   cal_trigger: "Cal.com Trigger (Webhook Secret)",
   slack: "Slack Webhook",
   slack_trigger: "Slack Trigger (Signing Secret)",
@@ -442,6 +444,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   telegram: "Connect a Telegram bot for inbound webhook triggers and outbound bot messages",
   discord: "Send messages via Discord incoming webhooks",
   discord_trigger: "Verify incoming Discord interaction webhooks using an application public key",
+  cal_api: "Create and manage Cal.com webhooks through the Cal.com API",
   cal_trigger: "Verify incoming Cal.com webhooks using a shared HMAC secret",
   slack: "Send messages via Slack incoming webhooks",
   slack_trigger: "Verify incoming Slack event webhooks using a signing secret",

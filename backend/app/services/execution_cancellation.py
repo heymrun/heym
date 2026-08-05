@@ -119,6 +119,67 @@ def register_execution(
     return event
 
 
+async def persist_registered_execution(
+    db: AsyncSession,
+    execution_id: uuid.UUID,
+) -> None:
+    """Persist a locally registered execution in the caller's transaction.
+
+    Trigger endpoints use this before acknowledging external webhooks so a worker
+    crash cannot lose the execution before the asynchronous registry loop runs.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.db.models import ActiveWorkflowExecution
+
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None:
+            raise ValueError(f"Execution {execution_id} is not registered")
+        workflow_id = handle.workflow_id
+        started_at = handle.started_at
+        inputs = dict(handle.inputs)
+        trigger_source = handle.trigger_source
+        actor_user_id = handle.actor_user_id
+        recoverable = handle.recoverable
+
+    now = _utcnow()
+    statement = (
+        pg_insert(ActiveWorkflowExecution)
+        .values(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            worker_id=_WORKER_ID,
+            started_at=started_at,
+            heartbeat_at=now,
+            cancel_requested_at=None,
+            inputs=inputs,
+            trigger_source=trigger_source,
+            actor_user_id=actor_user_id,
+            attempt=0,
+            recoverable=recoverable,
+            running_node_ids=[],
+            node_results=[],
+        )
+        .on_conflict_do_update(
+            index_elements=["execution_id"],
+            set_={
+                "workflow_id": workflow_id,
+                "worker_id": _WORKER_ID,
+                "started_at": started_at,
+                "heartbeat_at": now,
+                "cancel_requested_at": None,
+                "inputs": inputs,
+                "trigger_source": trigger_source,
+                "actor_user_id": actor_user_id,
+                "running_node_ids": [],
+                "node_results": [],
+            },
+        )
+    )
+    await db.execute(statement)
+
+
 def cancel_execution(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool:
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(execution_id)
@@ -132,6 +193,12 @@ def clear_execution(execution_id: uuid.UUID) -> None:
     with _LOCK:
         _ACTIVE_EXECUTIONS.pop(execution_id, None)
     active_execution_registry.record_finished(execution_id)
+
+
+def unregister_local_execution(execution_id: uuid.UUID) -> None:
+    """Stop local heartbeats without deleting the persisted recovery record."""
+    with _LOCK:
+        _ACTIVE_EXECUTIONS.pop(execution_id, None)
 
 
 def list_active_executions() -> list[ExecutionCancellationHandle]:

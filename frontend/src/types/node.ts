@@ -53,7 +53,15 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     outputs: 1,
     defaultData: {
       label: "calTrigger",
+      setupMode: "manual",
       credentialId: "",
+      calApiCredentialId: "",
+      events: ["BOOKING_CREATED"],
+      payloadVersion: "2021-10-20",
+      payloadTemplate: "",
+      noShowTime: 5,
+      noShowTimeUnit: "MINUTE",
+      active: true,
     },
   },
   telegramTrigger: {

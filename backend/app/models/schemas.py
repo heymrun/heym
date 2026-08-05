@@ -517,6 +517,7 @@ class CredentialType(str, Enum):
     header = "header"
     discord = "discord"
     discord_trigger = "discord_trigger"
+    cal_api = "cal_api"
     cal_trigger = "cal_trigger"
     telegram = "telegram"
     slack = "slack"
@@ -672,6 +673,20 @@ class CredentialTestRequest(BaseModel):
 class CredentialTestResponse(BaseModel):
     success: bool
     message: str
+
+
+class CalWebhookSubscriptionResponse(BaseModel):
+    workflow_id: uuid.UUID
+    node_id: str
+    external_webhook_id: str | None = None
+    subscriber_url: str
+    status: str
+    events: list[str] = Field(default_factory=list)
+    payload_version: str = "2021-10-20"
+    no_show_time: int = 5
+    no_show_time_unit: str = "MINUTE"
+    last_error: str | None = None
+    synced_at: datetime | None = None
 
 
 class SupabaseTablesResponse(BaseModel):

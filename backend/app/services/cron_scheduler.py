@@ -15,6 +15,7 @@ from app.api.workflows import (
 )
 from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVersion
 from app.db.session import async_session_maker
+from app.services.cal_api_service import CalApiError, delete_managed_cal_subscriptions
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
@@ -293,20 +294,37 @@ class CronScheduler:
     async def _cleanup_scheduled_workflows(self) -> None:
         async with async_session_maker() as db:
             result = await db.execute(
-                select(Workflow).where(Workflow.scheduled_for_deletion.isnot(None))
+                select(Workflow.id).where(Workflow.scheduled_for_deletion.isnot(None))
             )
-            scheduled_workflows = result.scalars().all()
+            scheduled_workflow_ids = list(result.scalars().all())
 
             deleted_count = 0
-            for workflow in scheduled_workflows:
+            for workflow_id in scheduled_workflow_ids:
+                workflow = await db.get(Workflow, workflow_id)
+                if workflow is None:
+                    continue
                 if self._should_delete_workflow(workflow):
                     logger.info(
                         "Deleting scheduled workflow %s (%s) - all start nodes deactivated",
                         workflow.id,
                         workflow.name,
                     )
-                    await db.delete(workflow)
-                    deleted_count += 1
+                    try:
+                        await delete_managed_cal_subscriptions(
+                            db,
+                            workflow_id=workflow.id,
+                            owner_id=workflow.owner_id,
+                        )
+                        await db.delete(workflow)
+                        await db.commit()
+                        deleted_count += 1
+                    except CalApiError as exc:
+                        await db.rollback()
+                        logger.warning(
+                            "Keeping scheduled workflow %s because Cal.com cleanup failed: %s",
+                            workflow_id,
+                            exc,
+                        )
                 else:
                     logger.debug(
                         "Keeping scheduled workflow %s (%s) - not all start nodes deactivated",
@@ -315,7 +333,6 @@ class CronScheduler:
                     )
 
             if deleted_count > 0:
-                await db.commit()
                 logger.info(
                     "Scheduled deletion cleanup completed: %d workflows deleted", deleted_count
                 )

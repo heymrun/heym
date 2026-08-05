@@ -248,17 +248,31 @@ In workflow expressions:
 - **DO NOT use** `textInput` as the entry point for Cal.com-triggered workflows
 - **Data fields**:
   - `label`: Node identifier (e.g., "calEvent")
-  - `credentialId`: UUID of a `cal_trigger` credential containing the webhook secret
+  - `setupMode`: `"manual"` (default, backward compatible) or `"managed"`
+  - `credentialId`: In manual mode, UUID of a `cal_trigger` credential containing the webhook secret
+  - `calApiCredentialId`: In managed mode, UUID of a `cal_api` credential. Use an owned credential placeholder; this field is not expression-capable.
+  - `events`: In managed mode, non-empty array of Cal.com webhook event names (default `["BOOKING_CREATED"]`)
+  - `payloadVersion`: In managed mode, `"2021-10-20"` (default) or `"2026-07-27"` (adds ICS calendar content on selected booking events)
+  - `payloadTemplate`: Optional Cal.com payload template string. This is interpreted by Cal.com, not as a Heym `$...` expression.
+  - `noShowTime`: Positive integer delay before evaluating host/guest Cal Video no-show events (default `5`)
+  - `noShowTimeUnit`: `"MINUTE"` (default), `"HOUR"`, or `"DAY"`. Used when either Cal Video no-show event is selected.
+  - `active`: Whether the trigger can receive requests (default `true`). Managed webhooks can only be synced while active.
 - **Output fields available downstream**:
   - `$<label>.event` — complete Cal.com webhook body
-  - `$<label>.triggerEvent` — event name (e.g., `"BOOKING_CREATED"`)
-  - `$<label>.payload` — event-specific payload
+  - `$<label>.triggerEvent` — top-level event name (e.g., `"BOOKING_CREATED"`), or `null` when a custom payload template omits it
+  - `$<label>.payload` — top-level `payload`, or the complete webhook body when that field is absent (flat meeting events and custom payloads)
   - `$<label>.headers` — sanitized HTTP headers
   - `$<label>.triggered_at` — ISO timestamp
+- **Custom payload templates**: Keep `triggerEvent` and `createdAt` at the top level. `triggerEvent` preserves the event-name output; `createdAt` enables 24-hour duplicate-delivery suppression.
 
 **Example node JSON:**
 ```json
 {"id": "n1", "type": "calTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "calEvent", "credentialId": "cal-trigger-credential-uuid"}}
+```
+
+**Managed example:**
+```json
+{"id": "n1", "type": "calTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "calEvent", "setupMode": "managed", "calApiCredentialId": "cal-api-credential-uuid", "events": ["BOOKING_CREATED", "BOOKING_CANCELLED"], "payloadVersion": "2021-10-20", "payloadTemplate": "", "noShowTime": 5, "noShowTimeUnit": "MINUTE", "active": true}}
 ```
 
 **Example downstream expressions:**

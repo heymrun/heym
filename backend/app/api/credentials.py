@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user
 from app.db.models import (
+    CalWebhookSubscription,
     Credential,
     CredentialShare,
     CredentialTeamShare,
@@ -43,12 +44,45 @@ from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 router = APIRouter()
 
 
+async def _cal_api_credential_has_remote_webhooks(
+    db: AsyncSession,
+    credential_id: uuid.UUID,
+) -> bool:
+    result = await db.execute(
+        select(CalWebhookSubscription.id)
+        .where(
+            CalWebhookSubscription.credential_id == credential_id,
+            CalWebhookSubscription.external_webhook_id.is_not(None),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _cal_api_connection_changed(existing: dict, updated: dict) -> bool:
+    existing_url = str(existing.get("base_url") or "https://api.cal.com").strip().rstrip("/")
+    updated_url = str(updated.get("base_url") or "https://api.cal.com").strip().rstrip("/")
+    existing_key = str(existing.get("api_key") or "").strip()
+    updated_key = str(updated.get("api_key") or "").strip()
+    return existing_url != updated_url or existing_key != updated_key
+
+
 def merge_credential_config_for_update(
     credential_type: CredentialType,
     existing_config: dict,
     incoming_config: dict,
 ) -> dict:
     """Merge update payload into an existing credential config when needed."""
+    if credential_type == CredentialType.cal_api:
+        merged_config = dict(existing_config)
+        incoming_api_key = str(incoming_config.get("api_key", "") or "").strip()
+        if incoming_api_key:
+            merged_config["api_key"] = incoming_api_key
+        incoming_base_url = str(incoming_config.get("base_url", "") or "").strip()
+        if incoming_base_url:
+            merged_config["base_url"] = incoming_base_url
+        return merged_config
+
     if credential_type == CredentialType.notion:
         merged_config = dict(existing_config)
         incoming_auth_mode = str(incoming_config.get("auth_mode", "") or "").strip()
@@ -170,6 +204,9 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     if credential_type == CredentialType.cal_trigger:
         webhook_secret = config.get("webhook_secret", "")
         return mask_api_key(webhook_secret)
+    if credential_type == CredentialType.cal_api:
+        api_key = str(config.get("api_key", "") or "")
+        return mask_api_key(api_key)
     if credential_type == CredentialType.slack:
         webhook_url = config.get("webhook_url", "")
         return mask_api_key(webhook_url)
@@ -279,6 +316,11 @@ def get_public_credential_fields(
     credential_type: CredentialType, config: dict
 ) -> dict[str, str | None]:
     """Return non-secret credential fields that the UI may safely hydrate for editing."""
+    if credential_type == CredentialType.cal_api:
+        return {
+            "base_url": str(config.get("base_url", "https://api.cal.com") or "").strip()
+            or "https://api.cal.com"
+        }
     if credential_type == CredentialType.supabase:
         supabase_url = str(config.get("supabase_url", "")).strip() or None
         supabase_schema = str(config.get("supabase_schema", "public")).strip() or "public"
@@ -1215,6 +1257,7 @@ async def update_credential(
     config = decrypt_config(credential.encrypted_config)
 
     if credential_data.config is not None:
+        existing_config = config
         config = (
             _merge_supabase_update_config(credential_data.config, config)
             if credential.type == CredentialType.supabase
@@ -1229,6 +1272,18 @@ async def update_credential(
             config,
             allow_pending_oauth=credential.type in {CredentialType.linear, CredentialType.notion},
         )
+        if (
+            credential.type == CredentialType.cal_api
+            and _cal_api_connection_changed(existing_config, config)
+            and await _cal_api_credential_has_remote_webhooks(db, credential.id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Disable every managed Cal.com webhook using this credential before changing "
+                    "its API key or base URL"
+                ),
+            )
         credential.encrypted_config = encrypt_config(config)
 
     await db.flush()
@@ -1267,6 +1322,15 @@ async def delete_credential(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+
+    if credential.type == CredentialType.cal_api:
+        if await _cal_api_credential_has_remote_webhooks(db, credential.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Disable every managed Cal.com webhook using this credential before deleting it"
+                ),
+            )
 
     await db.delete(credential)
 
@@ -1519,6 +1583,19 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cal.com Trigger credential requires webhook_secret",
+            )
+    elif credential_type == CredentialType.cal_api:
+        if "api_key" not in config or not str(config["api_key"]).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cal.com API credential requires api_key",
+            )
+        cal_base_url = str(config.get("base_url", "https://api.cal.com") or "").strip()
+        parsed = urlparse(cal_base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cal.com API credential base_url must be a valid http(s) URL",
             )
     elif credential_type == CredentialType.slack:
         if "webhook_url" not in config or not config["webhook_url"]:

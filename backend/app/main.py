@@ -204,6 +204,7 @@ async def lifespan(app: FastAPI):
     await imap_trigger_manager.stop()
     await RabbitMQPool.close_all()
     await cron_scheduler.stop()
+    await cal.shutdown_background_tasks()
     await execution_recovery_service.stop()
     await active_execution_registry.stop()
     with suppress(Exception):

@@ -993,7 +993,18 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
   const defaults: Record<NodeType, WorkflowNode["data"]> = {
     textInput: { label: "start", value: "", inputFields: [{ key: "text" }] },
     cron: { label: "cron", cronExpression: "0 * * * *" },
-    calTrigger: { label: "calTrigger", credentialId: "" },
+    calTrigger: {
+      label: "calTrigger",
+      setupMode: "manual",
+      credentialId: "",
+      calApiCredentialId: "",
+      events: ["BOOKING_CREATED"],
+      payloadVersion: "2021-10-20",
+      payloadTemplate: "",
+      noShowTime: 5,
+      noShowTimeUnit: "MINUTE",
+      active: true,
+    },
     websocketTrigger: {
       label: "websocketTrigger",
       websocketUrl: "",

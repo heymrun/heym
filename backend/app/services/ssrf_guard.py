@@ -185,6 +185,44 @@ class _HttpEgressPinBackend(httpcore.NetworkBackend):
         raise httpcore.ConnectError("HTTP node does not allow unix-socket connections")
 
 
+class _AsyncHttpEgressPinBackend(httpcore.AsyncNetworkBackend):
+    """Async counterpart used by integrations with operator-configured base URLs."""
+
+    def __init__(self, inner: httpcore.AsyncNetworkBackend) -> None:
+        self._inner = inner
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:
+            pinned = _resolve_pinned_ip(host)
+        except SsrfBlockedError as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        return await self._inner.connect_tcp(
+            pinned,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise httpcore.ConnectError("HTTP URL must not use a unix socket")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
 def _install_egress_pin(client: httpx.Client) -> None:
     """Wrap a client's connection pool with the pinning egress backend.
 
@@ -212,6 +250,27 @@ def _install_egress_pin(client: httpx.Client) -> None:
     if isinstance(backend, _HttpEgressPinBackend):
         return
     pool._network_backend = _HttpEgressPinBackend(backend)
+
+
+def install_async_egress_pin(client: httpx.AsyncClient) -> None:
+    """Install the same fail-closed dial-time SSRF guard on an async client."""
+    if settings.http_allow_private_urls:
+        return
+    if getattr(client, "_mounts", None):
+        raise RuntimeError(
+            "HTTP SSRF egress pin refuses a client with proxy/mount transports "
+            "(a proxy would bypass the pinned backend); build it with trust_env=False"
+        )
+    transport = getattr(client, "_transport", None)
+    pool = getattr(transport, "_pool", None)
+    backend = getattr(pool, "_network_backend", None)
+    if pool is None or backend is None:
+        raise RuntimeError(
+            "HTTP SSRF egress pin could not be installed (httpx internals unavailable)"
+        )
+    if isinstance(backend, _AsyncHttpEgressPinBackend):
+        return
+    pool._network_backend = _AsyncHttpEgressPinBackend(backend)
 
 
 def get_guarded_http_client() -> httpx.Client:

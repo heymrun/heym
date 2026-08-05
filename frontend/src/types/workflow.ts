@@ -422,6 +422,13 @@ export interface NodeData {
   mappings?: MappingField[];
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
+  setupMode?: "manual" | "managed";
+  calApiCredentialId?: string;
+  events?: string[];
+  payloadVersion?: string;
+  payloadTemplate?: string;
+  noShowTime?: number;
+  noShowTimeUnit?: "MINUTE" | "HOUR" | "DAY";
   githubCredentialId?: string;
   repositoryUrl?: string;
   baseBranch?: string;

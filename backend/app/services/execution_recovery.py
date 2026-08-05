@@ -40,6 +40,7 @@ class ExecutionRecoveryService:
     def __init__(self) -> None:
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._recovery_tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -55,6 +56,10 @@ class ExecutionRecoveryService:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        recovery_tasks = list(self._recovery_tasks)
+        if recovery_tasks:
+            logger.info("Waiting for %d recovery task(s) to finish", len(recovery_tasks))
+            await asyncio.gather(*recovery_tasks, return_exceptions=True)
         logger.info("Execution recovery service stopped")
 
     async def _run_loop(self) -> None:
@@ -72,9 +77,25 @@ class ExecutionRecoveryService:
     async def _sweep_once(self) -> None:
         orphans = await claim_orphaned_executions()
         for orphan in orphans:
-            asyncio.create_task(self._recover_one(orphan))
+            task = asyncio.create_task(self._recover_one(orphan))
+            self._recovery_tasks.add(task)
+            task.add_done_callback(self._recovery_task_done)
+
+    def _recovery_task_done(self, task: asyncio.Task[None]) -> None:
+        """Retain recovery tasks through completion and consume unexpected failures."""
+        self._recovery_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error(
+                "Execution recovery task failed",
+                exc_info=(type(error), error, error.__traceback__),
+            )
 
     async def _recover_one(self, orphan: ClaimedOrphan) -> None:
+        from app.services.workflow_executor import WorkflowCancelledError, WorkflowTimeoutError
+
         workflow = await self._load_workflow(orphan.workflow_id)
         action = decide_recovery_action(
             attempt=orphan.attempt,
@@ -82,7 +103,28 @@ class ExecutionRecoveryService:
             workflow_exists=workflow is not None,
         )
         if action == "rerun":
-            await self._rerun(orphan, workflow)
+            try:
+                await self._rerun(orphan, workflow)
+            except asyncio.CancelledError:
+                raise
+            except WorkflowTimeoutError:
+                logger.warning("Recovery re-run timed out for execution %s", orphan.execution_id)
+                from app.services.execution_cancellation import unregister_local_execution
+
+                unregister_local_execution(orphan.execution_id)
+                await self._finalize(orphan=orphan, workflow=workflow, status="failed")
+            except WorkflowCancelledError:
+                logger.info("Recovery re-run was cancelled for execution %s", orphan.execution_id)
+                from app.services.execution_cancellation import unregister_local_execution
+
+                unregister_local_execution(orphan.execution_id)
+                await self._finalize(orphan=orphan, workflow=workflow, status="cancelled")
+            except Exception:
+                logger.exception("Recovery re-run failed for execution %s", orphan.execution_id)
+                from app.services.execution_cancellation import unregister_local_execution
+
+                unregister_local_execution(orphan.execution_id)
+                await self._finalize(orphan=orphan, workflow=workflow, status="failed")
             return
         await self._finalize(orphan=orphan, workflow=workflow, status=action)
 
@@ -93,19 +135,29 @@ class ExecutionRecoveryService:
         from app.db.session import async_session_maker
 
         async with async_session_maker() as session:
-            result = await session.execute(select(Workflow).where(Workflow.id == workflow_id))
+            result = await session.execute(
+                select(Workflow).where(
+                    Workflow.id == workflow_id,
+                    Workflow.scheduled_for_deletion.is_(None),
+                )
+            )
             return result.scalar_one_or_none()
 
     async def _finalize(self, *, orphan: ClaimedOrphan, workflow, status: str) -> None:
         """Write a terminal ExecutionHistory entry and drop the active row."""
         from sqlalchemy import delete
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        from app.api.analytics import upsert_workflow_analytics_snapshot
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory
         from app.db.session import async_session_maker
+        from app.services.execution_cancellation import clear_execution
 
         async with async_session_maker() as session:
-            session.add(
-                ExecutionHistory(
+            await session.execute(
+                pg_insert(ExecutionHistory)
+                .values(
+                    id=orphan.execution_id,
                     workflow_id=orphan.workflow_id,
                     inputs=orphan.inputs,
                     outputs={},
@@ -115,13 +167,33 @@ class ExecutionRecoveryService:
                     trigger_source=orphan.trigger_source,
                     recovered=True,
                 )
+                .on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "outputs": {},
+                        "node_results": [],
+                        "status": status,
+                        "execution_time_ms": 0.0,
+                        "recovered": True,
+                    },
+                )
             )
             await session.execute(
                 delete(ActiveWorkflowExecution).where(
                     ActiveWorkflowExecution.execution_id == orphan.execution_id
                 )
             )
+            if workflow is not None:
+                await upsert_workflow_analytics_snapshot(
+                    session,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status="error" if status == "failed" else status,
+                    execution_time_ms=0.0,
+                )
             await session.commit()
+        clear_execution(orphan.execution_id)
         logger.info(
             "Recovery finalized execution %s as %s (workflow %s)",
             orphan.execution_id,
@@ -131,6 +203,8 @@ class ExecutionRecoveryService:
 
     async def _rerun(self, orphan: ClaimedOrphan, workflow) -> None:
         """Re-run the workflow from scratch with the original inputs."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from app.api.analytics import upsert_workflow_analytics_snapshot
         from app.api.workflows import (
             _persist_global_variables_from_execution,
@@ -139,12 +213,20 @@ class ExecutionRecoveryService:
         )
         from app.db.models import ExecutionHistory
         from app.db.session import async_session_maker
+        from app.services.codex_followup_service import (
+            is_codex_pending_execution,
+            persist_pending_codex_followup_execution,
+        )
         from app.services.execution_cancellation import (
             clear_execution,
             register_execution,
         )
         from app.services.global_variables_service import get_global_variables_context
-        from app.services.workflow_executor import execute_workflow
+        from app.services.hitl_service import (
+            build_default_public_base_url,
+            persist_pending_hitl_execution,
+        )
+        from app.services.workflow_executor import _to_json_compatible, execute_workflow
 
         actor_user_id = orphan.actor_user_id or workflow.owner_id
         async with async_session_maker() as session:
@@ -163,8 +245,8 @@ class ExecutionRecoveryService:
             actor_user_id=actor_user_id,
             recoverable=True,
         )
-        try:
-            result = await asyncio.to_thread(
+        execution_task = asyncio.create_task(
+            asyncio.to_thread(
                 execute_workflow,
                 workflow_id=workflow.id,
                 nodes=workflow.nodes,
@@ -176,23 +258,88 @@ class ExecutionRecoveryService:
                 trace_user_id=actor_user_id,
                 actor_user_id=actor_user_id,
                 cancel_event=cancel_event,
+                timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+                workflow_name=workflow.name,
+                workflow_description=getattr(workflow, "description", None) or "",
                 execution_id=str(orphan.execution_id),
+                public_base_url=build_default_public_base_url(),
             )
-        finally:
-            clear_execution(orphan.execution_id)
+        )
+        try:
+            result = await asyncio.shield(execution_task)
+        except asyncio.CancelledError:
+            cancel_event.set()
+            logger.warning(
+                "Waiting for cancelled recovery execution %s worker thread to stop",
+                orphan.execution_id,
+            )
+            result = await execution_task
+
+        if getattr(result, "allow_downstream_pending", False):
+            result.join_allow_downstream()
 
         async with async_session_maker() as session:
-            session.add(
-                ExecutionHistory(
+            if result.status == "pending":
+                history_entry = await session.get(ExecutionHistory, orphan.execution_id)
+                persist_pending = (
+                    persist_pending_codex_followup_execution
+                    if is_codex_pending_execution(result)
+                    else persist_pending_hitl_execution
+                )
+                history_entry, _ = await persist_pending(
+                    db=session,
+                    workflow=workflow,
+                    enriched_inputs=orphan.inputs,
+                    execution_result=result,
+                    trigger_source=orphan.trigger_source,
+                    credentials_owner_id=actor_user_id,
+                    trace_user_id=actor_user_id,
+                    public_base_url=build_default_public_base_url(),
+                    history_entry=history_entry,
+                    history_entry_id=orphan.execution_id,
+                )
+                history_entry.recovered = True
+                await upsert_workflow_analytics_snapshot(
+                    session,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status=result.status,
+                    execution_time_ms=result.execution_time_ms,
+                )
+                await session.commit()
+                clear_execution(orphan.execution_id)
+                if orphan.trigger_source == "board":
+                    from app.services.board_run_service import sync_recovered_board_run
+
+                    await sync_recovered_board_run(orphan.execution_id)
+                logger.info("Recovered execution %s is pending human input", orphan.execution_id)
+                return
+
+            await session.execute(
+                pg_insert(ExecutionHistory)
+                .values(
                     id=orphan.execution_id,
                     workflow_id=workflow.id,
                     inputs=orphan.inputs,
-                    outputs=result.outputs,
-                    node_results=result.node_results,
+                    outputs=_to_json_compatible(result.outputs),
+                    node_results=_to_json_compatible(result.node_results),
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
                     trigger_source=orphan.trigger_source,
                     recovered=True,
+                )
+                .on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "inputs": orphan.inputs,
+                        "outputs": _to_json_compatible(result.outputs),
+                        "node_results": _to_json_compatible(result.node_results),
+                        "status": result.status,
+                        "execution_time_ms": result.execution_time_ms,
+                        "trigger_source": orphan.trigger_source,
+                        "recovered": True,
+                    },
                 )
             )
             await upsert_workflow_analytics_snapshot(
@@ -203,15 +350,37 @@ class ExecutionRecoveryService:
                 status=result.status,
                 execution_time_ms=result.execution_time_ms,
             )
+            for sub_execution in result.sub_workflow_executions:
+                session.add(
+                    ExecutionHistory(
+                        workflow_id=uuid.UUID(sub_execution.workflow_id),
+                        inputs=_to_json_compatible(sub_execution.inputs),
+                        outputs=_to_json_compatible(sub_execution.outputs),
+                        node_results=_to_json_compatible(sub_execution.node_results),
+                        status=sub_execution.status,
+                        execution_time_ms=sub_execution.execution_time_ms,
+                        trigger_source=sub_execution.trigger_source,
+                        recovered=True,
+                    )
+                )
+                await upsert_workflow_analytics_snapshot(
+                    session,
+                    workflow_id=uuid.UUID(sub_execution.workflow_id),
+                    owner_id=None,
+                    workflow_name_snapshot=sub_execution.workflow_name or "Sub-workflow",
+                    status=sub_execution.status,
+                    execution_time_ms=sub_execution.execution_time_ms,
+                )
             await _persist_global_variables_from_execution(
                 session,
                 workflow.owner_id,
                 workflow.nodes,
                 workflow_cache,
-                result.node_results,
+                _to_json_compatible(result.node_results),
                 result.sub_workflow_executions,
             )
             await session.commit()
+        clear_execution(orphan.execution_id)
         if orphan.trigger_source == "board":
             from app.services.board_run_service import sync_recovered_board_run
 
