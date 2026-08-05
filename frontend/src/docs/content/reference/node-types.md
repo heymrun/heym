@@ -45,6 +45,7 @@ See [Triggers](./triggers.md) for all entry points.
 | Node | Description | Inputs | Outputs |
 |------|-------------|--------|---------|
 | [Set](../nodes/set-node.md) | Transform and map data | 1 | 1 |
+| [Converter](../nodes/converter-node.md) | Convert data between formats (CSV, JSON) and OCR images or PDFs to text | 1 | 1 |
 | [Variable](../nodes/variable-node.md) | Set or get a variable (workflow-local or [global](./global-variables.md)) | 1 | 1 |
 | [Execute](../nodes/execute-node.md) | Call another workflow | 1 | 1 |
 

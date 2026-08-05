@@ -13,6 +13,7 @@ from app.services.expression_evaluator import (
     classify_type,
     coerce_unprefixed_node_path_expression,
     is_single_dollar_expression,
+    is_top_level_ternary_expression,
     should_evaluate_as_multi_ref_condition,
     should_evaluate_as_multi_span_comparison_condition,
     should_evaluate_as_single_span_condition_tail,
@@ -185,6 +186,139 @@ class TestShouldEvaluateAsMultiSpanComparisonCondition(unittest.TestCase):
                 "$a.x and $b.y",
                 ex,
             )
+        )
+
+
+class TestIsTopLevelTernaryExpression(unittest.TestCase):
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_true_for_unprefixed_branches(self) -> None:
+        ex = self._executor()
+        self.assertTrue(
+            is_top_level_ternary_expression("$a.n > 0 ? a.text : b.text", ex),
+        )
+
+    def test_true_for_dollar_prefixed_branches(self) -> None:
+        ex = self._executor()
+        self.assertTrue(
+            is_top_level_ternary_expression("$a.n > 0 ? $a.text : $b.text", ex),
+        )
+
+    def test_true_for_surrounding_whitespace(self) -> None:
+        ex = self._executor()
+        self.assertTrue(
+            is_top_level_ternary_expression("  $a.flag ? $b.x : $c.y  ", ex),
+        )
+
+    def test_false_for_text_template_with_parentheses(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.name (admin)", ex))
+
+    def test_false_for_plain_sentence_template(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.name is here", ex))
+
+    def test_false_when_question_mark_lives_inside_span(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.get('a?b:c')", ex))
+
+    def test_false_for_url_query_string(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.url?token=1", ex))
+
+    def test_false_when_not_starting_with_dollar(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("Result: $a.n > 0 ? x : y", ex))
+
+    def test_false_for_multiline_value(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.text\n$b.n > 0 ? x : y", ex))
+
+    def test_false_for_multi_span_comparison_condition(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.x == 1 && $b.y == 2", ex))
+
+    def test_false_when_branches_are_not_parsable(self) -> None:
+        ex = self._executor()
+        self.assertFalse(is_top_level_ternary_expression("$a.n > 0 ? or : maybe", ex))
+
+
+class TestTernaryDialogExecutorParity(unittest.TestCase):
+    """The evaluate dialog and the executor must return the same value for `$cond ? a : b`.
+
+    Regression: the LLM/agent `userMessage` path rendered `$a.n.length > 0 ? a.x : b.y`
+    as the literal text `1113 > 0 ? a.x : b.y` while the dialog resolved the branch value,
+    and the `$`-prefixed variant errored with "Invalid condition expression".
+    """
+
+    CONTEXT = {
+        "plannerAgent": {"taskPrompt": "planned work"},
+        "userInput": {"text": "raw user input"},
+        "emptyAgent": {"taskPrompt": ""},
+    }
+
+    UNPREFIXED = (
+        "$plannerAgent.taskPrompt.orEmpty().length > 0 ? plannerAgent.taskPrompt : userInput.text"
+    )
+    PREFIXED = (
+        "$plannerAgent.taskPrompt.orEmpty().length > 0 ? $plannerAgent.taskPrompt : $userInput.text"
+    )
+    PREFIXED_FALSY = (
+        "$emptyAgent.taskPrompt.orEmpty().length > 0 ? $emptyAgent.taskPrompt : $userInput.text"
+    )
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_dialog_returns_truthy_branch_for_unprefixed_form(self) -> None:
+        response = ExpressionEvaluatorService().evaluate(self.UNPREFIXED, self.CONTEXT)
+        self.assertIsNone(response.error)
+        self.assertEqual(response.result, "planned work")
+        self.assertEqual(response.result_type, "string")
+
+    def test_dialog_returns_truthy_branch_for_prefixed_form(self) -> None:
+        response = ExpressionEvaluatorService().evaluate(self.PREFIXED, self.CONTEXT)
+        self.assertIsNone(response.error)
+        self.assertEqual(response.result, "planned work")
+        self.assertEqual(response.result_type, "string")
+
+    def test_dialog_returns_falsy_branch_for_prefixed_form(self) -> None:
+        response = ExpressionEvaluatorService().evaluate(self.PREFIXED_FALSY, self.CONTEXT)
+        self.assertIsNone(response.error)
+        self.assertEqual(response.result, "raw user input")
+
+    def test_executor_template_matches_dialog_for_unprefixed_form(self) -> None:
+        self.assertEqual(
+            self._executor()._resolve_template(self.UNPREFIXED, self.CONTEXT, "n1"),
+            "planned work",
+        )
+
+    def test_executor_template_matches_dialog_for_prefixed_form(self) -> None:
+        self.assertEqual(
+            self._executor()._resolve_template(self.PREFIXED, self.CONTEXT, "n1"),
+            "planned work",
+        )
+
+    def test_executor_template_selects_falsy_branch(self) -> None:
+        self.assertEqual(
+            self._executor()._resolve_template(self.PREFIXED_FALSY, self.CONTEXT, "n1"),
+            "raw user input",
+        )
+
+    def test_message_template_matches_dialog_for_prefixed_form(self) -> None:
+        self.assertEqual(
+            self._executor().evaluate_message_template(self.PREFIXED, self.CONTEXT, "n1"),
+            "planned work",
+        )
+
+    def test_text_templates_are_not_captured_by_the_ternary_path(self) -> None:
+        ex = self._executor()
+        context = {"a": {"name": "Ali", "text": "hello"}, "b": {"text": "bye"}}
+        self.assertEqual(ex._resolve_template("$a.name (admin)", context, "n1"), "Ali (admin)")
+        self.assertEqual(ex._resolve_template("$a.name is here", context, "n1"), "Ali is here")
+        self.assertEqual(
+            ex._resolve_template("$a.text and $b.text", context, "n1"), "hello and bye"
         )
 
 

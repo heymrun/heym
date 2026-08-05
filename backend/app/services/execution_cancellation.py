@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import queue
@@ -7,6 +8,8 @@ import socket
 import threading
 import time
 import uuid
+from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -21,6 +24,17 @@ ACTIVE_EXECUTION_STALE_AFTER_SECONDS = 300
 RECOVERY_STALE_AFTER_SECONDS = 60
 _REGISTRY_POLL_SECONDS = 0.5
 _REGISTRY_CLEANUP_SECONDS = 30.0
+# Live SSE events kept per execution so a canvas that attaches mid-run replays the
+# same stream the runner emitted (agent tool progress, sub-agent node lifecycle).
+# Bounded by both count and total bytes: the oldest events are dropped first.
+MAX_PROGRESS_EVENTS = 2000
+MAX_PROGRESS_EVENT_BYTES = 8 * 1024 * 1024
+# A single oversized payload (large node output) is buffered without its payload
+# fields; the full value still reaches the canvas with the final history entry.
+MAX_PROGRESS_EVENT_PAYLOAD_BYTES = 256 * 1024
+# Events the observer synthesizes itself, plus executor-internal plumbing that is
+# not JSON serializable.
+_UNBUFFERED_EVENT_TYPES = frozenset({"execution_started", "execution_complete"})
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +60,23 @@ class ExecutionCancellationHandle:
     node_results: list[dict[str, Any]] = field(default_factory=list)
     progress_version: int = 0
     synced_progress_version: int = 0
+    publishes_progress_events: bool = False
+    progress_events: deque[tuple[int, str]] = field(default_factory=deque)
+    progress_event_bytes: int = 0
+    next_progress_event_seq: int = 0
+    dropped_progress_events: int = 0
+
+
+@dataclass(frozen=True)
+class ActiveExecutionStreamSnapshot:
+    """Atomic view of one execution's live progress, taken under the registry lock."""
+
+    publishes_progress_events: bool
+    running_node_ids: list[str]
+    node_results: list[dict[str, Any]]
+    events: list[str]
+    next_event_seq: int
+    dropped_event_count: int
 
 
 @dataclass(frozen=True)
@@ -268,6 +299,120 @@ def record_execution_node_completed(
         handle.running_node_ids.discard(str(node_id))
         handle.node_results.append(node_result)
         handle.progress_version += 1
+
+
+def mark_execution_publishes_progress_events(execution_id: str) -> None:
+    """Flag a run as emitting live SSE events so observers stream them instead of polling."""
+    handle = _handle_for_execution_id(execution_id)
+    if handle is None:
+        return
+    with _LOCK:
+        handle.publishes_progress_events = True
+
+
+def _serialize_progress_event(event: dict[str, Any]) -> str | None:
+    try:
+        payload = json.dumps(event)
+    except (TypeError, ValueError):
+        return None
+    if len(payload) <= MAX_PROGRESS_EVENT_PAYLOAD_BYTES:
+        return payload
+    # Keep the node lifecycle (type/id/label/status) and drop the bulky payload
+    # fields so one large output cannot dominate the buffer.
+    trimmed: dict[str, Any] = {
+        key: value
+        for key, value in event.items()
+        if value is None or isinstance(value, (str, int, float, bool))
+    }
+    trimmed["_truncated"] = True
+    try:
+        return json.dumps(trimmed)
+    except (TypeError, ValueError):
+        return None
+
+
+def record_execution_progress_event(execution_id: str, event: dict[str, Any]) -> None:
+    """Buffer one live SSE event so other tabs can replay the runner's stream."""
+    event_type = event.get("type")
+    if not isinstance(event_type, str) or event_type.startswith("_"):
+        return
+    if event_type in _UNBUFFERED_EVENT_TYPES:
+        return
+    handle = _handle_for_execution_id(execution_id)
+    if handle is None:
+        return
+    payload = _serialize_progress_event(event)
+    if payload is None:
+        logger.debug("Skipping non-serializable live event %s", event_type)
+        return
+
+    with _LOCK:
+        events = handle.progress_events
+        events.append((handle.next_progress_event_seq, payload))
+        handle.next_progress_event_seq += 1
+        handle.progress_event_bytes += len(payload)
+        while events and (
+            len(events) > MAX_PROGRESS_EVENTS
+            or handle.progress_event_bytes > MAX_PROGRESS_EVENT_BYTES
+        ):
+            _seq, dropped_payload = events.popleft()
+            handle.progress_event_bytes -= len(dropped_payload)
+            handle.dropped_progress_events += 1
+
+
+def buffer_live_execution_events(
+    events: Iterator[dict[str, Any]],
+    execution_id: str,
+) -> Iterator[dict[str, Any]]:
+    """Pass a runner's SSE events through while recording them for late observers."""
+    mark_execution_publishes_progress_events(execution_id)
+    for event in events:
+        record_execution_progress_event(execution_id, event)
+        yield event
+
+
+def get_active_execution_stream_snapshot(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> ActiveExecutionStreamSnapshot | None:
+    """Return node progress and the buffered live events in one consistent read."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        return ActiveExecutionStreamSnapshot(
+            publishes_progress_events=handle.publishes_progress_events,
+            running_node_ids=sorted(handle.running_node_ids),
+            node_results=list(handle.node_results),
+            events=[payload for _seq, payload in handle.progress_events],
+            next_event_seq=handle.next_progress_event_seq,
+            dropped_event_count=handle.dropped_progress_events,
+        )
+
+
+def get_active_execution_events(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+    after_seq: int,
+) -> tuple[list[str], int] | None:
+    """Return live events newer than ``after_seq`` plus the next cursor value."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        payloads = [payload for seq, payload in handle.progress_events if seq >= after_seq]
+        return payloads, handle.next_progress_event_seq
+
+
+def _handle_for_execution_id(execution_id: str) -> ExecutionCancellationHandle | None:
+    try:
+        parsed_execution_id = uuid.UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return None
+    with _LOCK:
+        return _ACTIVE_EXECUTIONS.get(parsed_execution_id)
 
 
 class ActiveExecutionRegistry:

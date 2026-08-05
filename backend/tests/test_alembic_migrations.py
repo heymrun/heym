@@ -15,14 +15,26 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["104_add_cal_trigger_credential"])
+        self.assertEqual(self.script.get_heads(), ["106_add_cal_trigger_credential"])
 
-    def test_cal_trigger_revision_follows_google_drive_revision(self) -> None:
-        cal_trigger_revision = self.script.get_revision("104_add_cal_trigger_credential")
+    def test_cal_trigger_revision_follows_rag_revision(self) -> None:
+        cal_trigger_revision = self.script.get_revision("106_add_cal_trigger_credential")
 
         self.assertIsNotNone(cal_trigger_revision)
+        self.assertEqual(cal_trigger_revision.down_revision, "105_add_rag_credential_type")
+
+    def test_rag_credential_revision_follows_cron_slot_revision(self) -> None:
+        rag_revision = self.script.get_revision("105_add_rag_credential_type")
+
+        self.assertIsNotNone(rag_revision)
+        self.assertEqual(rag_revision.down_revision, "104_add_cron_slot_claims")
+
+    def test_cron_slot_claims_revision_follows_google_drive_revision(self) -> None:
+        cron_slot_revision = self.script.get_revision("104_add_cron_slot_claims")
+
+        self.assertIsNotNone(cron_slot_revision)
         self.assertEqual(
-            cal_trigger_revision.down_revision,
+            cron_slot_revision.down_revision,
             "103_add_google_drive_cred_type",
         )
 

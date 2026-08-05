@@ -149,6 +149,7 @@ export type NodeType =
   | "sticky"
   | "merge"
   | "set"
+  | "converter"
   | "jsonOutputMapper"
   | "telegram"
   | "slack"
@@ -420,6 +421,22 @@ export interface NodeData {
   outputSchema?: OutputSchemaField[];
   inputCount?: number;
   mappings?: MappingField[];
+  conversion?: string;
+  source?: string;
+  delimiter?: string;
+  hasHeader?: boolean;
+  includeHeader?: boolean;
+  trimValues?: boolean;
+  converterColumns?: string;
+  converterFileId?: string;
+  converterTargetFormat?: string;
+  ocrLanguage?: string;
+  ocrLanguageCustom?: string;
+  ocrEncoding?: string;
+  ocrNormalizeUnicode?: boolean;
+  ocrPsm?: string;
+  ocrDpi?: string | number;
+  ocrPageRange?: string;
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
   setupMode?: "manual" | "managed";
@@ -463,6 +480,8 @@ export interface NodeData {
   };
   jsonOutputEnabled?: boolean;
   jsonOutputSchema?: string;
+  extraBodyEnabled?: boolean;
+  extraBody?: string;
   hitlEnabled?: boolean;
   hitlSummary?: string;
   outputType?: LLMOutputType;
@@ -752,8 +771,7 @@ export interface NodeData {
     | "shareWithMyTeams"
     | "unshareWithMyTeams"
     | "downloadUrl"
-    | "save"
-    | "convertFile";
+    | "save";
   driveFileId?: string;
   driveLimit?: number;
   drivePassword?: string;
@@ -763,7 +781,6 @@ export interface NodeData {
   driveSourceUrl?: string;
   driveFilename?: string;
   driveBase64Content?: string;
-  driveConvertTargetFormat?: string;
   s3Operation?: "putObject" | "getObject" | "deleteObject" | "listObjects" | "createBucket" | "deleteBucket" | "createFolder" | "deleteFolder" | "getAllFolder" | "listBuckets" | "copyObject";
   s3Bucket?: string;
   s3Key?: string;

@@ -17,6 +17,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "codex": "codex_node",
     "condition": "condition_node",
     "consoleLog": "console_log_node",
+    "converter": "converter_node",
     "crawler": "crawler_node",
     "cron": "cron_node",
     "dataTable": "data_table_node",

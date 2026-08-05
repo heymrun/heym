@@ -8,6 +8,11 @@ from unittest.mock import AsyncMock, patch
 
 from app.api.workflows import update_workflow
 from app.models.schemas import NodeResultSchema, WorkflowUpdate
+from app.services.execution_cancellation import (
+    clear_execution,
+    get_active_execution_stream_snapshot,
+    register_execution,
+)
 from app.services.workflow_executor import (
     NodeResult,
     WorkflowExecutor,
@@ -224,6 +229,58 @@ class ExecuteWorkflowStreamingSseTests(unittest.TestCase):
         self.assertEqual(node_complete.get("metadata", {}).get("sequence"), 1)
         self.assertEqual(node_complete.get("metadata", {}).get("started_at_ms"), 1012.5)
         self.assertEqual(node_complete.get("metadata", {}).get("ended_at_ms"), 1025.0)
+
+
+class StreamingRunPublishesLiveEventsTests(unittest.TestCase):
+    """Events yielded by the runner are buffered for canvases attaching later."""
+
+    def test_run_buffers_its_events_on_the_shared_execution_handle(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+        nodes = [{"id": "node-1", "type": "llm", "data": {"label": "LLM"}}]
+
+        try:
+            with patch("app.services.workflow_executor.WorkflowExecutor", _FakeWorkflowExecutor):
+                list(
+                    execute_workflow_streaming(
+                        workflow_id=workflow_id,
+                        nodes=nodes,
+                        edges=[],
+                        inputs={},
+                        execution_id=str(execution_id),
+                    )
+                )
+
+            snapshot = get_active_execution_stream_snapshot(
+                execution_id,
+                workflow_id=workflow_id,
+            )
+            assert snapshot is not None
+            self.assertTrue(snapshot.publishes_progress_events)
+            buffered = [json.loads(payload) for payload in snapshot.events]
+            self.assertEqual(
+                [event["type"] for event in buffered],
+                ["node_start", "node_complete"],
+            )
+            # execution_complete is synthesized by the observer from history instead.
+            self.assertNotIn("execution_complete", [event["type"] for event in buffered])
+        finally:
+            clear_execution(execution_id)
+
+    def test_run_without_execution_id_does_not_raise(self) -> None:
+        nodes = [{"id": "node-1", "type": "llm", "data": {"label": "LLM"}}]
+        with patch("app.services.workflow_executor.WorkflowExecutor", _FakeWorkflowExecutor):
+            events = list(
+                execute_workflow_streaming(
+                    workflow_id=uuid.uuid4(),
+                    nodes=nodes,
+                    edges=[],
+                    inputs={},
+                )
+            )
+
+        self.assertTrue(any(event.get("type") == "node_complete" for event in events))
 
 
 class NodeResultTimingMetadataTests(unittest.TestCase):

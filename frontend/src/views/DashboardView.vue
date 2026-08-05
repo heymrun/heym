@@ -42,7 +42,7 @@ import DockerLogsViewer from "@/components/LogsTab/DockerLogsViewer.vue";
 import FolderTreeItem from "@/components/Folders/FolderTreeItem.vue";
 import WorkflowFolderDropPlaceholder from "@/components/Folders/WorkflowFolderDropPlaceholder.vue";
 import GlobalVariablesPanel from "@/components/GlobalVariables/GlobalVariablesPanel.vue";
-import ActiveWorkflowsBadge from "@/components/Layout/ActiveWorkflowsBadge.vue";
+
 import AppHeader from "@/components/Layout/AppHeader.vue";
 import DashboardNav from "@/components/Layout/DashboardNav.vue";
 import WorkspaceShell from "@/components/Layout/WorkspaceShell.vue";
@@ -1422,9 +1422,6 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
   >
     <div class="min-h-screen bg-background overflow-x-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
-        <template #before-docs>
-          <ActiveWorkflowsBadge v-if="activeTab === 'workflows'" />
-        </template>
         <template #actions>
           <Button
             variant="ghost"

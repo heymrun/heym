@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     allow_register: bool = True
     trust_proxy_headers: bool = False
     timezone: str = ""
+    # How late a cron slot may still run. Protects against a scheduler that was
+    # paused (leadership handoff, restart, host suspend) firing a whole backlog.
+    cron_misfire_grace_seconds: int = 600
     oauth_access_token_expire_seconds: int = 3600
     oauth_refresh_token_expire_days: int = 30
     oauth_auth_code_expire_minutes: int = 10

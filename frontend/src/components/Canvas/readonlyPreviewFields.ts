@@ -29,11 +29,13 @@ const SKIP_FIELDS = new Set([
   "hitlSummary",
   "allowDownstream",
   "jsonOutputEnabled",
+  "extraBodyEnabled",
 ]);
 
 const TEXTAREA_FIELDS = new Set([
   "systemInstruction",
   "userMessage",
+  "extraBody",
   "curl",
   "websocketHeaders",
   "websocketMessage",
@@ -113,6 +115,7 @@ const FIELD_LABELS: Record<string, string> = {
   playwrightCaptureNetwork: "Capture Network",
   playwrightAuthEnabled: "Auth Enabled",
   jsonOutputSchema: "JSON Schema",
+  extraBody: "Extra Body",
   value: "Value",
   bqOperation: "BigQuery Operation",
   gsOperation: "Google Sheets Operation",

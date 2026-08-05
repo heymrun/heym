@@ -49,6 +49,8 @@ If the selected provider or model does not support batch execution, the Properti
 | `imageInput` | expression | Base64 data URL or image URL |
 | `jsonOutputEnabled` | boolean | Structured JSON output |
 | `jsonOutputSchema` | string | JSON Schema for structured output |
+| `extraBodyEnabled` | boolean | Send provider-specific request parameters (default: `false`) |
+| `extraBody` | string | JSON object merged into the API request body |
 
 ### Reasoning models (o1, o3)
 
@@ -168,6 +170,31 @@ When **JSON output** is enabled together with batch mode, Heym parses each succe
 ## JSON Output
 
 When `jsonOutputEnabled` is true, the LLM returns JSON matching the schema. Access fields via `$nodeLabel.fieldName`.
+
+## Extra Body
+
+Some providers accept request parameters that the standard OpenAI-compatible fields do not
+cover, such as disabling a model's thinking mode. Tick **Send extra request body** in the node
+properties and enter a JSON object. It is merged into every API request this node makes.
+
+```json
+{
+  "extraBodyEnabled": true,
+  "extraBody": "{ \"thinking\": { \"type\": \"disabled\" } }"
+}
+```
+
+- **Disabled by default.** With the checkbox off, nothing extra is sent.
+- Must be a JSON **object**. An array, a scalar, or malformed text fails the node with
+  `Invalid extra body JSON` rather than being silently dropped.
+- The **Format** button next to the checkbox reformats the JSON, and turns red reading
+  `Invalid` when the text does not parse.
+- Applied to the main completion, the fallback model attempt, and batch mode requests.
+  **Not** applied to image generation or to guardrail checks, which use a different request
+  shape and a separate model.
+- `$` expressions are resolved before parsing, so `{"max_tokens": $prev.limit}` works. Because
+  this is textual substitution, a resolved value containing a double quote or a newline
+  produces invalid JSON and fails the node.
 
 ## Example – Text
 

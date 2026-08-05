@@ -478,6 +478,61 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 await stream.__anext__()
 
 
+class PortalExecuteStreamCancelPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_portal_run_is_persisted_as_cancelled_history(self) -> None:
+        """Without the row, a canvas observing the run never gets a terminal event."""
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Portal Workflow",
+            nodes=[{"id": "n1", "type": "textInput", "data": {"label": "Input"}}],
+            edges=[],
+        )
+
+        def fake_streaming_executor(**_kwargs: object):
+            raise WorkflowCancelledError("Workflow execution cancelled")
+            yield  # pragma: no cover - makes the callable a generator function
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarResult(workflow),
+                _ScalarResult(None),
+            ]
+        )
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        analytics = AsyncMock()
+
+        with (
+            patch("app.api.portal.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.portal.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.portal.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.portal.register_execution", return_value=Event()),
+            patch("app.api.portal.clear_active_execution"),
+            patch("app.api.portal.execute_workflow_streaming", fake_streaming_executor),
+            patch("app.api.portal.upsert_workflow_analytics_snapshot", analytics),
+        ):
+            response = await portal_execute_stream(
+                slug="portal-test",
+                execute_data=PortalExecuteRequest(inputs={}),
+                request=make_request(),
+                db=db,
+            )
+
+            stream = response.body_iterator
+            started = json.loads((await stream.__anext__()).removeprefix("data: "))
+            async for _chunk in stream:
+                pass
+
+        persisted = [call.args[0] for call in db.add.call_args_list]
+        self.assertEqual(len(persisted), 1)
+        self.assertEqual(persisted[0].status, "cancelled")
+        self.assertEqual(str(persisted[0].id), started["execution_id"])
+        self.assertEqual(persisted[0].trigger_source, "portal")
+        analytics.assert_awaited_once()
+
+
 class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
     async def test_emits_hidden_heartbeat_while_waiting_for_workflow_events(self) -> None:
         workflow = SimpleNamespace(

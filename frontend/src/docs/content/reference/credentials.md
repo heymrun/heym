@@ -23,7 +23,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Discord](../nodes/discord-node.md) | Discord | Incoming webhook URL |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Discord Trigger (Public Key) | Application public key for signature verification |
 | [Cal.com Trigger](../nodes/cal-trigger-node.md) | Cal.com API / Cal.com Trigger (Webhook Secret) | API-managed webhook lifecycle or manual HMAC-SHA256 verification |
-| [RAG](../nodes/rag-node.md) | RAG: Qdrant + OpenAI, RAG: Psql + OpenAI | Vector store connection (external Qdrant, or Heym's own Postgres via pgvector) |
+| [RAG](../nodes/rag-node.md) | RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, RAG: Custom Embeddings | Vector store connection (external Qdrant, or Heym's own Postgres via pgvector), with OpenAI or any OpenAI-compatible embedding endpoint |
 | [Slack](../nodes/slack-node.md) | Slack | Webhook or API token |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | IMAP | Inbound mailbox connection |
 | [Send Email](../nodes/send-email-node.md) | SMTP | Mail server |

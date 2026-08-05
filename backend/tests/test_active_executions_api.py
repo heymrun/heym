@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import json
 import threading
 import unittest
 import uuid
@@ -10,16 +12,22 @@ from app.api.workflows import (
 )
 from app.models.schemas import ActiveExecutionItem
 from app.services.execution_cancellation import (
+    MAX_PROGRESS_EVENT_PAYLOAD_BYTES,
+    MAX_PROGRESS_EVENTS,
     ActiveExecutionRecord,
     ExecutionCancellationHandle,
     active_execution_registry,
     clear_execution,
+    get_active_execution_events,
     get_active_execution_inputs,
     get_active_execution_progress,
+    get_active_execution_stream_snapshot,
     list_active_executions,
     list_persisted_active_executions_for_user,
+    mark_execution_publishes_progress_events,
     record_execution_node_completed,
     record_execution_node_started,
+    record_execution_progress_event,
     register_execution,
 )
 from app.services.workflow_executor import (
@@ -38,6 +46,17 @@ def _make_handle(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ExecutionCa
         started_at=datetime.datetime(2025, 1, 1, 12, 0, 0),
         inputs={"text": "local input"},
     )
+
+
+async def _drain_frames(iterator, *, limit: int, timeout: float = 1.0) -> list[str]:
+    """Collect SSE frames until the stream goes quiet, so extra frames are detectable."""
+    frames: list[str] = []
+    try:
+        while len(frames) < limit:
+            frames.append(await asyncio.wait_for(anext(iterator), timeout))
+    except (TimeoutError, asyncio.TimeoutError, StopAsyncIteration):
+        pass
+    return frames
 
 
 def _make_record(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ActiveExecutionRecord:
@@ -459,6 +478,193 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             clear_execution(execution_id)
 
+    async def test_stream_replays_runner_events_for_publishing_execution(self) -> None:
+        """A canvas attaching mid-run replays agent progress and sub-agent lifecycle."""
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            inputs={"text": "live input"},
+        )
+        mark_execution_publishes_progress_events(str(execution_id))
+        # Coarse snapshot the observer must NOT re-emit once live events exist.
+        record_execution_node_completed(
+            str(execution_id),
+            "input_1",
+            {
+                "node_id": "input_1",
+                "node_label": "userInput",
+                "node_type": "textInput",
+                "status": "success",
+                "output": {"source": "snapshot"},
+                "execution_time_ms": 1.0,
+                "error": None,
+            },
+        )
+        record_execution_node_started(str(execution_id), "agent_1")
+        for event in (
+            {
+                "type": "node_complete",
+                "node_id": "input_1",
+                "node_label": "userInput",
+                "node_type": "textInput",
+                "status": "success",
+                "output": {"source": "live"},
+                "execution_time_ms": 1.0,
+                "error": None,
+            },
+            {"type": "node_start", "node_id": "agent_1", "node_label": "orchestrator"},
+            {
+                "type": "agent_progress",
+                "node_id": "agent_1",
+                "node_label": "orchestrator",
+                "entry": {"name": "call_sub_agent", "phase": "start"},
+            },
+            {"type": "node_start", "node_id": "agent_2", "node_label": "growthHackerAgent"},
+        ):
+            record_execution_progress_event(str(execution_id), event)
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        try:
+            with patch(
+                "app.api.workflows.get_workflow_for_user",
+                AsyncMock(return_value=workflow),
+            ):
+                response = await stream_active_workflow_execution(
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    request=request,
+                    current_user=user,
+                    db=AsyncMock(),
+                )
+
+            iterator = response.body_iterator
+            frames = await _drain_frames(iterator, limit=6)
+            await iterator.aclose()
+
+            self.assertIn('"type": "execution_started"', frames[0])
+            payloads = [json.loads(frame.removeprefix("data: ")) for frame in frames[1:]]
+            self.assertEqual(
+                [(item["type"], item.get("node_id")) for item in payloads],
+                [
+                    ("node_complete", "input_1"),
+                    ("node_start", "agent_1"),
+                    ("agent_progress", "agent_1"),
+                    ("node_start", "agent_2"),
+                ],
+            )
+            self.assertEqual(payloads[0]["output"], {"source": "live"})
+        finally:
+            clear_execution(execution_id)
+
+    async def test_stream_sends_new_runner_events_after_the_initial_replay(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+        mark_execution_publishes_progress_events(str(execution_id))
+        record_execution_progress_event(
+            str(execution_id),
+            {"type": "node_start", "node_id": "agent_1", "node_label": "orchestrator"},
+        )
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        try:
+            with patch(
+                "app.api.workflows.get_workflow_for_user",
+                AsyncMock(return_value=workflow),
+            ):
+                response = await stream_active_workflow_execution(
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    request=request,
+                    current_user=user,
+                    db=AsyncMock(),
+                )
+
+            iterator = response.body_iterator
+            self.assertIn('"type": "execution_started"', await anext(iterator))
+            self.assertIn('"node_id": "agent_1"', await anext(iterator))
+
+            record_execution_progress_event(
+                str(execution_id),
+                {
+                    "type": "node_complete",
+                    "node_id": "agent_2",
+                    "node_label": "growthHackerAgent",
+                    "node_type": "agent",
+                    "status": "success",
+                    "output": {"text": "done"},
+                    "execution_time_ms": 12.0,
+                    "error": None,
+                },
+            )
+            follow_up = await anext(iterator)
+            await iterator.aclose()
+
+            self.assertIn('"type": "node_complete"', follow_up)
+            self.assertIn('"node_id": "agent_2"', follow_up)
+        finally:
+            clear_execution(execution_id)
+
+    async def test_stream_marks_a_vanished_execution_as_gone(self) -> None:
+        """Cancelled mid-flight runs must terminate the stream, not stall the canvas."""
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        stream_db = AsyncMock()
+        stream_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=stream_db)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch(
+                "app.api.workflows.get_workflow_for_user",
+                AsyncMock(return_value=workflow),
+            ),
+            patch("app.api.workflows.async_session_maker", return_value=session_context),
+            patch("app.api.workflows.WORKFLOW_OBSERVE_MISSING_TICK_LIMIT", 1),
+        ):
+            response = await stream_active_workflow_execution(
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                request=request,
+                current_user=user,
+                db=AsyncMock(),
+            )
+
+            iterator = response.body_iterator
+            self.assertIn('"type": "execution_started"', await anext(iterator))
+            gone = json.loads((await anext(iterator)).removeprefix("data: "))
+            with self.assertRaises(StopAsyncIteration):
+                await anext(iterator)
+
+        self.assertEqual(gone["type"], "error")
+        self.assertEqual(gone["code"], "execution_gone")
+
     async def test_stream_sends_heartbeat_while_active_node_is_idle(self) -> None:
         workflow_id = uuid.uuid4()
         execution_id = uuid.uuid4()
@@ -497,6 +703,115 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(heartbeat, ": heartbeat\n\n")
         finally:
             clear_execution(execution_id)
+
+
+class LiveExecutionEventBufferTests(unittest.TestCase):
+    """The live event buffer backs the observe stream for other tabs."""
+
+    def setUp(self) -> None:
+        self.workflow_id = uuid.uuid4()
+        self.execution_id = uuid.uuid4()
+        register_execution(workflow_id=self.workflow_id, execution_id=self.execution_id)
+        self.addCleanup(clear_execution, self.execution_id)
+
+    def _snapshot(self):
+        return get_active_execution_stream_snapshot(
+            self.execution_id,
+            workflow_id=self.workflow_id,
+        )
+
+    def test_marking_the_run_flags_it_for_event_replay(self) -> None:
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        self.assertFalse(snapshot.publishes_progress_events)
+
+        mark_execution_publishes_progress_events(str(self.execution_id))
+        record_execution_progress_event(
+            str(self.execution_id),
+            {"type": "node_start", "node_id": "agent_1"},
+        )
+
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        self.assertTrue(snapshot.publishes_progress_events)
+        self.assertEqual(len(snapshot.events), 1)
+        self.assertEqual(snapshot.next_event_seq, 1)
+        self.assertEqual(snapshot.dropped_event_count, 0)
+
+    def test_skips_internal_and_observer_synthesized_events(self) -> None:
+        for event in (
+            {"type": "_internal_node_result", "result": object()},
+            {"type": "execution_started", "execution_id": str(self.execution_id)},
+            {"type": "execution_complete", "status": "success"},
+            {"type": "node_complete", "node_id": "n1", "output": {"blob": object()}},
+        ):
+            record_execution_progress_event(str(self.execution_id), event)
+
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        self.assertEqual(snapshot.events, [])
+
+    def test_cursor_returns_only_newer_events(self) -> None:
+        for index in range(3):
+            record_execution_progress_event(
+                str(self.execution_id),
+                {"type": "node_start", "node_id": f"node-{index}"},
+            )
+
+        payloads, next_seq = get_active_execution_events(
+            self.execution_id,
+            workflow_id=self.workflow_id,
+            after_seq=1,
+        )
+        self.assertEqual(next_seq, 3)
+        self.assertEqual(
+            [json.loads(payload)["node_id"] for payload in payloads],
+            ["node-1", "node-2"],
+        )
+
+    def test_oversized_event_is_buffered_without_its_payload(self) -> None:
+        record_execution_progress_event(
+            str(self.execution_id),
+            {
+                "type": "node_complete",
+                "node_id": "big",
+                "node_label": "Big",
+                "status": "success",
+                "output": {"blob": "x" * (MAX_PROGRESS_EVENT_PAYLOAD_BYTES + 1)},
+            },
+        )
+
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        payload = json.loads(snapshot.events[0])
+        self.assertEqual(payload["node_id"], "big")
+        self.assertEqual(payload["status"], "success")
+        self.assertTrue(payload["_truncated"])
+        self.assertNotIn("output", payload)
+
+    def test_oldest_events_are_dropped_once_the_count_cap_is_reached(self) -> None:
+        for index in range(MAX_PROGRESS_EVENTS + 5):
+            record_execution_progress_event(
+                str(self.execution_id),
+                {"type": "node_start", "node_id": f"node-{index}"},
+            )
+
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        self.assertEqual(len(snapshot.events), MAX_PROGRESS_EVENTS)
+        self.assertEqual(snapshot.dropped_event_count, 5)
+        self.assertEqual(json.loads(snapshot.events[0])["node_id"], "node-5")
+
+    def test_unknown_execution_id_is_ignored(self) -> None:
+        record_execution_progress_event("not-a-uuid", {"type": "node_start", "node_id": "n"})
+        record_execution_progress_event(
+            str(uuid.uuid4()),
+            {"type": "node_start", "node_id": "n"},
+        )
+
+        snapshot = self._snapshot()
+        assert snapshot is not None
+        self.assertEqual(snapshot.events, [])
 
 
 class SubWorkflowActiveTrackingTests(unittest.TestCase):

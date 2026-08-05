@@ -313,11 +313,15 @@ def _any_dollar_span_under_code_nesting(trimmed: str, executor: Any) -> bool:
     return False
 
 
-def _probe_substituted_expression_ast_ok(trimmed: str, executor: Any) -> bool:
-    """True when replacing each ``$...`` span with ``0`` yields valid ``ast.parse(..., mode='eval')``."""
+def _substituted_expression_probe(trimmed: str, executor: Any) -> str | None:
+    """Return ``trimmed`` with every ``$...`` span replaced by ``0``; None when there are none.
+
+    Substituting the spans leaves only the operator "glue", which is what decides whether a
+    value is code (a condition, arithmetic, a ternary) or a plain text template.
+    """
     spans = executor._find_expressions(trimmed)
     if not spans:
-        return False
+        return None
     parts: list[str] = []
     last_end = 0
     for start, end, _expr in spans:
@@ -325,7 +329,14 @@ def _probe_substituted_expression_ast_ok(trimmed: str, executor: Any) -> bool:
         parts.append("0")
         last_end = end
     parts.append(trimmed[last_end:])
-    probe = "".join(parts)
+    return "".join(parts)
+
+
+def _probe_substituted_expression_ast_ok(trimmed: str, executor: Any) -> bool:
+    """True when replacing each ``$...`` span with ``0`` yields valid ``ast.parse(..., mode='eval')``."""
+    probe = _substituted_expression_probe(trimmed, executor)
+    if probe is None:
+        return False
     probe = executor._transform_ternary_expression(probe)
     probe = re.sub(r"&&", " and ", probe)
     probe = re.sub(r"\|\|", " or ", probe)
@@ -334,6 +345,38 @@ def _probe_substituted_expression_ast_ok(trimmed: str, executor: Any) -> bool:
     except SyntaxError:
         return False
     return True
+
+
+def is_top_level_ternary_expression(expression: str, executor: Any) -> bool:
+    """True when the whole trimmed value is one ``$cond ? truthy : falsy`` ternary.
+
+    ``is_single_dollar_expression`` misses ternaries whose branches carry their own ``$``
+    prefix, because the raw ``$`` breaks its ``ast.parse`` probe. Without this predicate
+    ``$a.n > 0 ? $a.x : $b.y`` falls through to string-template evaluation in the executor
+    and to boolean condition evaluation in the evaluate API, so the canvas dialog and the
+    run disagree. ``resolve_expression`` already evaluates both the bare-path and the
+    ``$``-prefixed branch forms, so both callers route here instead.
+
+    A top-level ``? :`` has no plain-text-template meaning, which keeps this narrower than
+    reusing the full ``is_single_dollar_expression`` probe (that one would also capture
+    text like ``$user.name (admin)``).
+    """
+    trimmed = expression.strip()
+    if not trimmed.startswith("$"):
+        return False
+    if "\n" in trimmed or "\r" in trimmed:
+        return False
+
+    spans = executor._find_expressions(trimmed)
+    if not spans or spans[0][0] != 0:
+        return False
+
+    # Split the probe, not the raw text, so a `?`/`:` living inside a `$span` (for example
+    # `$node.get("a?b")`) can never be mistaken for the ternary operator.
+    probe = _substituted_expression_probe(trimmed, executor)
+    if probe is None or _split_ternary_expression(probe) is None:
+        return False
+    return _probe_substituted_expression_ast_ok(trimmed, executor)
 
 
 def should_evaluate_as_multi_span_comparison_condition(
@@ -1201,6 +1244,27 @@ class ExpressionEvaluatorService:
 
             if "$" in trimmed:
                 if "\n" not in expression and "\r" not in expression:
+                    # Must precede the condition predicates: a multi-`$` ternary also looks
+                    # like a multi-span comparison, and that path would coerce the selected
+                    # branch value into a boolean.
+                    if is_top_level_ternary_expression(trimmed, executor):
+                        try:
+                            ternary_result = executor.resolve_expression(
+                                trimmed, context, current_node_id, preserve_type=True
+                            )
+                            return ExpressionEvaluateResponse(
+                                result=ternary_result,
+                                result_type=classify_type(ternary_result),
+                                preserved_type=True,
+                                error=None,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            return ExpressionEvaluateResponse(
+                                result=None,
+                                result_type="null",
+                                preserved_type=False,
+                                error=str(exc),
+                            )
                     if should_evaluate_as_multi_ref_condition(trimmed, executor):
                         try:
                             cond_result = executor.evaluate_condition_strict(

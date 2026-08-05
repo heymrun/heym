@@ -82,7 +82,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
   // "overwrite": this tab has edits that would replace the newer server version.
   // "reload": this tab has no edits, so it is simply showing an outdated workflow.
   const staleSaveMode = ref<"overwrite" | "reload">("overwrite");
-  const runningNodeId = ref<string | null>(null);
+  // Every node currently in flight. A set, not a single id: parallel branches and
+  // orchestrator fan-out run several nodes at once. It outlives `clearWorkflow`, so
+  // leaving and re-entering the editor mid-run restores the running highlights.
+  const runningNodeIds = ref<Set<string>>(new Set());
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
   const analysisPanelOpen = ref(false);
@@ -539,7 +542,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
 
     isExecuting.value = false;
-    runningNodeId.value = null;
+    runningNodeIds.value.clear();
     abortController.value = null;
     currentExecutionId.value = result.execution_history_id || null;
     currentExecutionWorkflowId.value = null;
@@ -611,6 +614,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
       currentExecutionId.value = null;
       clearNodeStatuses();
     } else {
+      // Taken before the reset below, which clears the set as it marks nodes pending.
+      // The store tracks these across `clearWorkflow`, so they survive leaving and
+      // re-entering the editor while the run continues in the background.
+      const stillRunningNodeIds = [...runningNodeIds.value];
       nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
       for (const nodeResult of nodeResults.value) {
         setNodeStatus(
@@ -618,8 +625,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
           nodeResult.status as "success" | "error" | "pending" | "skipped",
         );
       }
-      if (runningNodeId.value) {
-        setNodeStatus(runningNodeId.value, "running");
+      for (const nodeId of stillRunningNodeIds) {
+        setNodeStatus(nodeId, "running");
       }
     }
 
@@ -1232,7 +1239,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
       node.data = { ...node.data, status };
     }
     if (status === "running") {
-      runningNodeId.value = id;
+      runningNodeIds.value.add(id);
+    } else {
+      runningNodeIds.value.delete(id);
     }
   }
 
@@ -1253,7 +1262,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         };
       }
     });
-    runningNodeId.value = null;
+    runningNodeIds.value.clear();
   }
 
   /**
@@ -1423,7 +1432,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
               executionResult.value = { ...result, node_results: [] };
               clearNodeStatuses();
               isExecuting.value = false;
-              runningNodeId.value = null;
+              runningNodeIds.value.clear();
               abortController.value = null;
               currentExecutionId.value = null;
               currentExecutionWorkflowId.value = null;
@@ -1476,7 +1485,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             }
 
             isExecuting.value = false;
-            runningNodeId.value = null;
+            runningNodeIds.value.clear();
             abortController.value = null;
             currentExecutionId.value = result.execution_history_id || null;
             currentExecutionWorkflowId.value = null;
@@ -1485,7 +1494,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           (error: Error) => {
             clearNodeStatuses();
             isExecuting.value = false;
-            runningNodeId.value = null;
+            runningNodeIds.value.clear();
             abortController.value = null;
             currentExecutionId.value = null;
             currentExecutionWorkflowId.value = null;
@@ -1588,7 +1597,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     } catch (e: unknown) {
       clearNodeStatuses();
       isExecuting.value = false;
-      runningNodeId.value = null;
+      runningNodeIds.value.clear();
       abortController.value = null;
       currentExecutionId.value = null;
       currentExecutionWorkflowId.value = null;
@@ -1621,6 +1630,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
     while (!streamAbort.signal.aborted) {
       let completed = false;
+      let executionGone = false;
 
       await new Promise<void>((resolve) => {
         workflowApi.streamActiveExecution(
@@ -1630,6 +1640,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
             currentExecutionId.value = data.execution_id;
             loadHistoryInputs(data.inputs);
             nodeResults.value = [];
+            // Each (re)connect replays the run's live events from the start, so the
+            // agent/batch logs are rebuilt rather than appended to.
+            agentProgressLogs.value = new Map();
+            llmBatchProgressLogs.value = new Map();
             clearNodeStatuses();
             nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
           },
@@ -1688,10 +1702,18 @@ export const useWorkflowStore = defineStore("workflow", () => {
             const historyEntry = historyId
               ? await fetchExecutionHistoryEntry(historyId, true)
               : null;
+            // A cancelled run is persisted without per-node results; keep what was
+            // streamed so the log does not empty out on Stop.
+            const streamedRows = nodeResults.value.filter(
+              (nodeResult) => nodeResult.status !== "running",
+            );
             if (historyEntry?.result) {
               applyExecutionHistoryEntry(historyEntry);
             } else {
               applyExecutionResultSnapshot(result);
+            }
+            if (nodeResults.value.length === 0 && streamedRows.length > 0) {
+              nodeResults.value = streamedRows;
             }
             isObservingExecution.value = false;
             resolve();
@@ -1699,6 +1721,71 @@ export const useWorkflowStore = defineStore("workflow", () => {
           (_error) => resolve(),
           () => resolve(),
           streamAbort.signal,
+          (data) => {
+            const node = nodes.value.find((n) => n.id === data.node_id);
+            if (node) {
+              node.data = { ...node.data, retryAttempt: data.attempt };
+            }
+
+            const retryResult = data.retry_result;
+            if (!retryResult || typeof retryResult !== "object") {
+              return;
+            }
+            const row: NodeResult = {
+              node_id: retryResult.node_id,
+              node_label: retryResult.node_label || retryResult.node_id,
+              node_type: retryResult.node_type || "unknown",
+              status: retryResult.status as "success" | "error" | "pending" | "skipped",
+              output: retryResult.output,
+              execution_time_ms: retryResult.execution_time_ms,
+              error: retryResult.error ?? null,
+            };
+            if (retryResult.metadata && typeof retryResult.metadata === "object") {
+              row.metadata = retryResult.metadata;
+            }
+            nodeResults.value = [...nodeResults.value, row];
+          },
+          (data) => {
+            const m = new Map(agentProgressLogs.value);
+            const arr = m.get(data.node_id) ?? [];
+            const entry = data.entry;
+            const toolCallId = entry.tool_call_id;
+            const phase = entry.phase;
+            if (toolCallId && phase && phase !== "start") {
+              const idx = [...arr].map((e) => e.tool_call_id).lastIndexOf(toolCallId);
+              if (idx >= 0) {
+                const next = [...arr];
+                next[idx] = { ...next[idx], ...entry };
+                m.set(data.node_id, next);
+                agentProgressLogs.value = m;
+                return;
+              }
+            }
+            arr.push(entry);
+            m.set(data.node_id, arr);
+            agentProgressLogs.value = m;
+          },
+          (data) => {
+            const m = new Map(llmBatchProgressLogs.value);
+            const arr = m.get(data.node_id) ?? [];
+            arr.push(data.entry);
+            m.set(data.node_id, arr);
+            llmBatchProgressLogs.value = m;
+
+            const node = nodes.value.find((n) => n.id === data.node_id);
+            if (node) {
+              node.data = {
+                ...node.data,
+                batchRuntimeStatus: data.entry.status,
+                batchRuntimeRawStatus: data.entry.rawStatus,
+                batchRuntimeRequestCounts: data.entry.requestCounts,
+              };
+            }
+          },
+          () => {
+            executionGone = true;
+            resolve();
+          },
         );
       });
 
@@ -1708,6 +1795,19 @@ export const useWorkflowStore = defineStore("workflow", () => {
       if (historyEntry?.result) {
         applyExecutionHistoryEntry(historyEntry);
         isObservingExecution.value = false;
+        return;
+      }
+
+      if (executionGone) {
+        // The run is neither active nor recorded (cancelled mid-flight): settle the
+        // canvas instead of reconnecting to a stream that will never report again.
+        isObservingExecution.value = false;
+        isExecuting.value = false;
+        runningNodeIds.value.clear();
+        abortController.value = null;
+        currentExecutionWorkflowId.value = null;
+        dropUnresolvedNodeResults();
+        clearNodeStatuses();
         return;
       }
 
@@ -1725,6 +1825,17 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  /** Drop the placeholder rows observation adds on node_start but never resolved.
+   *
+   * They carry no output and would otherwise keep spinning at 0.00ms once the run
+   * is stopped or disappears. A finished run replaces nodeResults wholesale, so
+   * this only ever touches an interrupted observation.
+   */
+  function dropUnresolvedNodeResults(): void {
+    if (!nodeResults.value.some((result) => result.status === "running")) return;
+    nodeResults.value = nodeResults.value.filter((result) => result.status !== "running");
+  }
+
   function disconnectExecutionObservation(): void {
     if (!isObservingExecution.value) return;
     abortController.value?.abort();
@@ -1733,6 +1844,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     isExecuting.value = false;
     currentExecutionId.value = null;
     currentExecutionWorkflowId.value = null;
+    dropUnresolvedNodeResults();
     clearNodeStatuses();
   }
 
@@ -1752,7 +1864,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
     isExecuting.value = false;
     isObservingExecution.value = false;
-    runningNodeId.value = null;
+    runningNodeIds.value.clear();
+    dropUnresolvedNodeResults();
     clearNodeStatuses();
     currentExecutionId.value = null;
     currentExecutionWorkflowId.value = null;
@@ -3322,7 +3435,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     isObservingExecution,
     isSaving,
     hasUnsavedChanges,
-    runningNodeId,
+    runningNodeIds,
     pendingNodeDeletion,
     clipboardNode,
     canUndo,

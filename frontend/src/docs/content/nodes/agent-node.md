@@ -31,6 +31,8 @@ Add credentials in the [Credentials](../tabs/credentials-tab.md) tab. The model 
 | `userMessage` | string | User message/prompt. Default: `$input.text` |
 | `jsonOutputEnabled` | boolean | Structured JSON output |
 | `jsonOutputSchema` | string | JSON Schema for structured output |
+| `extraBodyEnabled` | boolean | Send provider-specific request parameters (default: `false`) |
+| `extraBody` | string | JSON object merged into every API request the agent makes |
 
 Use `$input.text`, `$nodeName.field`, and other [Expression DSL](../reference/expression-dsl.md) syntax.
 
@@ -313,6 +315,29 @@ The Skills section also includes **AI Build**:
 
 When editing with AI, Heym only sends text `.md` and `.py` skill files to the builder. Binary and other non-editable attachments are preserved and shared with the builder as path metadata so generated Python code can keep relative file references correct.
 Select an attached file in the right panel and enable **Include this file in AI context** when the AI needs to inspect a bundled template. Text, PDF, and DOCX files are extracted into prompt context when possible; Heym does not apply a separate Skill Builder attachment-size cap beyond the platform request body limit.
+
+## Extra Body
+
+Some providers accept request parameters that the standard OpenAI-compatible fields do not
+cover, such as disabling a model's thinking mode. Tick **Send extra request body** in the node
+properties and enter a JSON object.
+
+```json
+{
+  "extraBodyEnabled": true,
+  "extraBody": "{ \"thinking\": { \"type\": \"disabled\" } }"
+}
+```
+
+- **Disabled by default.** With the checkbox off, nothing extra is sent.
+- Applied to **every** request in the tool-calling loop, not just the first turn, plus the
+  fallback model attempt. Not applied to guardrail checks, which use a separate model.
+- Must be a JSON **object**. An array, a scalar, or malformed text fails the node with
+  `Invalid extra body JSON` rather than being silently dropped.
+- `$` expressions are resolved before parsing. Because this is textual substitution, a resolved
+  value containing a double quote or a newline produces invalid JSON and fails the node.
+
+Same field and behavior as the [LLM node](./llm-node.md) extra body.
 
 ## Guardrails
 

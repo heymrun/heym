@@ -9,6 +9,7 @@ import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clo
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
+  AgentProgressEntry,
   AgentSkill,
   AgentSkillFile,
   NodeResult,
@@ -68,24 +69,24 @@ const workflowLevelError = computed<string | null>(() => {
   const outputs = r.outputs as Record<string, unknown> | undefined;
   return outputs && typeof outputs.error === "string" ? outputs.error : null;
 });
-const runningNodeId = computed(() => workflowStore.runningNodeId);
 const agentProgressLogs = computed(() => workflowStore.agentProgressLogs);
 const selectedNode = computed(() => workflowStore.selectedNode);
 const logsCopied = ref(false);
 const showTimeline = ref(false);
 
-const runningAgentNode = computed(() => {
-  const id = runningNodeId.value;
-  if (!id) return null;
-  const node = workflowStore.nodes.find((n) => n.id === id);
-  return node?.type === "agent" ? node : null;
-});
+/** Every agent currently in flight, not just the last one to start: an
+ *  orchestrator can fan out to several sub-agents at once. */
+const runningAgentNodes = computed(() =>
+  workflowStore.nodes.filter((node) => node.type === "agent" && node.data.status === "running"),
+);
 
-const liveAgentEntries = computed(() => {
-  const id = runningNodeId.value;
-  if (!id) return [];
-  return agentProgressLogs.value.get(id) ?? [];
-});
+function liveAgentEntriesFor(nodeId: string): AgentProgressEntry[] {
+  return agentProgressLogs.value.get(nodeId) ?? [];
+}
+
+const liveAgentEntryCount = computed(() =>
+  runningAgentNodes.value.reduce((total, node) => total + liveAgentEntriesFor(node.id).length, 0),
+);
 
 async function copyLogsAsJson(): Promise<void> {
   const jsonData = getLogsAsJsonData();
@@ -164,7 +165,7 @@ watch(
 );
 
 watch(
-  () => liveAgentEntries.value.length,
+  () => liveAgentEntryCount.value,
   () => {
     if (isExecuting.value) {
       scrollToBottom();
@@ -3386,26 +3387,27 @@ function renderContent(content: string): string {
         </div>
 
         <div
-          v-if="runningAgentNode && isExecuting"
+          v-for="agentNode in (isExecuting ? runningAgentNodes : [])"
+          :key="agentNode.id"
           class="flex items-start gap-3 p-2 rounded-md bg-muted/30"
         >
           <Loader2 class="w-4 h-4 mt-0.5 shrink-0 animate-spin text-yellow-500" />
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
-              <span class="font-medium">{{ runningAgentNode.data?.label || runningAgentNode.id }}</span>
+              <span class="font-medium">{{ agentNode.data?.label || agentNode.id }}</span>
               <span class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300">
                 Live
               </span>
             </div>
             <div
-              v-if="liveAgentEntries.length > 0"
+              v-if="liveAgentEntriesFor(agentNode.id).length > 0"
               class="mt-2 space-y-1.5"
             >
               <div class="text-xs font-medium text-muted-foreground">
                 Tool Calls (streaming):
               </div>
               <div
-                v-for="(tc, i) in liveAgentEntries"
+                v-for="(tc, i) in liveAgentEntriesFor(agentNode.id)"
                 :key="i"
                 class="rounded border border-border/50 bg-muted/20 p-2 text-xs"
               >
@@ -3471,7 +3473,7 @@ function renderContent(content: string): string {
         </div>
 
         <div
-          v-else-if="isExecuting"
+          v-if="isExecuting && runningAgentNodes.length === 0"
           class="flex items-center gap-2 text-muted-foreground p-2"
         >
           <Loader2 class="w-4 h-4 animate-spin" />

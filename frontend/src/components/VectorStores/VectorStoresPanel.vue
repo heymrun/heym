@@ -83,8 +83,18 @@ const expandedSources = ref<Set<string>>(new Set());
 const deletingSource = ref<string | null>(null);
 const deletingItem = ref<string | null>(null);
 
+function credentialBackend(credential: CredentialListItem): string {
+  // Legacy credentials imply their backend by type; a RAG credential names it.
+  if (credential.type === "rag") {
+    return credential.public_fields?.db_type === "pgvector" ? "pgvector" : "qdrant";
+  }
+  return credential.type;
+}
+
 const filteredCredentials = computed(() =>
-  vectorCredentials.value.filter((c) => c.type === newStoreDbType.value),
+  vectorCredentials.value.filter(
+    (c) => credentialBackend(c) === newStoreDbType.value,
+  ),
 );
 
 const credentialOptions = computed(() => {
@@ -92,7 +102,7 @@ const credentialOptions = computed(() => {
     { value: "", label: "Select a credential" },
     ...filteredCredentials.value.map((c) => ({
       value: c.id,
-      label: c.name,
+      label: c.type === "rag" ? `${c.name} (custom embeddings)` : c.name,
     })),
   ];
 });
@@ -124,11 +134,12 @@ async function loadVectorStores(): Promise<void> {
 }
 
 async function loadCredentials(): Promise<void> {
-  const [qdrant, pgvector] = await Promise.all([
+  const [qdrant, pgvector, rag] = await Promise.all([
     credentialsApi.listByType("qdrant").catch(() => []),
     credentialsApi.listByType("pgvector").catch(() => []),
+    credentialsApi.listByType("rag").catch(() => []),
   ]);
-  vectorCredentials.value = [...qdrant, ...pgvector];
+  vectorCredentials.value = [...qdrant, ...pgvector, ...rag];
 }
 
 function openCreateDialog(): void {

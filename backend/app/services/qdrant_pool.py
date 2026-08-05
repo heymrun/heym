@@ -46,11 +46,17 @@ def warm_up_pools() -> int:
     initialized = 0
 
     with SessionLocal() as db:
-        qdrant_creds = db.query(Credential).filter(Credential.type == CredentialType.qdrant).all()
+        qdrant_creds = (
+            db.query(Credential)
+            .filter(Credential.type.in_([CredentialType.qdrant, CredentialType.rag]))
+            .all()
+        )
 
         for cred in qdrant_creds:
             try:
                 config = decrypt_config(cred.encrypted_config)
+                if cred.type == CredentialType.rag and config.get("db_type") != "qdrant":
+                    continue
                 host = config.get("qdrant_host", "localhost")
                 port = int(config.get("qdrant_port", 6333))
                 api_key = config.get("qdrant_api_key") or None

@@ -40,7 +40,10 @@ from app.models.schemas import (
 from app.services.encryption import decrypt_config
 from app.services.file_processor import create_file_processor
 from app.services.upload_limits import read_upload_file_limited
-from app.services.vector_store import create_vector_store_service_for_credential
+from app.services.vector_store import (
+    create_vector_store_service_for_credential,
+    rag_credential_backend,
+)
 from app.services.vector_store_pg import VectorStoreBackendUnavailableError
 
 router = APIRouter()
@@ -89,10 +92,14 @@ async def get_credential_config(
             detail="Credential not found",
         )
 
-    if credential.type not in (CredentialType.qdrant, CredentialType.pgvector):
+    if credential.type not in (
+        CredentialType.qdrant,
+        CredentialType.pgvector,
+        CredentialType.rag,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Credential must be a vector store credential (Qdrant or Postgres)",
+            detail="Credential must be a vector store credential (Qdrant, Postgres, or RAG)",
         )
 
     config = decrypt_config(credential.encrypted_config)
@@ -103,7 +110,17 @@ def get_vector_store_service_from_config(config: dict, credential_type: object):
     return create_vector_store_service_for_credential(credential_type, config)
 
 
-def _backend_for_credential_type(credential_type: object) -> str:
+def _backend_for_credential_type(credential_type: object, config: dict | None = None) -> str:
+    """Which vector store a credential writes into.
+
+    Legacy credentials imply their backend by type; a `rag` credential names it in
+    its config.
+    """
+    if credential_type == CredentialType.rag:
+        try:
+            return rag_credential_backend(config or {})
+        except ValueError:
+            return "qdrant"
     return "pgvector" if credential_type == CredentialType.pgvector else "qdrant"
 
 
@@ -216,9 +233,14 @@ async def list_vector_stores(
 async def _store_backend(store: VectorStore, db: AsyncSession) -> str:
     result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = result.scalar_one_or_none()
-    if credential and credential.type == CredentialType.pgvector:
-        return "pgvector"
-    return "qdrant"
+    if credential is None:
+        return "qdrant"
+    config = (
+        decrypt_config(credential.encrypted_config)
+        if credential.type == CredentialType.rag
+        else None
+    )
+    return _backend_for_credential_type(credential.type, config)
 
 
 async def _get_store_stats(
@@ -324,7 +346,7 @@ async def create_vector_store(
         created_at=store.created_at,
         updated_at=store.updated_at,
         stats=None,
-        backend=_backend_for_credential_type(credential.type),
+        backend=_backend_for_credential_type(credential.type, config),
     )
 
 
@@ -506,7 +528,7 @@ async def clone_vector_store(
         created_at=new_store.created_at,
         updated_at=new_store.updated_at,
         stats=stats,
-        backend=_backend_for_credential_type(credential.type),
+        backend=_backend_for_credential_type(credential.type, config),
     )
 
 

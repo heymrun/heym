@@ -114,6 +114,7 @@ export function usePropertiesPanelController() {
     sticky: StickyNote,
     merge: GitMerge,
     set: Settings2,
+    converter: Repeat,
     jsonOutputMapper: Braces,
     telegramTrigger: MessageSquare,
     telegram: MessageSquare,
@@ -174,6 +175,7 @@ export function usePropertiesPanelController() {
     sticky: "node-sticky",
     merge: "node-merge",
     set: "node-set",
+    converter: "node-set",
     jsonOutputMapper: "node-output",
     telegramTrigger: "node-telegram",
     telegram: "node-telegram",
@@ -234,6 +236,7 @@ export function usePropertiesPanelController() {
     sticky: "sticky-note-node",
     merge: "merge-node",
     set: "set-node",
+    converter: "converter-node",
     jsonOutputMapper: "json-output-mapper-node",
     telegramTrigger: "telegram-trigger-node",
     telegram: "telegram-node",
@@ -551,9 +554,11 @@ export function usePropertiesPanelController() {
   const suppressCloseExpandDialogsForNavigationId = ref<string | null>(null);
   const llmSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
   const llmImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const llmExtraBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentLlmExpressionFieldIndex = ref(0);
   const agentSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
   const agentImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const agentExtraBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const agentMcpEnvInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentAgentExpressionFieldIndex = ref(0);
   const codexRepositoryUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -577,6 +582,7 @@ export function usePropertiesPanelController() {
   const loadingGuardrailModels = ref(false);
   const loadingFallbackModels = ref(false);
   const jsonFormatError = ref(false);
+  const extraBodyFormatError = ref(false);
   const telegramCredentials = ref<CredentialListItem[]>([]);
   const calTriggerCredentials = ref<CredentialListItem[]>([]);
   const calApiCredentials = ref<CredentialListItem[]>([]);
@@ -681,6 +687,17 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  type ConverterExpressionFieldKey = "source" | "converterFileId" | "ocrPageRange";
+
+  interface ConverterExpressionField {
+    key: ConverterExpressionFieldKey;
+    label: string;
+  }
+
+  const converterExpressionInputRefs = ref<Map<ConverterExpressionFieldKey, ExpandableFieldRef>>(
+    new Map(),
+  );
+  const currentConverterExpressionFieldIndex = ref(0);
   const switchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const loopArrayExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const executeTemplateExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2257,6 +2274,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
+    closeConverterExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
     loopArrayExpressionInputRef.value?.closeExpandDialog();
     executeTemplateExpressionInputRef.value?.closeExpandDialog();
@@ -2871,6 +2889,18 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "converter") {
+      currentConverterExpressionFieldIndex.value = 0;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        const firstField = converterExpressionFields.value[0];
+        if (firstField && converterExpressionInputRefs.value.get(firstField.key)) {
+          nextTick(() => openConverterExpressionFieldAtIndex(0));
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "switch") {
       const tryOpenDialog = (attempts = 0): void => {
         if (attempts > 20) return;
@@ -3147,6 +3177,7 @@ export function usePropertiesPanelController() {
       case "throwError":
       case "crawler":
       case "consoleLog":
+      case "converter":
       case "switch":
       case "loop":
       case "grist":
@@ -3256,6 +3287,10 @@ export function usePropertiesPanelController() {
       return;
     }
     currentLlmExpressionFieldIndex.value = index;
+    if (index === llmExtraBodyExpressionIndex.value) {
+      llmExtraBodyExpressionInputRef.value?.openExpandDialog();
+      return;
+    }
     if (isImageOutputMode.value) {
       if (index === 0) {
         userMessageInputRef.value?.openExpandDialog();
@@ -3289,6 +3324,7 @@ export function usePropertiesPanelController() {
     llmSystemInstructionInputRef.value?.closeExpandDialog();
     userMessageInputRef.value?.closeExpandDialog();
     llmImageExpressionInputRef.value?.closeExpandDialog();
+    llmExtraBodyExpressionInputRef.value?.closeExpandDialog();
     currentLlmExpressionFieldIndex.value = newIndex;
     nextTick(() => {
       openLlmExpressionFieldAtIndex(newIndex);
@@ -3357,9 +3393,13 @@ export function usePropertiesPanelController() {
     } else if (index === 2 && n.data.imageInputEnabled) {
       agentImageExpressionInputRef.value?.openExpandDialog();
     } else if (index >= baseCount) {
-      const connId = agentMcpEnvConnectionIds.value[index - baseCount];
+      // Extra body sits after the MCP env slots so adding it never shifts their indices.
+      const envIndex = index - baseCount;
+      const connId = agentMcpEnvConnectionIds.value[envIndex];
       if (connId) {
         agentMcpEnvInputRefs.value.get(connId)?.openExpandDialog();
+      } else if (index === agentExtraBodyExpressionIndex.value) {
+        agentExtraBodyExpressionInputRef.value?.openExpandDialog();
       }
     }
   }
@@ -3380,6 +3420,7 @@ export function usePropertiesPanelController() {
     agentSystemInstructionInputRef.value?.closeExpandDialog();
     userMessageInputRef.value?.closeExpandDialog();
     agentImageExpressionInputRef.value?.closeExpandDialog();
+    agentExtraBodyExpressionInputRef.value?.closeExpandDialog();
     for (const input of agentMcpEnvInputRefs.value.values()) {
       input.closeExpandDialog();
     }
@@ -5777,6 +5818,80 @@ export function usePropertiesPanelController() {
     currentChartOutputExpressionFieldIndex.value = index;
   }
 
+  const converterExpressionFields = computed<ConverterExpressionField[]>(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "converter") {
+      return [];
+    }
+    const conversion = n.data.conversion || "csvToJson";
+    if (conversion === "pdfToText") {
+      return [
+        { key: "converterFileId", label: "File" },
+        { key: "ocrPageRange", label: "Page range" },
+      ];
+    }
+    if (conversion === "imageToText" || conversion === "fileConvert") {
+      return [{ key: "converterFileId", label: "File" }];
+    }
+    return [{ key: "source", label: "Source" }];
+  });
+
+  const converterExpressionFieldCount = computed((): number => {
+    return converterExpressionFields.value.length;
+  });
+
+  function converterExpressionFieldIndex(key: ConverterExpressionFieldKey): number {
+    const index = converterExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : 0;
+  }
+
+  function setConverterExpressionInputRef(key: ConverterExpressionFieldKey, el: unknown): void {
+    if (el) {
+      converterExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
+    } else {
+      converterExpressionInputRefs.value.delete(key);
+    }
+  }
+
+  function openConverterExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "converter") {
+      return;
+    }
+    const field = converterExpressionFields.value[index];
+    if (!field) {
+      return;
+    }
+    currentConverterExpressionFieldIndex.value = index;
+    converterExpressionInputRefs.value.get(field.key)?.openExpandDialog();
+  }
+
+  function closeConverterExpressionDialogs(): void {
+    for (const input of converterExpressionInputRefs.value.values()) {
+      input.closeExpandDialog();
+    }
+  }
+
+  function handleConverterExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = converterExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentConverterExpressionFieldIndex.value - 1
+        : currentConverterExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeConverterExpressionDialogs();
+    currentConverterExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openConverterExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onConverterRegisterExpressionFieldIndex(index: number): void {
+    currentConverterExpressionFieldIndex.value = index;
+  }
+
   function onSetMappingRegisterFieldIndex(index: number): void {
     currentSetMappingIndex.value = index;
   }
@@ -6609,7 +6724,11 @@ export function usePropertiesPanelController() {
   const S3_LIST_OBJECTS_MAX_KEYS = 1000;
   const s3MaxKeysWarning = ref("");
 
-  const driveConvertFormatOptions = [
+  // Target formats for the converter node's fileConvert conversion. The source file
+  // is chosen by expression rather than picked from a list, so the full matrix is
+  // offered and the backend rejects an impossible pair with a clear message.
+  const converterTargetFormatOptions = [
+    { value: "", label: "Select format..." },
     { value: "pdf", label: "PDF (.pdf)" },
     { value: "docx", label: "Word Document (.docx)" },
     { value: "html", label: "HTML (.html)" },
@@ -6622,52 +6741,6 @@ export function usePropertiesPanelController() {
     { value: "bmp", label: "BMP Image (.bmp)" },
     { value: "webp", label: "WebP Image (.webp)" },
   ];
-
-  const _IMAGE_MIMES = new Set([
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/bmp",
-    "image/webp",
-  ]);
-
-  const _MIME_TO_FORMAT: Record<string, string> = {
-    "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "text/html": "html",
-    "text/markdown": "md",
-    "text/plain": "txt",
-    "text/csv": "csv",
-    "application/epub+zip": "epub",
-    "application/json": "json",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/png": "png",
-    "image/bmp": "bmp",
-    "image/webp": "webp",
-  };
-
-  const driveConvertFormatOptionsFiltered = computed(() => {
-    const n = selectedNode.value;
-    if (!n || n.type !== "drive" || n.data.driveOperation !== "convertFile") {
-      return driveConvertFormatOptions;
-    }
-    const fileId = n.data.driveFileId;
-    if (!fileId) return driveConvertFormatOptions;
-    const file = driveFiles.value.find((f) => f.id === fileId);
-    if (!file) return driveConvertFormatOptions;
-
-    const inputFormat = _MIME_TO_FORMAT[file.mime_type];
-    const isImage = _IMAGE_MIMES.has(file.mime_type);
-
-    const allowed = isImage
-      ? ["jpg", "png", "bmp", "webp"]
-      : ["pdf", "docx", "html", "md", "txt", "csv", "epub"];
-
-    return driveConvertFormatOptions.filter(
-      (o) => allowed.includes(o.value) && o.value !== inputFormat,
-    );
-  });
 
   const dataTableOptions = computed(() => {
     const options = [{ value: "", label: "Select table..." }];
@@ -7419,15 +7492,35 @@ export function usePropertiesPanelController() {
     return workflowStore.selectedNode?.data.outputType === "image";
   });
 
+  /**
+   * Slot index of the extra body field, or -1 when it is not shown. Image output mode has
+   * no extra body field because image requests never receive the payload.
+   */
+  const llmExtraBodyExpressionIndex = computed((): number => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "llm" || !n.data.extraBodyEnabled || isImageOutputMode.value) {
+      return -1;
+    }
+    return 2 + (n.data.imageInputEnabled ? 1 : 0);
+  });
+
   const llmExpressionFieldCount = computed((): number => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "llm") {
       return 1;
     }
-    if (isImageOutputMode.value) {
-      return n.data.imageInputEnabled ? 2 : 1;
+    const base = isImageOutputMode.value ? 1 : 2;
+    const extraBodySlot = llmExtraBodyExpressionIndex.value === -1 ? 0 : 1;
+    return base + (n.data.imageInputEnabled ? 1 : 0) + extraBodySlot;
+  });
+
+  /** Slot index of the extra body field, or -1 while the toggle is off. */
+  const agentExtraBodyExpressionIndex = computed((): number => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "agent" || !n.data.extraBodyEnabled) {
+      return -1;
     }
-    return n.data.imageInputEnabled ? 3 : 2;
+    return (n.data.imageInputEnabled ? 3 : 2) + agentMcpEnvConnectionIds.value.length;
   });
 
   const agentExpressionFieldCount = computed((): number => {
@@ -7435,7 +7528,11 @@ export function usePropertiesPanelController() {
     if (!n || n.type !== "agent") {
       return 1;
     }
-    return (n.data.imageInputEnabled ? 3 : 2) + agentMcpEnvConnectionIds.value.length;
+    return (
+      (n.data.imageInputEnabled ? 3 : 2) +
+      agentMcpEnvConnectionIds.value.length +
+      (n.data.extraBodyEnabled ? 1 : 0)
+    );
   });
 
   const agentMcpEnvConnectionIds = computed((): string[] => {
@@ -8329,6 +8426,26 @@ export function usePropertiesPanelController() {
     }
   }
 
+  function formatExtraBody(): void {
+    if (!selectedNode.value) return;
+    const raw = selectedNode.value.data.extraBody;
+    if (!raw || typeof raw !== "string") return;
+
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Extra body must be a JSON object");
+      }
+      updateNodeData("extraBody", JSON.stringify(parsed, null, 2));
+      extraBodyFormatError.value = false;
+    } catch {
+      extraBodyFormatError.value = true;
+      setTimeout(() => {
+        extraBodyFormatError.value = false;
+      }, 2000);
+    }
+  }
+
   function updateNodeData(key: string, value: unknown): void {
     if (!selectedNode.value) return;
     const currentData = selectedNode.value.data as Record<string, unknown>;
@@ -9023,8 +9140,10 @@ export function usePropertiesPanelController() {
     redisKeyInputRef,
     llmSystemInstructionInputRef,
     llmImageExpressionInputRef,
+    llmExtraBodyExpressionInputRef,
     agentSystemInstructionInputRef,
     agentImageExpressionInputRef,
+    agentExtraBodyExpressionInputRef,
     codexRepositoryUrlExpressionInputRef,
     codexBaseBranchExpressionInputRef,
     codexTaskPromptExpressionInputRef,
@@ -9039,6 +9158,7 @@ export function usePropertiesPanelController() {
     loadingGuardrailModels,
     loadingFallbackModels,
     jsonFormatError,
+    extraBodyFormatError,
     slackTriggerCredentials,
     discordTriggerCredentials,
     loadingNotionDataSources,
@@ -9067,6 +9187,11 @@ export function usePropertiesPanelController() {
     websocketTriggerEventOptions,
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
+    converterExpressionFieldCount,
+    converterExpressionFieldIndex,
+    setConverterExpressionInputRef,
+    handleConverterExpressionFieldNavigate,
+    onConverterRegisterExpressionFieldIndex,
     switchExpressionInputRef,
     loopArrayExpressionInputRef,
     executeTemplateExpressionInputRef,
@@ -9441,7 +9566,7 @@ export function usePropertiesPanelController() {
     s3MaxKeysWarning,
     dataTableOperationOptions,
     driveOperationOptions,
-    driveConvertFormatOptionsFiltered,
+    converterTargetFormatOptions,
     dataTableOptions,
     rabbitmqCredentialOptions,
     rabbitmqOperationOptions,
@@ -9492,7 +9617,9 @@ export function usePropertiesPanelController() {
     getExpressionWarning,
     isImageOutputMode,
     llmExpressionFieldCount,
+    llmExtraBodyExpressionIndex,
     agentExpressionFieldCount,
+    agentExtraBodyExpressionIndex,
     mcpCallArgumentKeys,
     mcpCallExpressionFieldCount,
     selectedModelIsReasoning,
@@ -9552,6 +9679,7 @@ export function usePropertiesPanelController() {
     mcpCallSelectedTool,
     mcpCallToolOptions,
     formatJsonSchema,
+    formatExtraBody,
     updateNodeData,
     toggleWebSocketTriggerEvent,
     handleLabelChange,

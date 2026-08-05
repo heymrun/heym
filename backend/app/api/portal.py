@@ -454,10 +454,11 @@ async def portal_execute_stream(
 
     event_queue: queue.Queue = queue.Queue()
     final_result: dict = {}
+    was_cancelled: bool = False
     progress_tracker = PortalProgressTracker()
 
     def run_executor():
-        nonlocal final_result
+        nonlocal final_result, was_cancelled
         try:
             for event in execute_workflow_streaming(
                 workflow_id=workflow.id,
@@ -481,13 +482,14 @@ async def portal_execute_stream(
                 if event.get("type") == "execution_complete":
                     final_result = event
         except WorkflowCancelledError:
+            was_cancelled = True
             return
         finally:
             event_queue.put(None)
             clear_active_execution(execution_id)
 
     async def event_generator():
-        nonlocal final_result
+        nonlocal final_result, was_cancelled
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
@@ -506,6 +508,8 @@ async def portal_execute_stream(
             while True:
                 if await request.is_disconnected():
                     cancel_event.set()
+                    was_cancelled = True
+                    await asyncio.shield(future)
                     break
                 try:
                     event = event_queue.get(block=True, timeout=0.01)
@@ -634,7 +638,31 @@ async def portal_execute_stream(
                     cancel_event.set()
                     break
 
-            if final_result and final_result.get("status") != "pending":
+            if was_cancelled and not final_result:
+                # Without this row the run simply disappears: canvases observing it
+                # (live view in another tab) never receive a terminal event.
+                db.add(
+                    ExecutionHistory(
+                        id=execution_id,
+                        workflow_id=workflow.id,
+                        inputs=enriched_inputs,
+                        outputs={},
+                        node_results=[],
+                        status="cancelled",
+                        execution_time_ms=0,
+                        trigger_source="portal",
+                    )
+                )
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status="cancelled",
+                    execution_time_ms=0.0,
+                )
+                await db.flush()
+            elif final_result and final_result.get("status") != "pending":
                 await _persist_global_variables_from_execution(
                     db,
                     workflow.owner_id,

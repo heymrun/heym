@@ -22,6 +22,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
 | **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
+| **RAG: Custom Embeddings** | [RAG](../nodes/rag-node.md), Vectorstores | `embedding_base_url`, `embedding_model`, `embedding_dimensions`, `db_type`, optional `embedding_api_key`, plus `qdrant_host` when `db_type` is `qdrant` |
 | **Grist** | [Grist node](../nodes/grist-node.md) | `api_key`, `server_url` |
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Google Drive** | [Google Drive node](../nodes/google-drive-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
@@ -269,6 +270,54 @@ The Sentry credential stores an auth token for the [Sentry node](../nodes/sentry
 - The [RAG node](../nodes/rag-node.md) uses a vector store (which references a Qdrant credential) — it does not reference the credential directly.
 - If your Qdrant instance requires an API key, include it in the `qdrant_host` value or configure Qdrant accordingly; the current integration does not have a separate Qdrant API key field.
 - Self-hosted Qdrant: use the [official Docker image](https://hub.docker.com/r/qdrant/qdrant) and expose port `6333`.
+
+### Used By
+
+- [RAG node](../nodes/rag-node.md) (via vector store)
+- [Vectorstores Tab](../tabs/vectorstores-tab.md)
+
+## Custom Embeddings (RAG)
+
+By default RAG embeddings come from OpenAI. A **RAG: Custom Embeddings** credential
+points at any OpenAI-compatible embeddings endpoint instead — Ollama, vLLM, Text
+Embeddings Inference, LM Studio, Together, or a hosted gateway — and names the vector
+store it writes into.
+
+### Required Fields
+
+| Field | Description |
+|-------|-------------|
+| `embedding_base_url` | Endpoint URL including the `/v1` path, e.g. `http://localhost:11434/v1` |
+| `embedding_api_key` | Optional. Local servers usually need no key |
+| `embedding_model` | Model name as the endpoint expects it, e.g. `nomic-embed-text` |
+| `embedding_dimensions` | Vector width the model returns (default `1536`) |
+| `embedding_request_dimensions` | Optional. Ask the endpoint to return `embedding_dimensions` instead of the model's native width |
+| `db_type` | `qdrant` or `pgvector` |
+| `qdrant_host`, `qdrant_port`, `qdrant_api_key` | Qdrant connection, required when `db_type` is `qdrant` |
+
+### Notes
+
+- **Qdrant accepts any dimension count.** Each collection is created at the width this
+  credential declares, so the Dimensions field is freely editable.
+- **Postgres (pgvector) requires exactly 1536 dimensions.** Its column is a fixed
+  `vector(1536)`, so the Dimensions field is pinned to 1536 and a credential declaring
+  any other width is rejected at save time.
+- **Shortening for pgvector.** When the store is Postgres, the dialog offers *Ask the
+  endpoint to return 1536 dimensions*. This sends the `dimensions` request parameter,
+  which models trained with Matryoshka representations (OpenAI `text-embedding-3-*`,
+  `nomic-embed-text-v1.5`, `jina-v3` and similar) honour by returning a shortened,
+  still-meaningful vector. Endpoints that do not support the parameter reject the
+  request, and endpoints that accept but ignore it produce a clear error naming the
+  width actually returned. Heym never truncates vectors itself, because slicing the
+  output of a non-Matryoshka model degrades retrieval quality silently. The option is
+  not offered for Qdrant, which can size a collection to any width.
+- Use **Test Connection** in the credential dialog to embed a probe string and see the
+  width the model actually returns before you create a store.
+- The `dimensions` request parameter is only sent to OpenAI itself, since most
+  OpenAI-compatible servers reject unknown parameters. The model's native width is
+  validated against the credential instead.
+- The existing **RAG: Qdrant + OpenAI** and **RAG: Psql + OpenAI** credentials are
+  unchanged and keep working.
 
 ### Used By
 

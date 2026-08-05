@@ -33,7 +33,8 @@ export type CredentialType =
   | "sentry"
   | "s3"
   | "elevenlabs"
-  | "clickhouse";
+  | "clickhouse"
+  | "rag";
 
 export interface Credential {
   id: string;
@@ -52,6 +53,7 @@ export interface CredentialListItem {
   type: CredentialType;
   masked_value: string | null;
   header_key: string | null;
+  public_fields?: Record<string, string | null>;
   created_at: string;
   is_shared?: boolean;
   shared_by?: string | null;
@@ -225,6 +227,25 @@ export interface CredentialConfigPgvector {
   openai_api_key: string;
 }
 
+export type VectorStoreBackend = "qdrant" | "pgvector";
+
+/** The embedding half of a RAG credential — also the payload the test endpoint takes. */
+export interface CredentialConfigRagEmbedding {
+  embedding_base_url: string;
+  embedding_api_key: string;
+  embedding_model: string;
+  embedding_dimensions: string;
+  /** Ask the endpoint to return `embedding_dimensions` instead of the model's native width. */
+  embedding_request_dimensions: boolean;
+}
+
+export interface CredentialConfigRag extends CredentialConfigRagEmbedding {
+  db_type: VectorStoreBackend;
+  qdrant_host: string;
+  qdrant_port: string;
+  qdrant_api_key: string;
+}
+
 export interface CredentialConfigGrist {
   api_key: string;
   server_url: string;
@@ -312,6 +333,8 @@ export type CredentialConfig =
   | CredentialConfigRedis
   | CredentialConfigQdrant
   | CredentialConfigPgvector
+  | CredentialConfigRag
+  | CredentialConfigRagEmbedding
   | CredentialConfigGrist
   | CredentialConfigRabbitmq
   | CredentialConfigCohere
@@ -415,6 +438,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   redis: "Redis",
   qdrant: "RAG: Qdrant + OpenAI",
   pgvector: "RAG: Psql + OpenAI",
+  rag: "RAG: Custom Embeddings",
   grist: "Grist",
   rabbitmq: "RabbitMQ",
   cohere: "Cohere Reranker",
@@ -454,6 +478,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   qdrant: "Connect to QDrant for vector storage with OpenAI embeddings",
   pgvector:
     "Vector storage inside Heym's own Postgres database with OpenAI embeddings (no external DB)",
+  rag: "Use any OpenAI-compatible embedding endpoint by URL, and pick Qdrant or Postgres (pgvector) as the vector store",
   grist: "Connect to Grist spreadsheet for data operations",
   rabbitmq: "Connect to RabbitMQ for message queue operations",
   cohere: "Connect to Cohere API for reranking search results",

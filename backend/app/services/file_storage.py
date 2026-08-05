@@ -102,6 +102,94 @@ def get_file_path(generated_file: GeneratedFile) -> Path:
     return _safe_storage_path(generated_file.storage_path)
 
 
+def load_readable_file_sync(
+    db: object,
+    *,
+    file_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    context: str = "File",
+) -> tuple[GeneratedFile, bytes]:
+    """Read a Drive file the user owns or a teammate shared with them.
+
+    Uses the synchronous session the workflow executor runs on. Read access
+    mirrors the Drive node's ``get`` rule: own files always,
+    team-shared files when the user belongs to a team the file is shared with.
+    """
+    from app.db.models import FileTeamShare, TeamMember
+
+    row = (
+        db.query(GeneratedFile)
+        .filter(GeneratedFile.id == file_id, GeneratedFile.owner_id == owner_id)
+        .first()
+    )
+    if not row:
+        row = (
+            db.query(GeneratedFile)
+            .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
+            .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
+            .filter(GeneratedFile.id == file_id, TeamMember.user_id == owner_id)
+            .first()
+        )
+    if not row:
+        raise ValueError(f"{context}: file not found or access denied: {file_id}")
+
+    disk_path = get_file_path(row)
+    if not disk_path.exists():
+        raise ValueError(f"{context}: file content is missing on disk: {row.filename}")
+    return row, disk_path.read_bytes()
+
+
+def store_file_sync(
+    db: object,
+    *,
+    owner_id: uuid.UUID,
+    file_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    workflow_id: uuid.UUID | None = None,
+    source_node_id: str | None = None,
+    source_node_label: str | None = None,
+    context: str = "File",
+) -> tuple[GeneratedFile, str]:
+    """Write a new Drive file plus its default access token, synchronously.
+
+    Mirrors :func:`store_file` for the executor's synchronous session. Returns the
+    row and the raw token string, which is what a download URL is built from.
+    """
+    from app.db.models import FileAccessToken
+
+    filename = _normalize_storage_filename(filename)
+
+    max_bytes = settings.file_max_size_mb * 1024 * 1024
+    if len(file_bytes) > max_bytes:
+        raise ValueError(f"{context}: file exceeds the size limit ({settings.file_max_size_mb} MB)")
+
+    file_uuid = uuid.uuid4()
+    relative_path = f"{owner_id}/{file_uuid}/{filename}"
+    absolute_path = _safe_storage_path(relative_path)
+    absolute_path.parent.mkdir(parents=True, exist_ok=True)
+    absolute_path.write_bytes(file_bytes)
+
+    row = GeneratedFile(
+        id=file_uuid,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+        filename=filename,
+        storage_path=relative_path,
+        mime_type=mime_type,
+        size_bytes=len(file_bytes),
+        source_node_id=source_node_id,
+        source_node_label=source_node_label,
+        metadata_json={},
+    )
+    db.add(row)
+    db.flush()
+
+    token = secrets.token_urlsafe(32)
+    db.add(FileAccessToken(file_id=file_uuid, token=token, created_by_id=owner_id))
+    return row, token
+
+
 async def delete_file(db: AsyncSession, generated_file: GeneratedFile) -> None:
     disk_path = get_file_path(generated_file)
     if disk_path.exists():

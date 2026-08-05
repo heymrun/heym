@@ -14,9 +14,16 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
-from app.services.embedding import EMBEDDING_DIMENSIONS, EmbeddingService
+from app.services.embedding import (
+    EmbeddingConfig,
+    EmbeddingService,
+    embedding_config_from_credential,
+)
 
 QDRANT_PAYLOAD_LIMIT_BYTES = 30 * 1024 * 1024
+
+# Vector store backends a `rag` credential can target.
+VECTOR_STORE_BACKENDS = ("qdrant", "pgvector")
 
 
 @dataclass
@@ -115,7 +122,8 @@ class QdrantVectorStoreService:
         qdrant_host: str,
         qdrant_port: int,
         qdrant_api_key: str | None,
-        openai_api_key: str,
+        openai_api_key: str | None = None,
+        embedding_config: EmbeddingConfig | None = None,
     ):
         if qdrant_api_key:
             self.client = QdrantClient(
@@ -128,13 +136,19 @@ class QdrantVectorStoreService:
                 host=qdrant_host,
                 port=qdrant_port,
             )
-        self.embedding_service = EmbeddingService(openai_api_key)
+        if embedding_config is None:
+            embedding_config = EmbeddingConfig(api_key=openai_api_key)
+        self.embedding_service = EmbeddingService(embedding_config)
+
+    @property
+    def embedding_dimensions(self) -> int:
+        return self.embedding_service.config.dimensions
 
     def create_collection(self, collection_name: str) -> bool:
         self.client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
-                size=EMBEDDING_DIMENSIONS,
+                size=self.embedding_dimensions,
                 distance=Distance.COSINE,
             ),
         )
@@ -530,6 +544,14 @@ def create_vector_store_service(
     )
 
 
+def rag_credential_backend(config: dict) -> str:
+    """Vector store backend selected inside a `rag` credential."""
+    db_type = str(config.get("db_type") or "qdrant").strip()
+    if db_type not in VECTOR_STORE_BACKENDS:
+        raise ValueError(f"Unsupported vector store type: {db_type}")
+    return db_type
+
+
 def create_vector_store_service_for_credential(
     credential_type: object,
     config: dict,
@@ -547,4 +569,16 @@ def create_vector_store_service_for_credential(
         from app.services.vector_store_pg import PgVectorStoreService
 
         return PgVectorStoreService(openai_api_key=config["openai_api_key"])
+    if type_str == "rag":
+        embedding_config = embedding_config_from_credential(config)
+        if rag_credential_backend(config) == "pgvector":
+            from app.services.vector_store_pg import PgVectorStoreService
+
+            return PgVectorStoreService(embedding_config=embedding_config)
+        return QdrantVectorStoreService(
+            qdrant_host=config.get("qdrant_host", "localhost"),
+            qdrant_port=int(config.get("qdrant_port", 6333)),
+            qdrant_api_key=config.get("qdrant_api_key"),
+            embedding_config=embedding_config,
+        )
     raise ValueError(f"Unsupported vector store credential type: {type_str}")

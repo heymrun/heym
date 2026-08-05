@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy import text
 
-from app.services.embedding import EmbeddingService
+from app.services.embedding import EMBEDDING_DIMENSIONS, EmbeddingConfig, EmbeddingService
 from app.services.vector_store import (
     CollectionStats,
     ExistingFile,
@@ -22,6 +22,16 @@ BACKEND_UNAVAILABLE_MSG = (
 )
 
 
+def pgvector_dimension_message(dimensions: int) -> str:
+    """Explain why a non-1536 embedding width cannot use the pgvector backend."""
+    return (
+        f"Postgres (pgvector) stores vectors in a fixed vector({EMBEDDING_DIMENSIONS}) "
+        f"column, but this credential is configured for {dimensions} dimensions. Use an "
+        f"embedding model that returns {EMBEDDING_DIMENSIONS} dimensions, or select "
+        f"Qdrant as the vector store."
+    )
+
+
 class VectorStoreBackendUnavailableError(ValueError):
     """Raised when a pgvector operation is attempted but the backend table is missing."""
 
@@ -38,13 +48,22 @@ class PgVectorStoreService:
     ``create_collection`` is a no-op and ``collection_exists`` returns True.
     """
 
-    def __init__(self, openai_api_key: str, engine=None):
+    def __init__(
+        self,
+        openai_api_key: str | None = None,
+        engine=None,
+        embedding_config: EmbeddingConfig | None = None,
+    ):
         if engine is None:
             from app.db.session import sync_engine
 
             engine = sync_engine
         self.engine = engine
-        self.embedding_service = EmbeddingService(openai_api_key)
+        if embedding_config is None:
+            embedding_config = EmbeddingConfig(api_key=openai_api_key)
+        if embedding_config.dimensions != EMBEDDING_DIMENSIONS:
+            raise ValueError(pgvector_dimension_message(embedding_config.dimensions))
+        self.embedding_service = EmbeddingService(embedding_config)
 
     def _table_exists(self) -> bool:
         with self.engine.connect() as conn:

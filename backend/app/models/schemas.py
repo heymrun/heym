@@ -541,6 +541,7 @@ class CredentialType(str, Enum):
     clickhouse = "clickhouse"
     opencode = "opencode"
     google_drive = "google_drive"
+    rag = "rag"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -755,6 +756,7 @@ class CredentialListResponse(BaseModel):
     type: CredentialType
     masked_value: str | None = None
     header_key: str | None = None
+    public_fields: dict[str, str | None] = {}
     created_at: datetime
     is_shared: bool = False
     shared_by: str | None = None
@@ -905,6 +907,20 @@ class CredentialConfigQdrant(BaseModel):
 
 class CredentialConfigPgvector(BaseModel):
     openai_api_key: str
+
+
+class CredentialConfigRag(BaseModel):
+    """RAG credential: a custom embedding endpoint plus the vector store to write into."""
+
+    embedding_base_url: str
+    embedding_api_key: str | None = None
+    embedding_model: str
+    embedding_dimensions: int = 1536
+    embedding_request_dimensions: bool = False
+    db_type: str = "qdrant"
+    qdrant_host: str | None = None
+    qdrant_port: int = 6333
+    qdrant_api_key: str | None = None
 
 
 class CredentialConfigGrist(BaseModel):

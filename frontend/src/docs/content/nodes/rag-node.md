@@ -9,6 +9,11 @@ The node has a **Database** dropdown that selects the backend:
 
 The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, and Cohere reranking.
 
+Either backend can also be reached through a *RAG: Custom Embeddings* credential, which
+replaces OpenAI with any OpenAI-compatible embedding endpoint and names its own vector
+store. A store created from such a credential appears under whichever Database it
+targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-rag).
+
 ## Overview
 
 | Property | Value |

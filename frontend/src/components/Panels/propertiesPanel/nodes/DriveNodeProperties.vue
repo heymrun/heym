@@ -4,7 +4,6 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
-import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -21,7 +20,6 @@ const {
   handleDriveExpressionFieldNavigate,
   onDriveRegisterExpressionFieldIndex,
   driveOperationOptions,
-  driveConvertFormatOptionsFiltered,
   updateNodeData,
 } = usePropertiesPanelContext();
 </script>
@@ -133,7 +131,7 @@ const {
           field-key="driveFileId"
         />
       </div>
-      <template v-if="selectedNode.data.driveOperation === 'get' || selectedNode.data.driveOperation === 'convertFile'">
+      <template v-if="selectedNode.data.driveOperation === 'get'">
         <SearchableSelect
           :model-value="selectedNode.data.driveFileId || ''"
           :options="driveFileOptions"
@@ -308,21 +306,6 @@ const {
       </p>
     </div>
 
-    <div
-      v-if="selectedNode.data.driveOperation === 'convertFile'"
-      class="space-y-2"
-    >
-      <Label>Target Format</Label>
-      <Select
-        :model-value="selectedNode.data.driveConvertTargetFormat || ''"
-        :options="driveConvertFormatOptionsFiltered"
-        @update:model-value="updateNodeData('driveConvertTargetFormat', $event || undefined)"
-      />
-      <p class="text-xs text-muted-foreground">
-        Format to convert the file to
-      </p>
-    </div>
-
     <div class="rounded-lg bg-muted/50 p-3 space-y-1">
       <p class="text-xs font-medium text-foreground">
         Output
@@ -353,13 +336,6 @@ const {
         <template v-else-if="selectedNode.data.driveOperation === 'save'">
           <div>${{ selectedNode.data.label }}.id - new file UUID</div>
           <div>${{ selectedNode.data.label }}.filename - file name</div>
-          <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>
-          <div>${{ selectedNode.data.label }}.size_bytes - file size</div>
-          <div>${{ selectedNode.data.label }}.download_url - Drive download URL</div>
-        </template>
-        <template v-else-if="selectedNode.data.driveOperation === 'convertFile'">
-          <div>${{ selectedNode.data.label }}.id - new converted file UUID</div>
-          <div>${{ selectedNode.data.label }}.filename - converted filename</div>
           <div>${{ selectedNode.data.label }}.mime_type - MIME type</div>
           <div>${{ selectedNode.data.label }}.size_bytes - file size</div>
           <div>${{ selectedNode.data.label }}.download_url - Drive download URL</div>

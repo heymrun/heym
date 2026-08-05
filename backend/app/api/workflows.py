@@ -80,8 +80,10 @@ from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
 )
 from app.services.execution_cancellation import (
+    get_active_execution_events,
     get_active_execution_inputs,
     get_active_execution_progress,
+    get_active_execution_stream_snapshot,
     list_active_executions,
     list_pending_review_executions_for_user,
     list_persisted_active_executions_for_user,
@@ -125,6 +127,9 @@ _SENSITIVE_HEADERS: frozenset[str] = frozenset(
 _INTERNAL_STREAM_TRIGGER_SOURCES: frozenset[str] = frozenset({"Canvas", "Quick Drawer"})
 WORKFLOW_SSE_HEARTBEAT_SECONDS = 10.0
 WORKFLOW_STREAM_QUEUE_POLL_SECONDS = 0.01
+# Observe-stream polls at 0.25s; give a vanished execution 10s to surface its
+# history entry before telling the canvas the run is gone for good.
+WORKFLOW_OBSERVE_MISSING_TICK_LIMIT = 40
 
 
 @contextmanager
@@ -459,6 +464,8 @@ def get_node_output_expression(node: dict) -> str | None:
         return f"${label}.results (array of iteration outputs)"
     if node_type == "merge":
         return f"${label}.merged"
+    if node_type == "converter":
+        return f"${label}.result"
     if node_type == "slack":
         return f"${label}.success"
     if node_type == "textInput":
@@ -1116,8 +1123,27 @@ async def stream_active_workflow_execution(
         emitted_result_count = 0
         emitted_running_node_ids: set[str] = set()
         missing_ticks = 0
+        # "derived" rebuilds coarse node lifecycle from the progress snapshot (used for
+        # runs owned by another worker); "events" replays the runner's own SSE stream,
+        # which also carries agent tool progress and sub-agent node lifecycle.
+        stream_mode = "derived"
+        event_cursor = 0
         loop = asyncio.get_running_loop()
         last_heartbeat_at = loop.time()
+
+        def derived_catch_up_frames(
+            running_node_ids: list[str],
+            node_results: list[dict],
+        ) -> Iterator[str]:
+            """Rebuild node lifecycle frames from a coarse progress snapshot."""
+            nonlocal emitted_result_count, emitted_running_node_ids
+            for node_result in node_results[emitted_result_count:]:
+                yield f"data: {json.dumps({'type': 'node_complete', **node_result})}\n\n"
+            emitted_result_count = max(emitted_result_count, len(node_results))
+            current_running_node_ids = set(running_node_ids)
+            for node_id in sorted(current_running_node_ids - emitted_running_node_ids):
+                yield "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
+            emitted_running_node_ids = current_running_node_ids
 
         yield (
             "data: "
@@ -1139,13 +1165,58 @@ async def stream_active_workflow_execution(
             node_results: list[dict] = []
             active_found = False
 
-            local_progress = get_active_execution_progress(
+            snapshot = get_active_execution_stream_snapshot(
                 execution_id,
                 workflow_id=workflow_id,
             )
-            if local_progress is not None:
+            if snapshot is not None and snapshot.publishes_progress_events:
+                missing_ticks = 0
+                emitted_event = False
+                if stream_mode == "derived":
+                    nothing_emitted_yet = emitted_result_count == 0 and not emitted_running_node_ids
+                    if nothing_emitted_yet and snapshot.dropped_event_count == 0:
+                        # Attaching mid-run: replay the whole stream so the canvas shows
+                        # the agent log from the beginning.
+                        for payload in snapshot.events:
+                            yield f"data: {payload}\n\n"
+                            emitted_event = True
+                    else:
+                        # The buffer already lost its head: fall back to the snapshot for
+                        # the catch-up, then follow the live events from here on.
+                        for frame in derived_catch_up_frames(
+                            snapshot.running_node_ids,
+                            snapshot.node_results,
+                        ):
+                            yield frame
+                            emitted_event = True
+                    event_cursor = snapshot.next_event_seq
+                    stream_mode = "events"
+                else:
+                    pending_events = get_active_execution_events(
+                        execution_id,
+                        workflow_id=workflow_id,
+                        after_seq=event_cursor,
+                    )
+                    if pending_events is not None:
+                        payloads, next_seq = pending_events
+                        for payload in payloads:
+                            yield f"data: {payload}\n\n"
+                            emitted_event = True
+                        event_cursor = next_seq
+
+                now = loop.time()
+                if emitted_event:
+                    last_heartbeat_at = now
+                elif now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
+                    last_heartbeat_at = now
+                    yield ": heartbeat\n\n"
+                await asyncio.sleep(0.25)
+                continue
+
+            if snapshot is not None:
                 active_found = True
-                running_node_ids, node_results = local_progress
+                running_node_ids = snapshot.running_node_ids
+                node_results = snapshot.node_results
             else:
                 async with async_session_maker() as stream_db:
                     active_result = await stream_db.execute(
@@ -1164,18 +1235,12 @@ async def stream_active_workflow_execution(
             if active_found:
                 missing_ticks = 0
                 emitted_event = False
-                for node_result in node_results[emitted_result_count:]:
-                    yield f"data: {json.dumps({'type': 'node_complete', **node_result})}\n\n"
-                    emitted_event = True
-                emitted_result_count = max(emitted_result_count, len(node_results))
-
-                current_running_node_ids = set(running_node_ids)
-                for node_id in sorted(current_running_node_ids - emitted_running_node_ids):
-                    yield (
-                        "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
-                    )
-                    emitted_event = True
-                emitted_running_node_ids = current_running_node_ids
+                # Once the runner's own events have been streamed, never fall back to the
+                # coarse snapshot: its node results were already emitted as live events.
+                if stream_mode == "derived":
+                    for frame in derived_catch_up_frames(running_node_ids, node_results):
+                        yield frame
+                        emitted_event = True
                 now = loop.time()
                 if emitted_event:
                     last_heartbeat_at = now
@@ -1214,12 +1279,13 @@ async def stream_active_workflow_execution(
                 break
 
             missing_ticks += 1
-            if missing_ticks >= 40:
+            if missing_ticks >= WORKFLOW_OBSERVE_MISSING_TICK_LIMIT:
                 yield (
                     "data: "
                     + json.dumps(
                         {
                             "type": "error",
+                            "code": "execution_gone",
                             "message": "Execution is no longer active",
                         }
                     )

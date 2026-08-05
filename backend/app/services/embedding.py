@@ -11,6 +11,9 @@ MAX_TOKENS_PER_REQUEST = 300000
 SAFETY_MARGIN = 50000
 BATCH_TOKEN_LIMIT = MAX_TOKENS_PER_REQUEST - SAFETY_MARGIN
 
+# Local embedding servers usually ignore the key but the OpenAI SDK still requires one.
+CUSTOM_ENDPOINT_API_KEY_PLACEHOLDER = "not-needed"
+
 
 @dataclass
 class EmbeddingResult:
@@ -18,13 +21,91 @@ class EmbeddingResult:
     embedding: list[float]
 
 
+def as_bool(value: object) -> bool:
+    """Read a flag that may arrive as a bool from JSON or a string from a form."""
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in ("true", "1", "yes")
+
+
+@dataclass(frozen=True)
+class EmbeddingConfig:
+    """Where embeddings come from: OpenAI by default, any compatible endpoint by URL."""
+
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str = EMBEDDING_MODEL
+    dimensions: int = EMBEDDING_DIMENSIONS
+    request_dimensions: bool = False
+
+    @property
+    def is_custom_endpoint(self) -> bool:
+        return bool(self.base_url)
+
+
+def embedding_config_from_credential(config: dict) -> EmbeddingConfig:
+    """Build an embedding config from a decrypted `rag` credential config."""
+    dimensions = int(config.get("embedding_dimensions") or EMBEDDING_DIMENSIONS)
+    return EmbeddingConfig(
+        api_key=(config.get("embedding_api_key") or None),
+        base_url=(str(config.get("embedding_base_url") or "").strip() or None),
+        model=(str(config.get("embedding_model") or "").strip() or EMBEDDING_MODEL),
+        dimensions=dimensions,
+        request_dimensions=as_bool(config.get("embedding_request_dimensions")),
+    )
+
+
 class EmbeddingService:
-    def __init__(self, openai_api_key: str):
-        self.client = create_openai_client(api_key=openai_api_key)
+    def __init__(self, config: EmbeddingConfig | str):
+        if isinstance(config, str):
+            config = EmbeddingConfig(api_key=config)
+        self.config = config
+
+        client_kwargs: dict = {"api_key": config.api_key or CUSTOM_ENDPOINT_API_KEY_PLACEHOLDER}
+        if config.base_url:
+            client_kwargs["base_url"] = config.base_url
+        self.client = create_openai_client(**client_kwargs)
+
         try:
-            self.encoding = tiktoken.encoding_for_model("text-embedding-3-large")
+            self.encoding = tiktoken.encoding_for_model(config.model)
         except KeyError:
             self.encoding = tiktoken.get_encoding("cl100k_base")
+
+    def _request_kwargs(self) -> dict:
+        """Extra embedding request parameters.
+
+        OpenAI accepts a `dimensions` parameter for text-embedding-3-*, but most
+        OpenAI-compatible servers reject unknown parameters, so custom endpoints
+        only get it when the credential opts in. Otherwise they use their model's
+        native width, which `_check_dimensions` verifies against the credential.
+        """
+        if self.config.request_dimensions or not self.config.is_custom_endpoint:
+            return {"dimensions": self.config.dimensions}
+        return {}
+
+    def _check_dimensions(self, embedding: list[float]) -> list[float]:
+        if len(embedding) == self.config.dimensions:
+            return embedding
+
+        problem = (
+            f"Embedding model '{self.config.model}' returned {len(embedding)} "
+            f"dimensions, but the credential expects {self.config.dimensions}."
+        )
+        if self.config.request_dimensions:
+            # The endpoint accepted the request but ignored the requested width,
+            # which only Matryoshka-capable models honour.
+            fix = (
+                "The endpoint accepted the request but did not shorten the output, "
+                "so this model cannot produce the requested width. Use Qdrant with "
+                "the model's native dimensions instead."
+            )
+        else:
+            fix = (
+                "Set the credential's dimensions to match the model, or enable "
+                "'Ask the endpoint to return N dimensions' if the model can shorten "
+                "its output."
+            )
+        raise ValueError(f"{problem} {fix}")
 
     def _count_tokens(self, text: str) -> int:
         return len(self.encoding.encode(text))
@@ -86,11 +167,11 @@ class EmbeddingService:
             )
 
         response = self.client.embeddings.create(
-            model=EMBEDDING_MODEL,
+            model=self.config.model,
             input=text,
-            dimensions=EMBEDDING_DIMENSIONS,
+            **self._request_kwargs(),
         )
-        return response.data[0].embedding
+        return self._check_dimensions(response.data[0].embedding)
 
     def embed_texts(self, texts: list[str]) -> list[EmbeddingResult]:
         if not texts:
@@ -108,16 +189,16 @@ class EmbeddingService:
                 )
 
             response = self.client.embeddings.create(
-                model=EMBEDDING_MODEL,
+                model=self.config.model,
                 input=batch,
-                dimensions=EMBEDDING_DIMENSIONS,
+                **self._request_kwargs(),
             )
 
             for embedding_data in response.data:
                 all_results.append(
                     EmbeddingResult(
                         text=batch[embedding_data.index],
-                        embedding=embedding_data.embedding,
+                        embedding=self._check_dimensions(embedding_data.embedding),
                     )
                 )
 

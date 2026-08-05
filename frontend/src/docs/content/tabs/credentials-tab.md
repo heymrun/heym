@@ -26,6 +26,7 @@ The **Credentials** tab manages API keys and secrets used by nodes. Add credenti
 | **Redis** | Redis connection |
 | **RAG: Qdrant + OpenAI** | Vector store for RAG nodes, backed by an external Qdrant server |
 | **RAG: Psql + OpenAI** | Vector store for RAG nodes, backed by Heym's own Postgres database (pgvector) — no external service |
+| **RAG: Custom Embeddings** | Vector store for RAG nodes using any OpenAI-compatible embedding endpoint, with Qdrant or Postgres (pgvector) as the store |
 | **Cohere** | Cohere API for embeddings |
 
 ## Adding Credentials

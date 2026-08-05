@@ -5,6 +5,7 @@ from importlib import import_module
 from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.extra_body import resolve_extra_body
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -97,6 +98,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     fallback_credential_id = (node_data.get("fallbackCredentialId") or "").strip() or None
     fallback_model = (node_data.get("fallbackModel") or "").strip() or None
+    extra_body = resolve_extra_body(self, node_data, inputs, node_id)
     batch_status_signature: tuple[object, ...] | None = None
 
     def batch_status_callback(progress: dict[str, Any]) -> None:
@@ -146,6 +148,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         on_batch_status_update=batch_status_callback if batch_mode_enabled else None,
         should_abort=batch_should_abort if batch_mode_enabled else None,
         request_timeout=float(node_data.get("requestTimeoutSeconds") or 60),
+        extra_body=extra_body,
     )
     trace_id = self._pop_internal_trace_id(output)
     if output.get("error"):

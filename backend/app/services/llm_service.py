@@ -739,6 +739,7 @@ class LLMService:
         skills_included: list[str] | None = None,
         on_status_update: Callable[[dict[str, Any]], None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not user_messages:
             raise ValueError("Batch mode requires at least one item.")
@@ -775,6 +776,10 @@ class LLMService:
                 body["temperature"] = temperature
             if response_format is not None:
                 body["response_format"] = response_format
+            if extra_body:
+                # Batch entries carry the raw request body, so extra params merge at the
+                # top level instead of nesting under an "extra_body" key.
+                body.update(copy.deepcopy(extra_body))
 
             batch_requests.append(
                 {
@@ -982,6 +987,7 @@ class LLMService:
         initial_prompt_tokens: int = 0,
         initial_completion_tokens: int = 0,
         should_abort: Callable[[], str | None] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute LLM with tool calling loop."""
         client, provider = self._get_client()
@@ -1190,6 +1196,8 @@ class LLMService:
                 kwargs["temperature"] = temperature
             if response_format is not None:
                 kwargs["response_format"] = response_format
+            if extra_body:
+                kwargs["extra_body"] = copy.deepcopy(extra_body)
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
             _log_request(
@@ -2285,6 +2293,7 @@ async def execute_llm_batch(
     on_status_update: Callable[[dict[str, Any]], None] | None = None,
     should_abort: Callable[[], str | None] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
+    extra_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2302,6 +2311,7 @@ async def execute_llm_batch(
         skills_included=skills_included,
         on_status_update=on_status_update,
         should_abort=should_abort,
+        extra_body=extra_body,
     )
 
 
@@ -2597,6 +2607,7 @@ async def execute_llm_with_tools(
     initial_completion_tokens: int = 0,
     should_abort: Callable[[], str | None] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
+    extra_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2624,6 +2635,7 @@ async def execute_llm_with_tools(
         initial_prompt_tokens=initial_prompt_tokens,
         initial_completion_tokens=initial_completion_tokens,
         should_abort=should_abort,
+        extra_body=extra_body,
     )
 
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  Check,
   ChevronDown,
+  Copy,
   Download,
   FileText,
   HardDrive,
@@ -219,6 +221,24 @@ function downloadFile(file: GeneratedFile): void {
   window.open(url, "_blank", "noopener");
 }
 
+// The file UUID is what Drive and Converter nodes take, so make it one click to grab.
+const copiedFileId = ref("");
+let copiedResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copyFileId(file: GeneratedFile): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.clipboard) return;
+  try {
+    await navigator.clipboard.writeText(file.id);
+    copiedFileId.value = file.id;
+    clearTimeout(copiedResetTimer);
+    copiedResetTimer = setTimeout(() => {
+      copiedFileId.value = "";
+    }, 1500);
+  } catch {
+    // Clipboard access can be denied; there is nothing useful to report here.
+  }
+}
+
 async function downloadSelected(): Promise<void> {
   const ids = selectedFileIds.value;
   if (ids.length === 0 || downloadingBulk.value) return;
@@ -318,6 +338,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("dragover", handleWindowDragOver);
   window.removeEventListener("dragleave", handleWindowDragLeave);
   window.removeEventListener("drop", handleDrop);
+  clearTimeout(copiedResetTimer);
 });
 </script>
 
@@ -475,131 +496,148 @@ onBeforeUnmount(() => {
       v-if="files.length > 0"
       class="rounded-lg border border-border overflow-hidden"
     >
-      <table class="w-full text-sm">
-        <thead class="bg-muted/50 text-xs text-muted-foreground">
-          <tr>
-            <th class="w-9 px-3 py-2">
-              <input
-                v-if="selectableFiles.length > 0"
-                type="checkbox"
-                class="h-4 w-4 rounded border-input bg-background align-middle"
-                title="Select all"
-                :checked="allSelectableSelected"
-                :indeterminate="someSelectableSelected"
-                @change="toggleSelectAll"
-              >
-            </th>
-            <th class="text-left px-3 py-2 font-medium">
-              Name
-            </th>
-            <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">
-              Type
-            </th>
-            <th class="text-left px-3 py-2 font-medium hidden md:table-cell">
-              Size
-            </th>
-            <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">
-              Source
-            </th>
-            <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">
-              Date
-            </th>
-            <th class="text-right px-3 py-2 font-medium">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <tr
-            v-for="file in filtered"
-            :key="file.id"
-            class="transition-colors"
-            :class="selectedIds.has(file.id) ? 'bg-primary/5' : 'hover:bg-muted/30'"
-          >
-            <td class="w-9 px-3 py-2.5 align-top">
-              <input
-                v-if="!file.is_shared"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 rounded border-input bg-background"
-                :checked="selectedIds.has(file.id)"
-                @click="toggleRow(file, selectableFiles.indexOf(file), ($event as MouseEvent).shiftKey)"
-              >
-            </td>
-            <td class="px-3 py-2.5">
-              <div class="flex items-center gap-2">
-                <component
-                  :is="mimeIcon(file.mime_type)"
-                  class="w-4 h-4 shrink-0"
-                  :class="mimeColor(file.mime_type)"
-                />
-                <span class="truncate max-w-[200px] sm:max-w-[300px]">{{ file.filename }}</span>
-                <span
-                  v-if="file.shared_with_my_teams && !file.is_shared"
-                  class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:bg-violet-400/15 dark:text-violet-200"
+      <!-- Below ~320px even the truncated layout runs out of room, so scroll rather than clip. -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-muted/50 text-xs text-muted-foreground">
+            <tr>
+              <th class="w-9 px-3 py-2">
+                <input
+                  v-if="selectableFiles.length > 0"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-input bg-background align-middle"
+                  title="Select all"
+                  :checked="allSelectableSelected"
+                  :indeterminate="someSelectableSelected"
+                  @change="toggleSelectAll"
                 >
-                  <Users class="w-3 h-3" />
-                  Teams
-                </span>
-                <span
-                  v-if="file.is_shared"
-                  class="inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500"
-                >
-                  <Users class="w-3 h-3" />
-                  Shared
-                </span>
-              </div>
-              <p
-                v-if="file.is_shared && (file.shared_by || file.shared_by_team)"
-                class="mt-1 text-[11px] text-muted-foreground"
-              >
-                Shared{{ file.shared_by ? ` by ${file.shared_by}` : "" }}{{ file.shared_by_team ? ` via ${file.shared_by_team}` : "" }}
-              </p>
-            </td>
-            <td class="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">
-              {{ file.mime_type.split("/").pop() }}
-            </td>
-            <td class="px-3 py-2.5 text-xs text-muted-foreground hidden md:table-cell">
-              {{ formatFileSize(file.size_bytes) }}
-            </td>
-            <td class="px-3 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
-              {{ file.source_node_label || "-" }}
-            </td>
-            <td class="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">
-              {{ formatDate(file.created_at) }}
-            </td>
-            <td class="px-3 py-2.5">
-              <div
-                class="flex items-center justify-end gap-1"
-                @click.stop
-              >
-                <button
-                  class="p-1 rounded hover:bg-muted"
-                  title="Download"
-                  @click="downloadFile(file)"
-                >
-                  <Download class="w-3.5 h-3.5" />
-                </button>
-                <button
+              </th>
+              <th class="text-left px-3 py-2 font-medium">
+                Name
+              </th>
+              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">
+                Type
+              </th>
+              <th class="text-left px-3 py-2 font-medium hidden md:table-cell">
+                Size
+              </th>
+              <th class="text-left px-3 py-2 font-medium hidden lg:table-cell">
+                Source
+              </th>
+              <th class="text-left px-3 py-2 font-medium hidden sm:table-cell">
+                Date
+              </th>
+              <th class="text-right px-3 py-2 font-medium w-px whitespace-nowrap">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr
+              v-for="file in filtered"
+              :key="file.id"
+              class="transition-colors"
+              :class="selectedIds.has(file.id) ? 'bg-primary/5' : 'hover:bg-muted/30'"
+            >
+              <td class="w-9 px-3 py-2.5 align-top">
+                <input
                   v-if="!file.is_shared"
-                  class="p-1 rounded hover:bg-muted"
-                  title="Share"
-                  @click="openShare(file)"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 rounded border-input bg-background"
+                  :checked="selectedIds.has(file.id)"
+                  @click="toggleRow(file, selectableFiles.indexOf(file), ($event as MouseEvent).shiftKey)"
                 >
-                  <Share2 class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  v-if="!file.is_shared"
-                  class="p-1 rounded hover:bg-destructive/10 text-destructive"
-                  title="Delete"
-                  @click="deleteFile(file)"
+              </td>
+              <td class="px-3 py-2.5">
+                <div class="flex items-center gap-2 min-w-0">
+                  <component
+                    :is="mimeIcon(file.mime_type)"
+                    class="w-4 h-4 shrink-0"
+                    :class="mimeColor(file.mime_type)"
+                  />
+                  <span class="truncate max-w-[40vw] sm:max-w-[300px]">{{ file.filename }}</span>
+                  <span
+                    v-if="file.shared_with_my_teams && !file.is_shared"
+                    class="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:bg-violet-400/15 dark:text-violet-200"
+                  >
+                    <Users class="w-3 h-3" />
+                    Teams
+                  </span>
+                  <span
+                    v-if="file.is_shared"
+                    class="inline-flex shrink-0 items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500"
+                  >
+                    <Users class="w-3 h-3" />
+                    Shared
+                  </span>
+                </div>
+                <p
+                  v-if="file.is_shared && (file.shared_by || file.shared_by_team)"
+                  class="mt-1 text-[11px] text-muted-foreground"
                 >
-                  <Trash2 class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                  Shared{{ file.shared_by ? ` by ${file.shared_by}` : "" }}{{ file.shared_by_team ? ` via ${file.shared_by_team}` : "" }}
+                </p>
+              </td>
+              <td class="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">
+                {{ file.mime_type.split("/").pop() }}
+              </td>
+              <td class="px-3 py-2.5 text-xs text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                {{ formatFileSize(file.size_bytes) }}
+              </td>
+              <td class="px-3 py-2.5 text-xs text-muted-foreground hidden lg:table-cell whitespace-nowrap">
+                {{ file.source_node_label || "-" }}
+              </td>
+              <td class="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell whitespace-nowrap">
+                {{ formatDate(file.created_at) }}
+              </td>
+              <td class="px-3 py-2.5 w-px whitespace-nowrap">
+                <div
+                  class="flex items-center justify-end gap-0.5 sm:gap-1"
+                  @click.stop
+                >
+                  <button
+                    class="p-1 rounded hover:bg-muted"
+                    :title="copiedFileId === file.id ? 'File ID copied' : 'Copy file ID'"
+                    @click="copyFileId(file)"
+                  >
+                    <Check
+                      v-if="copiedFileId === file.id"
+                      class="w-3.5 h-3.5 text-emerald-500"
+                    />
+                    <Copy
+                      v-else
+                      class="w-3.5 h-3.5"
+                    />
+                  </button>
+                  <button
+                    class="p-1 rounded hover:bg-muted"
+                    title="Download"
+                    @click="downloadFile(file)"
+                  >
+                    <Download class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    v-if="!file.is_shared"
+                    class="p-1 rounded hover:bg-muted"
+                    title="Share"
+                    @click="openShare(file)"
+                  >
+                    <Share2 class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    v-if="!file.is_shared"
+                    class="p-1 rounded hover:bg-destructive/10 text-destructive"
+                    title="Delete"
+                    @click="deleteFile(file)"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Pagination + page size -->

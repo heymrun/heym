@@ -722,6 +722,16 @@ export const workflowApi = {
     onError: (error: Error) => void,
     onDisconnected: () => void,
     signal?: AbortSignal,
+    onNodeRetry?: (data: {
+      node_id: string;
+      node_label: string;
+      attempt: number;
+      max_attempts: number;
+      retry_result?: NodeResult;
+    }) => void,
+    onAgentProgress?: (data: AgentProgressEvent) => void,
+    onLlmBatchProgress?: (data: LLMBatchProgressEvent) => void,
+    onExecutionGone?: () => void,
   ): void => {
     const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -765,6 +775,12 @@ export const workflowApi = {
               });
             } else if (data.type === "node_start") {
               onNodeStart(data.node_id);
+            } else if (data.type === "node_retry" && onNodeRetry) {
+              onNodeRetry(data);
+            } else if (data.type === "agent_progress" && onAgentProgress) {
+              onAgentProgress(data);
+            } else if (data.type === "llm_batch_progress" && onLlmBatchProgress) {
+              onLlmBatchProgress(data);
             } else if (data.type === "node_complete") {
               onNodeComplete(data);
             } else if (data.type === "execution_complete") {
@@ -780,6 +796,12 @@ export const workflowApi = {
               });
               return;
             } else if (data.type === "error") {
+              if (data.code === "execution_gone" && onExecutionGone) {
+                // Terminal: the run left the registry without a history entry, so
+                // reconnecting would spin forever.
+                onExecutionGone();
+                return;
+              }
               throw new Error(data.message || "Live execution stream failed");
             }
           }

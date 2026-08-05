@@ -121,6 +121,40 @@ if ! command -v codex &> /dev/null; then
     fi
 fi
 
+# Binaries the Converter node's file conversions need: Tesseract for OCR, poppler's
+# pdftoppm to rasterize PDF pages, and weasyprint as the pandoc PDF engine. They ship in
+# every container image, so a native dev run installs them here to match. Best-effort:
+# the rest of the platform works without them, only file conversions fail.
+install_converter_dependencies() {
+    local missing=()
+    command -v tesseract >/dev/null 2>&1 || missing+=("tesseract")
+    command -v pdftoppm >/dev/null 2>&1 || missing+=("poppler")
+    command -v weasyprint >/dev/null 2>&1 || missing+=("weasyprint")
+    [ ${#missing[@]} -eq 0 ] && return 0
+
+    echo -e "${YELLOW}Installing Converter node dependencies (${missing[*]})...${NC}"
+    if command -v brew >/dev/null 2>&1; then
+        # tesseract-lang carries the non-English language data the "auto" setting relies on.
+        brew install tesseract tesseract-lang poppler weasyprint >/dev/null 2>&1
+    elif command -v apt-get >/dev/null 2>&1; then
+        local sudo_cmd=""
+        [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+        $sudo_cmd apt-get update -qq >/dev/null 2>&1 \
+            && $sudo_cmd apt-get install -y -qq --no-install-recommends \
+                weasyprint poppler-utils tesseract-ocr tesseract-ocr-osd tesseract-ocr-eng \
+                tesseract-ocr-tur tesseract-ocr-deu tesseract-ocr-fra tesseract-ocr-spa \
+                tesseract-ocr-script-latn tesseract-ocr-script-cyrl >/dev/null 2>&1
+    fi
+
+    if command -v tesseract >/dev/null 2>&1 && command -v pdftoppm >/dev/null 2>&1; then
+        echo -e "${GREEN}Converter dependencies installed.${NC}"
+    else
+        echo -e "${YELLOW}Could not auto-install Converter dependencies. OCR and file conversions will fail until you install them: 'brew install tesseract tesseract-lang poppler weasyprint' or 'apt-get install tesseract-ocr poppler-utils weasyprint'.${NC}"
+    fi
+}
+
+install_converter_dependencies
+
 ENV_FILE="$PROJECT_ROOT/.env"
 ENCRYPTION_KEY_PLACEHOLDER="change_this_to_a_random_32_byte_hex_value"
 

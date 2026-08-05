@@ -36,7 +36,7 @@ For every supported variable, default, and production note, see [Environment Var
 | `BACKEND_PORT` | Backend API port — defaults to `10105` |
 | `FRONTEND_PORT` | Frontend port — defaults to `4017` |
 | `FRONTEND_URL` | **Required in production.** Public URL of the app (scheme + host, e.g. `https://heym.example.com`). Used for OAuth redirect URIs (Google Sheets, BigQuery, Notion, and similar); must match the URL users use in the browser. |
-| `ALLOW_REGISTER` | Open user registration (`false` in prod, `true` in dev) |
+| `ALLOW_REGISTER` | Open user registration (`false` in prod, `true` in dev). Flip it to `false` only after your admin account exists — there is no first-user bootstrap, so an empty database plus disabled registration leaves no way to create one. |
 | `DOCKER_LOGS_ENABLED` | Enables Docker-backed Logs tab access when set to `true`; also requires Docker socket access |
 | `DOCKER_LOGS_ALLOWED_EMAILS` | Comma-separated list of trusted user emails allowed to access Docker logs when `DOCKER_LOGS_ENABLED=true` |
 | `REQUEST_BODY_MAX_SIZE_MB` | Maximum HTTP request body size accepted before endpoint handlers run; defaults to `100`, one MB above `FILE_MAX_SIZE_MB` to leave room for multipart overhead |
@@ -190,12 +190,16 @@ docker pull ghcr.io/heymrun/heym:latest
 docker run --rm \
   --env-file .env \
   -p 4017:4017 \
+  -e FILE_STORAGE_DIR=/app/data/files \
+  -e HEYM_PLUGINS_DIR=/app/data/plugins \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v "$(pwd)/data/plugins:/app/data/plugins" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
   ghcr.io/heymrun/heym:latest
 ```
+
+> **Make the file and plugin mounts absolute.** `FILE_STORAGE_DIR` and `HEYM_PLUGINS_DIR` default to the relative paths `./data/files` and `data/plugins`, and the release image starts the backend from `/app/backend`. Left relative, they resolve to `/app/backend/data/files` and `/app/backend/data/plugins`, so the two bind mounts above receive nothing and uploads are lost when the container is replaced. The `-e` flags override the relative values `.env.example` supplies through `--env-file`, because command-line `-e` wins over `--env-file`. Compose (`./deploy.sh`) does not need this: that image runs the backend from `/app`, where the relative defaults already land on the mounts.
 
 > **Docker socket access.** Mounting `/var/run/docker.sock` gives the backend broad control over the host Docker daemon. The default Docker Compose service and the direct `docker run` example include it for Docker-based MCP stdio tools that run `docker` commands. The Logs tab still requires `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS` with a comma-separated list of trusted user emails. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email. User-defined Python tools do **not** get this socket: they run in a separate hardened container with no Docker socket. See [Security](../reference/security.md#python-tool-sandbox).
 
@@ -219,12 +223,13 @@ docker run --rm \
 | `ENCRYPTION_KEY` | Yes | Credential encryption key |
 | `FRONTEND_URL` | Recommended | Public browser URL, especially for OAuth callbacks |
 | `CORS_ORIGINS` | Recommended | Allowed browser origins |
-| `ALLOW_REGISTER` | Recommended | Set `false` in production unless open signup is intended |
+| `FILE_STORAGE_DIR` | Recommended | Set it to an absolute `/app/data/files` when you mount that path; the relative `./data/files` default resolves under `/app/backend` in this image and misses the mount |
+| `ALLOW_REGISTER` | Recommended | Set `false` in production unless open signup is intended, but only once your admin account exists — there is no first-user bootstrap |
 | `DOCKER_LOGS_ENABLED` | Optional | Set `true` to allow the Logs tab to use Docker socket access |
 | `DOCKER_LOGS_ALLOWED_EMAILS` | Required when `DOCKER_LOGS_ENABLED=true` | Comma-separated list of trusted user emails allowed to access Docker logs |
 | `HEYM_PLUGINS_ENABLED` | Optional | Set `true` to enable the plugin subsystem (custom nodes installed as zip). Off by default |
 | `HEYM_PLUGIN_ADMIN_EMAILS` | Required when `HEYM_PLUGINS_ENABLED=true` | Comma-separated operator emails allowed to install/uninstall plugins |
-| `HEYM_PLUGINS_DIR` | Optional | Where plugin files are stored; defaults to `data/plugins` (mount it to persist) |
+| `HEYM_PLUGINS_DIR` | Optional | Where plugin files are stored. Set it to an absolute `/app/data/plugins` when you mount that path; the relative `data/plugins` default resolves under `/app/backend` in this image and misses the mount |
 | `HEYM_PYTHON_TOOL_SANDBOX` | Optional | Python tool isolation mode; defaults to `auto` (hardened Docker sandbox, fail closed). See [Security](../reference/security.md#python-tool-sandbox) |
 | `HEYM_PYTHON_TOOL_IMAGE` | Optional | Override the Python tool sandbox image; empty = auto-detect the backend image |
 | `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` | Optional | Docker volume used by sibling Codex runner containers; defaults to `heym-codex-workspaces` in Docker deployments |

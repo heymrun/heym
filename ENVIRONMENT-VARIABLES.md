@@ -37,7 +37,7 @@ lifetimes) that override these code defaults when you copy it.
 | `JWT_ALGORITHM` | JWT signing algorithm. | `HS256` |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime in minutes. | `1440` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime in days. | `30` |
-| `ALLOW_REGISTER` | Allow new user self-registration. Set `false` to lock down production. | `true` |
+| `ALLOW_REGISTER` | Allow new user self-registration. Set `false` to lock down production, but only after your admin account exists: registration is refused for everyone when this is off and there is no first-user bootstrap, so an empty database plus `false` leaves no way to create an account. | `true` |
 | `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-*` headers (enable only behind a trusted proxy). | `false` |
 
 ## OAuth (MCP / API clients)
@@ -66,7 +66,7 @@ lifetimes) that override these code defaults when you copy it.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `FILE_STORAGE_DIR` | Directory for Drive uploads and generated files. | `./data/files` |
+| `FILE_STORAGE_DIR` | Directory for Drive uploads and generated files. Relative values resolve against the backend's working directory, which is `/app` under Compose but `/app/backend` in the single-image release. Set it to an absolute `/app/data/files` whenever you bind-mount `/app/data/files` into `ghcr.io/heymrun/heym`, or the mount receives nothing. | `./data/files` |
 | `FILE_MAX_SIZE_MB` | Maximum single-file size in MB. | `99` |
 | `REQUEST_BODY_MAX_SIZE_MB` | Maximum HTTP request body size; kept one MB above `FILE_MAX_SIZE_MB` for multipart overhead. | `100` |
 | `DOCS_DIR` | Override path to docs content. Empty uses `frontend/src/docs/content`. | — |
@@ -166,7 +166,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 |----------|-------------|---------|
 | `HEYM_PLUGINS_ENABLED` | Enable installing custom nodes from zip packages. Install/uninstall runs server-side code, so it is operator-restricted. | `false` |
 | `HEYM_PLUGIN_ADMIN_EMAILS` | Comma-separated operator emails allowed to install/uninstall plugins. | — |
-| `HEYM_PLUGINS_DIR` | Directory where installed plugins are stored. | `data/plugins` |
+| `HEYM_PLUGINS_DIR` | Directory where installed plugins are stored. Same relative-path caveat as `FILE_STORAGE_DIR`: use an absolute `/app/data/plugins` when bind-mounting it into the single-image release. | `data/plugins` |
 
 ## Codex node
 

@@ -39,11 +39,12 @@ from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
 from app.services.execution_cancellation import (
-    clear_execution as _clear_sub_execution,
-)
-from app.services.execution_cancellation import (
+    buffer_live_execution_events,
     record_execution_node_completed,
     record_execution_node_started,
+)
+from app.services.execution_cancellation import (
+    clear_execution as _clear_sub_execution,
 )
 from app.services.execution_cancellation import (
     register_execution as _register_sub_execution,
@@ -52,9 +53,14 @@ from app.services.expression_evaluator import (
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
+from app.services.expression_evaluator import (
+    is_top_level_ternary_expression as _is_top_level_ternary_expression,
+)
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
+from app.services.node_execution.extra_body import resolve_extra_body
+from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
@@ -1898,65 +1904,6 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
     return restored
 
 
-def _detect_pandoc_format(mime_type: str, filename: str) -> str | None:
-    """Return pandoc input format string for the given MIME type / filename, or None if unsupported."""
-    _mime_map: dict[str, str] = {
-        "text/markdown": "markdown",
-        "text/html": "html",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-        "text/plain": "markdown",
-        "text/csv": "csv",
-    }
-    if mime_type in _mime_map:
-        return _mime_map[mime_type]
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    _ext_map: dict[str, str] = {
-        "md": "markdown",
-        "markdown": "markdown",
-        "html": "html",
-        "htm": "html",
-        "docx": "docx",
-        "txt": "markdown",
-        "csv": "csv",
-    }
-    return _ext_map.get(ext)
-
-
-def _extract_pdf_text(src_bytes: bytes) -> str:
-    """Extract plain text from a PDF via pypdf."""
-    import io
-
-    import pypdf
-
-    reader = pypdf.PdfReader(io.BytesIO(src_bytes))
-    parts = [page.extract_text() for page in reader.pages if page.extract_text()]
-    return "\n\n".join(parts)
-
-
-def _convert_image(src_bytes: bytes, target_format: str) -> tuple[bytes, str]:
-    """Convert image bytes to target_format. Returns (output_bytes, output_mime_type)."""
-    import io
-
-    from PIL import Image
-
-    _fmt_map: dict[str, tuple[str, str]] = {
-        "jpg": ("JPEG", "image/jpeg"),
-        "jpeg": ("JPEG", "image/jpeg"),
-        "png": ("PNG", "image/png"),
-        "bmp": ("BMP", "image/bmp"),
-        "webp": ("WEBP", "image/webp"),
-    }
-    if target_format not in _fmt_map:
-        raise ValueError(f"Drive Node: unsupported image output format '{target_format}'")
-    pil_format, mime_type = _fmt_map[target_format]
-    img = Image.open(io.BytesIO(src_bytes))
-    if pil_format == "JPEG" and img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format=pil_format)
-    return buf.getvalue(), mime_type
-
-
 class WorkflowExecutor:
     def __init__(
         self,
@@ -3437,6 +3384,13 @@ class WorkflowExecutor:
             result = self.resolve_expression(template, inputs, node_id)
             return str(result) if result is not None else ""
 
+        # `$cond ? a : b` always contains spaces, so the check above misses it and the
+        # template path below would substitute only the leading `$span` and keep the rest
+        # as literal text -- the evaluate dialog resolves the same value as an expression.
+        if self._is_top_level_ternary_expression(template):
+            result = self.resolve_expression(template.strip(), inputs, node_id)
+            return str(result) if result is not None else ""
+
         def replace_expr(expr: str) -> str:
             result = self.resolve_expression(expr, inputs, node_id)
             return str(result) if result is not None else expr
@@ -3466,6 +3420,7 @@ class WorkflowExecutor:
         on_batch_status_update: Callable[[dict[str, Any]], None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
         request_timeout: float = 60.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict:
         if not credential_id or not model:
             return {
@@ -3589,49 +3544,15 @@ class WorkflowExecutor:
                 response_format = {"type": "json_object"}
 
         if batch_mode_enabled:
-            if output_type == "image":
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode is only supported for text outputs.",
-                }
-            if image_input:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode does not support image input.",
-                }
-            if not isinstance(user_message, list):
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": (
-                        "Batch mode requires the User Message expression to resolve to an array. "
-                        'Example: $input.items.map("item.text")'
-                    ),
-                }
-            if not user_message:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode requires at least one item in the User Message array.",
-                }
-            normalized_user_messages: list[str] = []
-            for batch_item in user_message:
-                if batch_item is None:
-                    normalized_user_messages.append("")
-                elif isinstance(batch_item, (str, int, float, bool)):
-                    normalized_user_messages.append(str(batch_item))
-                else:
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": (
-                            "Batch mode items must resolve to strings or primitive values. "
-                            "Map objects into prompt strings before sending them to the LLM node."
-                        ),
-                    }
-            user_message = normalized_user_messages
+            normalized_messages, batch_input_error = normalize_batch_user_messages(
+                user_message=user_message,
+                model=model,
+                output_type=output_type,
+                image_input=image_input,
+            )
+            if batch_input_error is not None:
+                return batch_input_error
+            user_message = normalized_messages or []
 
         last_error: Exception | None = None
         last_model = model
@@ -3734,6 +3655,7 @@ class WorkflowExecutor:
                             on_status_update=on_batch_status_update,
                             should_abort=should_abort,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 else:
@@ -3755,6 +3677,7 @@ class WorkflowExecutor:
                             trace_context=trace_context,
                             conversation_history=self.conversation_history,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 out = dict(result)
@@ -4969,6 +4892,7 @@ class WorkflowExecutor:
         json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
         json_output_schema = node_data.get("jsonOutputSchema", "")
         hitl_enabled = bool(node_data.get("hitlEnabled", False))
+        agent_extra_body = resolve_extra_body(self, node_data, inputs, node_id)
         hitl_resolution = copy.deepcopy(self.hitl_resume_context.get(node_id or "") or {})
         hitl_agent_state = copy.deepcopy(hitl_resolution.get("_agent_state") or {})
         is_hitl_resume = bool(hitl_resolution)
@@ -5666,6 +5590,7 @@ class WorkflowExecutor:
                             initial_completion_tokens=resume_completion_tokens,
                             should_abort=should_abort_tool_loop,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
                 else:
@@ -5686,6 +5611,7 @@ class WorkflowExecutor:
                             conversation_history=conversation_history,
                             skills_included=skills_used or None,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
             except Exception as e:
@@ -6849,6 +6775,10 @@ class WorkflowExecutor:
             transform_ternary_expression=self._transform_ternary_expression,
         )
 
+    def _is_top_level_ternary_expression(self, template: str) -> bool:
+        """True when the whole trimmed string is one ``$cond ? truthy : falsy`` ternary."""
+        return _is_top_level_ternary_expression(template, self)
+
     def _extract_square_bracket_inner(self, s: str, start: int) -> tuple[str | None, int]:
         """s[start] must be '['. Returns (inner_content, index_after_closing_bracket)."""
         if start >= len(s) or s[start] != "[":
@@ -7059,6 +6989,16 @@ class WorkflowExecutor:
     ) -> str:
         if not template:
             return str(inputs)
+
+        # Same ternary carve-out as `_resolve_template`, so message-style fields agree with
+        # the evaluate dialog instead of rendering `1113 > 0 ? a.x : b.y` as literal text.
+        if self._is_top_level_ternary_expression(template):
+            ternary_result = self.resolve_expression(
+                template.strip(), inputs, current_node_id, preserve_type=preserve_type
+            )
+            if preserve_type and isinstance(ternary_result, str):
+                return ternary_result
+            return str(ternary_result) if ternary_result is not None else template
 
         def replace_expr(expr: str) -> str:
             result = self.resolve_expression(
@@ -9460,7 +9400,15 @@ def build_node_start_message(
 
 
 def execute_workflow_streaming(**kwargs):
-    """Public streaming entry: wrap the run in an OTel root span (no-op when disabled).
+    """Public streaming entry: record live events so late observers replay them."""
+    yield from buffer_live_execution_events(
+        _execute_workflow_streaming_traced(**kwargs),
+        str(kwargs.get("execution_id") or ""),
+    )
+
+
+def _execute_workflow_streaming_traced(**kwargs):
+    """Wrap the run in an OTel root span (no-op when disabled).
 
     The canvas "Run" and portal use the streaming path, which has its own node
     loop and does not call ``WorkflowExecutor.execute``. This wrapper opens the

@@ -27,7 +27,10 @@
 
 <br/>
 
+[![PR checks](https://img.shields.io/github/actions/workflow/status/heymrun/heym/pr-checks.yml?style=flat-square&event=pull_request&label=PR%20checks&logo=githubactions&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml)
+[![Release image](https://img.shields.io/github/actions/workflow/status/heymrun/heym/publish-release-image.yml?style=flat-square&label=release%20image&logo=docker&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/publish-release-image.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![MCP status](https://mcpvitals.com/badge/46f18385ee.svg?theme=flat-square)](https://mcpvitals.com/status/46f18385ee)
 [![Commons Clause](https://img.shields.io/badge/Condition-Commons%20Clause-orange.svg?style=flat-square)](COMMONS-CLAUSE.md)
 [![Heym Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheymrun%2Fheym%2Fmain%2Ffrontend%2Fpackage.json&query=%24.version&label=Heym&prefix=v&color=blueviolet&style=flat-square)](https://github.com/heymrun/heym/releases)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
@@ -227,7 +230,7 @@ For a complete list of all features with short descriptions, see **[Full Feature
 
 </div>
 
-Heym Built for developers who want control and enterprise teams that need a trusted path to production. Star Heym ⭐ on GitHub to follow releases and help more builders discover it.
+Heym is built for developers who want control and enterprise teams that need a trusted path to production. Star Heym ⭐ on GitHub to follow releases and help more builders discover it.
 
 ---
 
@@ -331,6 +334,7 @@ ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 sed -i.bak "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|; s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env && rm -f .env.bak
 docker run --env-file .env \
   -p 4017:4017 \
+  -e FILE_STORAGE_DIR=/app/data/files \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
@@ -341,6 +345,7 @@ docker run \
   -e ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
   -e SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
   -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:6543/heym \
+  -e FILE_STORAGE_DIR=/app/data/files \
   -p 4017:4017 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
@@ -348,9 +353,9 @@ docker run \
   ghcr.io/heymrun/heym:latest
 ```
 
-Open the editor in your browser at port `4017` in either setup.
+Open the editor in your browser on port `4017` in either setup.
 See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
-For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
+For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. `FILE_STORAGE_DIR=/app/data/files` is what makes that mount live: the release image starts the backend from `/app/backend`, so the default relative `./data/files` would resolve to `/app/backend/data/files` and land inside the container instead of your mount. `./run.sh` and `./deploy.sh` are unaffected — that image runs the backend from `/app`. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
 The Docker socket mount lets Heym start hardened sibling containers and grants broad host control. Every MCP `stdio` server needs it, since the caller-supplied command always runs in a throwaway container rather than on the backend host; without a Docker daemon, stdio fails closed. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
 
 ## Deploy & Call Workflows
@@ -360,6 +365,8 @@ Heym workflows are not limited to the editor. Run them from the canvas, call the
 ## Production Readiness
 
 Heym is built to be inspected and operated in your own infrastructure. Docker deployment, JWT auth, team controls, shared credentials, `SECURITY.md`, execution history, logs, LLM traces, OpenTelemetry export, evals, and per-model USD cost tracking all live in the core self-hostable product.
+
+Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck and production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
 
 <details>
 <summary><b>🐳 Docker Production Deployment</b></summary>
@@ -372,7 +379,7 @@ cp .env.example .env
 ./deploy.sh --restart    # Restart services
 ```
 
-> Set `ALLOW_REGISTER=false` in `.env` to lock down registration in production.
+> Register your admin account first, then set `ALLOW_REGISTER=false` in `.env` and restart to lock down registration in production. There is no first-user bootstrap, so disabling registration against an empty database leaves no way to create an account.
 
 </details>
 
@@ -755,7 +762,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.80" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.83" />
 </a>
 
 </div>

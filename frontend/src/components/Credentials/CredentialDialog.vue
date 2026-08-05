@@ -6,6 +6,7 @@ import type {
   Credential,
   CredentialConfig,
   CredentialType,
+  VectorStoreBackend,
 } from "@/types/credential";
 
 import Button from "@/components/ui/Button.vue";
@@ -108,6 +109,18 @@ const qdrantPort = ref("6333");
 const qdrantApiKey = ref("");
 const qdrantOpenaiApiKey = ref("");
 const pgvectorOpenaiApiKey = ref("");
+const ragEmbeddingBaseUrl = ref("");
+const ragEmbeddingApiKey = ref("");
+const ragEmbeddingModel = ref("");
+const ragEmbeddingDimensions = ref("1536");
+const ragRequestDimensions = ref(false);
+const ragDbType = ref<VectorStoreBackend>("qdrant");
+const ragQdrantHost = ref("");
+const ragQdrantPort = ref("6333");
+const ragQdrantApiKey = ref("");
+const ragTesting = ref(false);
+const ragTestSuccess = ref<boolean | null>(null);
+const ragTestMessage = ref("");
 const gristApiKey = ref("");
 const gristServerUrl = ref("");
 const rabbitmqHost = ref("");
@@ -239,6 +252,7 @@ const typeOptions = [
   { value: "redis", label: CREDENTIAL_TYPE_LABELS.redis },
   { value: "qdrant", label: CREDENTIAL_TYPE_LABELS.qdrant },
   { value: "pgvector", label: CREDENTIAL_TYPE_LABELS.pgvector },
+  { value: "rag", label: CREDENTIAL_TYPE_LABELS.rag },
   { value: "grist", label: CREDENTIAL_TYPE_LABELS.grist },
   { value: "rabbitmq", label: CREDENTIAL_TYPE_LABELS.rabbitmq },
   { value: "cohere", label: CREDENTIAL_TYPE_LABELS.cohere },
@@ -256,6 +270,42 @@ const typeOptions = [
 function isTrustedOAuthMessage(evt: MessageEvent, popup: Window | null): boolean {
   return evt.origin === window.location.origin && evt.source === popup;
 }
+
+function applyRagPublicFields(credential: Credential | null | undefined): void {
+  const fields = credential?.type === "rag" ? credential.public_fields : undefined;
+  ragEmbeddingBaseUrl.value = fields?.embedding_base_url ?? "";
+  ragEmbeddingApiKey.value = "";
+  ragEmbeddingModel.value = fields?.embedding_model ?? "";
+  ragEmbeddingDimensions.value = fields?.embedding_dimensions ?? "1536";
+  ragDbType.value = fields?.db_type === "pgvector" ? "pgvector" : "qdrant";
+  ragRequestDimensions.value =
+    ragDbType.value === "pgvector" && fields?.embedding_request_dimensions === "true";
+  ragQdrantHost.value = fields?.qdrant_host ?? "";
+  ragQdrantPort.value = fields?.qdrant_port ?? "6333";
+  ragQdrantApiKey.value = "";
+  ragTesting.value = false;
+  ragTestSuccess.value = null;
+  ragTestMessage.value = "";
+}
+
+const ragDbTypeOptions: { value: VectorStoreBackend; label: string }[] = [
+  { value: "qdrant", label: "Qdrant" },
+  { value: "pgvector", label: "Postgres (pgvector)" },
+];
+
+const PGVECTOR_FIXED_DIMENSIONS = "1536";
+
+// pgvector's column is a fixed vector(1536), so the field is pinned rather than
+// left editable with an error the user can only resolve one way. The shorten option
+// is meaningless for Qdrant, which sizes each collection freely — this watcher is the
+// single place that clears it, so what the checkbox shows is always what gets saved.
+watch(ragDbType, (dbType) => {
+  if (dbType === "pgvector") {
+    ragEmbeddingDimensions.value = PGVECTOR_FIXED_DIMENSIONS;
+  } else {
+    ragRequestDimensions.value = false;
+  }
+});
 
 watch(
   () => props.open,
@@ -324,6 +374,7 @@ watch(
         qdrantApiKey.value = "";
         qdrantOpenaiApiKey.value = "";
         pgvectorOpenaiApiKey.value = "";
+        applyRagPublicFields(props.credential);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -439,6 +490,7 @@ watch(
         qdrantApiKey.value = "";
         qdrantOpenaiApiKey.value = "";
         pgvectorOpenaiApiKey.value = "";
+        applyRagPublicFields(null);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -589,6 +641,13 @@ const isValid = computed(() => {
     ) || isEditing.value;
   } else if (type.value === "pgvector") {
     return !!pgvectorOpenaiApiKey.value.trim() || isEditing.value;
+  } else if (type.value === "rag") {
+    return (
+      !!ragEmbeddingBaseUrl.value.trim() &&
+      !!ragEmbeddingModel.value.trim() &&
+      Number(ragEmbeddingDimensions.value) > 0 &&
+      (ragDbType.value !== "qdrant" || !!ragQdrantHost.value.trim())
+    );
   } else if (type.value === "grist") {
     return (
       !!gristApiKey.value.trim() &&
@@ -830,6 +889,18 @@ function buildConfig(): CredentialConfig {
       qdrant_port: qdrantPort.value,
       qdrant_api_key: qdrantApiKey.value,
       openai_api_key: qdrantOpenaiApiKey.value,
+    };
+  } else if (type.value === "rag") {
+    return {
+      embedding_base_url: ragEmbeddingBaseUrl.value.trim(),
+      embedding_api_key: ragEmbeddingApiKey.value.trim(),
+      embedding_model: ragEmbeddingModel.value.trim(),
+      embedding_dimensions: ragEmbeddingDimensions.value.trim(),
+      embedding_request_dimensions: ragRequestDimensions.value,
+      db_type: ragDbType.value,
+      qdrant_host: ragDbType.value === "qdrant" ? ragQdrantHost.value.trim() : "",
+      qdrant_port: ragDbType.value === "qdrant" ? ragQdrantPort.value.trim() : "6333",
+      qdrant_api_key: ragDbType.value === "qdrant" ? ragQdrantApiKey.value.trim() : "",
     };
   } else if (type.value === "pgvector") {
     return {
@@ -1299,6 +1370,42 @@ async function testNotionConnection(): Promise<void> {
   }
 }
 
+async function testRagConnection(): Promise<void> {
+  if (!ragEmbeddingBaseUrl.value.trim() || !ragEmbeddingModel.value.trim()) {
+    ragTestSuccess.value = false;
+    ragTestMessage.value =
+      "Enter an embedding base URL and model to test the connection.";
+    return;
+  }
+  ragTesting.value = true;
+  ragTestSuccess.value = null;
+  ragTestMessage.value = "";
+  error.value = "";
+  try {
+    const result = await credentialsApi.testConnection({
+      type: "rag",
+      config: {
+        embedding_base_url: ragEmbeddingBaseUrl.value.trim(),
+        embedding_api_key: ragEmbeddingApiKey.value.trim(),
+        embedding_model: ragEmbeddingModel.value.trim(),
+        embedding_dimensions: ragEmbeddingDimensions.value.trim(),
+        embedding_request_dimensions: ragRequestDimensions.value,
+      },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    // The result is shown inline next to the button, so it is deliberately not
+    // mirrored into `error`, which is reserved for save failures.
+    ragTestSuccess.value = result.success;
+    ragTestMessage.value = result.message;
+  } catch (err) {
+    ragTestSuccess.value = false;
+    ragTestMessage.value =
+      err instanceof Error ? err.message : "Connection test failed";
+  } finally {
+    ragTesting.value = false;
+  }
+}
+
 async function testSentryConnection(): Promise<void> {
   if (!apiKey.value.trim() && !isEditing.value) {
     error.value = "Enter a Sentry auth token to test the connection.";
@@ -1567,6 +1674,9 @@ async function handleSave(): Promise<void> {
           qdrantApiKey.value.trim() ||
           qdrantOpenaiApiKey.value.trim() ||
           pgvectorOpenaiApiKey.value.trim() ||
+          // RAG fields are prefilled from public_fields, so the config is always
+          // resent; the backend keeps stored secrets when their inputs are blank.
+          type.value === "rag" ||
           gristApiKey.value.trim() ||
           gristServerUrl.value.trim() ||
           rabbitmqHost.value.trim() ||
@@ -2857,6 +2967,188 @@ async function handleSave(): Promise<void> {
           <p class="text-xs text-muted-foreground">
             OpenAI API key for text-embedding-3-large embeddings. Vectors are stored
             in Heym's own Postgres database — no external service required.
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'rag'">
+        <div class="space-y-2">
+          <Label for="cred-rag-base-url">Embedding Base URL</Label>
+          <Input
+            id="cred-rag-base-url"
+            v-model="ragEmbeddingBaseUrl"
+            placeholder="http://localhost:11434/v1"
+            :disabled="saving"
+          />
+          <p class="text-xs text-muted-foreground">
+            Any OpenAI-compatible embeddings endpoint, including the /v1 path
+            (Ollama, vLLM, TEI, LM Studio, Together, or api.openai.com/v1).
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-rag-api-key">API Key (optional)</Label>
+          <div class="relative">
+            <Input
+              id="cred-rag-api-key"
+              v-model="ragEmbeddingApiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Leave empty for open endpoints'"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Local servers usually need no key. Leave blank to keep the stored one.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-rag-model">Embedding Model</Label>
+          <Input
+            id="cred-rag-model"
+            v-model="ragEmbeddingModel"
+            placeholder="text-embedding-3-large"
+            :disabled="saving"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-rag-dimensions">Dimensions</Label>
+          <Input
+            id="cred-rag-dimensions"
+            v-model="ragEmbeddingDimensions"
+            type="number"
+            placeholder="1536"
+            :disabled="saving || ragDbType === 'pgvector'"
+          />
+          <p class="text-xs text-muted-foreground">
+            {{
+              ragDbType === "pgvector"
+                ? "Fixed at 1536 by the Postgres (pgvector) column. Switch to Qdrant for any other width."
+                : "Vector width the model returns. Use Test Connection to confirm it."
+            }}
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-rag-db-type">Vector Store</Label>
+          <Select
+            id="cred-rag-db-type"
+            :model-value="ragDbType"
+            :options="ragDbTypeOptions"
+            :disabled="saving"
+            @update:model-value="ragDbType = $event as VectorStoreBackend"
+          />
+          <p
+            v-if="ragDbType === 'pgvector'"
+            class="text-xs text-muted-foreground"
+          >
+            Postgres (pgvector) stores vectors in a fixed vector(1536) column, so
+            the embedding model must return 1536 dimensions. Choose Qdrant for any
+            other width.
+          </p>
+          <label
+            v-if="ragDbType === 'pgvector'"
+            class="flex items-start gap-2 text-sm text-muted-foreground"
+          >
+            <input
+              type="checkbox"
+              class="mt-1 rounded border-input"
+              :checked="ragRequestDimensions"
+              :disabled="saving"
+              @change="ragRequestDimensions = ($event.target as HTMLInputElement).checked"
+            >
+            <span>
+              Ask the endpoint to return 1536 dimensions
+              <span class="block text-xs">
+                For models that can shorten their output (OpenAI text-embedding-3,
+                nomic-embed-text-v1.5, jina-v3 and similar). Sends the
+                <code>dimensions</code> parameter, which some endpoints reject —
+                use Test Connection to confirm before saving.
+              </span>
+            </span>
+          </label>
+          <p
+            v-else
+            class="text-xs text-muted-foreground"
+          >
+            Qdrant sizes each collection to this credential's dimensions, so any
+            width works.
+          </p>
+        </div>
+
+        <template v-if="ragDbType === 'qdrant'">
+          <div class="space-y-2">
+            <Label for="cred-rag-qdrant-host">QDrant Host</Label>
+            <Input
+              id="cred-rag-qdrant-host"
+              v-model="ragQdrantHost"
+              placeholder="localhost"
+              :disabled="saving"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="cred-rag-qdrant-port">QDrant Port</Label>
+            <Input
+              id="cred-rag-qdrant-port"
+              v-model="ragQdrantPort"
+              type="number"
+              placeholder="6333"
+              :disabled="saving"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="cred-rag-qdrant-api-key">QDrant API Key (optional)</Label>
+            <Input
+              id="cred-rag-qdrant-api-key"
+              v-model="ragQdrantApiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Leave empty for local Qdrant'"
+              :disabled="saving"
+            />
+          </div>
+        </template>
+
+        <div class="space-y-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="rag-test-connection-button"
+            :loading="ragTesting"
+            :disabled="
+              saving ||
+                ragTesting ||
+                !ragEmbeddingBaseUrl.trim() ||
+                !ragEmbeddingModel.trim()
+            "
+            @click="testRagConnection"
+          >
+            Test Connection
+          </Button>
+          <p
+            v-if="ragTestMessage"
+            class="text-xs"
+            :class="ragTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ ragTestMessage }}
           </p>
         </div>
       </template>

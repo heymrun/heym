@@ -16,6 +16,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     weasyprint \
     && rm -rf /var/lib/apt/lists/*
 
+# OCR for the Converter node (imageToText/pdfToText): Tesseract plus poppler's pdftoppm,
+# which rasterizes PDF pages before recognition. `osd` and the script models are what make
+# the "auto" language setting work. OSD detects the script, then a script model such as
+# Latin reads every language written in it. Debian installs the script models without the
+# "script/" prefix, so tesseract lists them as Latin, Cyrillic, HanS, and so on.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-osd \
+    tesseract-ocr-eng \
+    tesseract-ocr-tur \
+    tesseract-ocr-deu \
+    tesseract-ocr-fra \
+    tesseract-ocr-spa \
+    tesseract-ocr-ita \
+    tesseract-ocr-por \
+    tesseract-ocr-nld \
+    tesseract-ocr-rus \
+    tesseract-ocr-ara \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-jpn \
+    tesseract-ocr-kor \
+    tesseract-ocr-script-latn \
+    tesseract-ocr-script-cyrl \
+    tesseract-ocr-script-arab \
+    tesseract-ocr-script-hans \
+    tesseract-ocr-script-jpan \
+    tesseract-ocr-script-hang \
+    && rm -rf /var/lib/apt/lists/* \
+    && tesseract --version \
+    && pdftoppm -v
+
 # OpenAI Codex CLI (required by the Codex node). Pin via the HEYM_CODEX_CLI_VERSION build arg.
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}

@@ -27,6 +27,7 @@ import SendEmailNodeProperties from "./SendEmailNodeProperties.vue";
 import ErrorHandlerNodeProperties from "./ErrorHandlerNodeProperties.vue";
 import MergeNodeProperties from "./MergeNodeProperties.vue";
 import SetJsonOutputMapperNodeProperties from "./SetJsonOutputMapperNodeProperties.vue";
+import ConverterNodeProperties from "./ConverterNodeProperties.vue";
 import WaitNodeProperties from "./WaitNodeProperties.vue";
 import VariableNodeProperties from "./VariableNodeProperties.vue";
 import LoopNodeProperties from "./LoopNodeProperties.vue";
@@ -88,6 +89,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <ErrorHandlerNodeProperties v-else-if="selectedNode?.type === 'errorHandler'" />
   <MergeNodeProperties v-else-if="selectedNode?.type === 'merge'" />
   <SetJsonOutputMapperNodeProperties v-else-if="selectedNode?.type === 'set' || selectedNode?.type === 'jsonOutputMapper'" />
+  <ConverterNodeProperties v-else-if="selectedNode?.type === 'converter'" />
   <WaitNodeProperties v-else-if="selectedNode?.type === 'wait'" />
   <VariableNodeProperties v-else-if="selectedNode?.type === 'variable'" />
   <LoopNodeProperties v-else-if="selectedNode?.type === 'loop'" />

@@ -419,7 +419,6 @@ export const driveOperationOptions: OperationOption[] = [
   { value: "getAll", label: "Get All Files" },
   { value: "downloadUrl", label: "Download from URL" },
   { value: "save", label: "Save from Base64" },
-  { value: "convertFile", label: "Convert File" },
   { value: "delete", label: "Delete File" },
   { value: "setPassword", label: "Set Password" },
   { value: "setTtl", label: "Set TTL (Expiry)" },

@@ -61,6 +61,7 @@ class CredentialType(str, PyEnum):
     clickhouse = "clickhouse"
     opencode = "opencode"
     google_drive = "google_drive"
+    rag = "rag"
 
 
 class WorkflowAuthType(str, PyEnum):
@@ -1714,6 +1715,35 @@ class WorkflowResponseCache(Base):
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CronSlotClaim(Base):
+    """One row per cron slot that has already been claimed for execution.
+
+    Every uvicorn worker runs its own scheduler and only the leader ticks, so a
+    leadership handoff used to hand a worker with stale in-memory state a whole
+    backlog of "missed" slots. The unique constraint makes the claim the single
+    source of truth: a slot runs once, whichever worker inserts the row first.
+    """
+
+    __tablename__ = "cron_slot_claims"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "node_id", "slot_at", name="uq_cron_slot_claim"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

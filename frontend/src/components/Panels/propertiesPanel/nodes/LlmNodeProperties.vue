@@ -15,10 +15,12 @@ const {
   userMessageInputRef,
   llmSystemInstructionInputRef,
   llmImageExpressionInputRef,
+  llmExtraBodyExpressionInputRef,
   loadingModels,
   loadingGuardrailModels,
   loadingFallbackModels,
   jsonFormatError,
+  extraBodyFormatError,
   guardrailCredentialOptions,
   guardrailModelOptions,
   handleGuardrailCredentialChange,
@@ -41,6 +43,7 @@ const {
   toggleGuardrailCategory,
   isImageOutputMode,
   llmExpressionFieldCount,
+  llmExtraBodyExpressionIndex,
   selectedModelIsReasoning,
   llmBatchCapabilityMessage,
   llmBatchCapabilityTone,
@@ -51,6 +54,7 @@ const {
   handleLlmImageInputChange,
   handleLlmBatchModeChange,
   formatJsonSchema,
+  formatExtraBody,
   updateNodeData,
 } = usePropertiesPanelContext();
 </script>
@@ -433,6 +437,67 @@ const {
         />
         <p class="text-xs text-muted-foreground">
           Provide a JSON schema to shape the response.
+        </p>
+      </div>
+
+      <div class="space-y-2 pt-2 border-t">
+        <Label>Extra Body</Label>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <input
+              id="llm-extra-body"
+              type="checkbox"
+              class="h-4 w-4 rounded border-input bg-background"
+              :checked="!!selectedNode.data.extraBodyEnabled"
+              @change="updateNodeData('extraBodyEnabled', ($event.target as HTMLInputElement).checked)"
+            >
+            <Label
+              for="llm-extra-body"
+              class="text-sm font-normal"
+            >
+              Send extra request body
+            </Label>
+          </div>
+          <Button
+            v-if="selectedNode.data.extraBodyEnabled"
+            variant="ghost"
+            size="sm"
+            :class="['h-11 min-h-[44px] md:h-7 px-2 gap-1.5', extraBodyFormatError ? 'text-red-500' : '']"
+            :title="extraBodyFormatError ? 'Invalid JSON object' : 'Format JSON'"
+            @click="formatExtraBody"
+          >
+            <Braces class="w-3.5 h-3.5" />
+            <span class="text-xs">{{ extraBodyFormatError ? 'Invalid' : 'Format' }}</span>
+          </Button>
+        </div>
+        <ExpressionInput
+          v-if="selectedNode.data.extraBodyEnabled"
+          ref="llmExtraBodyExpressionInputRef"
+          :model-value="selectedNode.data.extraBody || ''"
+          placeholder="{ &quot;thinking&quot;: { &quot;type&quot;: &quot;disabled&quot; } }"
+          :rows="4"
+          class="font-mono text-xs"
+          :nodes="workflowStore.nodes"
+          :node-results="workflowStore.nodeResults"
+          :edges="workflowStore.edges"
+          :current-node-id="selectedNode.id"
+          expandable
+          navigation-enabled
+          :navigation-index="llmExtraBodyExpressionIndex"
+          :navigation-total="llmExpressionFieldCount"
+          :dialog-node-label="selectedNodeEvaluateDialogLabel"
+          dialog-key-label="Extra body"
+          field-key="extraBody"
+          @update:model-value="updateNodeData('extraBody', $event)"
+          @navigate="handleLlmExpressionFieldNavigate"
+          @register-field-index="onLlmRegisterExpressionFieldIndex"
+        />
+        <p
+          v-if="selectedNode.data.extraBodyEnabled"
+          class="text-xs text-muted-foreground"
+        >
+          A JSON object merged into every LLM API request for this node. Supports $ expressions.
+          Not sent for image output or guardrail checks.
         </p>
       </div>
     </template>

@@ -1,7 +1,7 @@
 """Add Cal.com Trigger credentials, delivery receipts, and managed subscriptions.
 
-Revision ID: 104_add_cal_trigger_credential
-Revises: 103_add_google_drive_cred_type
+Revision ID: 106_add_cal_trigger_credential
+Revises: 105_add_rag_credential_type
 Create Date: 2026-07-31 00:00:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "104_add_cal_trigger_credential"
-down_revision: str | None = "103_add_google_drive_cred_type"
+revision: str = "106_add_cal_trigger_credential"
+down_revision: str | None = "105_add_rag_credential_type"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

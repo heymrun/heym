@@ -71,12 +71,13 @@ Generated files are stored on the server's filesystem under `data/files/`. In Do
 The [Drive node](../nodes/drive-node.md) lets you manage Drive files programmatically from within a workflow. Use it to:
 
 - **List** your files and return metadata such as filename, MIME type, size, source, and download URL
-- **Convert** a file to a different format — documents via pandoc (docx, html, md, txt, pdf) or images via Pillow (jpg, png, bmp, webp)
 - **Delete** a file after it has been delivered to the user
 - **Share or unshare with your teams** so team members can read and download it only while the team share exists
 - **Set a password** on the download link
 - **Set a TTL** so the link expires after N hours
 - **Set a max downloads** limit
+
+Converting a file to another format is the [Converter node](../nodes/converter-node.md)'s job, with `conversion: "fileConvert"`. It reads a Drive file and stores the converted result as a new one.
 
 Reference the file by its ID from the skill output: `$agentLabel._generated_files[0].id`
 

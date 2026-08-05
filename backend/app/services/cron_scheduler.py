@@ -13,9 +13,11 @@ from app.api.workflows import (
     collect_referenced_workflows,
     get_credentials_context,
 )
+from app.config import settings
 from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVersion
 from app.db.session import async_session_maker
 from app.services.cal_api_service import CalApiError, delete_managed_cal_subscriptions
+from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
@@ -36,6 +38,7 @@ class CronScheduler:
         self._last_refresh_token_cleanup_date: str | None = None
         self._last_file_access_token_cleanup_date: str | None = None
         self._last_response_cache_cleanup_date: str | None = None
+        self._last_cron_slot_claim_cleanup_date: str | None = None
 
     async def start(self) -> None:
         if self._running:
@@ -68,6 +71,7 @@ class CronScheduler:
                 await self._check_refresh_token_cleanup()
                 await self._check_file_access_token_cleanup()
                 await self._check_response_cache_cleanup()
+                await self._check_cron_slot_claim_cleanup()
             except Exception as e:
                 logger.exception("Error in cron scheduler loop: %s", e)
             await asyncio.sleep(30)
@@ -88,19 +92,24 @@ class CronScheduler:
                     node_id = node.get("id", "")
                     node_key = f"{workflow.id}_{node_id}"
                     try:
-                        if self._should_trigger(cron_expr, now, node_key):
-                            minute_key = now.strftime("%Y%m%d%H%M")
-                            can_execute = await lock_service.check_cron_execution(
-                                str(workflow.id),
-                                node_id,
-                                minute_key,
+                        slot = self._due_slot(cron_expr, now, node_key)
+                        if slot is not None:
+                            claimed = await claim_cron_slot(
+                                workflow_id=workflow.id,
+                                node_id=node_id,
+                                slot_at=slot,
+                                worker_id=lock_service.worker_id,
                             )
-                            if can_execute:
+                            # Settle the slot either way: a lost claim means another
+                            # worker owns this run, and retrying next pass would only
+                            # risk a duplicate.
+                            self.mark_slot_handled(node_key, slot)
+                            if claimed:
                                 await self._execute_workflow(db, workflow)
-                                self._last_check[node_key] = now
                             else:
                                 logger.debug(
-                                    "Cron execution for %s already handled by another worker",
+                                    "Cron slot %s for %s already claimed by another worker",
+                                    slot.isoformat(),
                                     node_key,
                                 )
                     except Exception as e:
@@ -129,22 +138,42 @@ class CronScheduler:
             if n.get("type") == "cron" and n.get("data", {}).get("active", True) is not False
         ]
 
-    def _should_trigger(self, cron_expr: str, now: datetime, node_key: str) -> bool:
+    def _due_slot(self, cron_expr: str, now: datetime, node_key: str) -> datetime | None:
+        """Return the scheduled slot this pass should run, or None.
+
+        A slot is due when it has passed, this process has not handled it yet,
+        and it is still inside the misfire grace window. Anything older is a
+        backlog entry (paused scheduler, leadership handoff, restart) and is
+        dropped instead of being replayed hours late.
+        """
         try:
-            cron = croniter(cron_expr, now)
-            prev_time = cron.get_prev(datetime)
-            last_check = self._last_check.get(node_key)
-
-            if last_check is None:
-                self._last_check[node_key] = now
-                return False
-
-            if prev_time.replace(tzinfo=now.tzinfo) > last_check:
-                return True
-            return False
+            prev_time = croniter(cron_expr, now).get_prev(datetime)
         except Exception as e:
             logger.error("Invalid cron expression '%s': %s", cron_expr, e)
-            return False
+            return None
+
+        slot = prev_time.replace(tzinfo=now.tzinfo)
+        if self._last_check.get(node_key) == slot:
+            return None
+
+        lateness = (now - slot).total_seconds()
+        if lateness > settings.cron_misfire_grace_seconds:
+            if self._last_check.get(node_key) is not None:
+                logger.info(
+                    "Skipping cron slot %s for %s: %.0fs late (grace %ss)",
+                    slot.isoformat(),
+                    node_key,
+                    lateness,
+                    settings.cron_misfire_grace_seconds,
+                )
+            self.mark_slot_handled(node_key, slot)
+            return None
+
+        return slot
+
+    def mark_slot_handled(self, node_key: str, slot: datetime) -> None:
+        """Record a slot as settled for this process so later passes skip it."""
+        self._last_check[node_key] = slot
 
     async def _execute_workflow(self, db: AsyncSession, workflow: Workflow) -> None:
         logger.info("Executing workflow %s via cron trigger", workflow.id)
@@ -168,7 +197,10 @@ class CronScheduler:
                 actor_user_id=workflow.owner_id,
             )
             try:
-                result = execute_workflow(
+                # Off the event loop: a cron run can block for minutes, and this
+                # worker still has to serve HTTP and keep its leader lock alive.
+                result = await asyncio.to_thread(
+                    execute_workflow,
                     workflow_id=workflow.id,
                     nodes=workflow.nodes,
                     edges=workflow.edges,
@@ -524,6 +556,33 @@ class CronScheduler:
                     self._last_response_cache_cleanup_date = current_date
                 else:
                     logger.debug("Response cache cleanup already handled by another worker")
+
+    async def _check_cron_slot_claim_cleanup(self) -> None:
+        tz = get_configured_timezone()
+        now = datetime.now(tz)
+        current_date = now.strftime("%Y%m%d")
+
+        if now.hour == 4 and now.minute >= 30 and now.minute < 60:
+            if self._last_cron_slot_claim_cleanup_date != current_date:
+                can_cleanup = await lock_service.check_cron_execution(
+                    "cron_slot_claim_cleanup",
+                    "cleanup",
+                    current_date,
+                )
+                if can_cleanup:
+                    await self._cleanup_old_cron_slot_claims()
+                    self._last_cron_slot_claim_cleanup_date = current_date
+                else:
+                    logger.debug("Cron slot claim cleanup already handled by another worker")
+
+    async def _cleanup_old_cron_slot_claims(self) -> None:
+        async with async_session_maker() as db:
+            deleted_count = await cleanup_cron_slot_claims(db)
+            if deleted_count > 0:
+                await db.commit()
+                logger.info(
+                    "Cron slot claim cleanup completed: %d old claims deleted", deleted_count
+                )
 
     async def _cleanup_expired_response_cache(self) -> None:
         from app.services.cache_rate_limit import response_cache

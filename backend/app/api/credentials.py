@@ -39,7 +39,15 @@ from app.models.schemas import (
     TeamShareResponse,
 )
 from app.services.codex_usage_service import fetch_codex_usage
+from app.services.embedding import (
+    EMBEDDING_DIMENSIONS,
+    EmbeddingService,
+    as_bool,
+    embedding_config_from_credential,
+)
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
+from app.services.vector_store import VECTOR_STORE_BACKENDS
+from app.services.vector_store_pg import pgvector_dimension_message
 
 router = APIRouter()
 
@@ -81,6 +89,27 @@ def merge_credential_config_for_update(
         incoming_base_url = str(incoming_config.get("base_url", "") or "").strip()
         if incoming_base_url:
             merged_config["base_url"] = incoming_base_url
+        return merged_config
+
+    if credential_type == CredentialType.rag:
+        # The dialog leaves secret inputs blank unless the user retypes them, so a
+        # blank key means "keep the stored one" rather than "clear it".
+        merged_config = dict(existing_config)
+        for key in (
+            "embedding_base_url",
+            "embedding_model",
+            "embedding_dimensions",
+            "embedding_request_dimensions",
+            "db_type",
+            "qdrant_host",
+            "qdrant_port",
+        ):
+            if key in incoming_config:
+                merged_config[key] = incoming_config[key]
+        for key in ("embedding_api_key", "qdrant_api_key"):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
         return merged_config
 
     if credential_type == CredentialType.notion:
@@ -241,6 +270,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     elif credential_type == CredentialType.pgvector:
         openai_api_key = config.get("openai_api_key", "")
         return mask_api_key(openai_api_key)
+    elif credential_type == CredentialType.rag:
+        embedding_api_key = str(config.get("embedding_api_key", "") or "").strip()
+        if embedding_api_key:
+            return mask_api_key(embedding_api_key)
+        model = str(config.get("embedding_model", "") or "").strip()
+        return model or None
     elif credential_type == CredentialType.grist:
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
@@ -356,6 +391,18 @@ def get_public_credential_fields(
             account_id = str(config.get("account_id", "")).strip()
             fields["account_id"] = account_id or None
         return fields
+    if credential_type == CredentialType.rag:
+        return {
+            "embedding_base_url": str(config.get("embedding_base_url", "")).strip() or None,
+            "embedding_model": str(config.get("embedding_model", "")).strip() or None,
+            "embedding_dimensions": str(config.get("embedding_dimensions") or EMBEDDING_DIMENSIONS),
+            "embedding_request_dimensions": str(
+                as_bool(config.get("embedding_request_dimensions"))
+            ).lower(),
+            "db_type": str(config.get("db_type", "qdrant")).strip() or "qdrant",
+            "qdrant_host": str(config.get("qdrant_host", "") or "").strip() or None,
+            "qdrant_port": str(config.get("qdrant_port") or 6333),
+        }
     return {}
 
 
@@ -514,6 +561,7 @@ async def list_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -536,6 +584,7 @@ async def list_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -557,6 +606,7 @@ async def list_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -655,6 +705,7 @@ async def list_credentials_by_type(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -677,6 +728,7 @@ async def list_credentials_by_type(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -698,6 +750,7 @@ async def list_credentials_by_type(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -763,6 +816,7 @@ async def list_llm_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -785,6 +839,7 @@ async def list_llm_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -806,6 +861,7 @@ async def list_llm_credentials(
                 type=cred.type,
                 masked_value=masked,
                 header_key=header_key,
+                public_fields=get_public_credential_fields(cred.type, config),
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -865,6 +921,35 @@ async def create_credential(
     )
 
 
+RAG_TEST_PROBE_TEXT = "Heym RAG credential connection test."
+
+
+async def _test_rag_embedding_endpoint(config: dict) -> CredentialTestResponse:
+    """Embed a probe string so a bad URL, key, or dimension count surfaces in the dialog."""
+    embedding_config = embedding_config_from_credential(config)
+    service = EmbeddingService(embedding_config)
+    try:
+        embedding = await run_in_threadpool(service.embed_text, RAG_TEST_PROBE_TEXT)
+    except ValueError as exc:
+        return CredentialTestResponse(success=False, message=str(exc))
+    except Exception as exc:
+        # The endpoint is user-supplied, so unreachable hosts and auth failures are
+        # expected outcomes of a test rather than server errors.
+        return CredentialTestResponse(
+            success=False,
+            message=f"Could not reach the embedding endpoint: {exc}",
+        )
+    if embedding_config.request_dimensions:
+        return CredentialTestResponse(
+            success=True,
+            message=(f"Connected. The endpoint honored the requested {len(embedding)} dimensions."),
+        )
+    return CredentialTestResponse(
+        success=True,
+        message=f"Connected. Model returned {len(embedding)} dimensions.",
+    )
+
+
 @router.post("/test", response_model=CredentialTestResponse)
 async def run_credential_connection_test(
     test_data: CredentialTestRequest,
@@ -879,6 +964,7 @@ async def run_credential_connection_test(
         CredentialType.notion,
         CredentialType.clickhouse,
         CredentialType.sentry,
+        CredentialType.rag,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -909,8 +995,17 @@ async def run_credential_connection_test(
             config = _merge_clickhouse_test_config(config, stored_config)
         elif test_data.type == CredentialType.sentry:
             config = {**stored_config, **{k: v for k, v in config.items() if v}}
+        elif test_data.type == CredentialType.rag:
+            config = {**stored_config, **{k: v for k, v in config.items() if v not in (None, "")}}
         else:
             config = _merge_notion_test_config(config, stored_config)
+
+    if test_data.type == CredentialType.rag:
+        # Only the embedding half is exercised here. Validating the vector store
+        # choice too would reject exactly the case the test exists to diagnose:
+        # a pgvector selection whose dimension count is still unknown.
+        _validate_rag_embedding_fields(config)
+        return await _test_rag_embedding_endpoint(config)
 
     validate_credential_config(test_data.type, config)
 
@@ -1420,6 +1515,60 @@ async def get_codex_usage(
     )
 
 
+def _validate_rag_embedding_fields(config: dict) -> int:
+    """Validate the embedding half of a RAG credential and return its dimension count."""
+    if not str(config.get("embedding_base_url", "") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG credential requires embedding_base_url",
+        )
+    if not str(config.get("embedding_model", "") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG credential requires embedding_model",
+        )
+
+    try:
+        dimensions = int(config.get("embedding_dimensions") or EMBEDDING_DIMENSIONS)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG credential requires embedding_dimensions to be a positive integer",
+        ) from None
+    if dimensions <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG credential requires embedding_dimensions to be a positive integer",
+        )
+    return dimensions
+
+
+def _validate_rag_config(config: dict) -> None:
+    """Validate a RAG credential: custom embedding endpoint plus vector store choice."""
+    dimensions = _validate_rag_embedding_fields(config)
+
+    db_type = str(config.get("db_type", "") or "").strip()
+    if db_type not in VECTOR_STORE_BACKENDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"RAG credential requires db_type to be one of: {', '.join(VECTOR_STORE_BACKENDS)}"
+            ),
+        )
+
+    if db_type == "pgvector" and dimensions != EMBEDDING_DIMENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=pgvector_dimension_message(dimensions),
+        )
+
+    if db_type == "qdrant" and not str(config.get("qdrant_host", "") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG credential requires qdrant_host when db_type is qdrant",
+        )
+
+
 def validate_credential_config(
     credential_type: CredentialType,
     config: dict,
@@ -1647,6 +1796,8 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Postgres vector credential requires openai_api_key",
             )
+    elif credential_type == CredentialType.rag:
+        _validate_rag_config(config)
     elif credential_type == CredentialType.grist:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(
