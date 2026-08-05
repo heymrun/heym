@@ -2491,7 +2491,7 @@ async function handleSave(): Promise<void> {
             :disabled="saving"
           />
           <p class="text-xs text-muted-foreground">
-            Used by Cal.com action nodes to list, create, update, and delete webhooks.
+            Used only by Heym to create, update, and remove managed Cal.com webhooks.
           </p>
         </div>
         <div class="space-y-2">

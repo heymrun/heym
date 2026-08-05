@@ -1,4 +1,4 @@
-"""Add Cal.com credentials and webhook delivery receipts.
+"""Add Cal.com Trigger credentials, delivery receipts, and managed subscriptions.
 
 Revision ID: 106_add_cal_trigger_credential
 Revises: 105_add_rag_credential_type
@@ -9,6 +9,7 @@ Create Date: 2026-07-31 00:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -58,8 +59,75 @@ def upgrade() -> None:
         unique=False,
     )
 
+    op.create_table(
+        "cal_webhook_subscriptions",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("workflow_id", sa.UUID(), nullable=False),
+        sa.Column("node_id", sa.String(length=255), nullable=False),
+        sa.Column("credential_id", sa.UUID(), nullable=True),
+        sa.Column("external_webhook_id", sa.String(length=255), nullable=True),
+        sa.Column("subscriber_url", sa.String(length=2048), nullable=False),
+        sa.Column("encrypted_secret", sa.Text(), nullable=False),
+        sa.Column("configuration", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("synced_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["credential_id"], ["credentials.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["workflow_id"], ["workflows.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "workflow_id",
+            "node_id",
+            name="uq_cal_webhook_subscription_node",
+        ),
+    )
+    op.create_index(
+        op.f("ix_cal_webhook_subscriptions_credential_id"),
+        "cal_webhook_subscriptions",
+        ["credential_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_cal_webhook_subscriptions_status"),
+        "cal_webhook_subscriptions",
+        ["status"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_cal_webhook_subscriptions_workflow_id"),
+        "cal_webhook_subscriptions",
+        ["workflow_id"],
+        unique=False,
+    )
+
 
 def downgrade() -> None:
+    op.drop_index(
+        op.f("ix_cal_webhook_subscriptions_workflow_id"),
+        table_name="cal_webhook_subscriptions",
+    )
+    op.drop_index(
+        op.f("ix_cal_webhook_subscriptions_status"),
+        table_name="cal_webhook_subscriptions",
+    )
+    op.drop_index(
+        op.f("ix_cal_webhook_subscriptions_credential_id"),
+        table_name="cal_webhook_subscriptions",
+    )
+    op.drop_table("cal_webhook_subscriptions")
+
     op.drop_index(
         op.f("ix_cal_webhook_delivery_receipts_received_at"),
         table_name="cal_webhook_delivery_receipts",

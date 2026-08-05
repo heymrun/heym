@@ -12,7 +12,6 @@ _HANDLER_MODULES: dict[str, str] = {
     "agent": "agent_node",
     "bigquery": "bigquery_node",
     "calTrigger": "cal_trigger_node",
-    "cal": "cal_node",
     "chartOutput": "chart_output_node",
     "clickhouse": "clickhouse_node",
     "codex": "codex_node",

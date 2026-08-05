@@ -215,7 +215,6 @@ const icons = {
   textInput: Type,
   cron: CalendarClock,
   calTrigger: CalendarClock,
-  cal: CalendarClock,
   telegramTrigger: MessageSquare,
   websocketTrigger: Radio,
   fileUploadTrigger: Upload,

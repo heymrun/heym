@@ -2892,51 +2892,6 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
-      if (node.type === "cal") {
-        const operation = node.data.calOperation;
-        const agentProvidedFields = new Set<string>(node.data.agentProvidedFields ?? []);
-        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
-          errors.push({
-            nodeId: node.id,
-            nodeLabel: node.data.label,
-            nodeType: "Cal.com",
-            message: "Credential is not selected",
-          });
-        }
-        if (!operation) {
-          errors.push({
-            nodeId: node.id,
-            nodeLabel: node.data.label,
-            nodeType: "Cal.com",
-            message: "Operation is not selected",
-          });
-        }
-        if (
-          (operation === "updateWebhook" || operation === "deleteWebhook") &&
-          !agentProvidedFields.has("calWebhookId") &&
-          !node.data.calWebhookId?.trim()
-        ) {
-          errors.push({
-            nodeId: node.id,
-            nodeLabel: node.data.label,
-            nodeType: "Cal.com",
-            message: "Webhook ID is required for this operation",
-          });
-        }
-        if (
-          (operation === "createWebhook" || operation === "updateWebhook") &&
-          !agentProvidedFields.has("calWebhook") &&
-          (!node.data.calWebhook?.trim() || node.data.calWebhook.trim() === "{}")
-        ) {
-          errors.push({
-            nodeId: node.id,
-            nodeLabel: node.data.label,
-            nodeType: "Cal.com",
-            message: "Webhook data is required for this operation",
-          });
-        }
-      }
-
       if (node.type === "jira") {
         const operation = node.data.jiraOperation;
         if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {

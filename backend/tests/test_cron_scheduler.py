@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.db.models import ExecutionHistory
+from app.services.cal_api_service import CalApiError
 from app.services.cron_scheduler import CronScheduler
 from app.services.workflow_executor import (
     DotList,
@@ -290,7 +291,45 @@ class CronSchedulerDeletionCleanupTests(unittest.IsolatedAsyncioTestCase):
         context.__aexit__ = AsyncMock(return_value=None)
         return context
 
-    async def test_scheduled_hard_delete_removes_workflow(self) -> None:
+    async def test_scheduled_hard_delete_cleans_managed_webhooks_first(self) -> None:
+        scheduler = CronScheduler()
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            name="Scheduled deletion",
+            nodes=[],
+            edges=[],
+        )
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [workflow_id]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.get = AsyncMock(return_value=workflow)
+        db.delete = AsyncMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+        cleanup = AsyncMock()
+
+        with (
+            patch(
+                "app.services.cron_scheduler.async_session_maker",
+                return_value=self._session_context(db),
+            ),
+            patch("app.services.cron_scheduler.delete_managed_cal_subscriptions", cleanup),
+        ):
+            await scheduler._cleanup_scheduled_workflows()
+
+        cleanup.assert_awaited_once_with(
+            db,
+            workflow_id=workflow_id,
+            owner_id=owner_id,
+        )
+        db.delete.assert_awaited_once_with(workflow)
+        db.commit.assert_awaited_once()
+
+    async def test_scheduled_hard_delete_retries_after_remote_cleanup_failure(self) -> None:
         scheduler = CronScheduler()
         workflow_id = uuid.uuid4()
         workflow = SimpleNamespace(
@@ -308,14 +347,22 @@ class CronSchedulerDeletionCleanupTests(unittest.IsolatedAsyncioTestCase):
         db.delete = AsyncMock()
         db.commit = AsyncMock()
         db.rollback = AsyncMock()
-        with patch(
-            "app.services.cron_scheduler.async_session_maker",
-            return_value=self._session_context(db),
+
+        with (
+            patch(
+                "app.services.cron_scheduler.async_session_maker",
+                return_value=self._session_context(db),
+            ),
+            patch(
+                "app.services.cron_scheduler.delete_managed_cal_subscriptions",
+                AsyncMock(side_effect=CalApiError("Cal.com unavailable", status_code=503)),
+            ),
         ):
             await scheduler._cleanup_scheduled_workflows()
 
-        db.delete.assert_awaited_once_with(workflow)
-        db.commit.assert_awaited_once()
+        db.delete.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
 
 
 class CronDueSlotTests(unittest.TestCase):

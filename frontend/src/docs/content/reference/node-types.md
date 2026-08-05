@@ -47,7 +47,6 @@ See [Triggers](./triggers.md) for all entry points.
 | [Set](../nodes/set-node.md) | Transform and map data | 1 | 1 |
 | [Converter](../nodes/converter-node.md) | Convert data between formats (CSV, JSON) and OCR images or PDFs to text | 1 | 1 |
 | [Variable](../nodes/variable-node.md) | Set or get a variable (workflow-local or [global](./global-variables.md)) | 1 | 1 |
-| [Cal.com](../nodes/cal-node.md) | List, create, update, and delete Cal.com webhooks through API v2 | 1 | 1 |
 | [Execute](../nodes/execute-node.md) | Call another workflow | 1 | 1 |
 
 ## Integration Nodes

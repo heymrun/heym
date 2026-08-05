@@ -26,21 +26,6 @@ export const redisOperationOptions: OperationOption[] = [
   { value: "deleteKey", label: "Delete Key" },
 ];
 
-export const calOperationGroups: OperationOptionGroup[] = [
-  {
-    label: "Webhooks",
-    options: [
-      { value: "listWebhooks", label: "List Webhooks" },
-      { value: "createWebhook", label: "Create Webhook" },
-      { value: "updateWebhook", label: "Update Webhook" },
-      { value: "deleteWebhook", label: "Delete Webhook" },
-    ],
-  },
-];
-
-export const calOperationOptions: OperationOption[] =
-  flattenOperationGroups(calOperationGroups);
-
 export const linearOperationGroups: OperationOptionGroup[] = [
   {
     label: "Workspace",

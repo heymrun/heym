@@ -11,6 +11,7 @@ import {
   type InjectionKey,
   type Ref,
 } from "vue";
+import axios from "axios";
 import { useRouter } from "vue-router";
 import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
@@ -30,8 +31,8 @@ import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
 import { getSentryExpressionFields, type SentryExpressionFieldKey } from "@/lib/sentryExpressionFields";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
-import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
-import type { MCPFetchToolItem } from "@/services/api";
+import { calApi, configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
+import type { CalWebhookSubscription, MCPFetchToolItem } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useToast } from "@/composables/useToast";
 import { useRunPanelFileDrag } from "@/composables/useRunPanelFileDrag";
@@ -45,8 +46,6 @@ import type { WebSocketTriggerEventName } from "@/types/workflow";
 import { NODE_DEFINITIONS } from "@/types/node";
 import {
   bigQueryOperationOptions,
-  calOperationGroups,
-  calOperationOptions,
   clickhouseOperationGroups,
   clickhouseOperationOptions,
   dataTableOperationOptions,
@@ -99,7 +98,6 @@ export function usePropertiesPanelController() {
     textInput: Type,
     cron: CalendarClock,
     calTrigger: CalendarClock,
-    cal: CalendarClock,
     websocketTrigger: Radio,
     fileUploadTrigger: Upload,
     llm: Brain,
@@ -161,7 +159,6 @@ export function usePropertiesPanelController() {
     textInput: "node-input",
     cron: "node-cron",
     calTrigger: "node-cron",
-    cal: "node-linear",
     websocketTrigger: "node-websocket",
     fileUploadTrigger: "node-websocket",
     llm: "node-llm",
@@ -223,7 +220,6 @@ export function usePropertiesPanelController() {
     textInput: "input-node",
     cron: "cron-node",
     calTrigger: "cal-trigger-node",
-    cal: "cal-node",
     websocketTrigger: "websocket-trigger-node",
     fileUploadTrigger: "file-upload-trigger-node",
     llm: "llm-node",
@@ -590,6 +586,12 @@ export function usePropertiesPanelController() {
   const telegramCredentials = ref<CredentialListItem[]>([]);
   const calTriggerCredentials = ref<CredentialListItem[]>([]);
   const calApiCredentials = ref<CredentialListItem[]>([]);
+  const calWebhookEvents = ref<string[]>([]);
+  const calSubscription = ref<CalWebhookSubscription | null>(null);
+  const calSubscriptionLoading = ref(false);
+  const calSubscriptionError = ref<string | null>(null);
+  let calSubscriptionRequestSequence = 0;
+  let calSubscriptionMutationSequence = 0;
   const slackCredentials = ref<CredentialListItem[]>([]);
   const slackTriggerCredentials = ref<CredentialListItem[]>([]);
   const discordCredentials = ref<CredentialListItem[]>([]);
@@ -1074,12 +1076,16 @@ export function usePropertiesPanelController() {
         } catch {
           calTriggerCredentials.value = [];
         }
-      }
-      if (type === "cal") {
         try {
-          calApiCredentials.value = await credentialsApi.listByType("cal_api");
+          const [apiCredentials, events] = await Promise.all([
+            credentialsApi.listByType("cal_api"),
+            calApi.listEvents(),
+          ]);
+          calApiCredentials.value = apiCredentials;
+          calWebhookEvents.value = events;
         } catch {
           calApiCredentials.value = [];
+          calWebhookEvents.value = [];
         }
       }
 
@@ -6074,8 +6080,8 @@ export function usePropertiesPanelController() {
   const calApiCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
-      node && node.type === "cal"
-        ? (node.data.credentialId as string | undefined)
+      node && node.type === "calTrigger"
+        ? (node.data.calApiCredentialId as string | undefined)
         : undefined;
 
     return buildCredentialOptions(
@@ -6085,6 +6091,105 @@ export function usePropertiesPanelController() {
       "Shared Cal.com API credential (from owner)",
     );
   });
+
+  function calApiErrorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail;
+      if (typeof detail === "string" && detail.trim()) return detail;
+    }
+    return "Unable to manage the Cal.com webhook";
+  }
+
+  function isCurrentCalTrigger(workflowId: string, nodeId: string): boolean {
+    return workflowStore.currentWorkflow?.id === workflowId
+      && selectedNode.value?.type === "calTrigger"
+      && selectedNode.value.id === nodeId;
+  }
+
+  async function loadCalSubscription(): Promise<void> {
+    const requestSequence = ++calSubscriptionRequestSequence;
+    const workflowId = workflowStore.currentWorkflow?.id;
+    const node = selectedNode.value;
+    calSubscription.value = null;
+    calSubscriptionError.value = null;
+    if (!workflowId || !node || node.type !== "calTrigger") return;
+    try {
+      const subscription = await calApi.getSubscription(workflowId, node.id);
+      if (requestSequence === calSubscriptionRequestSequence) {
+        calSubscription.value = subscription;
+      }
+    } catch (error: unknown) {
+      if (
+        requestSequence === calSubscriptionRequestSequence
+        && (!axios.isAxiosError(error) || error.response?.status !== 404)
+      ) {
+        calSubscriptionError.value = calApiErrorMessage(error);
+      }
+    }
+  }
+
+  async function syncCalSubscription(): Promise<void> {
+    const workflowId = workflowStore.currentWorkflow?.id;
+    const node = selectedNode.value;
+    if (!workflowId || !node || node.type !== "calTrigger") return;
+    const mutationSequence = ++calSubscriptionMutationSequence;
+    calSubscriptionRequestSequence += 1;
+    calSubscriptionLoading.value = true;
+    calSubscriptionError.value = null;
+    try {
+      if (!(await workflowStore.saveWorkflow())) return;
+      const subscription = await calApi.syncSubscription(workflowId, node.id);
+      if (isCurrentCalTrigger(workflowId, node.id)) {
+        calSubscription.value = subscription;
+        showToast("Cal.com webhook synced", "success");
+      }
+    } catch (error: unknown) {
+      if (isCurrentCalTrigger(workflowId, node.id)) {
+        calSubscriptionError.value = calApiErrorMessage(error);
+        showToast(calSubscriptionError.value, "error");
+      }
+    } finally {
+      if (mutationSequence === calSubscriptionMutationSequence) {
+        calSubscriptionLoading.value = false;
+      }
+    }
+  }
+
+  async function deactivateCalSubscription(): Promise<void> {
+    const workflowId = workflowStore.currentWorkflow?.id;
+    const node = selectedNode.value;
+    if (!workflowId || !node || node.type !== "calTrigger") return;
+    const mutationSequence = ++calSubscriptionMutationSequence;
+    calSubscriptionRequestSequence += 1;
+    calSubscriptionLoading.value = true;
+    calSubscriptionError.value = null;
+    try {
+      const subscription = await calApi.deactivateSubscription(workflowId, node.id);
+      if (isCurrentCalTrigger(workflowId, node.id)) {
+        calSubscription.value = subscription;
+        showToast("Cal.com webhook disabled", "success");
+      }
+    } catch (error: unknown) {
+      if (isCurrentCalTrigger(workflowId, node.id)) {
+        calSubscriptionError.value = calApiErrorMessage(error);
+        showToast(calSubscriptionError.value, "error");
+      }
+    } finally {
+      if (mutationSequence === calSubscriptionMutationSequence) {
+        calSubscriptionLoading.value = false;
+      }
+    }
+  }
+
+  watch(
+    () => [workflowStore.currentWorkflow?.id, selectedNode.value?.id] as const,
+    () => {
+      calSubscriptionMutationSequence += 1;
+      calSubscriptionLoading.value = false;
+      void loadCalSubscription();
+    },
+    { immediate: true },
+  );
 
   const smtpCredentialOptions = computed(() => {
     const node = selectedNode.value;
@@ -8982,6 +9087,12 @@ export function usePropertiesPanelController() {
     copySlackWebhookUrl,
     copyDiscordWebhookUrl,
     copyCalWebhookUrl,
+    calWebhookEvents,
+    calSubscription,
+    calSubscriptionLoading,
+    calSubscriptionError,
+    syncCalSubscription,
+    deactivateCalSubscription,
     copyTelegramWebhookUrl,
     runBodyError,
     genericBodyPlaceholder,
@@ -9390,8 +9501,6 @@ export function usePropertiesPanelController() {
     telegramTriggerCredentialOptions,
     calTriggerCredentialOptions,
     calApiCredentialOptions,
-    calOperationOptions,
-    calOperationGroups,
     smtpCredentialOptions,
     imapTriggerCredentialOptions,
     redisCredentialOptions,

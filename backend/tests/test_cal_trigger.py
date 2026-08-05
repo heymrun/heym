@@ -181,6 +181,648 @@ class CalCredentialTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(secret)
 
+    async def test_managed_webhook_secret_comes_from_active_subscription(self) -> None:
+        from app.api.cal import _get_managed_webhook_secret
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = SimpleNamespace(
+            encrypted_secret="encrypted-secret"
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        with patch(
+            "app.api.cal.decrypt_config",
+            return_value={"webhook_secret": " managed-secret "},
+        ):
+            secret = await _get_managed_webhook_secret(db, uuid.uuid4(), "cal-node")
+
+        self.assertEqual(secret, "managed-secret")
+
+
+class CalManagedSubscriptionTests(unittest.IsolatedAsyncioTestCase):
+    def _managed_workflow(
+        self,
+        workflow_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        credential_id: uuid.UUID,
+        *,
+        events: object = None,
+        payload_version: str = "2021-10-20",
+        payload_template: str = "",
+        no_show_time: int = 5,
+        no_show_time_unit: str = "MINUTE",
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            nodes=[
+                {
+                    "id": "cal-node",
+                    "type": "calTrigger",
+                    "data": {
+                        "setupMode": "managed",
+                        "calApiCredentialId": str(credential_id),
+                        "events": ["BOOKING_CREATED"] if events is None else events,
+                        "payloadVersion": payload_version,
+                        "payloadTemplate": payload_template,
+                        "noShowTime": no_show_time,
+                        "noShowTimeUnit": no_show_time_unit,
+                        "active": True,
+                    },
+                }
+            ],
+        )
+
+    async def test_sync_creates_api_webhook_and_encrypted_local_subscription(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        node_id = "cal-node"
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            nodes=[
+                {
+                    "id": node_id,
+                    "type": "calTrigger",
+                    "data": {
+                        "setupMode": "managed",
+                        "calApiCredentialId": str(credential_id),
+                        "events": ["BOOKING_CREATED", "BOOKING_CANCELLED"],
+                        "payloadVersion": "2021-10-20",
+                        "active": True,
+                    },
+                }
+            ],
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        client = MagicMock()
+        client.create_webhook = AsyncMock(return_value={"id": "cal-hook-1"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.build_default_public_base_url", return_value="https://heym.test"),
+            patch("app.api.cal.encrypt_config", return_value="encrypted-secret") as encrypt,
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "hook-secret"}),
+        ):
+            response = await sync_cal_webhook_subscription(
+                workflow_id,
+                node_id,
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        body = client.create_webhook.await_args.args[0]
+        self.assertEqual(
+            body,
+            {
+                "active": True,
+                "subscriberUrl": f"https://heym.test/api/cal/webhook/{workflow_id}/{node_id}",
+                "triggers": ["BOOKING_CREATED", "BOOKING_CANCELLED"],
+                "secret": "hook-secret",
+                "version": "2021-10-20",
+                "payloadTemplate": "",
+            },
+        )
+        encrypt.assert_called_once()
+        self.assertEqual(response.external_webhook_id, "cal-hook-1")
+        self.assertEqual(response.status, "active")
+        self.assertEqual(response.events, ["BOOKING_CREATED", "BOOKING_CANCELLED"])
+        db.commit.assert_awaited_once()
+
+    async def test_sync_rejects_disabled_managed_trigger(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            nodes=[
+                {
+                    "id": "cal-node",
+                    "type": "calTrigger",
+                    "data": {"setupMode": "managed", "active": False},
+                }
+            ],
+        )
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=MagicMock(),
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    async def test_sync_rejects_non_array_events(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events="BOOKING_CREATED",
+        )
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=MagicMock(),
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("array of strings", raised.exception.detail)
+
+    async def test_sync_accepts_current_cal_events_and_ics_payload_version(self) -> None:
+        from app.api.cal import CAL_WEBHOOK_EVENTS, sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events=["INSTANT_MEETING", "BOOKING_LOCATION_UPDATED", "CALENDAR_ENTRY_REJECTED"],
+            payload_version="2026-07-27",
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.create_webhook = AsyncMock(return_value={"id": "cal-hook-2"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.encrypt_config", return_value="encrypted-secret"),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+        ):
+            response = await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        body = client.create_webhook.await_args.args[0]
+        self.assertEqual(
+            body["triggers"],
+            ["INSTANT_MEETING", "BOOKING_LOCATION_UPDATED", "CALENDAR_ENTRY_REJECTED"],
+        )
+        self.assertEqual(body["version"], "2026-07-27")
+        self.assertEqual(response.payload_version, "2026-07-27")
+        self.assertIn("INSTANT_MEETING", CAL_WEBHOOK_EVENTS)
+        self.assertIn("ROUTING_FORM_FALLBACK_HIT", CAL_WEBHOOK_EVENTS)
+
+    async def test_sync_sends_empty_template_and_required_no_show_delay(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events=["AFTER_HOSTS_CAL_VIDEO_NO_SHOW"],
+            payload_template="",
+            no_show_time=12,
+            no_show_time_unit="MINUTE",
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.create_webhook = AsyncMock(return_value={"id": "no-show-hook"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.encrypt_config", return_value="encrypted-secret"),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        body = client.create_webhook.await_args.args[0]
+        self.assertEqual(body["payloadTemplate"], "")
+        self.assertEqual(body["time"], 12)
+        self.assertEqual(body["timeUnit"], "MINUTE")
+
+    async def test_sync_clears_existing_remote_payload_template(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            payload_template="",
+        )
+        subscription = SimpleNamespace(
+            workflow_id=workflow_id,
+            node_id="cal-node",
+            credential_id=credential_id,
+            external_webhook_id="existing-hook",
+            subscriber_url="https://heym.test/api/cal/webhook/old/cal-node",
+            encrypted_secret="encrypted-secret",
+            configuration={
+                "events": ["BOOKING_CREATED"],
+                "payloadVersion": "2021-10-20",
+                "payloadTemplate": "old-template",
+            },
+            status="active",
+            last_error=None,
+            synced_at=None,
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = subscription
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.update_webhook = AsyncMock(return_value={"id": "existing-hook"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        update_body = client.update_webhook.await_args.args[1]
+        self.assertEqual(update_body["payloadTemplate"], "")
+
+    async def test_sync_deduplicates_events_before_remote_create(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events=["BOOKING_CREATED", "BOOKING_CREATED", " BOOKING_CANCELLED "],
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.create_webhook = AsyncMock(return_value={"id": "cal-hook-1"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.encrypt_config", return_value="encrypted-secret"),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+        ):
+            response = await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(
+            client.create_webhook.await_args.args[0]["triggers"],
+            ["BOOKING_CREATED", "BOOKING_CANCELLED"],
+        )
+        self.assertEqual(response.events, ["BOOKING_CREATED", "BOOKING_CANCELLED"])
+
+    async def test_sync_keeps_active_status_when_remote_update_fails(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+        from app.services.cal_api_service import CalApiError
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(workflow_id, owner_id, credential_id)
+        subscription = SimpleNamespace(
+            workflow_id=workflow_id,
+            node_id="cal-node",
+            credential_id=credential_id,
+            external_webhook_id="cal-hook-1",
+            subscriber_url="https://heym.test/old",
+            encrypted_secret="encrypted-secret",
+            configuration={"events": ["BOOKING_CREATED"]},
+            status="active",
+            last_error=None,
+            synced_at=None,
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = subscription
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.update_webhook = AsyncMock(
+            side_effect=CalApiError("temporary Cal.com failure", status_code=503)
+        )
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(subscription.external_webhook_id, "cal-hook-1")
+        self.assertEqual(subscription.last_error, "temporary Cal.com failure")
+        db.commit.assert_awaited_once()
+
+    async def test_sync_recreates_missing_remote_webhook_in_one_request(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+        from app.services.cal_api_service import CalApiError
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(workflow_id, owner_id, credential_id)
+        subscription = SimpleNamespace(
+            workflow_id=workflow_id,
+            node_id="cal-node",
+            credential_id=credential_id,
+            external_webhook_id="deleted-hook",
+            subscriber_url="https://heym.test/old",
+            encrypted_secret="encrypted-secret",
+            configuration={"events": ["BOOKING_CREATED"]},
+            status="active",
+            last_error=None,
+            synced_at=None,
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = subscription
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+        client = MagicMock()
+        client.update_webhook = AsyncMock(
+            side_effect=CalApiError("webhook not found", status_code=404)
+        )
+        client.create_webhook = AsyncMock(return_value={"id": "replacement-hook"})
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+        ):
+            response = await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(subscription.external_webhook_id, "replacement-hook")
+        self.assertEqual(response.external_webhook_id, "replacement-hook")
+
+    async def test_failed_deactivation_keeps_still_active_subscription_verifiable(self) -> None:
+        from app.api.cal import deactivate_cal_webhook_subscription
+        from app.services.cal_api_service import CalApiError
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(id=workflow_id, owner_id=owner_id)
+        subscription = SimpleNamespace(
+            workflow_id=workflow_id,
+            node_id="cal-node",
+            credential_id=uuid.uuid4(),
+            external_webhook_id="active-hook",
+            subscriber_url="https://heym.test/cal",
+            encrypted_secret="encrypted-secret",
+            configuration={"events": ["BOOKING_CREATED"]},
+            status="active",
+            last_error=None,
+            synced_at=None,
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = subscription
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._delete_remote_subscription",
+                AsyncMock(side_effect=CalApiError("temporary failure", status_code=503)),
+            ),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await deactivate_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(subscription.external_webhook_id, "active-hook")
+        db.commit.assert_awaited_once()
+
+    async def test_sync_reconciles_conflicting_subscriber_url(self) -> None:
+        from app.api.cal import _create_or_reconcile_webhook
+        from app.services.cal_api_service import CalApiError
+
+        client = MagicMock()
+        client.create_webhook = AsyncMock(
+            side_effect=CalApiError("already exists", status_code=409)
+        )
+        client.list_webhooks = AsyncMock(
+            return_value=[
+                {"id": "other", "subscriberUrl": "https://heym.test/other"},
+                {"id": "existing", "subscriberUrl": "https://heym.test/cal"},
+            ]
+        )
+        client.update_webhook = AsyncMock(return_value={"id": "existing"})
+        body = {"subscriberUrl": "https://heym.test/cal", "active": True}
+
+        webhook, created = await _create_or_reconcile_webhook(
+            client,
+            body,
+            "https://heym.test/cal",
+        )
+
+        self.assertEqual(webhook, {"id": "existing"})
+        self.assertFalse(created)
+        client.update_webhook.assert_awaited_once_with("existing", body)
+
+    async def test_sync_compensates_remote_create_when_commit_fails(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(workflow_id, owner_id, credential_id)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.flush = AsyncMock()
+        db.commit = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        db.rollback = AsyncMock()
+        client = MagicMock()
+        client.create_webhook = AsyncMock(return_value={"id": "created-hook"})
+        client.delete_webhook = AsyncMock()
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.encrypt_config", return_value="encrypted-secret"),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(raised.exception.status_code, 500)
+        db.rollback.assert_awaited_once()
+        client.delete_webhook.assert_awaited_once_with("created-hook")
+
+    async def test_sync_restores_remote_update_when_commit_fails(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events=["BOOKING_CANCELLED"],
+            payload_template="new-template",
+        )
+        subscription = SimpleNamespace(
+            workflow_id=workflow_id,
+            node_id="cal-node",
+            credential_id=credential_id,
+            external_webhook_id="existing-hook",
+            subscriber_url="https://heym.test/api/cal/webhook/old/cal-node",
+            encrypted_secret="encrypted-secret",
+            configuration={
+                "events": ["BOOKING_CREATED"],
+                "payloadVersion": "2021-10-20",
+                "payloadTemplate": "old-template",
+            },
+            status="active",
+            last_error=None,
+            synced_at=None,
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = subscription
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        db.rollback = AsyncMock()
+        client = MagicMock()
+        client.update_webhook = AsyncMock(
+            side_effect=[{"id": "existing-hook"}, {"id": "existing-hook"}]
+        )
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.cal._cal_api_client_for_credential",
+                AsyncMock(return_value=(credential_id, client)),
+            ),
+            patch("app.api.cal.decrypt_config", return_value={"webhook_secret": "secret"}),
+            patch("app.api.cal.build_default_public_base_url", return_value="https://heym.test"),
+            self.assertRaises(HTTPException),
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=db,
+            )
+
+        self.assertEqual(client.update_webhook.await_count, 2)
+        restored_body = client.update_webhook.await_args_list[1].args[1]
+        self.assertEqual(restored_body["triggers"], ["BOOKING_CREATED"])
+        self.assertEqual(restored_body["payloadTemplate"], "old-template")
+
 
 class CalWebhookTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_webhook_reserves_and_schedules_workflow(self) -> None:

@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user
 from app.db.models import (
+    CalWebhookSubscription,
     Credential,
     CredentialShare,
     CredentialTeamShare,
@@ -49,6 +50,29 @@ from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
 router = APIRouter()
+
+
+async def _cal_api_credential_has_remote_webhooks(
+    db: AsyncSession,
+    credential_id: uuid.UUID,
+) -> bool:
+    result = await db.execute(
+        select(CalWebhookSubscription.id)
+        .where(
+            CalWebhookSubscription.credential_id == credential_id,
+            CalWebhookSubscription.external_webhook_id.is_not(None),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _cal_api_connection_changed(existing: dict, updated: dict) -> bool:
+    existing_url = str(existing.get("base_url") or "https://api.cal.com").strip().rstrip("/")
+    updated_url = str(updated.get("base_url") or "https://api.cal.com").strip().rstrip("/")
+    existing_key = str(existing.get("api_key") or "").strip()
+    updated_key = str(updated.get("api_key") or "").strip()
+    return existing_url != updated_url or existing_key != updated_key
 
 
 def merge_credential_config_for_update(
@@ -1328,6 +1352,7 @@ async def update_credential(
     config = decrypt_config(credential.encrypted_config)
 
     if credential_data.config is not None:
+        existing_config = config
         config = (
             _merge_supabase_update_config(credential_data.config, config)
             if credential.type == CredentialType.supabase
@@ -1342,6 +1367,18 @@ async def update_credential(
             config,
             allow_pending_oauth=credential.type in {CredentialType.linear, CredentialType.notion},
         )
+        if (
+            credential.type == CredentialType.cal_api
+            and _cal_api_connection_changed(existing_config, config)
+            and await _cal_api_credential_has_remote_webhooks(db, credential.id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Disable every managed Cal.com webhook using this credential before changing "
+                    "its API key or base URL"
+                ),
+            )
         credential.encrypted_config = encrypt_config(config)
 
     await db.flush()
@@ -1380,6 +1417,15 @@ async def delete_credential(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+
+    if credential.type == CredentialType.cal_api:
+        if await _cal_api_credential_has_remote_webhooks(db, credential.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Disable every managed Cal.com webhook using this credential before deleting it"
+                ),
+            )
 
     await db.delete(credential)
 

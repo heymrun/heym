@@ -995,15 +995,15 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     cron: { label: "cron", cronExpression: "0 * * * *" },
     calTrigger: {
       label: "calTrigger",
+      setupMode: "manual",
       credentialId: "",
+      calApiCredentialId: "",
+      events: ["BOOKING_CREATED"],
+      payloadVersion: "2021-10-20",
+      payloadTemplate: "",
+      noShowTime: 5,
+      noShowTimeUnit: "MINUTE",
       active: true,
-    },
-    cal: {
-      label: "cal",
-      credentialId: "",
-      calOperation: "listWebhooks",
-      calWebhookId: "",
-      calWebhook: "{}",
     },
     websocketTrigger: {
       label: "websocketTrigger",

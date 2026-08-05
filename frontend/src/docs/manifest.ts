@@ -42,7 +42,6 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "input-node", title: "Input" },
       { slug: "cron-node", title: "Cron" },
       { slug: "cal-trigger-node", title: "Cal.com Trigger" },
-      { slug: "cal-node", title: "Cal.com Node" },
       { slug: "telegram-trigger-node", title: "Telegram Trigger" },
       { slug: "discord-trigger-node", title: "Discord Trigger" },
       { slug: "imap-trigger-node", title: "IMAP Trigger" },

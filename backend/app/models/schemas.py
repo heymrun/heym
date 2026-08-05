@@ -676,6 +676,20 @@ class CredentialTestResponse(BaseModel):
     message: str
 
 
+class CalWebhookSubscriptionResponse(BaseModel):
+    workflow_id: uuid.UUID
+    node_id: str
+    external_webhook_id: str | None = None
+    subscriber_url: str
+    status: str
+    events: list[str] = Field(default_factory=list)
+    payload_version: str = "2021-10-20"
+    no_show_time: int = 5
+    no_show_time_unit: str = "MINUTE"
+    last_error: str | None = None
+    synced_at: datetime | None = None
+
+
 class SupabaseTablesResponse(BaseModel):
     tables: list[str]
     success: bool = True
