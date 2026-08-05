@@ -252,7 +252,7 @@ In workflow expressions:
   - `credentialId`: In manual mode, UUID of a `cal_trigger` credential containing the webhook secret
   - `calApiCredentialId`: In managed mode, UUID of a `cal_api` credential. Use an owned credential placeholder; this field is not expression-capable.
   - `events`: In managed mode, non-empty array of Cal.com webhook event names (default `["BOOKING_CREATED"]`)
-  - `payloadVersion`: In managed mode, `"2021-10-20"` (default) or `"2026-07-27"` (adds ICS calendar content on selected booking events)
+  - `payloadVersion`: In managed mode, `"2021-10-20"` (default) or its backward-compatible `"2026-07-27"` extension, which adds optional attendee and organizer ICS content to selected booking events
   - `payloadTemplate`: Optional Cal.com payload template string. This is interpreted by Cal.com, not as a Heym `$...` expression.
   - `noShowTime`: Positive integer delay before evaluating host/guest Cal Video no-show events (default `5`)
   - `noShowTimeUnit`: `"MINUTE"` (default), `"HOUR"`, or `"DAY"`. Used when either Cal Video no-show event is selected.

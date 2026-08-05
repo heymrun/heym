@@ -18,7 +18,7 @@ The **Cal.com Trigger** node is a zero-input entry point that receives signed Ca
 | `credentialId` | UUID | Manual mode: `cal_trigger` credential containing the shared webhook secret |
 | `calApiCredentialId` | UUID | Managed mode: `cal_api` credential used for webhook CRUD |
 | `events` | string[] | Managed mode: one or more Cal.com event names |
-| `payloadVersion` | string | `2021-10-20` (default) or `2026-07-27` (adds ICS calendar content on selected booking events) |
+| `payloadVersion` | string | `2021-10-20` (default) or its backward-compatible `2026-07-27` extension, which adds optional attendee and organizer ICS content to selected booking events |
 | `payloadTemplate` | string | Optional Cal.com payload template |
 | `noShowTime` | integer | Delay before evaluating host/guest Cal Video no-show events; minimum `1`, default `5` |
 | `noShowTimeUnit` | string | `MINUTE` (default), `HOUR`, or `DAY` |
@@ -30,6 +30,8 @@ The **Cal.com Trigger** node is a zero-input entry point that receives signed Ca
 
 1. Create a **Cal.com API** credential with a Cal.com API key. Keep
    `https://api.cal.com` for Cal.com Cloud, or enter the origin of your self-hosted instance.
+   Heym uses API v2 exclusively: an origin gets `/v2` appended automatically, while an explicit
+   versioned URL must end in `/v2`. URLs containing `/v1` or another API version are rejected.
 2. Add a **Cal.com Trigger**, select **Managed with Cal.com API**, and choose the API credential.
 3. Select one or more events and a payload version. Optionally add a payload template. Host/guest
    Cal Video no-show events also require an evaluation delay and unit.

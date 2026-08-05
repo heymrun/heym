@@ -442,7 +442,7 @@ export interface NodeData {
   setupMode?: "manual" | "managed";
   calApiCredentialId?: string;
   events?: string[];
-  payloadVersion?: string;
+  payloadVersion?: "2021-10-20" | "2026-07-27";
   payloadTemplate?: string;
   noShowTime?: number;
   noShowTimeUnit?: "MINUTE" | "HOUR" | "DAY";

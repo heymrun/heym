@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import delete, func, select
@@ -20,6 +22,24 @@ _DEFAULT_BASE_URL = "https://api.cal.com"
 _TIMEOUT_SECONDS = 30.0
 _WEBHOOK_PAGE_SIZE = 250
 _MAX_WEBHOOK_PAGES = 100
+
+
+def normalize_cal_api_v2_url(base_url: str) -> str:
+    """Return a Cal.com API v2 base URL and reject explicit non-v2 versions."""
+    cleaned = base_url.strip().rstrip("/")
+    parsed = urlsplit(cleaned)
+    if parsed.query or parsed.fragment:
+        raise ValueError("Cal.com API base URL cannot contain a query or fragment")
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    version_segments = [
+        segment.lower() for segment in segments if re.fullmatch(r"v\d+", segment, re.I)
+    ]
+    if version_segments:
+        if version_segments == ["v2"] and segments[-1].lower() == "v2":
+            return cleaned
+        raise ValueError("Cal.com API base URL must use API v2")
+    return f"{cleaned}/v2"
 
 
 class CalApiError(RuntimeError):
@@ -39,8 +59,7 @@ class CalApiConfig:
 
     @property
     def api_v2_url(self) -> str:
-        cleaned = self.base_url.rstrip("/")
-        return cleaned if cleaned.endswith("/v2") else f"{cleaned}/v2"
+        return normalize_cal_api_v2_url(self.base_url)
 
 
 class CalApiClient:

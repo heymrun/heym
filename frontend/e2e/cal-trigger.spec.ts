@@ -295,6 +295,7 @@ test("managed Cal.com API mode creates a webhook and accepts its signed delivery
     await panel.getByRole("combobox").nth(1).selectOption(credential.id);
     await panel.getByRole("checkbox", { name: "BOOKING_CANCELLED" }).check();
     await panel.getByRole("checkbox", { name: "AFTER_HOSTS_CAL_VIDEO_NO_SHOW" }).check();
+    await panel.getByRole("combobox").nth(2).selectOption("2026-07-27");
     await expect(panel.getByText("No-show evaluation delay")).toBeVisible();
     await panel.getByRole("button", { name: "Save & Sync" }).click();
     await expect(panel.getByText("active", { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -308,6 +309,7 @@ test("managed Cal.com API mode creates a webhook and accepts its signed delivery
       "AFTER_HOSTS_CAL_VIDEO_NO_SHOW",
     ]);
     expect(createBody.payloadTemplate).toBe("");
+    expect(createBody.version).toBe("2026-07-27");
     expect(createBody.time).toBe(5);
     expect(createBody.timeUnit).toBe("MINUTE");
     expect(createBody.subscriberUrl).toMatch(

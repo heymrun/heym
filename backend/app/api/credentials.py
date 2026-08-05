@@ -38,6 +38,7 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
 )
+from app.services.cal_api_service import normalize_cal_api_v2_url
 from app.services.codex_usage_service import fetch_codex_usage
 from app.services.embedding import (
     EMBEDDING_DIMENSIONS,
@@ -1746,6 +1747,13 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cal.com API credential base_url must be a valid http(s) URL",
             )
+        try:
+            normalize_cal_api_v2_url(cal_base_url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
     elif credential_type == CredentialType.slack:
         if "webhook_url" not in config or not config["webhook_url"]:
             raise HTTPException(

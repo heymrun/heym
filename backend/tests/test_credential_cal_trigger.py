@@ -49,6 +49,11 @@ class CalApiCredentialTests(unittest.TestCase):
                 CredentialType.cal_api,
                 {"api_key": "key", "base_url": "file:///tmp/cal"},
             )
+        with self.assertRaisesRegex(HTTPException, "must use API v2"):
+            validate_credential_config(
+                CredentialType.cal_api,
+                {"api_key": "key", "base_url": "https://api.cal.com/v1"},
+            )
 
     def test_public_fields_expose_base_url_but_not_api_key(self) -> None:
         config = {"api_key": "secret", "base_url": "https://cal.example.test"}

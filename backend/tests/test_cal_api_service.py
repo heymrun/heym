@@ -31,6 +31,36 @@ class CalApiConfigTests(unittest.TestCase):
             "https://cal.example.test/v2",
         )
 
+    def test_rejects_non_v2_version_paths(self) -> None:
+        for base_url in (
+            "https://api.cal.com/v1",
+            "https://api.cal.com/v3",
+            "https://cal.example.test/api/v1/",
+            "https://cal.example.test/v2/webhooks",
+        ):
+            with (
+                self.subTest(base_url=base_url),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "must use API v2",
+                ),
+            ):
+                CalApiConfig(api_key="key", base_url=base_url).api_v2_url
+
+    def test_rejects_query_and_fragment_in_base_url(self) -> None:
+        for base_url in (
+            "https://api.cal.com?version=v2",
+            "https://api.cal.com/#v2",
+        ):
+            with (
+                self.subTest(base_url=base_url),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "cannot contain a query or fragment",
+                ),
+            ):
+                CalApiConfig(api_key="key", base_url=base_url).api_v2_url
+
     def test_subscription_lock_id_is_stable_signed_int(self) -> None:
         workflow_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
         first = cal_subscription_lock_id(workflow_id, "cal-node")

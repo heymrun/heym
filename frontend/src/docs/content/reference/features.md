@@ -86,7 +86,7 @@ Pairs with [Slack](../nodes/slack-node.md), [Agent Node](../nodes/agent-node.md)
 
 #### [Cal.com Trigger](../nodes/cal-trigger-node.md)
 
-The Cal.com Trigger node receives booking and meeting webhooks, verifies their HMAC-SHA256 signature, and starts the workflow. Manual mode uses a selected `cal_trigger` credential. Managed mode uses a `cal_api` credential to create, update, and disable the webhook, generate and encrypt its signing secret, and select events, payload versions, and Cal Video no-show evaluation delays in Heym. The node exposes the optional top-level event name, complete event body, normalized payload, sanitized headers (including the Cal.com payload version), and trigger timestamp.
+The Cal.com Trigger node receives booking and meeting webhooks, verifies their HMAC-SHA256 signature, and starts the workflow. Manual mode uses a selected `cal_trigger` credential. Managed mode uses the Cal.com API v2 contract through a `cal_api` credential to create, update, and disable the webhook, generate and encrypt its signing secret, select supported v2 events, choose the `2021-10-20` payload schema or its backward-compatible `2026-07-27` ICS extension, and configure Cal Video no-show evaluation delays in Heym. The node exposes the optional top-level event name, complete event body, normalized payload, sanitized headers (including the Cal.com payload version), and trigger timestamp.
 
 Pairs with [Condition](../nodes/condition-node.md), [Switch](../nodes/switch-node.md), [Slack](../nodes/slack-node.md), and [Third-Party Integrations](./integrations.md).
 

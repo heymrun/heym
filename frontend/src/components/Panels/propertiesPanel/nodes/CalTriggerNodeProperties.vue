@@ -31,7 +31,7 @@ const setupModeOptions = [
 
 const payloadVersionOptions = [
   { value: "2021-10-20", label: "2021-10-20" },
-  { value: "2026-07-27", label: "2026-07-27 (includes ICS content)" },
+  { value: "2026-07-27", label: "2026-07-27 (includes optional ICS content)" },
 ];
 
 const noShowTimeUnitOptions = [

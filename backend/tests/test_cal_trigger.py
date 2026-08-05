@@ -358,7 +358,7 @@ class CalManagedSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("array of strings", raised.exception.detail)
 
-    async def test_sync_accepts_current_cal_events_and_ics_payload_version(self) -> None:
+    async def test_sync_accepts_documented_events_and_extended_payload_version(self) -> None:
         from app.api.cal import CAL_WEBHOOK_EVENTS, sync_cal_webhook_subscription
 
         workflow_id = uuid.uuid4()
@@ -368,7 +368,11 @@ class CalManagedSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             workflow_id,
             owner_id,
             credential_id,
-            events=["INSTANT_MEETING", "BOOKING_LOCATION_UPDATED", "CALENDAR_ENTRY_REJECTED"],
+            events=[
+                "INSTANT_MEETING",
+                "BOOKING_LOCATION_UPDATED",
+                "DELEGATION_CREDENTIAL_SECRET_ROTATED",
+            ],
             payload_version="2026-07-27",
         )
         result = MagicMock()
@@ -399,12 +403,44 @@ class CalManagedSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         body = client.create_webhook.await_args.args[0]
         self.assertEqual(
             body["triggers"],
-            ["INSTANT_MEETING", "BOOKING_LOCATION_UPDATED", "CALENDAR_ENTRY_REJECTED"],
+            [
+                "INSTANT_MEETING",
+                "BOOKING_LOCATION_UPDATED",
+                "DELEGATION_CREDENTIAL_SECRET_ROTATED",
+            ],
         )
         self.assertEqual(body["version"], "2026-07-27")
         self.assertEqual(response.payload_version, "2026-07-27")
         self.assertIn("INSTANT_MEETING", CAL_WEBHOOK_EVENTS)
-        self.assertIn("ROUTING_FORM_FALLBACK_HIT", CAL_WEBHOOK_EVENTS)
+        self.assertIn("BOOKING_LOCATION_UPDATED", CAL_WEBHOOK_EVENTS)
+        self.assertIn("DELEGATION_CREDENTIAL_SECRET_ROTATED", CAL_WEBHOOK_EVENTS)
+
+    async def test_sync_rejects_events_outside_public_v2_contract(self) -> None:
+        from app.api.cal import sync_cal_webhook_subscription
+
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        credential_id = uuid.uuid4()
+        workflow = self._managed_workflow(
+            workflow_id,
+            owner_id,
+            credential_id,
+            events=["CALENDAR_ENTRY_REJECTED"],
+        )
+
+        with (
+            patch("app.api.cal.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await sync_cal_webhook_subscription(
+                workflow_id,
+                "cal-node",
+                current_user=SimpleNamespace(id=owner_id),
+                db=MagicMock(),
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("unsupported Cal.com events", raised.exception.detail)
 
     async def test_sync_sends_empty_template_and_required_no_show_delay(self) -> None:
         from app.api.cal import sync_cal_webhook_subscription

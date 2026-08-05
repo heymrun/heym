@@ -2503,7 +2503,7 @@ async function handleSave(): Promise<void> {
             :disabled="saving"
           />
           <p class="text-xs text-muted-foreground">
-            Keep the default for Cal.com Cloud, or enter your self-hosted Cal.com API URL.
+            Cal.com API v2 only. Use the service origin or a URL ending in /v2.
           </p>
         </div>
       </template>
