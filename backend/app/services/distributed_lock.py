@@ -53,6 +53,13 @@ class DistributedLockService:
     async def _release_leader_session(self) -> None:
         if self._leader_session:
             try:
+                await self._leader_session.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": self._leader_lock_id},
+                )
+            except Exception as e:
+                logger.warning("Failed to unlock advisory lock on release: %s", e)
+            try:
                 await self._leader_session.close()
             except Exception:
                 pass
