@@ -5,9 +5,9 @@ import os
 import uuid
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.db.session import async_session_maker
+from app.db.session import async_session_maker, engine
 
 logger = logging.getLogger("distributed_lock")
 
@@ -24,7 +24,7 @@ class DistributedLockService:
         self._leader_task: asyncio.Task | None = None
         self._running = False
         self._leader_lock_id = _string_to_lock_id("heym:leader:lock")
-        self._leader_session: AsyncSession | None = None
+        self._leader_conn: AsyncConnection | None = None
 
     @property
     def worker_id(self) -> str:
@@ -51,19 +51,31 @@ class DistributedLockService:
         logger.info("Distributed lock service stopped")
 
     async def _release_leader_session(self) -> None:
-        if self._leader_session:
-            try:
-                await self._leader_session.execute(
-                    text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": self._leader_lock_id},
-                )
-            except Exception as e:
-                logger.warning("Failed to unlock advisory lock on release: %s", e)
-            try:
-                await self._leader_session.close()
-            except Exception:
-                pass
-            self._leader_session = None
+        if self._leader_conn:
+            unlock_confirmed = False
+            if self._is_leader:
+                try:
+                    result = await self._leader_conn.execute(
+                        text("SELECT pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": self._leader_lock_id},
+                    )
+                    row = result.fetchone()
+                    unlock_confirmed = bool(row[0]) if row else False
+                except Exception as e:
+                    logger.warning("Failed to unlock advisory lock on release: %s", e)
+
+            if self._is_leader and not unlock_confirmed:
+                try:
+                    await self._leader_conn.invalidate()
+                except Exception:
+                    pass
+            else:
+                try:
+                    await self._leader_conn.close()
+                except Exception:
+                    pass
+
+            self._leader_conn = None
             self._is_leader = False
 
     async def _leader_election_loop(self) -> None:
@@ -95,13 +107,14 @@ class DistributedLockService:
 
     async def _try_acquire_leader_lock(self) -> bool:
         try:
-            self._leader_session = async_session_maker()
-            result = await self._leader_session.execute(
+            conn = await engine.connect()
+            self._leader_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            result = await self._leader_conn.execute(
                 text("SELECT pg_try_advisory_lock(:lock_id)"),
                 {"lock_id": self._leader_lock_id},
             )
             row = result.fetchone()
-            acquired = row[0] if row else False
+            acquired = bool(row[0]) if row else False
             if not acquired:
                 await self._release_leader_session()
             return acquired
@@ -111,14 +124,14 @@ class DistributedLockService:
             return False
 
     async def _check_leader_lock_valid(self) -> bool:
-        if not self._leader_session:
+        if not self._leader_conn:
             return False
         try:
-            await self._leader_session.execute(
+            await self._leader_conn.execute(
                 text("SELECT pg_advisory_lock_shared(:lock_id)"),
                 {"lock_id": self._leader_lock_id},
             )
-            await self._leader_session.execute(
+            await self._leader_conn.execute(
                 text("SELECT pg_advisory_unlock_shared(:lock_id)"),
                 {"lock_id": self._leader_lock_id},
             )
