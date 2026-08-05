@@ -73,7 +73,7 @@ class CalApiCredentialTests(unittest.TestCase):
 
 
 class CalApiCredentialUpdateTests(unittest.IsolatedAsyncioTestCase):
-    async def test_active_managed_webhook_blocks_connection_changes(self) -> None:
+    async def test_connection_changes_are_allowed_without_trigger_subscriptions(self) -> None:
         credential_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         credential = SimpleNamespace(
@@ -87,29 +87,24 @@ class CalApiCredentialUpdateTests(unittest.IsolatedAsyncioTestCase):
         )
         credential_result = MagicMock()
         credential_result.scalar_one_or_none.return_value = credential
-        subscription_result = MagicMock()
-        subscription_result.scalar_one_or_none.return_value = uuid.uuid4()
         db = MagicMock()
-        db.execute = AsyncMock(side_effect=[credential_result, subscription_result])
+        db.execute = AsyncMock(return_value=credential_result)
         db.flush = AsyncMock()
         db.refresh = AsyncMock()
 
-        with (
-            patch(
-                "app.api.credentials.decrypt_config",
-                return_value={"api_key": "old-key", "base_url": "https://api.cal.com"},
-            ),
-            self.assertRaises(HTTPException) as raised,
+        with patch(
+            "app.api.credentials.decrypt_config",
+            return_value={"api_key": "old-key", "base_url": "https://api.cal.com"},
         ):
-            await update_credential(
+            result = await update_credential(
                 credential_id,
                 CredentialUpdate(config={"api_key": "new-key", "base_url": "https://api.cal.com"}),
                 current_user=SimpleNamespace(id=credential.owner_id),
                 db=db,
             )
 
-        self.assertEqual(raised.exception.status_code, 409)
-        self.assertIn("Disable every managed Cal.com webhook", raised.exception.detail)
+        self.assertEqual(result.id, credential_id)
+        db.flush.assert_awaited_once()
 
 
 if __name__ == "__main__":

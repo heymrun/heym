@@ -576,43 +576,6 @@ class CalWebhookDeliveryReceipt(Base):
     )
 
 
-class CalWebhookSubscription(Base):
-    """Managed Cal.com webhook registration for one workflow trigger node."""
-
-    __tablename__ = "cal_webhook_subscriptions"
-    __table_args__ = (
-        UniqueConstraint("workflow_id", "node_id", name="uq_cal_webhook_subscription_node"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    credential_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("credentials.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    external_webhook_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    subscriber_url: Mapped[str] = mapped_column(String(2048), nullable=False)
-    encrypted_secret: Mapped[str] = mapped_column(Text, nullable=False)
-    configuration: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="inactive", nullable=False, index=True)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-
 class ActiveWorkflowExecution(Base):
     """Cross-worker registry of executions that are currently running."""
 

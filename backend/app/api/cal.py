@@ -5,49 +5,36 @@ import hashlib
 import hmac
 import json
 import logging
-import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from threading import Event
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
-from app.api.deps import get_current_user
 from app.api.workflows import (
     _persist_global_variables_from_execution,
     collect_referenced_workflows,
     get_credentials_context,
-    get_workflow_for_user,
 )
 from app.db.models import (
     CalWebhookDeliveryReceipt,
-    CalWebhookSubscription,
     CredentialType,
     ExecutionHistory,
-    User,
     Workflow,
 )
-from app.db.session import async_session_maker, get_db
-from app.models.schemas import CalWebhookSubscriptionResponse
-from app.services.cal_api_service import (
-    CalApiClient,
-    CalApiConfig,
-    CalApiError,
-    lock_cal_subscription,
-)
+from app.db.session import async_session_maker
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
 )
 from app.services.credential_access import get_accessible_credential
-from app.services.encryption import decrypt_config, encrypt_config
+from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     clear_execution,
     persist_registered_execution,
@@ -73,37 +60,6 @@ _BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS = 30.0
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 _BACKGROUND_CANCEL_EVENTS: dict[asyncio.Task[None], Event] = {}
 _LAST_RECEIPT_CLEANUP_AT = float("-inf")
-_NO_SHOW_EVENTS = frozenset({"AFTER_HOSTS_CAL_VIDEO_NO_SHOW", "AFTER_GUESTS_CAL_VIDEO_NO_SHOW"})
-
-CAL_WEBHOOK_EVENTS: tuple[str, ...] = (
-    "BOOKING_CREATED",
-    "BOOKING_PAYMENT_INITIATED",
-    "BOOKING_PAID",
-    "BOOKING_RESCHEDULED",
-    "BOOKING_REQUESTED",
-    "BOOKING_CANCELLED",
-    "BOOKING_REJECTED",
-    "BOOKING_NO_SHOW_UPDATED",
-    "BOOKING_LOCATION_UPDATED",
-    "FORM_SUBMITTED",
-    "MEETING_ENDED",
-    "MEETING_STARTED",
-    "RECORDING_READY",
-    "INSTANT_MEETING",
-    "INSTANT_MEETING_ACCEPTED",
-    "RECORDING_TRANSCRIPTION_GENERATED",
-    "OOO_CREATED",
-    "AFTER_HOSTS_CAL_VIDEO_NO_SHOW",
-    "AFTER_GUESTS_CAL_VIDEO_NO_SHOW",
-    "FORM_SUBMITTED_NO_EVENT",
-    "ROUTING_FORM_FALLBACK_HIT",
-    "DELEGATION_CREDENTIAL_ERROR",
-    "WRONG_ASSIGNMENT_REPORT",
-    "DELEGATION_CREDENTIAL_SECRET_ROTATION_FAILED",
-    "DELEGATION_CREDENTIAL_ROTATION_REQUIRED",
-    "DELEGATION_CREDENTIAL_SECRET_ROTATED",
-    "CALENDAR_ENTRY_REJECTED",
-)
 _FORWARDED_HEADERS: frozenset[str] = frozenset(
     {
         "content-type",
@@ -112,45 +68,6 @@ _FORWARDED_HEADERS: frozenset[str] = frozenset(
         "x-request-id",
     }
 )
-
-
-class _ManagedCalWebhookConfig(BaseModel):
-    """Validated managed fields read from a saved Cal.com Trigger node."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    setup_mode: Literal["managed"] = Field(alias="setupMode")
-    cal_api_credential_id: str = Field(alias="calApiCredentialId", min_length=1)
-    events: list[str] = Field(min_length=1)
-    payload_version: Literal["2021-10-20", "2026-07-27"] = Field(
-        default="2021-10-20",
-        alias="payloadVersion",
-    )
-    payload_template: str = Field(default="", alias="payloadTemplate", max_length=100_000)
-    no_show_time: int = Field(default=5, alias="noShowTime", ge=1)
-    no_show_time_unit: Literal["MINUTE", "HOUR", "DAY"] = Field(
-        default="MINUTE",
-        alias="noShowTimeUnit",
-    )
-    active: bool = Field(default=True, strict=True)
-
-    @field_validator("events", mode="before")
-    @classmethod
-    def _validate_events_shape(cls, value: object) -> object:
-        if not isinstance(value, list) or not all(isinstance(event, str) for event in value):
-            raise ValueError("events must be an array of strings")
-        return value
-
-    @field_validator("events")
-    @classmethod
-    def _normalize_events(cls, value: list[str]) -> list[str]:
-        events = list(dict.fromkeys(event.strip() for event in value if event.strip()))
-        if not events:
-            raise ValueError("select at least one Cal.com event")
-        invalid_events = sorted(set(events) - set(CAL_WEBHOOK_EVENTS))
-        if invalid_events:
-            raise ValueError(f"unsupported Cal.com events: {', '.join(invalid_events)}")
-        return events
 
 
 def _verify_cal_signature(webhook_secret: str, raw_body: bytes, signature: str) -> bool:
@@ -267,7 +184,6 @@ async def _resolve_legacy_workflow_id(
                 if node.get("id") == node_id
                 and node.get("type") == "calTrigger"
                 and node.get("data", {}).get("active") is not False
-                and node.get("data", {}).get("setupMode", "manual") == "manual"
             ),
             None,
         )
@@ -310,26 +226,6 @@ async def _get_webhook_secret(
     config = decrypt_config(credential.encrypted_config)
     webhook_secret = str(config.get("webhook_secret") or "").strip()
     return webhook_secret or None
-
-
-async def _get_managed_webhook_secret(
-    db: AsyncSession,
-    workflow_id: uuid.UUID,
-    node_id: str,
-) -> str | None:
-    result = await db.execute(
-        select(CalWebhookSubscription).where(
-            CalWebhookSubscription.workflow_id == workflow_id,
-            CalWebhookSubscription.node_id == node_id,
-            CalWebhookSubscription.status == "active",
-        )
-    )
-    subscription = result.scalar_one_or_none()
-    if subscription is None:
-        return None
-    config = decrypt_config(subscription.encrypted_secret)
-    secret = str(config.get("webhook_secret") or "").strip()
-    return secret or None
 
 
 async def _reserve_execution(
@@ -472,454 +368,6 @@ def _schedule_receipt_cleanup() -> None:
     task = asyncio.create_task(_cleanup_expired_delivery_receipts())
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_discard_background_task)
-
-
-def _managed_webhook_url(workflow_id: uuid.UUID, node_id: str) -> str:
-    public_base_url = build_default_public_base_url()
-    return f"{public_base_url}/api/cal/webhook/{workflow_id}/{node_id}"
-
-
-async def _cal_api_client_for_credential(
-    db: AsyncSession,
-    credential_id: str,
-    owner_id: uuid.UUID,
-) -> tuple[uuid.UUID, CalApiClient]:
-    try:
-        credential_uuid = uuid.UUID(credential_id)
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Select a valid Cal.com API credential",
-        )
-    credential = await get_accessible_credential(db, credential_uuid, owner_id)
-    if credential is None or credential.type != CredentialType.cal_api:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Select an accessible Cal.com API credential",
-        )
-    config = decrypt_config(credential.encrypted_config)
-    api_key = str(config.get("api_key") or "").strip()
-    base_url = str(config.get("base_url") or "https://api.cal.com").strip()
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cal.com API credential is missing its API key",
-        )
-    return credential_uuid, CalApiClient(CalApiConfig(api_key=api_key, base_url=base_url))
-
-
-def _subscription_response(
-    subscription: CalWebhookSubscription,
-) -> CalWebhookSubscriptionResponse:
-    config = subscription.configuration or {}
-    events = config.get("events") if isinstance(config.get("events"), list) else []
-    return CalWebhookSubscriptionResponse(
-        workflow_id=subscription.workflow_id,
-        node_id=subscription.node_id,
-        external_webhook_id=subscription.external_webhook_id,
-        subscriber_url=subscription.subscriber_url,
-        status=subscription.status,
-        events=[str(event) for event in events],
-        payload_version=str(config.get("payloadVersion") or "2021-10-20"),
-        no_show_time=int(config.get("noShowTime") or 5),
-        no_show_time_unit=str(config.get("noShowTimeUnit") or "MINUTE"),
-        last_error=subscription.last_error,
-        synced_at=subscription.synced_at,
-    )
-
-
-def _managed_config_from_node(node_data: object) -> _ManagedCalWebhookConfig:
-    """Validate saved node data and expose a stable client-facing validation error."""
-    try:
-        return _ManagedCalWebhookConfig.model_validate(node_data)
-    except ValidationError as exc:
-        first_error = exc.errors(include_url=False)[0]
-        location = ".".join(str(part) for part in first_error.get("loc", ()))
-        message = str(first_error.get("msg") or "Invalid value")
-        detail = f"Invalid Cal.com Trigger configuration: {location}: {message}"
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
-
-
-async def _create_or_reconcile_webhook(
-    client: CalApiClient,
-    body: dict[str, Any],
-    subscriber_url: str,
-) -> tuple[dict[str, Any], bool]:
-    """Create a webhook or adopt the existing webhook for the same subscriber URL."""
-    async with client:
-        try:
-            return await client.create_webhook(body), True
-        except CalApiError as exc:
-            if exc.status_code != status.HTTP_409_CONFLICT:
-                raise
-            webhooks = await client.list_webhooks()
-            existing = next(
-                (
-                    webhook
-                    for webhook in webhooks
-                    if str(webhook.get("subscriberUrl") or "") == subscriber_url
-                    and webhook.get("id") is not None
-                ),
-                None,
-            )
-            if existing is None:
-                raise exc
-            webhook_id = str(existing["id"])
-            return await client.update_webhook(webhook_id, body), False
-
-
-async def _compensate_created_webhook(client: CalApiClient, webhook_id: str) -> None:
-    """Best-effort removal when a remote create cannot be persisted locally."""
-    try:
-        await client.delete_webhook(webhook_id)
-    except CalApiError as exc:
-        if exc.status_code != status.HTTP_404_NOT_FOUND:
-            logger.exception("Failed to compensate Cal.com webhook creation %s", webhook_id)
-    except Exception:
-        logger.exception("Failed to compensate Cal.com webhook creation %s", webhook_id)
-
-
-async def _compensate_updated_webhook(
-    client: CalApiClient,
-    webhook_id: str,
-    previous_body: dict[str, Any],
-) -> None:
-    """Best-effort restore an existing remote webhook after local persistence fails."""
-    try:
-        await client.update_webhook(webhook_id, previous_body)
-    except Exception:
-        logger.exception("Failed to compensate Cal.com webhook update %s", webhook_id)
-
-
-def _webhook_request_body(
-    config: _ManagedCalWebhookConfig,
-    *,
-    subscriber_url: str,
-    webhook_secret: str,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "active": True,
-        "subscriberUrl": subscriber_url,
-        "triggers": config.events,
-        "secret": webhook_secret,
-        "version": config.payload_version,
-        # Cal.com PATCH semantics retain an omitted template, so always send this field.
-        "payloadTemplate": config.payload_template.strip(),
-    }
-    if _NO_SHOW_EVENTS.intersection(config.events):
-        body["time"] = config.no_show_time
-        body["timeUnit"] = config.no_show_time_unit
-    return body
-
-
-def _stored_webhook_request_body(
-    subscription: CalWebhookSubscription,
-    webhook_secret: str,
-) -> dict[str, Any] | None:
-    stored = subscription.configuration or {}
-    events = stored.get("events")
-    if not isinstance(events, list) or not events:
-        return None
-    node_data = {
-        "setupMode": "managed",
-        "calApiCredentialId": str(subscription.credential_id or "stored"),
-        "events": events,
-        "payloadVersion": stored.get("payloadVersion") or "2021-10-20",
-        "payloadTemplate": stored.get("payloadTemplate") or "",
-        "noShowTime": stored.get("noShowTime") or 5,
-        "noShowTimeUnit": stored.get("noShowTimeUnit") or "MINUTE",
-        "active": True,
-    }
-    try:
-        stored_config = _ManagedCalWebhookConfig.model_validate(node_data)
-    except ValidationError:
-        return None
-    return _webhook_request_body(
-        stored_config,
-        subscriber_url=subscription.subscriber_url,
-        webhook_secret=webhook_secret,
-    )
-
-
-async def _delete_remote_subscription(
-    db: AsyncSession,
-    subscription: CalWebhookSubscription,
-    owner_id: uuid.UUID,
-) -> None:
-    if subscription.external_webhook_id:
-        if subscription.credential_id is None:
-            raise CalApiError("Managed Cal.com webhook has no API credential")
-        _credential_id, client = await _cal_api_client_for_credential(
-            db,
-            str(subscription.credential_id),
-            owner_id,
-        )
-        try:
-            await client.delete_webhook(subscription.external_webhook_id)
-        except CalApiError as exc:
-            if exc.status_code != status.HTTP_404_NOT_FOUND:
-                raise
-    subscription.external_webhook_id = None
-    subscription.status = "inactive"
-    subscription.last_error = None
-    subscription.synced_at = datetime.now(timezone.utc)
-
-
-@router.get("/events", response_model=list[str])
-async def list_cal_webhook_events(
-    _current_user: User = Depends(get_current_user),
-) -> list[str]:
-    """List event names supported by Cal.com managed webhooks."""
-    return list(CAL_WEBHOOK_EVENTS)
-
-
-@router.get(
-    "/subscriptions/{workflow_id}/{node_id}",
-    response_model=CalWebhookSubscriptionResponse,
-)
-async def get_cal_webhook_subscription(
-    workflow_id: uuid.UUID,
-    node_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CalWebhookSubscriptionResponse:
-    """Return the managed subscription state for one trigger node."""
-    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
-    if workflow is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
-    result = await db.execute(
-        select(CalWebhookSubscription).where(
-            CalWebhookSubscription.workflow_id == workflow_id,
-            CalWebhookSubscription.node_id == node_id,
-        )
-    )
-    subscription = result.scalar_one_or_none()
-    if subscription is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Managed Cal.com webhook is not configured",
-        )
-    return _subscription_response(subscription)
-
-
-@router.post(
-    "/subscriptions/{workflow_id}/{node_id}/sync",
-    response_model=CalWebhookSubscriptionResponse,
-)
-async def sync_cal_webhook_subscription(
-    workflow_id: uuid.UUID,
-    node_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CalWebhookSubscriptionResponse:
-    """Create or update a Cal.com API-managed webhook from the saved node configuration."""
-    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
-    if workflow is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
-    if workflow.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the workflow owner can manage Cal.com webhooks",
-        )
-    trigger_node = next(
-        (
-            node
-            for node in workflow.nodes or []
-            if node.get("id") == node_id and node.get("type") == "calTrigger"
-        ),
-        None,
-    )
-    if trigger_node is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trigger node not found")
-    node_data = trigger_node.get("data", {})
-    if not isinstance(node_data, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Cal.com Trigger configuration: data must be an object",
-        )
-    if node_data.get("setupMode", "manual") != "managed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Set the Cal.com Trigger setup mode to managed first",
-        )
-    if node_data.get("active") is False:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Enable the Cal.com Trigger before syncing its webhook",
-        )
-    config = _managed_config_from_node(node_data)
-
-    credential_id, client = await _cal_api_client_for_credential(
-        db,
-        config.cal_api_credential_id,
-        workflow.owner_id,
-    )
-    await lock_cal_subscription(db, workflow_id, node_id)
-    result = await db.execute(
-        select(CalWebhookSubscription).where(
-            CalWebhookSubscription.workflow_id == workflow_id,
-            CalWebhookSubscription.node_id == node_id,
-        )
-    )
-    subscription = result.scalar_one_or_none()
-    previous_status = subscription.status if subscription is not None else None
-    if subscription is not None and subscription.credential_id != credential_id:
-        try:
-            await _delete_remote_subscription(db, subscription, workflow.owner_id)
-        except (CalApiError, HTTPException) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Unable to remove the previous Cal.com webhook: {exc}",
-            )
-
-    subscriber_url = _managed_webhook_url(workflow_id, node_id)
-    if subscription is None:
-        subscription = CalWebhookSubscription(
-            workflow_id=workflow_id,
-            node_id=node_id,
-            credential_id=credential_id,
-            subscriber_url=subscriber_url,
-            encrypted_secret=encrypt_config({"webhook_secret": secrets.token_hex(32)}),
-            configuration={},
-            status="inactive",
-        )
-        db.add(subscription)
-        await db.flush()
-    secret_config = decrypt_config(subscription.encrypted_secret)
-    webhook_secret = str(secret_config.get("webhook_secret") or "")
-    body = _webhook_request_body(
-        config,
-        subscriber_url=subscriber_url,
-        webhook_secret=webhook_secret,
-    )
-    previous_remote_body = (
-        _stored_webhook_request_body(subscription, webhook_secret)
-        if subscription.external_webhook_id
-        else None
-    )
-    previous_external_webhook_id = subscription.external_webhook_id
-    created_remote = False
-    try:
-        if subscription.external_webhook_id:
-            try:
-                webhook = await client.update_webhook(subscription.external_webhook_id, body)
-            except CalApiError as exc:
-                if exc.status_code != status.HTTP_404_NOT_FOUND:
-                    raise
-                subscription.external_webhook_id = None
-                webhook, created_remote = await _create_or_reconcile_webhook(
-                    client,
-                    body,
-                    subscriber_url,
-                )
-        else:
-            webhook, created_remote = await _create_or_reconcile_webhook(
-                client,
-                body,
-                subscriber_url,
-            )
-    except CalApiError as exc:
-        remote_still_active = bool(subscription.external_webhook_id) and (
-            exc.status_code != status.HTTP_404_NOT_FOUND
-            and previous_status == "active"
-            and subscription.credential_id == credential_id
-        )
-        subscription.status = "active" if remote_still_active else "error"
-        subscription.last_error = str(exc)
-        await db.commit()
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-
-    external_id = webhook.get("id")
-    if external_id is None:
-        subscription.status = "error"
-        subscription.last_error = "Cal.com API response did not include a webhook ID"
-        await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=subscription.last_error,
-        )
-    subscription.credential_id = credential_id
-    subscription.external_webhook_id = str(external_id)
-    subscription.subscriber_url = subscriber_url
-    subscription.configuration = {
-        "events": config.events,
-        "payloadVersion": config.payload_version,
-        "payloadTemplate": config.payload_template.strip(),
-        "noShowTime": config.no_show_time,
-        "noShowTimeUnit": config.no_show_time_unit,
-    }
-    subscription.status = "active"
-    subscription.last_error = None
-    subscription.synced_at = datetime.now(timezone.utc)
-    try:
-        await db.commit()
-    except Exception as exc:
-        try:
-            await db.rollback()
-        except Exception:
-            logger.exception("Failed to roll back Cal.com subscription transaction")
-        if created_remote:
-            await _compensate_created_webhook(client, str(external_id))
-        elif previous_remote_body is not None and previous_external_webhook_id:
-            await _compensate_updated_webhook(
-                client,
-                previous_external_webhook_id,
-                previous_remote_body,
-            )
-        logger.exception("Failed to persist Cal.com webhook subscription")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to persist the Cal.com webhook subscription",
-        ) from exc
-    return _subscription_response(subscription)
-
-
-@router.delete(
-    "/subscriptions/{workflow_id}/{node_id}",
-    response_model=CalWebhookSubscriptionResponse,
-)
-async def deactivate_cal_webhook_subscription(
-    workflow_id: uuid.UUID,
-    node_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CalWebhookSubscriptionResponse:
-    """Delete the remote Cal.com webhook while retaining local status."""
-    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
-    if workflow is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
-    if workflow.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the workflow owner can manage Cal.com webhooks",
-        )
-    await lock_cal_subscription(db, workflow_id, node_id)
-    result = await db.execute(
-        select(CalWebhookSubscription).where(
-            CalWebhookSubscription.workflow_id == workflow_id,
-            CalWebhookSubscription.node_id == node_id,
-        )
-    )
-    subscription = result.scalar_one_or_none()
-    if subscription is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Managed Cal.com webhook is not configured",
-        )
-    previous_status = subscription.status
-    previous_external_webhook_id = subscription.external_webhook_id
-    try:
-        await _delete_remote_subscription(db, subscription, workflow.owner_id)
-    except (CalApiError, HTTPException) as exc:
-        remote_may_still_be_active = bool(previous_external_webhook_id) and (
-            previous_status == "active"
-        )
-        subscription.status = "active" if remote_may_still_be_active else "error"
-        subscription.last_error = str(exc)
-        await db.commit()
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    await db.commit()
-    return _subscription_response(subscription)
 
 
 async def _execute_workflow_background(
@@ -1194,16 +642,11 @@ async def _handle_cal_webhook(
         workflow, trigger_node = trigger_match
 
         node_data = trigger_node.get("data", {})
-        setup_mode = str(node_data.get("setupMode") or "manual")
         credential_id = str(node_data.get("credentialId") or "").strip()
-        if setup_mode == "managed":
-            webhook_secret = await _get_managed_webhook_secret(db, workflow.id, node_id)
-        else:
-            webhook_secret = await _get_webhook_secret(db, credential_id, workflow.owner_id)
+        webhook_secret = await _get_webhook_secret(db, credential_id, workflow.owner_id)
         if not webhook_secret:
             logger.warning(
-                "Cal.com webhook rejected: invalid %s configuration on node_id=%s",
-                setup_mode,
+                "Cal.com webhook rejected: invalid credential configuration on node_id=%s",
                 node_id,
             )
             raise HTTPException(
@@ -1254,7 +697,7 @@ async def cal_webhook(
 
 @router.post("/webhook/{node_id}", deprecated=True)
 async def legacy_cal_webhook(node_id: str, request: Request) -> dict[str, bool]:
-    """Keep pre-managed manual webhook URLs working during migration."""
+    """Keep older node-only webhook URLs working during migration."""
     raw_body = await request.body()
     signature = request.headers.get("x-cal-signature-256", "")
     async with async_session_maker() as db:

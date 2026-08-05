@@ -165,6 +165,7 @@ export type NodeType =
   | "github"
   | "jira"
   | "linear"
+  | "cal"
   | "googleSheets"
   | "googleDrive"
   | "bigquery"
@@ -439,13 +440,9 @@ export interface NodeData {
   ocrPageRange?: string;
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
-  setupMode?: "manual" | "managed";
-  calApiCredentialId?: string;
-  events?: string[];
-  payloadVersion?: string;
-  payloadTemplate?: string;
-  noShowTime?: number;
-  noShowTimeUnit?: "MINUTE" | "HOUR" | "DAY";
+  calOperation?: string;
+  calWebhookId?: string;
+  calWebhook?: string;
   githubCredentialId?: string;
   repositoryUrl?: string;
   baseBranch?: string;

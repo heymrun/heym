@@ -16,7 +16,6 @@ from app.api.workflows import (
 from app.config import settings
 from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVersion
 from app.db.session import async_session_maker
-from app.services.cal_api_service import CalApiError, delete_managed_cal_subscriptions
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
@@ -341,22 +340,9 @@ class CronScheduler:
                         workflow.id,
                         workflow.name,
                     )
-                    try:
-                        await delete_managed_cal_subscriptions(
-                            db,
-                            workflow_id=workflow.id,
-                            owner_id=workflow.owner_id,
-                        )
-                        await db.delete(workflow)
-                        await db.commit()
-                        deleted_count += 1
-                    except CalApiError as exc:
-                        await db.rollback()
-                        logger.warning(
-                            "Keeping scheduled workflow %s because Cal.com cleanup failed: %s",
-                            workflow_id,
-                            exc,
-                        )
+                    await db.delete(workflow)
+                    await db.commit()
+                    deleted_count += 1
                 else:
                     logger.debug(
                         "Keeping scheduled workflow %s (%s) - not all start nodes deactivated",

@@ -1271,57 +1271,6 @@ export const opencodeApi = {
   },
 };
 
-export interface CalWebhookSubscription {
-  workflow_id: string;
-  node_id: string;
-  external_webhook_id: string | null;
-  subscriber_url: string;
-  status: string;
-  events: string[];
-  payload_version: string;
-  no_show_time: number;
-  no_show_time_unit: string;
-  last_error: string | null;
-  synced_at: string | null;
-}
-
-export const calApi = {
-  listEvents: async (): Promise<string[]> => {
-    const response = await api.get<string[]>("/cal/events");
-    return response.data;
-  },
-
-  getSubscription: async (
-    workflowId: string,
-    nodeId: string,
-  ): Promise<CalWebhookSubscription> => {
-    const response = await api.get<CalWebhookSubscription>(
-      `/cal/subscriptions/${workflowId}/${nodeId}`,
-    );
-    return response.data;
-  },
-
-  syncSubscription: async (
-    workflowId: string,
-    nodeId: string,
-  ): Promise<CalWebhookSubscription> => {
-    const response = await api.post<CalWebhookSubscription>(
-      `/cal/subscriptions/${workflowId}/${nodeId}/sync`,
-    );
-    return response.data;
-  },
-
-  deactivateSubscription: async (
-    workflowId: string,
-    nodeId: string,
-  ): Promise<CalWebhookSubscription> => {
-    const response = await api.delete<CalWebhookSubscription>(
-      `/cal/subscriptions/${workflowId}/${nodeId}`,
-    );
-    return response.data;
-  },
-};
-
 export const credentialsApi = {
   list: async (): Promise<CredentialListItem[]> => {
     const response = await api.get<CredentialListItem[]>("/credentials");

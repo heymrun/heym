@@ -248,15 +248,8 @@ In workflow expressions:
 - **DO NOT use** `textInput` as the entry point for Cal.com-triggered workflows
 - **Data fields**:
   - `label`: Node identifier (e.g., "calEvent")
-  - `setupMode`: `"manual"` (default, backward compatible) or `"managed"`
-  - `credentialId`: In manual mode, UUID of a `cal_trigger` credential containing the webhook secret
-  - `calApiCredentialId`: In managed mode, UUID of a `cal_api` credential. Use an owned credential placeholder; this field is not expression-capable.
-  - `events`: In managed mode, non-empty array of Cal.com webhook event names (default `["BOOKING_CREATED"]`)
-  - `payloadVersion`: In managed mode, `"2021-10-20"` (default) or `"2026-07-27"` (adds ICS calendar content on selected booking events)
-  - `payloadTemplate`: Optional Cal.com payload template string. This is interpreted by Cal.com, not as a Heym `$...` expression.
-  - `noShowTime`: Positive integer delay before evaluating host/guest Cal Video no-show events (default `5`)
-  - `noShowTimeUnit`: `"MINUTE"` (default), `"HOUR"`, or `"DAY"`. Used when either Cal Video no-show event is selected.
-  - `active`: Whether the trigger can receive requests (default `true`). Managed webhooks can only be synced while active.
+  - `credentialId`: UUID of a `cal_trigger` credential containing the webhook secret
+  - `active`: Whether the trigger can receive requests (default `true`)
 - **Output fields available downstream**:
   - `$<label>.event` — complete Cal.com webhook body
   - `$<label>.triggerEvent` — top-level event name (e.g., `"BOOKING_CREATED"`), or `null` when a custom payload template omits it
@@ -268,11 +261,6 @@ In workflow expressions:
 **Example node JSON:**
 ```json
 {"id": "n1", "type": "calTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "calEvent", "credentialId": "cal-trigger-credential-uuid"}}
-```
-
-**Managed example:**
-```json
-{"id": "n1", "type": "calTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "calEvent", "setupMode": "managed", "calApiCredentialId": "cal-api-credential-uuid", "events": ["BOOKING_CREATED", "BOOKING_CANCELLED"], "payloadVersion": "2021-10-20", "payloadTemplate": "", "noShowTime": 5, "noShowTimeUnit": "MINUTE", "active": true}}
 ```
 
 **Example downstream expressions:**
@@ -4094,6 +4082,42 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
+### 36a. cal (Cal.com Webhook API Operations)
+- **Type**: `cal`
+- **Inputs**: 1, **Outputs**: 1
+- **Credential required**: `cal_api` credential containing a Cal.com API key and optional base URL
+- **Operations**:
+  - `listWebhooks`: list every webhook visible to the credential
+  - `createWebhook`: create a webhook from `calWebhook`
+  - `updateWebhook`: update `calWebhookId` with fields from `calWebhook`
+  - `deleteWebhook`: delete `calWebhookId`
+- **Fields**: `calOperation`, `calWebhookId`, `calWebhook`
+- `calWebhookId` and `calWebhook` support expressions and can be agent-provided tool fields.
+- `calWebhook` must be a JSON object or an expression resolving to an object. For create, it
+  normally contains `subscriberUrl`, `triggers`, `secret`, `active`, and `version`; optional Cal.com
+  fields such as `payloadTemplate`, `time`, and `timeUnit` may also be included.
+- List output: `{success, operation, webhooks, count}`.
+- Create/update output: `{success, operation, webhook}`.
+- Delete output: `{success, operation, deleted, webhookId}`.
+- Use a separate `calTrigger` node when the workflow must receive the webhook. Copy its URL into
+  `calWebhook.subscriberUrl` and use the same secret in both the `cal_trigger` credential and
+  `calWebhook.secret`.
+
+**Example — create a webhook for a Cal.com Trigger:**
+```json
+{
+  "id": "cal-1",
+  "type": "cal",
+  "position": {"x": 500, "y": 100},
+  "data": {
+    "label": "createCalWebhook",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "calOperation": "createWebhook",
+    "calWebhook": "{\"subscriberUrl\":\"https://heym.example/api/cal/webhook/WORKFLOW_ID/NODE_ID\",\"triggers\":[\"BOOKING_CREATED\"],\"secret\":\"shared-secret\",\"active\":true,\"version\":\"2021-10-20\"}"
+  }
+}
+```
+
 ### 37. sentry (Sentry REST Operations)
 - **Type**: `sentry`
 - **Purpose**: Manage Sentry organizations, projects, teams, issues, events, and releases
@@ -4758,7 +4782,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `slack-credential-uuid`, `cal-trigger-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `calTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `slack-credential-uuid`, `cal-trigger-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `calTrigger`, `cal`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.
