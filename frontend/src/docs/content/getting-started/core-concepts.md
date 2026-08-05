@@ -2,7 +2,7 @@
 
 ## Workflows
 
-A workflow is a directed graph of [**nodes**](../reference/node-types.md) connected by **edges**. Manage workflows in the [Workflows](../tabs/workflows-tab.md) tab. Organize them in [folders](../reference/workflow-organization.md). Execution flows from [trigger nodes](../reference/triggers.md) ([Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md)) through processing nodes to [output](../nodes/output-node.md) nodes. See [Workflow Structure](../reference/workflow-structure.md) for the JSON format. Save and share workflows as [Templates](../tabs/templates-tab.md) to reuse them across projects. Workflows can also run from the [Board](../tabs/board-tab.md), where kanban cards trigger a column's workflow chain with the card's full context.
+A workflow is a directed graph of [**nodes**](../reference/node-types.md) connected by **edges**. Manage workflows in the [Workflows](../tabs/workflows-tab.md) tab. Organize them in [folders](../reference/workflow-organization.md). Execution flows from [trigger nodes](../reference/triggers.md) ([Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Cal.com Trigger](../nodes/cal-trigger-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [Discord Trigger](../nodes/discord-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md)) through processing nodes to [output](../nodes/output-node.md) nodes. See [Workflow Structure](../reference/workflow-structure.md) for the JSON format. Save and share workflows as [Templates](../tabs/templates-tab.md) to reuse them across projects. Workflows can also run from the [Board](../tabs/board-tab.md), where kanban cards trigger a column's workflow chain with the card's full context.
 
 ## Nodes
 
@@ -20,7 +20,7 @@ Edges connect a source node's output handle to a target node's input handle. Dat
 
 ## Execution Flow
 
-1. **Trigger** – Input, Cron, Telegram Trigger, Discord Trigger, IMAP Trigger, or [WebSocket Trigger](../nodes/websocket-trigger-node.md) node starts execution (see [Triggers](../reference/triggers.md))
+1. **Trigger** – Input, Cron, [Cal.com Trigger](../nodes/cal-trigger-node.md), Telegram Trigger, Discord Trigger, IMAP Trigger, or [WebSocket Trigger](../nodes/websocket-trigger-node.md) node starts execution (see [Triggers](../reference/triggers.md))
 2. **Downstream** – Each node receives output from connected upstream nodes; [parallel execution](../reference/parallel-execution.md) runs independent nodes concurrently
 3. **Expressions** – Nodes reference upstream data via `$nodeLabel.field`. See [Expression DSL](../reference/expression-dsl.md).
 4. **Output** – [Output](../nodes/output-node.md) node produces the final result

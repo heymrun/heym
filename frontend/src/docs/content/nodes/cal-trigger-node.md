@@ -17,12 +17,45 @@ The **Cal.com Trigger** node is a zero-input entry point that receives signed Ca
 | `setupMode` | `manual` / `managed` | Keep existing webhooks manual, or let Heym manage them through the Cal.com API |
 | `credentialId` | UUID | Manual mode: `cal_trigger` credential containing the shared webhook secret |
 | `calApiCredentialId` | UUID | Managed mode: `cal_api` credential used for webhook CRUD |
-| `events` | string[] | Managed mode: one or more Cal.com event names |
+| `events` | string[] | Managed mode: one or more names from the managed event allowlist below |
 | `payloadVersion` | string | `2021-10-20` (default) or its backward-compatible `2026-07-27` extension, which adds optional attendee and organizer ICS content to selected booking events |
 | `payloadTemplate` | string | Optional Cal.com payload template |
 | `noShowTime` | integer | Delay before evaluating host/guest Cal Video no-show events; minimum `1`, default `5` |
 | `noShowTimeUnit` | string | `MINUTE` (default), `HOUR`, or `DAY` |
-| `active` | boolean | Enables delivery and managed synchronization |
+| `active` | boolean | When `false`, webhook deliveries are rejected and managed sync is blocked. The Properties panel exposes this as **Trigger enabled** in managed mode only |
+
+## Managed Event Allowlist
+
+Managed mode accepts only these Cal.com API v2 event names (also returned by `GET /api/cal/events`):
+
+- `BOOKING_CREATED`
+- `BOOKING_PAYMENT_INITIATED`
+- `BOOKING_PAID`
+- `BOOKING_RESCHEDULED`
+- `BOOKING_REQUESTED`
+- `BOOKING_CANCELLED`
+- `BOOKING_REJECTED`
+- `BOOKING_NO_SHOW_UPDATED`
+- `BOOKING_LOCATION_UPDATED`
+- `FORM_SUBMITTED`
+- `MEETING_ENDED`
+- `MEETING_STARTED`
+- `RECORDING_READY`
+- `INSTANT_MEETING`
+- `INSTANT_MEETING_ACCEPTED`
+- `RECORDING_TRANSCRIPTION_GENERATED`
+- `OOO_CREATED`
+- `AFTER_HOSTS_CAL_VIDEO_NO_SHOW`
+- `AFTER_GUESTS_CAL_VIDEO_NO_SHOW`
+- `FORM_SUBMITTED_NO_EVENT`
+- `ROUTING_FORM_FALLBACK_HIT`
+- `DELEGATION_CREDENTIAL_ERROR`
+- `WRONG_ASSIGNMENT_REPORT`
+- `DELEGATION_CREDENTIAL_SECRET_ROTATION_FAILED`
+- `DELEGATION_CREDENTIAL_ROTATION_REQUIRED`
+- `DELEGATION_CREDENTIAL_SECRET_ROTATED`
+
+In manual mode, event selection remains in Cal.com and is not restricted to this list.
 
 ## Setup Guide
 
@@ -41,9 +74,9 @@ The **Cal.com Trigger** node is a zero-input entry point that receives signed Ca
    out of managed mode removes the remote webhook before the local configuration is discarded.
 
 The status box shows whether the local registration is active, inactive, or in an error state. A
-Cal.com API credential cannot be deleted while an active managed webhook still references it.
-Its API key and base URL also cannot be changed until those managed webhooks are disabled, preventing
-the old Cal.com instance or account from retaining an unreachable webhook.
+Cal.com API credential cannot be deleted while a managed subscription still has a remote webhook ID.
+Its API key and base URL also cannot be changed until those remote webhooks are disabled or removed,
+preventing the old Cal.com instance or account from retaining an unreachable webhook.
 
 Heym blocks Cal.com API base URLs that resolve to loopback, private, link-local, or cloud metadata
 addresses by default. Trusted self-hosted deployments that intentionally use an internal Cal.com API

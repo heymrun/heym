@@ -10,7 +10,7 @@ Start nodes (no incoming edges) that initiate execution:
 |-----------|-------------|
 | [Input](../nodes/input-node.md) (textInput) | HTTP entry point. Receives `body`, `headers`, `query` from requests. |
 | [Cron](../nodes/cron-node.md) | Runs on a schedule (cron expression, e.g. `0 * * * *` for hourly). |
-| [Cal.com Trigger](../nodes/cal-trigger-node.md) | Starts when Cal.com sends a signed webhook to the node-specific endpoint. |
+| [Cal.com Trigger](../nodes/cal-trigger-node.md) | Starts when Cal.com sends a signed webhook to `POST /api/cal/webhook/{workflow_id}/{node_id}`. |
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
@@ -35,6 +35,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Slack** | `POST /api/slack/webhook/{node_id}` | HMAC-SHA256 signing secret |
 | **Discord** | `POST /api/discord/webhook/{node_id}` | Ed25519 application public key |
 | **Telegram** | `POST /api/telegram/webhook/{node_id}` | Optional `x-telegram-bot-api-secret-token` |
+| **Cal.com** | `POST /api/cal/webhook/{workflow_id}/{node_id}` | HMAC-SHA256 webhook secret (`x-cal-signature-256`) |
 | **Editor** | Same as Webhook, via `workflowStore.executeWorkflow` | JWT |
 
 ### Webhook / API
@@ -84,7 +85,7 @@ Discord sends interaction webhooks to `POST /api/discord/webhook/{node_id}`. The
 
 ### Cal.com
 
-Cal.com sends webhooks to `POST /api/cal/webhook/{workflow_id}/{node_id}`. Cal.com Cloud requires this subscriber URL to be publicly reachable over HTTPS; self-hosted Cal.com can use HTTP and internal addresses. In manual mode, Heym verifies `x-cal-signature-256` with the selected `cal_trigger` secret. In managed mode, Heym uses only the Cal.com API v2 webhook contract: it creates or updates the webhook through a `cal_api` credential, stores a generated signing secret encrypted, exposes the documented event set, and supports both the `2021-10-20` payload schema and its backward-compatible `2026-07-27` ICS extension. The credential Base URL must be the service origin or end in `/v2`; explicit non-v2 API paths are rejected. Internal Cal.com API URLs require the operator-controlled `HEYM_HTTP_ALLOW_PRIVATE_URLS=true` setting. Downstream output includes the complete `event`, optional top-level `triggerEvent`, normalized `payload`, sanitized `headers`, and `triggered_at`. When the body has no top-level `payload`—including flat meeting events and many custom templates—Heym exposes the complete body as `payload`. The Cal.com payload version remains available through `headers['x-cal-webhook-version']`. Valid events run in the background, deliveries containing a top-level `createdAt` or `idempotencyKey` are deduplicated for 24 hours under Heym's retention policy, and runs are recorded with `trigger_source: "Cal.com"`. Older node-only manual URLs (`POST /api/cal/webhook/{node_id}`) remain available as a deprecated compatibility path when the signature identifies exactly one workflow; ambiguous cloned node IDs are rejected.
+Cal.com sends webhooks to `POST /api/cal/webhook/{workflow_id}/{node_id}`. Cal.com Cloud requires this subscriber URL to be publicly reachable over HTTPS; self-hosted Cal.com can use HTTP and internal addresses. In manual mode, Heym verifies `x-cal-signature-256` with the selected `cal_trigger` secret. In managed mode, Heym uses only the Cal.com API v2 webhook contract: it creates or updates the webhook through a `cal_api` credential, stores a generated signing secret encrypted, exposes the managed event allowlist (see [Cal.com Trigger](../nodes/cal-trigger-node.md)), and supports both the `2021-10-20` payload schema and its backward-compatible `2026-07-27` ICS extension. The credential Base URL must be the service origin or end in `/v2`; explicit non-v2 API paths are rejected. Internal Cal.com API URLs require the operator-controlled `HEYM_HTTP_ALLOW_PRIVATE_URLS=true` setting. Downstream output includes the complete `event`, optional top-level `triggerEvent`, normalized `payload`, sanitized `headers`, and `triggered_at`. When the body has no top-level `payload`—including flat meeting events and many custom templates—Heym exposes the complete body as `payload`. The Cal.com payload version remains available through `headers['x-cal-webhook-version']`. Valid events run in the background, deliveries containing a top-level `createdAt` or `idempotencyKey` are deduplicated for 24 hours under Heym's retention policy, and runs are recorded with `trigger_source: "Cal.com"`. Older node-only manual URLs (`POST /api/cal/webhook/{node_id}`) remain available as a deprecated compatibility path when the signature identifies exactly one workflow; ambiguous cloned node IDs are rejected.
 
 ### RabbitMQ
 
@@ -120,6 +121,7 @@ Execution history records `trigger_source` for every entry point:
 - **Cron**: `{"triggered_by": "cron"}`
 - **Telegram**: `update` + `message` + optional `callback_query` + sanitized `headers` + `triggered_by: "telegram"` + `trigger_node_id` + `triggered_at`
 - **Discord**: `interaction` + `type` + `data` + sanitized `headers` + `triggered_by: "Discord"` + `trigger_node_id` + `triggered_at`
+- **Cal.com**: `event` + `triggerEvent` + `payload` + sanitized `headers` + `triggered_by: "Cal.com"` + `trigger_node_id` + `triggered_at`
 - **IMAP**: `email` + `triggered_by: "imap"` + `trigger_node_id` + `triggered_at`
 - **WebSocket**: `eventName` + `url` + `triggered_by: "websocket"` + `message` / `connection` / `close`
 - **File Upload**: `file` + `uploaded_at` + `triggered_by: "file_upload"`
@@ -131,8 +133,9 @@ Execution history records `trigger_source` for every entry point:
 
 - [Webhooks](./webhooks.md) – Webhook TTL, cache, rate limit, auth
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges
-- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
+- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Cal.com Trigger](../nodes/cal-trigger-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
 - [Discord Trigger](../nodes/discord-trigger-node.md) – Discord interactions webhook trigger
+- [Cal.com Trigger](../nodes/cal-trigger-node.md) – Signed Cal.com webhook trigger (managed or manual)
 - [Quick Start](../getting-started/quick-start.md) – Build a workflow with Input
 - [Portal](./portal.md) – Portal trigger and chat UI
 - [Execution History](./execution-history.md) – View past runs and trigger_source
