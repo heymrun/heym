@@ -50,7 +50,7 @@ class DistributedLockService:
         await self._release_leader_session()
         logger.info("Distributed lock service stopped")
 
-    async def _release_leader_session(self) -> None:
+    async def _release_leader_session(self, force_invalidate: bool = False) -> None:
         if self._leader_conn:
             unlock_confirmed = False
             if self._is_leader:
@@ -61,18 +61,18 @@ class DistributedLockService:
                     )
                     row = result.fetchone()
                     unlock_confirmed = bool(row[0]) if row else False
-                except Exception as e:
+                except BaseException as e:
                     logger.warning("Failed to unlock advisory lock on release: %s", e)
 
-            if self._is_leader and not unlock_confirmed:
+            if force_invalidate or (self._is_leader and not unlock_confirmed):
                 try:
                     await self._leader_conn.invalidate()
-                except Exception:
+                except BaseException:
                     pass
             else:
                 try:
                     await self._leader_conn.close()
-                except Exception:
+                except BaseException:
                     pass
 
             self._leader_conn = None
@@ -108,20 +108,37 @@ class DistributedLockService:
     async def _try_acquire_leader_lock(self) -> bool:
         try:
             conn = await engine.connect()
+        except Exception:
+            return False
+
+        try:
             self._leader_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        except BaseException as e:
+            logger.warning("Failed to set execution options on leader conn: %s", e)
+            await conn.close()
+            if isinstance(e, Exception):
+                return False
+            raise
+
+        uncertain = True
+        try:
             result = await self._leader_conn.execute(
                 text("SELECT pg_try_advisory_lock(:lock_id)"),
                 {"lock_id": self._leader_lock_id},
             )
             row = result.fetchone()
             acquired = bool(row[0]) if row else False
+            uncertain = False
+
             if not acquired:
                 await self._release_leader_session()
             return acquired
-        except Exception as e:
-            logger.warning("Failed to acquire leader lock: %s", e)
-            await self._release_leader_session()
-            return False
+        except BaseException as e:
+            logger.warning("Error during leader lock acquisition: %s", e)
+            await self._release_leader_session(force_invalidate=uncertain)
+            if isinstance(e, Exception):
+                return False
+            raise
 
     async def _check_leader_lock_valid(self) -> bool:
         if not self._leader_conn:
