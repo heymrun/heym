@@ -22,7 +22,6 @@ import {
 } from "lucide-vue-next";
 
 import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
-import type { CredentialListItem, LLMModel } from "@/types/credential";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
@@ -39,8 +38,8 @@ import {
 } from "@/utils/parseClarify";
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
-import { aiApi, credentialsApi } from "@/services/api";
-import { useAiDefaults } from "@/composables/useAiDefaults";
+import { aiApi } from "@/services/api";
+import { useChatModelSelection } from "@/composables/useChatModelSelection";
 import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
@@ -58,11 +57,6 @@ interface Props {
   conversationId: string;
 }
 
-interface SelectOption {
-  value: string;
-  label: string;
-}
-
 const props = defineProps<Props>();
 
 const UUID_PATTERN =
@@ -71,7 +65,6 @@ const CHAT_SCROLLBAR_VERTICAL_INSET_PX = 12;
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
-const aiDefaults = useAiDefaults();
 const router = useRouter();
 
 const input = ref("");
@@ -81,37 +74,27 @@ const messagesScrollRef = ref<HTMLDivElement | null>(null);
 const chatScrollbarTrackRef = ref<HTMLDivElement | null>(null);
 const messagesEndRef = ref<HTMLElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
-const credentials = ref<CredentialListItem[]>([]);
-const models = ref<LLMModel[]>([]);
-const selectedCredentialId = ref("");
-const selectedModel = ref("");
-const isLoadingModels = ref(false);
-const credentialError = ref("");
-const modelsLoadFailed = ref(false);
 
-const credentialOptions = computed<SelectOption[]>(() =>
-  credentials.value.map((credential) => ({
-    value: credential.id,
-    label: credential.name,
-  })),
-);
-
-const modelOptions = computed<SelectOption[]>(() =>
-  models.value.map((model) => ({
-    value: model.id,
-    label: model.name,
-  })),
-);
-
-const modelSelectPlaceholder = computed<string>(() => {
-  if (isLoadingModels.value) {
-    return "Loading...";
-  }
-  if (modelsLoadFailed.value) {
-    return "Failed to load";
-  }
-  return "Select...";
+const {
+  credentials,
+  selectedCredentialId,
+  selectedModel,
+  credentialOptions,
+  modelOptions,
+  isLoadingModels,
+  modelsLoadFailed,
+  credentialError,
+  modelPlaceholder: modelSelectPlaceholder,
+  loadCredentials: loadCredentialList,
+  applySavedSelection,
+  selectCredential,
+} = useChatModelSelection({
+  onModelsSettled: () => {
+    focusInputWhenReady();
+    void _maybeLoadContextSummary();
+  },
 });
+
 const copiedMessageId = ref<string | null>(null);
 const queueEditingId = ref<string | null>(null);
 const queueEditingValue = ref("");
@@ -743,70 +726,21 @@ function toggleSpeechInput(): void {
 function _applyConversationSession(): void {
   const conv = chatStore.activeConversation;
   if (!conv || !credentials.value.length) return;
-  const savedCredId = conv.last_credential_id;
-  const savedModel = conv.last_model;
-  if (savedCredId) {
-    const credMatch = credentials.value.find((c) => c.id === savedCredId);
-    if (credMatch) {
-      selectedCredentialId.value = credMatch.id;
-      void loadModels(credMatch.id, savedModel ?? undefined);
-      return;
-    }
-  }
-  if (!selectedCredentialId.value) {
-    const resolved = aiDefaults.resolveCredentialId(credentials.value, {});
-    if (resolved) {
-      selectedCredentialId.value = resolved;
-      void loadModels(resolved);
-    }
-  }
+  void applySavedSelection({
+    credentialId: conv.last_credential_id,
+    model: conv.last_model,
+  });
 }
 
 async function loadCredentials(): Promise<void> {
-  try {
-    credentials.value = await credentialsApi.listLLM();
-    _credentialsReady = true;
-    if (credentials.value.length > 0) {
-      if (chatStore.activeConversation) {
-        _applyConversationSession();
-      } else if (!selectedCredentialId.value) {
-        const resolved = aiDefaults.resolveCredentialId(credentials.value, {});
-        if (resolved) {
-          selectedCredentialId.value = resolved;
-          await loadModels(resolved);
-        }
-      }
-    }
-  } catch {
-    credentialError.value = "Failed to load credentials";
+  await loadCredentialList();
+  _credentialsReady = true;
+  if (credentials.value.length === 0) return;
+  if (chatStore.activeConversation) {
+    _applyConversationSession();
+    return;
   }
-}
-
-async function loadModels(credId: string, preferredModelId?: string): Promise<void> {
-  if (!credId) return;
-  isLoadingModels.value = true;
-  modelsLoadFailed.value = false;
-  models.value = [];
-  selectedModel.value = "";
-  try {
-    models.value = await credentialsApi.getModels(credId);
-    if (models.value.length > 0) {
-      const match = preferredModelId
-        ? models.value.find((m) => m.id === preferredModelId)
-        : null;
-      const preferredModel = aiDefaults.resolveModel(credId, models.value, {
-        savedModel: preferredModelId ?? null,
-      });
-      selectedModel.value =
-        preferredModel ?? (match ? match.id : models.value[models.value.length - 1].id);
-    }
-  } catch {
-    modelsLoadFailed.value = true;
-  } finally {
-    isLoadingModels.value = false;
-    focusInputWhenReady();
-    void _maybeLoadContextSummary();
-  }
+  await applySavedSelection();
 }
 
 async function _maybeLoadContextSummary(): Promise<void> {
@@ -818,18 +752,8 @@ async function _maybeLoadContextSummary(): Promise<void> {
   );
 }
 
-async function onCredentialChange(): Promise<void> {
-  await loadModels(selectedCredentialId.value);
-}
-
 function onCredentialSelect(value: string | undefined): void {
-  selectedCredentialId.value = value ?? "";
-  if (!selectedCredentialId.value) {
-    models.value = [];
-    selectedModel.value = "";
-    return;
-  }
-  void onCredentialChange();
+  void selectCredential(value);
 }
 
 function sendQuickPrompt(text: string): void {
