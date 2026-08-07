@@ -327,9 +327,9 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="order-1 flex min-w-0 items-center gap-1 sm:order-2 sm:ml-auto sm:max-w-full sm:justify-end">
+        <div class="order-1 flex max-w-full flex-wrap items-center gap-1 sm:order-2 sm:ml-auto sm:flex-nowrap sm:justify-end">
           <div
-            class="min-w-0 flex-1 sm:max-w-full sm:flex-none sm:shrink-0"
+            class="max-w-full shrink-0"
             data-testid="dashboard-chat-credential-selector"
           >
             <SearchableSelect
@@ -348,7 +348,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="min-w-0 flex-1 sm:max-w-full sm:flex-none sm:shrink-0"
+            class="max-w-full shrink-0"
             data-testid="dashboard-chat-model-selector"
           >
             <SearchableSelect
