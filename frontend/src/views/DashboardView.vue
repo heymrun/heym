@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   Workflow,
   X,
@@ -32,6 +33,7 @@ import type { CredentialListItem } from "@/types/credential";
 import type { FolderTree, NodeData, WorkflowEdge, WorkflowListItem, WorkflowNode } from "@/types/workflow";
 import AnalyticsDashboard from "@/components/Analytics/AnalyticsDashboard.vue";
 import BoardPanel from "@/components/Board/BoardPanel.vue";
+import DashboardChatComposer from "@/components/Chat/DashboardChatComposer.vue";
 import CredentialsPanel from "@/components/Credentials/CredentialsPanel.vue";
 import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
 import DataTablePanel from "@/components/DataTable/DataTablePanel.vue";
@@ -110,6 +112,41 @@ type TabKey = "workflows" | "board" | "schedules" | "credentials" | "globalvaria
 const initialTab: TabKey = validTabs.has(parsedInitial.tab) ? (parsedInitial.tab as TabKey) : "workflows";
 const dataTableInitialId = ref<string | null>(parsedInitial.tab === "datatable" ? parsedInitial.subPath : null);
 const activeTab = ref<TabKey>(initialTab);
+
+const CHAT_COMPOSER_DISMISSED_KEY = "heym-dashboard-chat-composer-dismissed";
+
+function readChatComposerDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(CHAT_COMPOSER_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const chatComposerDismissed = ref(readChatComposerDismissed());
+
+function dismissChatComposer(): void {
+  chatComposerDismissed.value = true;
+  try {
+    window.localStorage.setItem(CHAT_COMPOSER_DISMISSED_KEY, "1");
+  } catch {
+    // Ignore storage failures; the composer still hides for this session.
+  }
+}
+
+function restoreChatComposer(): void {
+  chatComposerDismissed.value = false;
+  try {
+    window.localStorage.removeItem(CHAT_COMPOSER_DISMISSED_KEY);
+  } catch {
+    // Ignore storage failures; the composer still shows for this session.
+  }
+}
+
+function openCredentialsTab(): void {
+  activeTab.value = "credentials";
+}
 
 watch(activeTab, (newTab) => {
   const query: Record<string, string> = newTab === "workflows" ? {} : { tab: newTab };
@@ -1470,6 +1507,12 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
               </div>
             </Transition>
 
+            <DashboardChatComposer
+              v-if="!chatComposerDismissed"
+              @dismiss="dismissChatComposer"
+              @open-credentials="openCredentialsTab"
+            />
+
             <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
               <div>
                 <div class="flex items-center gap-3">
@@ -1489,6 +1532,17 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 </p>
               </div>
               <div class="flex flex-wrap items-center justify-end gap-1.5 sm:flex-nowrap">
+                <Button
+                  v-if="chatComposerDismissed"
+                  variant="ghost"
+                  size="sm"
+                  class="gap-1.5"
+                  data-testid="dashboard-chat-composer-restore"
+                  @click="restoreChatComposer"
+                >
+                  <Sparkles class="w-4 h-4" />
+                  Ask AI
+                </Button>
                 <div
                   v-if="!loading && (workflows.length > 0 || folderStore.folderTree.length > 0)"
                   class="relative w-full min-w-[220px] sm:w-72 md:w-80"
