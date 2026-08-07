@@ -165,12 +165,12 @@ onMounted(() => {
     >
 
     <form
-      class="mt-4 flex flex-col gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:flex-row sm:items-center sm:gap-2.5 sm:px-3.5 sm:py-3"
+      class="mt-4 flex flex-col gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:flex-row sm:items-start sm:gap-2.5 sm:px-3.5 sm:py-3"
       @submit.prevent="submit"
     >
       <button
         type="button"
-        class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:flex"
+        class="hidden h-[52px] w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:flex"
         :disabled="attachmentLoading"
         title="Attach file"
         aria-label="Attach file"
@@ -185,12 +185,12 @@ onMounted(() => {
         rows="1"
         data-testid="dashboard-chat-input"
         placeholder="Ask anything, or describe a workflow to build"
-        class="min-h-[52px] w-full flex-1 resize-none bg-transparent px-2 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
+        class="min-h-[52px] w-full flex-1 resize-none bg-transparent px-2 py-3 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
         @input="onInput"
         @keydown="onKeydown"
       />
 
-      <div class="flex items-center gap-2">
+      <div class="flex w-full items-center gap-2 sm:mt-1 sm:w-auto">
         <button
           type="button"
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:hidden"
@@ -203,7 +203,7 @@ onMounted(() => {
         </button>
 
         <div
-          class="min-w-0 flex-1 sm:w-[170px] sm:flex-none"
+          class="min-w-0 flex-1 sm:w-[190px] sm:flex-none"
           data-testid="dashboard-chat-credential-selector"
         >
           <SearchableSelect
@@ -221,7 +221,7 @@ onMounted(() => {
         </div>
 
         <div
-          class="min-w-0 flex-1 sm:w-[170px] sm:flex-none"
+          class="min-w-0 flex-1 sm:w-[190px] sm:flex-none"
           data-testid="dashboard-chat-model-selector"
         >
           <SearchableSelect
