@@ -256,7 +256,7 @@ onUnmounted(() => {
           rows="1"
           data-testid="dashboard-chat-input"
           aria-label="Message"
-          class="min-h-[36px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none sm:text-[15px]"
+          class="min-h-[36px] w-full resize-none bg-transparent px-2.5 py-1 text-[15px] leading-7 text-foreground outline-none sm:text-base"
           @input="onInput"
           @keydown="onKeydown"
         />
@@ -268,7 +268,7 @@ onUnmounted(() => {
           <p
             v-if="!input"
             :key="placeholderIndex"
-            class="pointer-events-none absolute left-1 right-1 top-1 truncate text-sm leading-7 text-muted-foreground sm:text-[15px]"
+            class="pointer-events-none absolute left-2.5 right-2.5 top-1 truncate text-[15px] leading-7 text-muted-foreground sm:text-base"
           >
             {{ currentPlaceholder }}
           </p>
@@ -289,7 +289,7 @@ onUnmounted(() => {
 
         <div class="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
           <div
-            class="max-w-full"
+            class="max-w-full shrink-0"
             data-testid="dashboard-chat-credential-selector"
           >
             <SearchableSelect
@@ -308,7 +308,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="max-w-full"
+            class="max-w-full shrink-0"
             data-testid="dashboard-chat-model-selector"
           >
             <SearchableSelect
@@ -329,7 +329,7 @@ onUnmounted(() => {
           <button
             type="submit"
             data-testid="dashboard-chat-send"
-            class="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            class="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             :disabled="!canSubmit"
             title="Start chat"
             aria-label="Start chat"
@@ -345,59 +345,58 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
-    </form>
-
-    <div
-      v-if="attachedFile || attachmentError || modelsLoadFailed || showNoCredentialsHint || submitError"
-      class="mt-2 flex flex-wrap items-center gap-2"
-    >
       <div
-        v-if="attachedFile"
-        class="flex max-w-xs items-center gap-1.5 rounded-lg border border-border/40 bg-muted/60 px-2.5 py-1 text-xs text-foreground"
+        v-if="attachedFile || attachmentError || modelsLoadFailed || showNoCredentialsHint || submitError"
+        class="mt-2 flex flex-wrap items-center gap-2 px-1"
       >
-        <Paperclip class="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span class="truncate">{{ attachedFile.name }}</span>
-        <span class="shrink-0 text-muted-foreground">· {{ attachedFile.sizeKb }} KB</span>
-        <button
-          type="button"
-          class="ml-0.5 shrink-0 rounded p-0.5 hover:bg-muted/80"
-          aria-label="Remove attachment"
-          @click="clearAttachment"
+        <div
+          v-if="attachedFile"
+          class="flex max-w-xs items-center gap-1.5 rounded-lg border border-border/40 bg-muted/60 px-2.5 py-1 text-xs text-foreground"
         >
-          <X class="h-3 w-3" />
+          <Paperclip class="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span class="truncate">{{ attachedFile.name }}</span>
+          <span class="shrink-0 text-muted-foreground">· {{ attachedFile.sizeKb }} KB</span>
+          <button
+            type="button"
+            class="ml-0.5 shrink-0 rounded p-0.5 hover:bg-muted/80"
+            aria-label="Remove attachment"
+            @click="clearAttachment"
+          >
+            <X class="h-3 w-3" />
+          </button>
+        </div>
+
+        <p
+          v-if="attachmentError"
+          class="text-xs text-destructive"
+        >
+          {{ attachmentError }}
+        </p>
+
+        <p
+          v-if="modelsLoadFailed"
+          class="text-xs text-amber-600 dark:text-amber-400"
+        >
+          This credential's model list could not be loaded.
+        </p>
+
+        <button
+          v-if="showNoCredentialsHint"
+          type="button"
+          class="text-xs font-medium text-primary underline-offset-2 hover:underline"
+          @click="emit('open-credentials')"
+        >
+          Add an LLM credential to start chatting
         </button>
+
+        <p
+          v-if="submitError"
+          class="text-xs text-destructive"
+        >
+          {{ submitError }}
+        </p>
       </div>
-
-      <p
-        v-if="attachmentError"
-        class="text-xs text-destructive"
-      >
-        {{ attachmentError }}
-      </p>
-
-      <p
-        v-if="modelsLoadFailed"
-        class="text-xs text-amber-600 dark:text-amber-400"
-      >
-        This credential's model list could not be loaded.
-      </p>
-
-      <button
-        v-if="showNoCredentialsHint"
-        type="button"
-        class="text-xs font-medium text-primary underline-offset-2 hover:underline"
-        @click="emit('open-credentials')"
-      >
-        Add an LLM credential to start chatting
-      </button>
-
-      <p
-        v-if="submitError"
-        class="text-xs text-destructive"
-      >
-        {{ submitError }}
-      </p>
-    </div>
+    </form>
   </section>
 </template>
 
