@@ -149,12 +149,54 @@ onMounted(() => {
       <X class="h-4 w-4" />
     </button>
 
-    <h2 class="text-lg font-bold tracking-tight sm:text-xl">
-      {{ greeting }}
-    </h2>
-    <p class="mt-0.5 text-sm text-muted-foreground">
-      What do you want to automate?
-    </p>
+    <div class="flex flex-col gap-3 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div class="min-w-0">
+        <h2 class="text-lg font-bold tracking-tight sm:text-xl">
+          {{ greeting }}
+        </h2>
+        <p class="mt-0.5 text-sm text-muted-foreground">
+          What do you want to automate?
+        </p>
+      </div>
+
+      <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0">
+        <div
+          class="min-w-0 sm:w-[190px]"
+          data-testid="dashboard-chat-credential-selector"
+        >
+          <SearchableSelect
+            id="dashboard-chat-credential-select"
+            :model-value="selectedCredentialId"
+            :options="credentialOptions"
+            placeholder="Select..."
+            search-placeholder="Search credentials..."
+            empty-text="No credentials found."
+            :disabled="!hasCredentials"
+            select-class="h-10 rounded-lg border-input bg-background shadow-none"
+            content-class="z-[60]"
+            @update:model-value="onCredentialSelect"
+          />
+        </div>
+
+        <div
+          class="min-w-0 sm:w-[190px]"
+          data-testid="dashboard-chat-model-selector"
+        >
+          <SearchableSelect
+            id="dashboard-chat-model-select"
+            :model-value="selectedModel"
+            :options="modelOptions"
+            :placeholder="modelPlaceholder"
+            search-placeholder="Search models..."
+            empty-text="No models found."
+            :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
+            select-class="h-10 rounded-lg border-input bg-background shadow-none"
+            content-class="z-[60]"
+            @update:model-value="selectedModel = $event ?? ''"
+          />
+        </div>
+      </div>
+    </div>
 
     <input
       ref="fileInputRef"
@@ -165,12 +207,12 @@ onMounted(() => {
     >
 
     <form
-      class="mt-4 flex flex-col gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:flex-row sm:items-start sm:gap-2.5 sm:px-3.5 sm:py-3"
+      class="mt-4 flex items-start gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:gap-2.5 sm:px-3.5 sm:py-3"
       @submit.prevent="submit"
     >
       <button
         type="button"
-        class="hidden h-[52px] w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:flex"
+        class="flex h-[52px] w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         :disabled="attachmentLoading"
         title="Attach file"
         aria-label="Attach file"
@@ -190,58 +232,11 @@ onMounted(() => {
         @keydown="onKeydown"
       />
 
-      <div class="flex w-full items-center gap-2 sm:mt-1 sm:w-auto">
-        <button
-          type="button"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:hidden"
-          :disabled="attachmentLoading"
-          title="Attach file"
-          aria-label="Attach file"
-          @click="openFilePicker"
-        >
-          <Paperclip class="h-4 w-4" />
-        </button>
-
-        <div
-          class="min-w-0 flex-1 sm:w-[190px] sm:flex-none"
-          data-testid="dashboard-chat-credential-selector"
-        >
-          <SearchableSelect
-            id="dashboard-chat-credential-select"
-            :model-value="selectedCredentialId"
-            :options="credentialOptions"
-            placeholder="Select..."
-            search-placeholder="Search credentials..."
-            empty-text="No credentials found."
-            :disabled="!hasCredentials"
-            select-class="h-10 rounded-lg border-input bg-background shadow-none"
-            content-class="z-[60]"
-            @update:model-value="onCredentialSelect"
-          />
-        </div>
-
-        <div
-          class="min-w-0 flex-1 sm:w-[190px] sm:flex-none"
-          data-testid="dashboard-chat-model-selector"
-        >
-          <SearchableSelect
-            id="dashboard-chat-model-select"
-            :model-value="selectedModel"
-            :options="modelOptions"
-            :placeholder="modelPlaceholder"
-            search-placeholder="Search models..."
-            empty-text="No models found."
-            :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            select-class="h-10 rounded-lg border-input bg-background shadow-none"
-            content-class="z-[60]"
-            @update:model-value="selectedModel = $event ?? ''"
-          />
-        </div>
-
+      <div class="flex h-[52px] shrink-0 items-center">
         <button
           type="submit"
           data-testid="dashboard-chat-send"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           :disabled="!canSubmit"
           title="Start chat"
           aria-label="Start chat"
