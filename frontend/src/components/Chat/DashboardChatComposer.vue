@@ -264,7 +264,7 @@ onUnmounted(() => {
     >
 
     <form
-      class="mt-4 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:px-3.5 sm:py-3"
+      class="mt-4 rounded-2xl border border-border/40 bg-muted/40 px-2.5 pb-2.5 pt-4 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:px-3.5 sm:pb-3 sm:pt-4"
       @submit.prevent="submit"
     >
       <div class="relative">
