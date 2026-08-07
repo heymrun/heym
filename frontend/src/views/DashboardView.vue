@@ -1524,7 +1524,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
               @open-credentials="openCredentialsTab"
             />
 
-            <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <div>
                 <div class="flex items-center gap-3">
                   <h2 class="text-xl md:text-2xl font-bold tracking-tight">
@@ -1542,7 +1542,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   <span class="sm:hidden"> · Long press for move/delete</span>
                 </p>
               </div>
-              <div class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-3 sm:flex-nowrap sm:gap-y-1.5">
+              <div class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-2 sm:flex-nowrap sm:gap-y-1.5">
                 <Button
                   v-if="chatComposerDismissed"
                   variant="ghost"
