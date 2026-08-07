@@ -1547,7 +1547,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   v-if="chatComposerDismissed"
                   variant="ghost"
                   size="sm"
-                  class="order-2 mr-auto gap-1.5 sm:order-none sm:mr-0"
+                  class="order-1 mr-auto gap-1.5 sm:order-none sm:mr-0"
                   data-testid="dashboard-chat-composer-restore"
                   @click="restoreChatComposer"
                 >
@@ -1556,7 +1556,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 </Button>
                 <div
                   v-if="!loading && (workflows.length > 0 || folderStore.folderTree.length > 0)"
-                  class="relative order-1 w-full min-w-[220px] sm:order-none sm:w-72 md:w-80"
+                  class="relative order-4 w-full min-w-[220px] sm:order-none sm:w-72 md:w-80"
                 >
                   <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <input
@@ -1582,7 +1582,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="outline"
                   size="sm"
-                  class="order-3 sm:hidden min-h-[36px] min-w-[36px]"
+                  class="order-2 sm:hidden min-h-[36px] min-w-[36px]"
                   @click="openCreateFolderDialog(null)"
                 >
                   <FolderPlus class="w-3.5 h-3.5" />
@@ -1590,7 +1590,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="outline"
                   size="sm"
-                  class="order-3 hidden sm:order-none sm:inline-flex"
+                  class="order-2 hidden sm:order-none sm:inline-flex"
                   @click="openCreateFolderDialog(null)"
                 >
                   <FolderPlus class="w-3.5 h-3.5" />
@@ -1599,7 +1599,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="gradient"
                   size="sm"
-                  class="order-4 sm:order-none"
+                  class="order-3 sm:order-none"
                   data-testid="new-workflow-button"
                   @click="showCreateDialog = true; pushOverlayState()"
                 >
