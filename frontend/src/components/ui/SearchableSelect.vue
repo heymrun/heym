@@ -117,7 +117,12 @@ const triggerSizingText = computed<string>(() => {
 /** The search icon always returns while open, where the trigger acts as a search field. */
 const showTriggerIcon = computed<boolean>(() => !props.hideTriggerIcon || open.value);
 
-const sizingSpanPadStart = computed<string>(() => (showTriggerIcon.value ? "pl-12" : "pl-3"));
+/**
+ * The sizing span reserves the space the label cannot use. Without the icon the
+ * trigger still spends 16px on input padding plus 36px on the chevron, so a
+ * pl-3 reservation left the last characters clipped.
+ */
+const sizingSpanPadStart = computed<string>(() => (showTriggerIcon.value ? "pl-12" : "pl-6"));
 
 const inputClass = computed(() =>
   cn(

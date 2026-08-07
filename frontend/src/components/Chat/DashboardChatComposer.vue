@@ -187,6 +187,9 @@ async function submit(): Promise<void> {
 onMounted(() => {
   void bootstrap();
   placeholderTimer = setInterval(() => {
+    // The suggestion is hidden while typing, so pause instead of rotating
+    // behind the draft and jumping on clear.
+    if (input.value.length > 0) return;
     placeholderIndex.value = (placeholderIndex.value + 1) % PROMPT_SUGGESTIONS.length;
   }, PLACEHOLDER_ROTATION_MS);
 });
@@ -220,12 +223,12 @@ onUnmounted(() => {
 
     <button
       type="button"
-      class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+      class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
       aria-label="Hide chat box"
       title="Hide"
       @click="emit('dismiss')"
     >
-      <X class="h-[18px] w-[18px]" />
+      <X class="h-5 w-5" />
     </button>
 
     <div class="pr-8">
@@ -256,7 +259,7 @@ onUnmounted(() => {
           rows="1"
           data-testid="dashboard-chat-input"
           aria-label="Message"
-          class="min-h-[36px] w-full resize-none bg-transparent px-2.5 py-1 text-[15px] leading-7 text-foreground outline-none sm:text-base"
+          class="min-h-[28px] w-full resize-none bg-transparent px-2.5 py-0 text-[15px] leading-7 text-foreground outline-none sm:text-base"
           @input="onInput"
           @keydown="onKeydown"
         />
@@ -268,14 +271,14 @@ onUnmounted(() => {
           <p
             v-if="!input"
             :key="placeholderIndex"
-            class="pointer-events-none absolute left-2.5 right-2.5 top-1 truncate text-[15px] leading-7 text-muted-foreground sm:text-base"
+            class="pointer-events-none absolute left-2.5 right-2.5 top-0 truncate text-[15px] leading-7 text-muted-foreground sm:text-base"
           >
             {{ currentPlaceholder }}
           </p>
         </Transition>
       </div>
 
-      <div class="mt-2 flex flex-wrap items-center gap-2">
+      <div class="mt-1 flex flex-wrap items-center gap-2">
         <button
           type="button"
           class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
