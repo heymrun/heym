@@ -161,7 +161,7 @@ onMounted(() => {
 
       <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0">
         <div
-          class="min-w-0 sm:w-[190px]"
+          class="min-w-0 sm:max-w-[240px]"
           data-testid="dashboard-chat-credential-selector"
         >
           <SearchableSelect
@@ -172,14 +172,14 @@ onMounted(() => {
             search-placeholder="Search credentials..."
             empty-text="No credentials found."
             :disabled="!hasCredentials"
-            select-class="h-10 rounded-lg border-input bg-background shadow-none"
+            select-class="h-9 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="onCredentialSelect"
           />
         </div>
 
         <div
-          class="min-w-0 sm:w-[190px]"
+          class="min-w-0 sm:max-w-[240px]"
           data-testid="dashboard-chat-model-selector"
         >
           <SearchableSelect
@@ -190,7 +190,7 @@ onMounted(() => {
             search-placeholder="Search models..."
             empty-text="No models found."
             :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            select-class="h-10 rounded-lg border-input bg-background shadow-none"
+            select-class="h-9 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="selectedModel = $event ?? ''"
           />
