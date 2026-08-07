@@ -208,7 +208,7 @@ onUnmounted(() => {
 <template>
   <section
     data-testid="dashboard-chat-composer"
-    class="relative z-10 mb-5 rounded-2xl border border-border/50 bg-card/60 px-4 py-5 shadow-sm sm:px-6 sm:py-6"
+    class="relative z-10 mb-5 rounded-2xl border border-border/50 bg-card/60 px-4 pb-5 pt-3.5 shadow-sm sm:px-6 sm:pb-6 sm:pt-4"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -226,7 +226,7 @@ onUnmounted(() => {
 
     <button
       type="button"
-      class="absolute right-6 top-4 flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+      class="absolute right-6 top-3.5 flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
       aria-label="Hide chat box"
       title="Hide"
       @click="emit('dismiss')"
@@ -262,7 +262,7 @@ onUnmounted(() => {
           rows="1"
           data-testid="dashboard-chat-input"
           aria-label="Message"
-          class="min-h-[28px] w-full resize-none bg-transparent px-2.5 py-0 text-[15px] leading-7 text-foreground outline-none sm:text-base"
+          class="min-h-[24px] w-full resize-none bg-transparent px-2.5 py-0 text-[15px] leading-6 text-foreground outline-none sm:text-base"
           @input="onInput"
           @keydown="onKeydown"
           @focus="isInputFocused = true"
@@ -276,17 +276,17 @@ onUnmounted(() => {
           <p
             v-if="!input"
             :key="placeholderIndex"
-            class="pointer-events-none absolute left-2.5 right-2.5 top-0 truncate text-[15px] leading-7 text-muted-foreground sm:text-base"
+            class="pointer-events-none absolute left-2.5 right-2.5 top-0 truncate text-[15px] leading-6 text-muted-foreground sm:text-base"
           >
             {{ currentPlaceholder }}
           </p>
         </Transition>
       </div>
 
-      <div class="mt-0.5 flex flex-wrap items-center gap-2">
+      <div class="mt-0 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           :disabled="attachmentLoading"
           title="Attach file"
           aria-label="Attach file"
@@ -337,7 +337,7 @@ onUnmounted(() => {
           <button
             type="submit"
             data-testid="dashboard-chat-send"
-            class="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            class="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             :disabled="!canSubmit"
             title="Start chat"
             aria-label="Start chat"
