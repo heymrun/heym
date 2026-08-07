@@ -327,7 +327,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="order-1 flex max-w-full flex-wrap items-center gap-1 sm:order-2 sm:ml-auto sm:flex-nowrap sm:justify-end">
+        <div class="order-1 flex w-full max-w-full flex-wrap items-center justify-between gap-1 sm:order-2 sm:ml-auto sm:w-auto sm:flex-nowrap sm:justify-end">
           <div
             class="max-w-full shrink-0"
             data-testid="dashboard-chat-credential-selector"
