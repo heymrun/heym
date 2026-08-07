@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useMediaQuery } from "@vueuse/core";
 import { Loader2, Paperclip, Send, X } from "lucide-vue-next";
 
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -18,6 +17,14 @@ const emit = defineEmits<{
 const ATTACHMENT_ACCEPT =
   ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf";
 const MAX_INPUT_HEIGHT_PX = 180;
+const PLACEHOLDER_ROTATION_MS = 3000;
+const PROMPT_SUGGESTIONS: string[] = [
+  "Ask anything, or describe a workflow to build",
+  "Summarize my unread emails every morning",
+  "Turn a CSV into a clean JSON report",
+  "Read new invoices with OCR and file them",
+  "Post today's GitHub issues to Slack",
+];
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -46,12 +53,11 @@ const inputRef = ref<HTMLTextAreaElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isSubmitting = ref(false);
 const submitError = ref("");
+const placeholderIndex = ref(0);
+let placeholderTimer: ReturnType<typeof setInterval> | null = null;
 
-const isNarrowViewport = useMediaQuery("(max-width: 639px)");
-
-// The long prompt wraps and clips inside the one-line box on small screens.
-const inputPlaceholder = computed<string>(() =>
-  isNarrowViewport.value ? "Ask anything" : "Ask anything, or describe a workflow to build",
+const currentPlaceholder = computed<string>(
+  () => PROMPT_SUGGESTIONS[placeholderIndex.value] ?? PROMPT_SUGGESTIONS[0],
 );
 
 const greeting = computed<string>(() => {
@@ -139,6 +145,16 @@ async function submit(): Promise<void> {
 
 onMounted(() => {
   void bootstrap();
+  placeholderTimer = setInterval(() => {
+    placeholderIndex.value = (placeholderIndex.value + 1) % PROMPT_SUGGESTIONS.length;
+  }, PLACEHOLDER_ROTATION_MS);
+});
+
+onUnmounted(() => {
+  if (placeholderTimer) {
+    clearInterval(placeholderTimer);
+    placeholderTimer = null;
+  }
 });
 </script>
 
@@ -157,53 +173,13 @@ onMounted(() => {
       <X class="h-4 w-4" />
     </button>
 
-    <div class="flex flex-col gap-3 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <div class="min-w-0">
-        <h2 class="text-lg font-bold tracking-tight sm:text-xl">
-          {{ greeting }}
-        </h2>
-        <p class="mt-0.5 text-sm text-muted-foreground">
-          What do you want to automate?
-        </p>
-      </div>
-
-      <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0">
-        <div
-          class="min-w-0 sm:max-w-[240px]"
-          data-testid="dashboard-chat-credential-selector"
-        >
-          <SearchableSelect
-            id="dashboard-chat-credential-select"
-            :model-value="selectedCredentialId"
-            :options="credentialOptions"
-            placeholder="Select..."
-            search-placeholder="Search credentials..."
-            empty-text="No credentials found."
-            :disabled="!hasCredentials"
-            select-class="h-8 rounded-lg border-input bg-background shadow-none"
-            content-class="z-[60]"
-            @update:model-value="onCredentialSelect"
-          />
-        </div>
-
-        <div
-          class="min-w-0 sm:max-w-[240px]"
-          data-testid="dashboard-chat-model-selector"
-        >
-          <SearchableSelect
-            id="dashboard-chat-model-select"
-            :model-value="selectedModel"
-            :options="modelOptions"
-            :placeholder="modelPlaceholder"
-            search-placeholder="Search models..."
-            empty-text="No models found."
-            :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            select-class="h-8 rounded-lg border-input bg-background shadow-none"
-            content-class="z-[60]"
-            @update:model-value="selectedModel = $event ?? ''"
-          />
-        </div>
-      </div>
+    <div class="pr-8">
+      <h2 class="text-lg font-bold tracking-tight sm:text-xl">
+        {{ greeting }}
+      </h2>
+      <p class="mt-0.5 text-sm text-muted-foreground">
+        What do you want to automate?
+      </p>
     </div>
 
     <input
@@ -215,49 +191,104 @@ onMounted(() => {
     >
 
     <form
-      class="mt-4 flex items-start gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:gap-2.5 sm:px-3.5 sm:py-3"
+      class="mt-4 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:px-3.5 sm:py-3"
       @submit.prevent="submit"
     >
-      <button
-        type="button"
-        class="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground sm:h-[52px] sm:w-10 transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-        :disabled="attachmentLoading"
-        title="Attach file"
-        aria-label="Attach file"
-        @click="openFilePicker"
-      >
-        <Paperclip class="h-4 w-4" />
-      </button>
+      <div class="relative">
+        <textarea
+          ref="inputRef"
+          v-model="input"
+          rows="1"
+          data-testid="dashboard-chat-input"
+          aria-label="Message"
+          class="min-h-[36px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none sm:text-[15px]"
+          @input="onInput"
+          @keydown="onKeydown"
+        />
 
-      <textarea
-        ref="inputRef"
-        v-model="input"
-        rows="1"
-        data-testid="dashboard-chat-input"
-        :placeholder="inputPlaceholder"
-        class="min-h-[44px] w-full flex-1 resize-none bg-transparent px-1.5 py-2 text-sm leading-7 sm:min-h-[52px] sm:px-2 sm:py-3 text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
-        @input="onInput"
-        @keydown="onKeydown"
-      />
-
-      <div class="flex h-11 shrink-0 items-center sm:h-[52px]">
-        <button
-          type="submit"
-          data-testid="dashboard-chat-send"
-          class="flex h-9 w-9 items-center justify-center rounded-xl bg-primary sm:h-10 sm:w-10 text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          :disabled="!canSubmit"
-          title="Start chat"
-          aria-label="Start chat"
+        <Transition
+          name="composer-placeholder"
+          mode="out-in"
         >
-          <Loader2
-            v-if="isSubmitting"
-            class="h-4 w-4 animate-spin"
-          />
-          <Send
-            v-else
-            class="h-4 w-4"
-          />
+          <p
+            v-if="!input"
+            :key="placeholderIndex"
+            class="pointer-events-none absolute left-1 right-1 top-1 truncate text-sm leading-7 text-muted-foreground sm:text-[15px]"
+          >
+            {{ currentPlaceholder }}
+          </p>
+        </Transition>
+      </div>
+
+      <div class="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          :disabled="attachmentLoading"
+          title="Attach file"
+          aria-label="Attach file"
+          @click="openFilePicker"
+        >
+          <Paperclip class="h-4 w-4" />
         </button>
+
+        <div class="ml-auto flex min-w-0 items-center gap-1">
+          <div
+            class="min-w-0 max-w-[130px] sm:max-w-[200px]"
+            data-testid="dashboard-chat-credential-selector"
+          >
+            <SearchableSelect
+              id="dashboard-chat-credential-select"
+              :model-value="selectedCredentialId"
+              :options="credentialOptions"
+              placeholder="Credential"
+              search-placeholder="Search credentials..."
+              empty-text="No credentials found."
+              :disabled="!hasCredentials"
+              hide-trigger-icon
+              select-class="h-8 min-h-0 rounded-lg border-transparent bg-transparent text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/70 focus-within:border-transparent focus-within:ring-0"
+              content-class="z-[60]"
+              @update:model-value="onCredentialSelect"
+            />
+          </div>
+
+          <div
+            class="min-w-0 max-w-[130px] sm:max-w-[200px]"
+            data-testid="dashboard-chat-model-selector"
+          >
+            <SearchableSelect
+              id="dashboard-chat-model-select"
+              :model-value="selectedModel"
+              :options="modelOptions"
+              :placeholder="isLoadingModels || modelsLoadFailed ? modelPlaceholder : 'Model'"
+              search-placeholder="Search models..."
+              empty-text="No models found."
+              :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
+              hide-trigger-icon
+              select-class="h-8 min-h-0 rounded-lg border-transparent bg-transparent text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/70 focus-within:border-transparent focus-within:ring-0"
+              content-class="z-[60]"
+              @update:model-value="selectedModel = $event ?? ''"
+            />
+          </div>
+
+          <button
+            type="submit"
+            data-testid="dashboard-chat-send"
+            class="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            :disabled="!canSubmit"
+            title="Start chat"
+            aria-label="Start chat"
+          >
+            <Loader2
+              v-if="isSubmitting"
+              class="h-4 w-4 animate-spin"
+            />
+            <Send
+              v-else
+              class="h-4 w-4"
+            />
+          </button>
+        </div>
       </div>
     </form>
 
@@ -314,3 +345,34 @@ onMounted(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.composer-placeholder-enter-active,
+.composer-placeholder-leave-active {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease;
+}
+
+.composer-placeholder-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.composer-placeholder-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-placeholder-enter-active,
+  .composer-placeholder-leave-active {
+    transition: opacity 120ms ease;
+  }
+
+  .composer-placeholder-enter-from,
+  .composer-placeholder-leave-to {
+    transform: none;
+  }
+}
+</style>

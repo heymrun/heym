@@ -48,6 +48,8 @@ interface Props {
   disabled?: boolean;
   clearable?: boolean;
   clearAriaLabel?: string;
+  /** Hides the leading search icon while closed, for compact inline triggers. */
+  hideTriggerIcon?: boolean;
   class?: string;
   selectClass?: string;
   contentClass?: string;
@@ -64,6 +66,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   clearable: false,
   clearAriaLabel: "Clear selection",
+  hideTriggerIcon: false,
   class: undefined,
   selectClass: undefined,
   contentClass: undefined,
@@ -110,6 +113,18 @@ const hasValue = computed<boolean>(() => {
 const triggerSizingText = computed<string>(() => {
   return selectedOption.value?.label ?? props.placeholder;
 });
+
+/** The search icon always returns while open, where the trigger acts as a search field. */
+const showTriggerIcon = computed<boolean>(() => !props.hideTriggerIcon || open.value);
+
+const sizingSpanPadStart = computed<string>(() => (showTriggerIcon.value ? "pl-12" : "pl-3"));
+
+const inputClass = computed(() =>
+  cn(
+    "h-full w-0 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed",
+    showTriggerIcon.value ? "px-2" : "pl-3 pr-1"
+  )
+);
 
 const wrapperClass = computed(() =>
   cn("relative group min-w-0 w-full", props.class)
@@ -224,8 +239,8 @@ function clearValue(): void {
     <ComboboxAnchor :class="wrapperClass">
       <span
         aria-hidden="true"
-        class="invisible block h-0 overflow-hidden whitespace-nowrap pl-12 text-sm"
-        :class="clearable && hasValue ? 'pr-16' : 'pr-9'"
+        class="invisible block h-0 overflow-hidden whitespace-nowrap text-sm"
+        :class="[clearable && hasValue ? 'pr-16' : 'pr-9', sizingSpanPadStart]"
       >
         {{ triggerSizingText }}
       </span>
@@ -233,10 +248,13 @@ function clearValue(): void {
         :class="anchorClass"
         @click="openOptions"
       >
-        <Search class="ml-3.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <Search
+          v-if="showTriggerIcon"
+          class="ml-3.5 h-4 w-4 shrink-0 text-muted-foreground"
+        />
         <ComboboxInput
           :id="id"
-          class="h-full w-0 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
+          :class="inputClass"
           :placeholder="open ? searchPlaceholder : placeholder"
           :disabled="disabled"
         />
