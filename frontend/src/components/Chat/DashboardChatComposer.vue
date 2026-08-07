@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useMediaQuery } from "@vueuse/core";
 import { Loader2, Paperclip, Send, X } from "lucide-vue-next";
 
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -45,6 +46,13 @@ const inputRef = ref<HTMLTextAreaElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isSubmitting = ref(false);
 const submitError = ref("");
+
+const isNarrowViewport = useMediaQuery("(max-width: 639px)");
+
+// The long prompt wraps and clips inside the one-line box on small screens.
+const inputPlaceholder = computed<string>(() =>
+  isNarrowViewport.value ? "Ask anything" : "Ask anything, or describe a workflow to build",
+);
 
 const greeting = computed<string>(() => {
   const name = authStore.user?.name?.trim();
@@ -172,7 +180,7 @@ onMounted(() => {
             search-placeholder="Search credentials..."
             empty-text="No credentials found."
             :disabled="!hasCredentials"
-            select-class="h-9 rounded-lg border-input bg-background shadow-none"
+            select-class="h-8 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="onCredentialSelect"
           />
@@ -190,7 +198,7 @@ onMounted(() => {
             search-placeholder="Search models..."
             empty-text="No models found."
             :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            select-class="h-9 rounded-lg border-input bg-background shadow-none"
+            select-class="h-8 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="selectedModel = $event ?? ''"
           />
@@ -212,7 +220,7 @@ onMounted(() => {
     >
       <button
         type="button"
-        class="flex h-[52px] w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        class="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground sm:h-[52px] sm:w-10 transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         :disabled="attachmentLoading"
         title="Attach file"
         aria-label="Attach file"
@@ -226,17 +234,17 @@ onMounted(() => {
         v-model="input"
         rows="1"
         data-testid="dashboard-chat-input"
-        placeholder="Ask anything, or describe a workflow to build"
-        class="min-h-[52px] w-full flex-1 resize-none bg-transparent px-2 py-3 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
+        :placeholder="inputPlaceholder"
+        class="min-h-[44px] w-full flex-1 resize-none bg-transparent px-1.5 py-2 text-sm leading-7 sm:min-h-[52px] sm:px-2 sm:py-3 text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
         @input="onInput"
         @keydown="onKeydown"
       />
 
-      <div class="flex h-[52px] shrink-0 items-center">
+      <div class="flex h-11 shrink-0 items-center sm:h-[52px]">
         <button
           type="submit"
           data-testid="dashboard-chat-send"
-          class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          class="flex h-9 w-9 items-center justify-center rounded-xl bg-primary sm:h-10 sm:w-10 text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           :disabled="!canSubmit"
           title="Start chat"
           aria-label="Start chat"
