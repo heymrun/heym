@@ -1027,8 +1027,18 @@ async function downloadFolderAsZip(folder: FolderTree): Promise<void> {
   }
 }
 
+/** The chat composer is its own drop target for attachments, so skip workflow import there. */
+function isEventInsideChatComposer(event: DragEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  return Boolean(target?.closest?.("[data-testid='dashboard-chat-composer']"));
+}
+
 function handleJsonDragOver(event: DragEvent): void {
   event.preventDefault();
+  if (isEventInsideChatComposer(event)) {
+    isDraggingJsonFile.value = false;
+    return;
+  }
   if (event.dataTransfer) {
     const items = event.dataTransfer.items;
     if (items && items.length > 0 && items[0].kind === "file") {
@@ -1264,6 +1274,7 @@ async function importZipFile(file: File): Promise<void> {
 async function handleJsonDrop(event: DragEvent): Promise<void> {
   event.preventDefault();
   isDraggingJsonFile.value = false;
+  if (isEventInsideChatComposer(event)) return;
 
   const files = event.dataTransfer?.files;
   if (!files || files.length === 0) return;

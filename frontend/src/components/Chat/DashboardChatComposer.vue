@@ -17,7 +17,7 @@ const emit = defineEmits<{
 const ATTACHMENT_ACCEPT =
   ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf";
 const MAX_INPUT_HEIGHT_PX = 180;
-const PLACEHOLDER_ROTATION_MS = 3000;
+const PLACEHOLDER_ROTATION_MS = 5000;
 const PROMPT_SUGGESTIONS: string[] = [
   "Ask anything, or describe a workflow to build",
   "Summarize my unread emails every morning",
@@ -54,7 +54,9 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const isSubmitting = ref(false);
 const submitError = ref("");
 const placeholderIndex = ref(0);
+const isDraggingFile = ref(false);
 let placeholderTimer: ReturnType<typeof setInterval> | null = null;
+let dragCounter = 0;
 
 const currentPlaceholder = computed<string>(
   () => PROMPT_SUGGESTIONS[placeholderIndex.value] ?? PROMPT_SUGGESTIONS[0],
@@ -100,6 +102,45 @@ async function handleFileInputChange(event: Event): Promise<void> {
   await processFile(file);
   // Allow re-picking the same file after removing it.
   target.value = "";
+}
+
+function dragCarriesFiles(event: DragEvent): boolean {
+  return Boolean(event.dataTransfer?.types.includes("Files"));
+}
+
+function onDragEnter(event: DragEvent): void {
+  if (!dragCarriesFiles(event)) return;
+  event.preventDefault();
+  dragCounter += 1;
+  isDraggingFile.value = true;
+}
+
+function onDragOver(event: DragEvent): void {
+  if (!dragCarriesFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  isDraggingFile.value = true;
+}
+
+function onDragLeave(): void {
+  dragCounter -= 1;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    isDraggingFile.value = false;
+  }
+}
+
+/** Stops propagation so the Workflows tab does not import the file as a workflow. */
+async function onDrop(event: DragEvent): Promise<void> {
+  event.preventDefault();
+  event.stopPropagation();
+  dragCounter = 0;
+  isDraggingFile.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) return;
+  await processFile(file);
 }
 
 function onCredentialSelect(value: string | undefined): void {
@@ -162,15 +203,29 @@ onUnmounted(() => {
   <section
     data-testid="dashboard-chat-composer"
     class="relative z-10 mb-5 rounded-2xl border border-border/50 bg-card/60 px-4 py-5 shadow-sm sm:px-6 sm:py-6"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
   >
+    <div
+      v-if="isDraggingFile"
+      class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-background/85"
+    >
+      <div class="flex items-center gap-2 text-sm font-medium text-primary">
+        <Paperclip class="h-4 w-4" />
+        Drop file to attach
+      </div>
+    </div>
+
     <button
       type="button"
-      class="absolute right-3 top-3 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
       aria-label="Hide chat box"
       title="Hide"
       @click="emit('dismiss')"
     >
-      <X class="h-4 w-4" />
+      <X class="h-[18px] w-[18px]" />
     </button>
 
     <div class="pr-8">
@@ -220,7 +275,7 @@ onUnmounted(() => {
         </Transition>
       </div>
 
-      <div class="mt-2 flex items-center gap-2">
+      <div class="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
           class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
@@ -232,9 +287,9 @@ onUnmounted(() => {
           <Paperclip class="h-4 w-4" />
         </button>
 
-        <div class="ml-auto flex min-w-0 items-center gap-1">
+        <div class="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
           <div
-            class="min-w-0 max-w-[130px] sm:max-w-[200px]"
+            class="max-w-full"
             data-testid="dashboard-chat-credential-selector"
           >
             <SearchableSelect
@@ -253,7 +308,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="min-w-0 max-w-[130px] sm:max-w-[200px]"
+            class="max-w-full"
             data-testid="dashboard-chat-model-selector"
           >
             <SearchableSelect
@@ -350,8 +405,8 @@ onUnmounted(() => {
 .composer-placeholder-enter-active,
 .composer-placeholder-leave-active {
   transition:
-    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 200ms ease;
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease;
 }
 
 .composer-placeholder-enter-from {
