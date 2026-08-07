@@ -296,7 +296,7 @@ onUnmounted(() => {
       </div>
 
       <div class="mt-0 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-        <div class="flex items-center justify-between gap-2 sm:contents">
+        <div class="order-2 flex items-center justify-between gap-2 sm:contents">
           <button
             type="button"
             class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:order-1"
@@ -327,7 +327,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="flex min-w-0 items-center gap-1 sm:order-2 sm:ml-auto sm:max-w-full sm:justify-end">
+        <div class="order-1 flex min-w-0 items-center gap-1 sm:order-2 sm:ml-auto sm:max-w-full sm:justify-end">
           <div
             class="min-w-0 flex-1 sm:max-w-full sm:flex-none sm:shrink-0"
             data-testid="dashboard-chat-credential-selector"
