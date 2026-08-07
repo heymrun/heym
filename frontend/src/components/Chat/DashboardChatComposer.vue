@@ -16,7 +16,7 @@ const emit = defineEmits<{
 
 const ATTACHMENT_ACCEPT =
   ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf";
-const MAX_INPUT_HEIGHT_PX = 140;
+const MAX_INPUT_HEIGHT_PX = 180;
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -137,7 +137,7 @@ onMounted(() => {
 <template>
   <section
     data-testid="dashboard-chat-composer"
-    class="relative z-10 mb-5 rounded-2xl border border-border/50 bg-card/60 px-4 py-4 shadow-sm sm:px-5"
+    class="relative z-10 mb-5 rounded-2xl border border-border/50 bg-card/60 px-4 py-5 shadow-sm sm:px-6 sm:py-6"
   >
     <button
       type="button"
@@ -165,12 +165,12 @@ onMounted(() => {
     >
 
     <form
-      class="mt-3 flex flex-col gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2 py-2 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:flex-row sm:items-center sm:px-3"
+      class="mt-4 flex flex-col gap-2 rounded-2xl border border-border/40 bg-muted/40 px-2.5 py-2.5 transition-colors focus-within:border-primary/30 focus-within:bg-muted/50 sm:flex-row sm:items-center sm:gap-2.5 sm:px-3.5 sm:py-3"
       @submit.prevent="submit"
     >
       <button
         type="button"
-        class="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:flex"
+        class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:flex"
         :disabled="attachmentLoading"
         title="Attach file"
         aria-label="Attach file"
@@ -185,7 +185,7 @@ onMounted(() => {
         rows="1"
         data-testid="dashboard-chat-input"
         placeholder="Ask anything, or describe a workflow to build"
-        class="min-h-[36px] w-full flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        class="min-h-[52px] w-full flex-1 resize-none bg-transparent px-2 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
         @input="onInput"
         @keydown="onKeydown"
       />
@@ -193,7 +193,7 @@ onMounted(() => {
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:hidden"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:hidden"
           :disabled="attachmentLoading"
           title="Attach file"
           aria-label="Attach file"
@@ -203,7 +203,7 @@ onMounted(() => {
         </button>
 
         <div
-          class="min-w-0 flex-1 sm:w-[160px] sm:flex-none"
+          class="min-w-0 flex-1 sm:w-[170px] sm:flex-none"
           data-testid="dashboard-chat-credential-selector"
         >
           <SearchableSelect
@@ -214,14 +214,14 @@ onMounted(() => {
             search-placeholder="Search credentials..."
             empty-text="No credentials found."
             :disabled="!hasCredentials"
-            select-class="h-9 rounded-lg border-input bg-background shadow-none"
+            select-class="h-10 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="onCredentialSelect"
           />
         </div>
 
         <div
-          class="min-w-0 flex-1 sm:w-[160px] sm:flex-none"
+          class="min-w-0 flex-1 sm:w-[170px] sm:flex-none"
           data-testid="dashboard-chat-model-selector"
         >
           <SearchableSelect
@@ -232,7 +232,7 @@ onMounted(() => {
             search-placeholder="Search models..."
             empty-text="No models found."
             :disabled="!selectedCredentialId || isLoadingModels || modelsLoadFailed"
-            select-class="h-9 rounded-lg border-input bg-background shadow-none"
+            select-class="h-10 rounded-lg border-input bg-background shadow-none"
             content-class="z-[60]"
             @update:model-value="selectedModel = $event ?? ''"
           />
@@ -241,7 +241,7 @@ onMounted(() => {
         <button
           type="submit"
           data-testid="dashboard-chat-send"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           :disabled="!canSubmit"
           title="Start chat"
           aria-label="Start chat"
