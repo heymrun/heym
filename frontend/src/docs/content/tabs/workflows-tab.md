@@ -5,6 +5,16 @@ The **Workflows** tab is the default dashboard view. It shows your workflow list
 <video src="/features/showcase/workflows.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/workflows.webm">▶ Watch Workflows demo</a></p>
 
+## Start a Chat
+
+Above the workflow list there is a chat box that greets you by name and asks what you want to automate. Type a prompt, optionally attach one file, and pick the credential and model you want. Both dropdowns are searchable and start on your [AI defaults](../reference/user-settings.md).
+
+Sending creates a new conversation and opens it in the [Chat tab](./chat-tab.md), where the reply streams in. Supported attachments are text files, images, and PDFs, one per message, same as the chat composer.
+
+If you have no LLM credential yet, the box shows a link to the [Credentials tab](./credentials-tab.md) and sending stays disabled.
+
+Click the **x** to hide the box. An **Ask AI** button then appears next to the Workflows heading and brings it back. The choice is remembered in your browser.
+
 ## Workflow List
 
 - View all workflows in a card grid or list

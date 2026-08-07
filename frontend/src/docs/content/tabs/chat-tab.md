@@ -11,6 +11,8 @@ The **Chat** tab provides a direct LLM chat interface. Use it to test models, as
 2. Choose a model from the dropdown (models are loaded from the selected credential)
 3. Start typing to send messages
 
+You can also start a conversation from the chat box on the [Workflows tab](./workflows-tab.md). It sends your first message and opens the new conversation here with the answer already streaming.
+
 ## Features
 
 - **Global variables context** – Your [Global Variables](../reference/global-variables.md) are available to the LLM, so you can ask about or reference stored values
