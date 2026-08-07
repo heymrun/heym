@@ -25,7 +25,19 @@ const PROMPT_SUGGESTIONS: string[] = [
   "Add a task to my Kanban board",
   "What is stored in my global variables?",
   "Which workflow templates are available?",
-  "Turn a CSV into a clean JSON report",
+  // Titles from the beginner templates collection on heym.run.
+  "Daily sales snapshot to Slack",
+  "Save Slack requests to Google Sheets",
+  "New leads sheet to Slack",
+  "Log Slack messages in BigQuery",
+  "BigQuery report to Google Sheets",
+  "Google Sheets to BigQuery sync",
+  "Save Slack feedback and notify product",
+  "Daily low-stock alert to Slack",
+  "Weekly cloud spend to Google Sheets",
+  "Log Slack partner leads in BigQuery",
+  "Daily Google Sheets lead digest by email",
+  "Email new Slack feedback",
 ];
 
 const router = useRouter();
@@ -283,21 +295,41 @@ onUnmounted(() => {
         </Transition>
       </div>
 
-      <div class="mt-0 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          :disabled="attachmentLoading"
-          title="Attach file"
-          aria-label="Attach file"
-          @click="openFilePicker"
-        >
-          <Paperclip class="h-4 w-4" />
-        </button>
+      <div class="mt-0 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+        <div class="flex items-center justify-between gap-2 sm:contents">
+          <button
+            type="button"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:order-1"
+            :disabled="attachmentLoading"
+            title="Attach file"
+            aria-label="Attach file"
+            @click="openFilePicker"
+          >
+            <Paperclip class="h-4 w-4" />
+          </button>
 
-        <div class="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
+          <button
+            type="submit"
+            data-testid="dashboard-chat-send"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 sm:order-3 sm:ml-1"
+            :disabled="!canSubmit"
+            title="Start chat"
+            aria-label="Start chat"
+          >
+            <Loader2
+              v-if="isSubmitting"
+              class="h-4 w-4 animate-spin"
+            />
+            <Send
+              v-else
+              class="h-4 w-4"
+            />
+          </button>
+        </div>
+
+        <div class="flex min-w-0 items-center gap-1 sm:order-2 sm:ml-auto sm:max-w-full sm:justify-end">
           <div
-            class="max-w-full shrink-0"
+            class="min-w-0 flex-1 sm:max-w-full sm:flex-none sm:shrink-0"
             data-testid="dashboard-chat-credential-selector"
           >
             <SearchableSelect
@@ -316,7 +348,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="max-w-full shrink-0"
+            class="min-w-0 flex-1 sm:max-w-full sm:flex-none sm:shrink-0"
             data-testid="dashboard-chat-model-selector"
           >
             <SearchableSelect
@@ -333,24 +365,6 @@ onUnmounted(() => {
               @update:model-value="selectedModel = $event ?? ''"
             />
           </div>
-
-          <button
-            type="submit"
-            data-testid="dashboard-chat-send"
-            class="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            :disabled="!canSubmit"
-            title="Start chat"
-            aria-label="Start chat"
-          >
-            <Loader2
-              v-if="isSubmitting"
-              class="h-4 w-4 animate-spin"
-            />
-            <Send
-              v-else
-              class="h-4 w-4"
-            />
-          </button>
         </div>
       </div>
       <div
