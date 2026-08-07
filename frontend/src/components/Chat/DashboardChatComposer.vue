@@ -20,10 +20,12 @@ const MAX_INPUT_HEIGHT_PX = 180;
 const PLACEHOLDER_ROTATION_MS = 5000;
 const PROMPT_SUGGESTIONS: string[] = [
   "Ask anything, or describe a workflow to build",
-  "Summarize my unread emails every morning",
+  "Run my daily report workflow",
+  "Which scheduled workflows run this week?",
+  "Add a task to my Kanban board",
+  "What is stored in my global variables?",
+  "Which workflow templates are available?",
   "Turn a CSV into a clean JSON report",
-  "Read new invoices with OCR and file them",
-  "Post today's GitHub issues to Slack",
 ];
 
 const router = useRouter();
@@ -54,6 +56,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const isSubmitting = ref(false);
 const submitError = ref("");
 const placeholderIndex = ref(0);
+const isInputFocused = ref(false);
 const isDraggingFile = ref(false);
 let placeholderTimer: ReturnType<typeof setInterval> | null = null;
 let dragCounter = 0;
@@ -187,9 +190,9 @@ async function submit(): Promise<void> {
 onMounted(() => {
   void bootstrap();
   placeholderTimer = setInterval(() => {
-    // The suggestion is hidden while typing, so pause instead of rotating
-    // behind the draft and jumping on clear.
-    if (input.value.length > 0) return;
+    // Hold still while the box is in use, so the line never moves under the
+    // caret and never jumps when a draft is cleared.
+    if (input.value.length > 0 || isInputFocused.value) return;
     placeholderIndex.value = (placeholderIndex.value + 1) % PROMPT_SUGGESTIONS.length;
   }, PLACEHOLDER_ROTATION_MS);
 });
@@ -223,7 +226,7 @@ onUnmounted(() => {
 
     <button
       type="button"
-      class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+      class="absolute right-6 top-4 flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-foreground/70 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
       aria-label="Hide chat box"
       title="Hide"
       @click="emit('dismiss')"
@@ -231,7 +234,7 @@ onUnmounted(() => {
       <X class="h-5 w-5" />
     </button>
 
-    <div class="pr-8">
+    <div class="pr-16">
       <h2 class="text-lg font-bold tracking-tight sm:text-xl">
         {{ greeting }}
       </h2>
@@ -262,6 +265,8 @@ onUnmounted(() => {
           class="min-h-[28px] w-full resize-none bg-transparent px-2.5 py-0 text-[15px] leading-7 text-foreground outline-none sm:text-base"
           @input="onInput"
           @keydown="onKeydown"
+          @focus="isInputFocused = true"
+          @blur="isInputFocused = false"
         />
 
         <Transition
@@ -278,7 +283,7 @@ onUnmounted(() => {
         </Transition>
       </div>
 
-      <div class="mt-1 flex flex-wrap items-center gap-2">
+      <div class="mt-0.5 flex flex-wrap items-center gap-2">
         <button
           type="button"
           class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
