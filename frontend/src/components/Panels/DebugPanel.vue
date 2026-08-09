@@ -3929,14 +3929,18 @@ function renderContent(content: string): string {
 }
 
 .ai-panel {
+  /* 64px editor header + the same 24px gap the panel keeps at the bottom, so
+     short screens never push the panel flush against the toolbar. */
+  --ai-panel-gap: 24px;
+  --ai-panel-top: calc(64px + var(--ai-panel-gap));
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  right: var(--ai-panel-gap);
+  bottom: var(--ai-panel-gap);
   /* Scales with the viewport: ~34% of the width, never cramped on small
      laptops and never oversized on wide displays. */
   width: clamp(360px, 34vw, 620px);
-  max-width: calc(100vw - 48px);
-  height: calc(100vh - 88px);
+  max-width: calc(100vw - var(--ai-panel-gap) * 2);
+  height: calc(100vh - var(--ai-panel-top) - var(--ai-panel-gap));
   max-height: 860px;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
