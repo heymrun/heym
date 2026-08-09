@@ -77,14 +77,14 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[]),
+            patch("app.services.active_execution_overview.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
 
@@ -101,14 +101,14 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[_make_record(wf_id, ex_id)]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[]),
+            patch("app.services.active_execution_overview.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
 
@@ -132,14 +132,14 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=records),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[]),
+            patch("app.services.active_execution_overview.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
 
@@ -185,14 +185,14 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[_make_record(running_wf, running_ex)]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=pending),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[]),
+            patch("app.services.active_execution_overview.list_active_executions", return_value=[]),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
 
@@ -229,16 +229,19 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=handles),
             patch(
-                "app.api.workflows.get_active_execution_progress",
+                "app.services.active_execution_overview.list_active_executions",
+                return_value=handles,
+            ),
+            patch(
+                "app.services.active_execution_overview.get_active_execution_progress",
                 return_value=([], []),
             ),
         ):
@@ -270,16 +273,19 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[handle]),
             patch(
-                "app.api.workflows.get_active_execution_progress",
+                "app.services.active_execution_overview.list_active_executions",
+                return_value=[handle],
+            ),
+            patch(
+                "app.services.active_execution_overview.get_active_execution_progress",
                 return_value=([], []),
             ),
         ):
@@ -300,14 +306,17 @@ class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.workflows.list_active_executions", return_value=[handle]),
+            patch(
+                "app.services.active_execution_overview.list_active_executions",
+                return_value=[handle],
+            ),
         ):
             result = await list_active_workflow_executions(current_user=user, db=db)
 

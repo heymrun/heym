@@ -41,6 +41,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 
 - Build, edit, inspect, and run workflows through the Workflow AI Builder
 - Report analytics, recent executions, and upcoming cron schedules
+- Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
 - Read teams and global variables, and search the documentation
 - Approve, edit, or refuse pending human-in-the-loop reviews

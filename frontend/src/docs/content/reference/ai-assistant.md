@@ -11,6 +11,12 @@ For documentation questions outside the editor, use [Chat with Docs](./chat-with
 3. Click the **AI** button (Sparkles icon) in the panel toolbar
 4. The AI Assistant panel opens at the bottom-right
 
+Press `Ctrl + I` / `Cmd + I` anywhere in the editor to open or close the panel — the shortcut works even while a text input is focused. See [Keyboard Shortcuts](./keyboard-shortcuts.md).
+
+## Closing the Panel
+
+Click the **X** button, click the **AI Assistant** title in the panel header, press `Ctrl + I` / `Cmd + I`, or toggle the **AI** button in the Debug panel toolbar.
+
 ## Configuration
 
 Before sending messages, select:

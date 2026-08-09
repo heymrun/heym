@@ -53,6 +53,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
 from app.services import template_service
+from app.services.active_execution_overview import build_active_execution_overview
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import (
@@ -370,6 +371,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 6a. When the user asks about scheduled cron runs, the calendar, or when workflows will run (today, this week, this month, upcoming times), use get_schedule_events with view_window day, week, or month, optional reference_date (YYYY-MM-DD), include_shared false for owned-only or true to include shared workflows, or start_iso/end_iso for a custom range. Summarize events (workflow name and time) in the user's language.
 6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. For a specific task/card (what it is, its description, the comments/conversation on it, what happened, its output or error), use get_card_detail with the card_id from get_board_tasks. Answer from the results in the user's language; do not execute workflows for these questions.
 6c. When the user naturally asks to add or create a kanban task/card, use create_board_task; this is a board action, not a request to create a workflow, and no command prefix is needed. Pass the user's requested title and optional description. If the user clearly names a board, call list_boards first to resolve its exact board_id. If no board is specified, call create_board_task without board_id: it will create the task when there is exactly one board, or return requires_board_selection with the available boards when there are several. For requires_board_selection, emit one heym-clarify question of type single whose options are the returned board names, then stop and wait. After the user selects a board, call list_boards again to resolve the selected name to its board_id, then call create_board_task exactly once. If a named board is missing or ambiguous, use the same single-choice board selection. Never ask which column to use: create_board_task always places the task in the first column.
+6d. When the user asks what is running right now (e.g. "what is running?", "how many workflows are active?", "is anything still going?", "which node is it on?", "how long has it been running?"), use get_active_executions. It takes no arguments and returns count, running_count, pending_count, and one entry per in-progress run with workflow_name, running_for (human-readable elapsed time), current_nodes (the node or nodes executing right now), last_completed_node, and url. Answer with the count first, then one line per run: workflow name, how long it has been running, the current node label, and the url as a markdown link. If count is 0, say plainly that nothing is running right now. Entries with status "pending" are not executing; they are waiting for human review (pending_kind hitl or codex), so say that instead of reporting them as running. Do not use get_recent_executions for this question: that tool lists finished runs.
 7. When a workflow is waiting for human review and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation.
 8. When the user asks you to wait, monitor, or check again for a workflow that is still running or pending, use wait_for_execution_update instead of repeatedly polling yourself. Default to 5 seconds between checks and at most 5 checks unless the user explicitly asks otherwise.
 9. If execute_workflow or wait_for_execution_update returns a pending workflow with review details, explain that pending state in the same language as the user, include the review link as a markdown link, briefly summarize the blocked step, and show the three direct chat reply options: approve, edit: ..., and reject.
@@ -387,7 +389,7 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show analytics stats, (3) I can show scheduled cron times (day/week/month), (4) I can run a workflow and show its result, (5) I can list workflows and you can talk about them or ask me to run one, (6) I can list your teams. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
@@ -595,6 +597,14 @@ DASHBOARD_CHAT_TOOLS = [
                 },
                 "required": [],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_executions",
+            "description": "List the workflow executions that are running RIGHT NOW (plus runs paused for human review). Use when the user asks what is running, how many workflows are active, which workflow is still going, how long a run has been going, or which node a run is currently on (e.g. 'what is running?', 'kaç workflow çalışıyor?', 'su an calisan workflowlar', 'which node is it on?'). Returns count, workflow names, how long each has been running, the current node(s), and a link to each live run. This is about in-progress runs only; use get_recent_executions for runs that already finished.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -2435,6 +2445,17 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         if isinstance(data, dict) and "executions" in data:
             return f"{len(data.get('executions', []))} recent execution(s) listed"
         return result_json[:150] + ("..." if len(result_json) > 150 else "")
+    if tool_name == "get_active_executions":
+        if isinstance(data, dict) and data.get("error"):
+            return f"Error: {str(data.get('error'))[:150]}"
+        if isinstance(data, dict) and "count" in data:
+            count = int(data.get("count") or 0)
+            if count == 0:
+                return "No workflows are running right now"
+            pending = int(data.get("pending_count") or 0)
+            suffix = f", {pending} awaiting review" if pending else ""
+            return f"{count} active execution(s){suffix}"
+        return result_json[:200] + ("..." if len(result_json) > 200 else "")
     if tool_name == "search_documentation":
         if isinstance(data, dict) and "results" in data:
             results = data.get("results", [])
@@ -3588,6 +3609,46 @@ async def stream_dashboard_chat(
                             "label": step_label,
                             "tool": name,
                             "request": {"time_range": time_range, "limit": limit},
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name == "get_active_executions":
+                    step_label = "Checking running workflows..."
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    try:
+                        overview = await build_active_execution_overview(
+                            db, user_id, public_base_url
+                        )
+                        result = json.dumps(overview, default=str)
+                    except Exception as e:
+                        logger.exception("get_active_executions failed")
+                        result = json.dumps({"error": str(e)})
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": {},
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }

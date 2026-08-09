@@ -1298,6 +1298,13 @@ function getOutputImageSrcs(output: unknown): string[] {
 const imageLightboxSrc = ref<string | null>(null);
 
 function handleDebugPanelWindowKeyDown(e: KeyboardEvent): void {
+  // AI Assistant: Ctrl+I / Cmd+I toggles the panel, even while typing.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "i") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    toggleAiPanel();
+    return;
+  }
   if (e.key === "Escape" && isFinalOutputExpanded.value) {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -3649,12 +3656,24 @@ function renderContent(content: string): string {
         v-if="aiPanelOpen"
         class="ai-panel"
       >
-        <div class="ai-panel-header">
-          <div class="flex items-center gap-2">
+        <div
+          class="ai-panel-header"
+          @click.self="aiPanelOpen = false"
+        >
+          <button
+            type="button"
+            class="ai-panel-title"
+            title="Close AI Assistant (Ctrl+I)"
+            data-testid="ai-assistant-title-toggle"
+            @click="aiPanelOpen = false"
+          >
             <Sparkles class="w-4 h-4 text-primary" />
             <span class="font-medium text-sm">AI Assistant</span>
-          </div>
-          <div class="flex items-center gap-2">
+          </button>
+          <div
+            class="flex items-center gap-2"
+            @click.self="aiPanelOpen = false"
+          >
             <div class="mode-toggle">
               <button
                 :class="['mode-toggle-btn', canvasMode === 'agent' && 'active']"
@@ -3913,9 +3932,12 @@ function renderContent(content: string): string {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  width: 400px;
-  height: calc(100vh - 100px);
-  max-height: 700px;
+  /* Scales with the viewport: ~34% of the width, never cramped on small
+     laptops and never oversized on wide displays. */
+  width: clamp(360px, 34vw, 620px);
+  max-width: calc(100vw - 48px);
+  height: calc(100vh - 88px);
+  max-height: 860px;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
@@ -4042,6 +4064,27 @@ function renderContent(content: string): string {
   justify-content: space-between;
   background: hsl(var(--muted) / 0.5);
   border-radius: 12px 12px 0 0;
+  cursor: pointer;
+}
+
+/* Fills the free space between the title and the header controls so the whole
+   empty strip closes the panel, not just the label. */
+.ai-panel-title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px 6px;
+  margin: -4px 0 -4px -6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ai-panel-title:hover {
+  background: hsl(var(--muted));
 }
 
 .ai-panel-config {

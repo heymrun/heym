@@ -30,6 +30,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Clear chat** – Start a new conversation
 - **Voice input** – Use the microphone button for speech-to-text (browser-supported). When recording stops, Heym can lightly clean up the transcript before you send it
 - **Scheduled workflows** – Ask when cron workflows run (today, this week, this month, or a custom date range). The assistant uses the same schedule data as the [Scheduled](./scheduled-tab.md) tab and can limit results to workflows you own or include those shared with you
+- **Live run status** – Ask what is running right now and Chat answers with the count, the workflow names, how long each run has been going, which node it is on, and a link straight to the live run
 
 ## Using Chat from an MCP Client
 
@@ -59,6 +60,22 @@ first column.
 If your workspace has several boards and you do not identify one, Chat pauses with a
 single-choice board picker. Select a board to finish creating the card. No slash command
 or special message format is required.
+
+## Asking What Is Running
+
+Ask in ordinary language — "what is running?", "how many workflows are active right now?",
+"which node is the nightly report on?" — and Chat reports the live picture:
+
+- **How many** executions are in progress, split into running and awaiting human review
+- **Which workflows** they belong to, by name
+- **How long** each run has been going (for example `1m 35s`, `3h 25m`)
+- **Which node** is executing right now, by its canvas label, plus the last node that finished
+- **A link** to each live run, which opens the canvas with that execution replaying
+
+Runs paused for a [Human-in-the-Loop](../reference/human-in-the-loop.md) or Codex review are reported as
+waiting for you, not as running. This is the same data as the active-runs badge in the header,
+so Chat and the badge never disagree. For runs that already finished, ask for recent executions
+instead — that reads [Execution History](../reference/execution-history.md).
 
 ## User Rules
 

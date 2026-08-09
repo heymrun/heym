@@ -12,7 +12,6 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import String, case, cast, func, literal, or_, select, text, union_all
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -67,6 +66,7 @@ from app.models.schemas import (
     WorkflowVersionResponse,
 )
 from app.services import file_intake_service
+from app.services.active_execution_overview import collect_active_executions_for_user
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.codex_followup_service import (
@@ -84,11 +84,7 @@ from app.services.execution_cancellation import (
 from app.services.execution_cancellation import (
     get_active_execution_events,
     get_active_execution_inputs,
-    get_active_execution_progress,
     get_active_execution_stream_snapshot,
-    list_active_executions,
-    list_pending_review_executions_for_user,
-    list_persisted_active_executions_for_user,
     register_execution,
     request_persisted_execution_cancel,
 )
@@ -1012,108 +1008,7 @@ async def list_active_workflow_executions(
 ) -> list[ActiveExecutionItem]:
     """Return running and pending-review executions for the authenticated user."""
 
-    # This endpoint stitches together three independent reads. Any one of them can
-    # fail on its own, and a partial list is far more useful to the badge than a
-    # 500: degrade section by section instead of failing the whole request.
-    async def _read(section: str, coroutine: Any) -> Any:
-        try:
-            return await coroutine
-        except SQLAlchemyError:
-            logger.warning("Active executions: %s lookup failed; skipping", section, exc_info=True)
-            await db.rollback()
-            return None
-
-    persisted = (
-        await _read(
-            "persisted registry", list_persisted_active_executions_for_user(db, current_user.id)
-        )
-        or []
-    )
-    items_by_execution_id = {
-        record.execution_id: ActiveExecutionItem(
-            execution_id=str(record.execution_id),
-            workflow_id=str(record.workflow_id),
-            workflow_name=record.workflow_name,
-            started_at=record.started_at,
-            inputs=record.inputs,
-            running_node_ids=record.running_node_ids,
-            node_results=record.node_results,
-            status="running",
-        )
-        for record in persisted
-    }
-
-    local_handles = [
-        handle
-        for handle in list_active_executions()
-        if handle.execution_id not in items_by_execution_id and not handle.event.is_set()
-    ]
-    if local_handles:
-        workflow_ids = list({h.workflow_id for h in local_handles})
-        result = await _read(
-            "local handle workflows",
-            db.execute(
-                select(Workflow).where(
-                    Workflow.id.in_(workflow_ids),
-                    or_(
-                        Workflow.owner_id == current_user.id,
-                        Workflow.id.in_(
-                            select(WorkflowShare.workflow_id).where(
-                                WorkflowShare.user_id == current_user.id
-                            )
-                        ),
-                    ),
-                )
-            ),
-        )
-        accessible: dict[uuid.UUID, str] = (
-            {w.id: w.name for w in result.scalars().all()} if result is not None else {}
-        )
-        for handle in local_handles:
-            if handle.workflow_id not in accessible:
-                continue
-            progress = get_active_execution_progress(
-                handle.execution_id,
-                workflow_id=handle.workflow_id,
-            )
-            if progress is None:
-                continue
-            running_node_ids, node_results = progress
-            items_by_execution_id[handle.execution_id] = ActiveExecutionItem(
-                execution_id=str(handle.execution_id),
-                workflow_id=str(handle.workflow_id),
-                workflow_name=accessible[handle.workflow_id],
-                started_at=handle.started_at,
-                inputs=dict(handle.inputs),
-                running_node_ids=running_node_ids,
-                node_results=node_results,
-                status="running",
-            )
-
-    pending_reviews = (
-        await _read("pending reviews", list_pending_review_executions_for_user(db, current_user.id))
-        or []
-    )
-    for record in pending_reviews:
-        if record.execution_id in items_by_execution_id:
-            continue
-        items_by_execution_id[record.execution_id] = ActiveExecutionItem(
-            execution_id=str(record.execution_id),
-            workflow_id=str(record.workflow_id),
-            workflow_name=record.workflow_name,
-            started_at=record.started_at,
-            inputs=record.inputs,
-            running_node_ids=[],
-            node_results=record.node_results,
-            status="pending",
-            pending_kind=record.pending_kind,
-        )
-
-    return sorted(
-        items_by_execution_id.values(),
-        key=lambda item: item.started_at,
-        reverse=True,
-    )
+    return await collect_active_executions_for_user(db, current_user.id)
 
 
 @router.get("/{workflow_id}/executions/{execution_id}/stream")

@@ -511,11 +511,11 @@ class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase)
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(side_effect=SQLAlchemyError("could not read block 189")),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(return_value=[]),
             ),
         ):
@@ -548,11 +548,11 @@ class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase)
 
         with (
             patch(
-                "app.api.workflows.list_persisted_active_executions_for_user",
+                "app.services.active_execution_overview.list_persisted_active_executions_for_user",
                 AsyncMock(return_value=[record]),
             ),
             patch(
-                "app.api.workflows.list_pending_review_executions_for_user",
+                "app.services.active_execution_overview.list_pending_review_executions_for_user",
                 AsyncMock(side_effect=SQLAlchemyError("could not read block 189")),
             ),
         ):

@@ -9,6 +9,7 @@ These shortcuts are active anywhere in the workflow editor.
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl + K` / `Cmd + K` | Open the Command Palette |
+| `Ctrl + I` / `Cmd + I` | Toggle the [AI Assistant](./ai-assistant.md) panel (works while typing) |
 | `Ctrl + Enter` / `Cmd + Enter` | Run the current workflow |
 | `Ctrl + S` / `Cmd + S` | Save the workflow |
 | `Ctrl + Z` / `Cmd + Z` | Undo |
