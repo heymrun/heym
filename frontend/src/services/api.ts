@@ -1,6 +1,22 @@
 import axios from "axios";
 
 import { heymClientHeaders } from "@/constants/httpIdentity";
+import type {
+  Alert,
+  AlertDraftRequest,
+  AlertDraftResponse,
+  AlertEvent,
+  AlertEventListResponse,
+  AlertEventTimeRange,
+  AlertListFilters,
+  AlertListResponse,
+  AlertPayload,
+  AlertPreview,
+  AlertPreviewRequest,
+  AlertShareEntry,
+  AlertTeamShareEntry,
+  AlertUpdatePayload,
+} from "@/types/alerts";
 import type { LoginRequest, PasswordChangeRequest, RegisterRequest, User, UserUpdateRequest } from "@/types/auth";
 import type {
   CreateTemplateRequest,
@@ -3700,3 +3716,103 @@ export const expressionApi = {
 };
 
 export default api;
+
+export const alertsApi = {
+  list: async (filters: AlertListFilters = {}): Promise<AlertListResponse> => {
+    const response = await api.get<AlertListResponse>("/alerts", { params: filters });
+    return response.data;
+  },
+
+  get: async (alertId: string): Promise<Alert> => {
+    const response = await api.get<Alert>(`/alerts/${alertId}`);
+    return response.data;
+  },
+
+  create: async (payload: AlertPayload): Promise<Alert> => {
+    const response = await api.post<Alert>("/alerts", payload);
+    return response.data;
+  },
+
+  update: async (alertId: string, payload: AlertUpdatePayload): Promise<Alert> => {
+    const response = await api.patch<Alert>(`/alerts/${alertId}`, payload);
+    return response.data;
+  },
+
+  remove: async (alertId: string): Promise<void> => {
+    await api.delete(`/alerts/${alertId}`);
+  },
+
+  /** Evaluate a saved alert right now. Does not fire and writes no event. */
+  test: async (alertId: string): Promise<AlertPreview> => {
+    const response = await api.post<AlertPreview>(`/alerts/${alertId}/test`);
+    return response.data;
+  },
+
+  /** Backtest an unsaved condition. Powers the wizard's Review step. */
+  preview: async (payload: AlertPreviewRequest): Promise<AlertPreview> => {
+    const response = await api.post<AlertPreview>("/alerts/preview", payload);
+    return response.data;
+  },
+
+  listEvents: async (
+    alertId: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<AlertEventListResponse> => {
+    const response = await api.get<AlertEventListResponse>(`/alerts/${alertId}/events`, { params });
+    return response.data;
+  },
+
+  listAllEvents: async (
+    params: {
+      unacknowledged?: boolean;
+      time_range?: AlertEventTimeRange;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<AlertEventListResponse> => {
+    const response = await api.get<AlertEventListResponse>("/alerts/events", { params });
+    return response.data;
+  },
+
+  acknowledgeEvent: async (eventId: string): Promise<AlertEvent> => {
+    const response = await api.post<AlertEvent>(`/alerts/events/${eventId}/acknowledge`);
+    return response.data;
+  },
+
+  draft: async (payload: AlertDraftRequest): Promise<AlertDraftResponse> => {
+    const response = await api.post<AlertDraftResponse>("/alerts/ai-draft", payload);
+    return response.data;
+  },
+
+  listShares: async (alertId: string): Promise<AlertShareEntry[]> => {
+    const response = await api.get<AlertShareEntry[]>(`/alerts/${alertId}/shares`);
+    return response.data;
+  },
+
+  addShare: async (alertId: string, userEmail: string): Promise<AlertShareEntry> => {
+    const response = await api.post<AlertShareEntry>(`/alerts/${alertId}/shares`, {
+      user_email: userEmail,
+    });
+    return response.data;
+  },
+
+  removeShare: async (alertId: string, userId: string): Promise<void> => {
+    await api.delete(`/alerts/${alertId}/shares/${userId}`);
+  },
+
+  listTeamShares: async (alertId: string): Promise<AlertTeamShareEntry[]> => {
+    const response = await api.get<AlertTeamShareEntry[]>(`/alerts/${alertId}/team-shares`);
+    return response.data;
+  },
+
+  addTeamShare: async (alertId: string, teamId: string): Promise<AlertTeamShareEntry> => {
+    const response = await api.post<AlertTeamShareEntry>(`/alerts/${alertId}/team-shares`, {
+      team_id: teamId,
+    });
+    return response.data;
+  },
+
+  removeTeamShare: async (alertId: string, teamId: string): Promise<void> => {
+    await api.delete(`/alerts/${alertId}/team-shares/${teamId}`);
+  },
+};

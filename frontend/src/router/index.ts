@@ -23,6 +23,7 @@ const DASHBOARD_TAB_PATHS = [
   "vectorstores",
   "mcp",
   "traces",
+  "alerts",
   "analytics",
   "dashboard",
   "templates",
