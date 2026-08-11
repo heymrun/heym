@@ -359,10 +359,13 @@ docker run \
   ghcr.io/heymrun/heym:latest
 ```
 
-Open the editor in your browser on port `4017` in either setup.
-See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
-For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. `FILE_STORAGE_DIR=/app/data/files` is what makes that mount live: the release image starts the backend from `/app/backend`, so the default relative `./data/files` would resolve to `/app/backend/data/files` and land inside the container instead of your mount. `./run.sh` and `./deploy.sh` are unaffected — that image runs the backend from `/app`. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
-The Docker socket mount lets Heym start hardened sibling containers and grants broad host control. Every MCP `stdio` server needs it, since the caller-supplied command always runs in a throwaway container rather than on the backend host; without a Docker daemon, stdio fails closed. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
+Open the editor on port `4017`. See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for every setting and its default.
+
+Three things about the `docker run` setup are worth knowing:
+
+- **`FILE_STORAGE_DIR=/app/data/files` is load-bearing.** The release image runs the backend from `/app/backend`, so the default relative path would land inside the container instead of your mount and Drive uploads would vanish on restart. `./run.sh` and `./deploy.sh` are unaffected.
+- **Keep `heym-codex-workspaces` mounted.** Python skills and the Codex node run there in a hardened sibling container; without it, skill execution fails closed. Per-run isolation needs Docker Engine 25.0+.
+- **The Docker socket grants broad host control.** MCP `stdio` servers need it, because the caller-supplied command runs in a throwaway container rather than on the host. Docker log access stays off unless you set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS`. Create that admin account first, or keep `ALLOW_REGISTER=false`, so nobody can self-register into an allow-listed email.
 
 ## Deploy & Call Workflows
 
