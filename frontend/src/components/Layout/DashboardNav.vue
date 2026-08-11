@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import {
   Activity,
   BarChart3,
+  BellRing,
   CalendarClock,
   Database,
   FlaskConical,
@@ -31,15 +32,16 @@ const tabs = [
   { id: "board", label: "Board", icon: SquareKanban },
   { id: "schedules", label: "Scheduled", icon: CalendarClock },
   { id: "traces", label: "Traces", icon: Activity },
-  { id: "globalvariables", label: "Variables", icon: Variable },
+  { id: "alerts", label: "Alerts", icon: BellRing },
+  { id: "mcp", label: "MCP", icon: Server },
   { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "drive", label: "Drive", icon: HardDrive },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "datatable", label: "DataTable", icon: Table2 },
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "vectorstores", label: "Vectors", icon: Database },
-  { id: "mcp", label: "MCP", icon: Server },
+  { id: "globalvariables", label: "Variables", icon: Variable },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "drive", label: "Drive", icon: HardDrive },
   { id: "credentials", label: "Credentials", icon: Key },
   { id: "evals", label: "Evals", icon: FlaskConical },
   { id: "teams", label: "Teams", icon: Users },
@@ -58,6 +60,7 @@ const activeTab = computed(() => {
     tabParam === "vectorstores" ||
     tabParam === "mcp" ||
     tabParam === "traces" ||
+    tabParam === "alerts" ||
     tabParam === "analytics" ||
     tabParam === "dashboard" ||
     tabParam === "logs" ||
@@ -317,6 +320,7 @@ watch(activeTab, () => {
 .tab-item[data-tab-id="vectorstores"]:hover    .tab-icon { animation: icon-pulse  0.40s ease-out; }
 .tab-item[data-tab-id="mcp"]:hover             .tab-icon { animation: icon-blink  0.50s ease-out; }
 .tab-item[data-tab-id="traces"]:hover          .tab-icon { animation: icon-wiggle 0.50s ease-out; }
+.tab-item[data-tab-id="alerts"]:hover          .tab-icon { animation: icon-shake  0.45s ease-out; }
 .tab-item[data-tab-id="analytics"]:hover       .tab-icon { animation: icon-grow   0.40s ease-out; }
 .tab-item[data-tab-id="evals"]:hover           .tab-icon { animation: icon-shake  0.45s ease-out; }
 .tab-item[data-tab-id="teams"]:hover           .tab-icon { animation: icon-bounce 0.40s ease-out; }

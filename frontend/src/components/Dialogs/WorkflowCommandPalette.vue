@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   Activity,
   BarChart3,
+  BellRing,
   BookOpen,
   CalendarDays,
   Database,
@@ -47,6 +48,7 @@ const TABS = [
   { id: "vectorstores", label: "Vectors", icon: Database },
   { id: "mcp", label: "MCP", icon: Server },
   { id: "traces", label: "Traces", icon: Activity },
+  { id: "alerts", label: "Alerts", icon: BellRing },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "datatable", label: "DataTable", icon: Table2 },

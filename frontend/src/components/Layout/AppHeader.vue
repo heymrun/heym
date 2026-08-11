@@ -120,7 +120,10 @@ async function handleLogout(): Promise<void> {
           @click="settingsInitialTab = 'profile'; showSettingsDialog = true; pushOverlayState()"
         >
           <Settings class="w-4 h-4 md:hidden" />
-          <div class="hidden md:flex items-center justify-center w-7 h-7 rounded-lg bg-primary/15 text-primary shrink-0">
+          <!-- --primary is the same 62% lightness in both themes, so on the dark
+               background the /15 tile and the icon both sink. Dark mode lifts the
+               tile and switches to --accent-foreground, the theme's lighter purple. -->
+          <div class="hidden md:flex items-center justify-center w-7 h-7 rounded-lg bg-primary/15 text-primary dark:bg-primary/25 dark:text-accent-foreground shrink-0">
             <Settings class="w-4 h-4" />
           </div>
           <span class="font-medium text-foreground hidden md:inline">{{ authStore.user.name }}</span>

@@ -42,6 +42,7 @@ import WorkflowActionSheet from "@/components/Dialogs/WorkflowActionSheet.vue";
 import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.vue";
 import DockerLogsViewer from "@/components/LogsTab/DockerLogsViewer.vue";
 import FolderTreeItem from "@/components/Folders/FolderTreeItem.vue";
+import AlertsTab from "@/components/Alerts/AlertsTab.vue";
 import WorkflowFolderDropPlaceholder from "@/components/Folders/WorkflowFolderDropPlaceholder.vue";
 import GlobalVariablesPanel from "@/components/GlobalVariables/GlobalVariablesPanel.vue";
 
@@ -104,11 +105,11 @@ function parseTabParam(raw: string | undefined | null): { tab: string; subPath: 
 
 const validTabs = new Set([
   "workflows", "board", "schedules", "credentials", "globalvariables", "vectorstores", "mcp",
-  "traces", "analytics", "dashboard", "templates", "teams", "logs", "drive", "datatable",
+  "traces", "alerts", "analytics", "dashboard", "templates", "teams", "logs", "drive", "datatable",
 ]);
 
 const parsedInitial = parseTabParam(tabParam === "chat" ? undefined : tabParam);
-type TabKey = "workflows" | "board" | "schedules" | "credentials" | "globalvariables" | "vectorstores" | "mcp" | "traces" | "analytics" | "dashboard" | "templates" | "teams" | "logs" | "drive" | "datatable";
+type TabKey = "workflows" | "board" | "schedules" | "credentials" | "globalvariables" | "vectorstores" | "mcp" | "traces" | "alerts" | "analytics" | "dashboard" | "templates" | "teams" | "logs" | "drive" | "datatable";
 const initialTab: TabKey = validTabs.has(parsedInitial.tab) ? (parsedInitial.tab as TabKey) : "workflows";
 const dataTableInitialId = ref<string | null>(parsedInitial.tab === "datatable" ? parsedInitial.subPath : null);
 const activeTab = ref<TabKey>(initialTab);
@@ -157,6 +158,10 @@ watch(activeTab, (newTab) => {
 
   if (newTab === "workflows") {
     quickDrawerStore.syncPreferencesFromStorage();
+    // Other tabs can create workflows without going through this view - the Alerts
+    // wizard makes a notify workflow, for one - so the list is refetched on return
+    // instead of staying at whatever it was when the dashboard mounted.
+    void loadWorkflows();
   }
 });
 
@@ -2141,6 +2146,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
             :initial-table-id="dataTableInitialId"
             @navigate="onDataTableNavigate"
           />
+
+          <AlertsTab v-else-if="activeTab === 'alerts'" />
 
           <VectorStoresPanel v-else-if="activeTab === 'vectorstores'" />
 

@@ -39,6 +39,7 @@ const TRACE_SOURCE_LABELS: Record<string, string> = {
   data_table_ai: "DataTable Create / Fine-tune",
   dashboard_widget_ai: "Widget Create / Fine-tune",
   expression_builder: "Build with AI",
+  alert_builder: "Alert Builder",
   mcp: "MCP",
 };
 
@@ -342,6 +343,7 @@ const sourceOptions = computed<SelectOption[]>(() => [
   { value: "skill_builder", label: TRACE_SOURCE_LABELS.skill_builder },
   { value: "data_table_ai", label: TRACE_SOURCE_LABELS.data_table_ai },
   { value: "dashboard_widget_ai", label: TRACE_SOURCE_LABELS.dashboard_widget_ai },
+  { value: "alert_builder", label: TRACE_SOURCE_LABELS.alert_builder },
   { value: "evals", label: TRACE_SOURCE_LABELS.evals },
 ]);
 

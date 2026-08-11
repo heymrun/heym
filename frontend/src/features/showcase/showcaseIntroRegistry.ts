@@ -5,7 +5,12 @@ export interface ShowcaseIntroContent {
   description: string;
 }
 
-export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = {
+/**
+ * null means "no recording yet". Every consumer already gates on a falsy src:
+ * the panel and mobile sheet skip the video section, and ShowcaseIntroDialog
+ * refuses to open. Pointing at a file that does not exist would 404 instead.
+ */
+export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string | null> = {
   "dashboard:workflows": "/features/showcase/workflows.webm",
   "dashboard:board": "/features/showcase/board.webm",
   "dashboard:templates": "/features/showcase/templates.webm",
@@ -18,6 +23,9 @@ export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = 
   "dashboard:vectorstores": "/features/showcase/vectorstores.webm",
   "dashboard:mcp": "/features/showcase/mcp.webm",
   "dashboard:traces": "/features/showcase/traces.webm",
+  // Placeholder: the board recording stands in until an alerts one is recorded.
+  // Swap the path, nothing else, once it exists.
+  "dashboard:alerts": "/features/showcase/board.webm",
   "dashboard:analytics": "/features/showcase/analytics.webm",
   "dashboard:dashboard": "/features/showcase/dashboard.webm",
   evals: "/features/showcase/evals.webm",
@@ -64,6 +72,10 @@ export const SHOWCASE_INTRO_CONTENT_BY_CONTEXT: Record<ShowcaseContext, Showcase
   "dashboard:traces": {
     title: "Understand execution behavior",
     description: "Inspect trace-level details to debug outcomes, compare runs, and improve workflow reliability.",
+  },
+  "dashboard:alerts": {
+    title: "Get told before someone asks",
+    description: "Set thresholds on errors, duration, cost, and run count, then let Heym tell you when a window crosses them.",
   },
   "dashboard:analytics": {
     title: "Track platform performance",

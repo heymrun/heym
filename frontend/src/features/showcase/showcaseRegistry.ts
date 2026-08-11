@@ -290,6 +290,29 @@ export const SHOWCASE_DEFINITIONS: Record<ShowcaseContext, ShowcaseDefinition> =
     ],
     docsTarget: docsTarget("tabs", "traces-tab", "Traces Tab"),
   },
+  "dashboard:alerts": {
+    id: "dashboard:alerts",
+    title: "Alerts",
+    summary: "Define a threshold over a time window and be told when it is crossed, instead of finding out from whoever noticed first.",
+    bullets: [
+      "Four types: error count, run duration, token or USD cost, and execution count.",
+      "Every alert is judged over a window you choose, never on a single event.",
+      "Describe what you want in plain language and the wizard fills itself in.",
+    ],
+    highlights: [
+      { eyebrow: "Windows", title: "Bursts, not blips", description: "One failed run is noise. Twelve in ten minutes is an incident.", tone: "primary" },
+      { eyebrow: "Before you save", title: "Backtest the condition", description: "The review step replays it against real history so you fix the threshold first.", tone: "amber" },
+      { eyebrow: "Response", title: "Run a workflow on fire", description: "The alert payload becomes a workflow input, so Slack or email is a node you already have.", tone: "blue" },
+    ],
+    actions: [
+      docsAction("alerts-docs", "Open alerts docs", "Read how alert types, windows, and the wizard work.", docsTarget("tabs", "alerts-tab", "Alerts Tab")),
+    ],
+    details: [
+      { id: "alerts-purpose", title: "What this is for", content: "Analytics and traces answer questions you thought to ask. An alert is how you ask Heym to speak up on its own, for the handful of numbers worth being interrupted about." },
+      { id: "alerts-quiet", title: "Why it stays quiet", content: "An alert fires once and then holds until the metric recovers. A broken workflow checked every 60 seconds would otherwise produce 60 firings an hour, which is how alerting gets muted." },
+    ],
+    docsTarget: docsTarget("tabs", "alerts-tab", "Alerts Tab"),
+  },
   "dashboard:analytics": {
     id: "dashboard:analytics",
     title: "Analytics",
