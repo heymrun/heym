@@ -15,6 +15,7 @@ from starlette.responses import Response
 from app.api import (
     agent_memory,
     ai_assistant,
+    alerts,
     analytics,
     auth,
     bigquery_oauth,
@@ -360,6 +361,7 @@ app.include_router(files.router, prefix="/api/files", tags=["Files"])
 app.include_router(file_intake.router, prefix="/api", tags=["File Intake"])
 app.include_router(portal.router, prefix="/api/workflows", tags=["Portal Settings"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["Dashboards"])
 app.include_router(boards.router, prefix="/api/boards", tags=["Boards"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])

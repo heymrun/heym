@@ -2157,3 +2157,117 @@ class BoardCardActivity(Base):
     card: Mapped["BoardCard"] = relationship(
         "BoardCard", back_populates="activities", foreign_keys=[card_id]
     )
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (Index("ix_alerts_enabled_next_check", "enabled", "next_check_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    alert_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="workflow")
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    notify_workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="ok")
+    renotify_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="on_recovery")
+    cooldown_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    check_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    next_check_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_triggered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_observed_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    owner: Mapped["User"] = relationship("User")
+    workflow: Mapped["Workflow | None"] = relationship("Workflow", foreign_keys=[workflow_id])
+    notify_workflow: Mapped["Workflow | None"] = relationship(
+        "Workflow", foreign_keys=[notify_workflow_id]
+    )
+    events: Mapped[list["AlertEvent"]] = relationship(
+        "AlertEvent", back_populates="alert", cascade="all, delete-orphan"
+    )
+    shares: Mapped[list["AlertShare"]] = relationship(
+        "AlertShare", back_populates="alert", cascade="all, delete-orphan"
+    )
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+    __table_args__ = (Index("ix_alert_events_alert_triggered", "alert_id", "triggered_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    observed_value: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold_value: Mapped[float] = mapped_column(Float, nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    context: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notify_execution_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    notify_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    alert: Mapped["Alert"] = relationship("Alert", back_populates="events")
+
+
+class AlertShare(Base):
+    __tablename__ = "alert_shares"
+    __table_args__ = (UniqueConstraint("alert_id", "user_id", name="uq_alert_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    alert: Mapped["Alert"] = relationship("Alert", back_populates="shares")
+    user: Mapped["User"] = relationship("User")
+
+
+class AlertTeamShare(Base):
+    __tablename__ = "alert_team_shares"
+    __table_args__ = (UniqueConstraint("alert_id", "team_id", name="uq_alert_team_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    alert: Mapped["Alert"] = relationship("Alert")
+    team: Mapped["Team"] = relationship("Team")

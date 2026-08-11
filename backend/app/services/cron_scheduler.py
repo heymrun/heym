@@ -16,6 +16,8 @@ from app.api.workflows import (
 from app.config import settings
 from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVersion
 from app.db.session import async_session_maker
+from app.services.alerts.cleanup import cleanup_old_alert_events
+from app.services.alerts.evaluator import evaluate_due_alerts
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
@@ -38,6 +40,7 @@ class CronScheduler:
         self._last_file_access_token_cleanup_date: str | None = None
         self._last_response_cache_cleanup_date: str | None = None
         self._last_cron_slot_claim_cleanup_date: str | None = None
+        self._last_alert_event_cleanup_date: str | None = None
 
     async def start(self) -> None:
         if self._running:
@@ -64,6 +67,8 @@ class CronScheduler:
                     continue
 
                 await self._check_and_execute()
+                await self._check_alerts()
+                await self._check_alert_event_cleanup()
                 await self._check_scheduled_deletion_cleanup()
                 await self._check_portal_session_cleanup()
                 await self._check_workflow_version_cleanup()
@@ -303,6 +308,26 @@ class CronScheduler:
             )
         except Exception as e:
             logger.exception("Failed to execute workflow %s via cron: %s", workflow.id, e)
+
+    async def _check_alerts(self) -> None:
+        """Evaluate every alert that is due. Never lets one failure stop the loop."""
+        try:
+            fired = await evaluate_due_alerts()
+            if fired:
+                logger.info("Alert evaluation pass fired %s alert(s)", fired)
+        except Exception as e:
+            logger.exception("Error in alert evaluation pass: %s", e)
+
+    async def _check_alert_event_cleanup(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._last_alert_event_cleanup_date == today:
+            return
+        self._last_alert_event_cleanup_date = today
+        try:
+            async with async_session_maker() as db:
+                await cleanup_old_alert_events(db)
+        except Exception as e:
+            logger.exception("Error cleaning up alert events: %s", e)
 
     async def _check_scheduled_deletion_cleanup(self) -> None:
         tz = get_configured_timezone()

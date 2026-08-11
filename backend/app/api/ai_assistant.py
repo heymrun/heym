@@ -394,7 +394,8 @@ When the user asks for something you cannot do with your tools (e.g. console log
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
 13. When the user asks you to create, build, generate, or set up a new workflow/automation, call create_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL and saves it. It does NOT run the workflow; the user runs it from the Run button on the workflow card. Do not run the workflow yourself unless the user explicitly asks you to. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
-14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow."""
+14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow.
+15. When the user asks about alerts — what alerts exist, whether something is being monitored, which alerts are firing, or why/when an alert triggered — use list_alerts, get_alert_detail, and get_alert_events. For a "why did it fire" question always call get_alert_events and quote the actual observed value, the threshold, and the time window from the event, plus the contributing detail in its context (failing executions and error messages, per-model spend, or trigger source). Do not guess a reason and do not recompute the numbers yourself; the event stores what was true when it fired. Respond in the user's language."""
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
@@ -767,7 +768,231 @@ DASHBOARD_CHAT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_alerts",
+            "description": "List the user's alerts (threshold rules over a time window on errors, duration, LLM cost, or execution count). Use when the user asks what alerts exist, which alerts are configured for a workflow, which alerts are currently firing, or whether something is being monitored (e.g. 'what alerts do I have?', 'hangi alertlerim var?', 'is there an alert on the invoice workflow?'). Returns each alert's condition, current state, and last observed value.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {
+                        "type": "string",
+                        "description": "Optional UUID to list only alerts watching that workflow.",
+                    },
+                    "alert_type": {
+                        "type": "string",
+                        "enum": [
+                            "error_threshold",
+                            "workflow_duration",
+                            "token_cost",
+                            "execution_count",
+                        ],
+                        "description": "Optional filter by alert type.",
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["ok", "triggered"],
+                        "description": "Optional filter: 'triggered' returns only alerts currently firing.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_alert_detail",
+            "description": "Get the full definition of one alert: its condition, window, threshold, scope, notify workflow, and how many times it fired in the last 7 days. Use after list_alerts when the user asks about a specific alert's setup (e.g. 'what is the threshold on that one?', 'how is the cost alert configured?').",
+            "parameters": {
+                "type": "object",
+                "properties": {"alert_id": {"type": "string", "description": "UUID of the alert."}},
+                "required": ["alert_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_alert_events",
+            "description": "List times alerts actually fired, with the reason. Use whenever the user asks WHY or WHEN an alert triggered (e.g. 'why did the cost alert fire?', 'when did this last trigger?', 'bu alert neden tetiklendi?', 'show me recent alert firings'). Returns the exact window that was evaluated, the observed value versus the threshold, and the contributing detail: failing execution ids and error messages for error alerts, per-model spend for cost alerts, per-trigger-source counts for execution-count alerts. Always cite the observed value and window when explaining a firing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "alert_id": {
+                        "type": "string",
+                        "description": "Optional UUID to scope to one alert. Omit for firings across all alerts.",
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["24h", "7d", "30d", "all"],
+                        "description": "Time window to look back over. Default 7d.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max firings to return (default 20, max 50).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
+
+
+async def handle_list_alerts(db: AsyncSession, user: Any, args: dict) -> dict:
+    """Alerts the user can read, with a human-readable condition for each."""
+    from app.db.models import Alert
+    from app.models.alert_schemas import describe_condition
+    from app.services.alert_access import accessible_alerts_filter
+
+    filters: list[Any] = [accessible_alerts_filter(user.id)]
+    workflow_id = _coerce_uuid(args.get("workflow_id"))
+    if workflow_id is not None:
+        filters.append(Alert.workflow_id == workflow_id)
+    if args.get("alert_type"):
+        filters.append(Alert.alert_type == args["alert_type"])
+    if args.get("state"):
+        filters.append(Alert.state == args["state"])
+
+    result = await db.execute(select(Alert).where(*filters).order_by(Alert.created_at.desc()))
+    alerts = list(result.scalars().all())
+
+    return {
+        "count": len(alerts),
+        "alerts": [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "alert_type": a.alert_type,
+                "scope": a.scope,
+                "workflow_id": str(a.workflow_id) if a.workflow_id else None,
+                "condition": describe_condition(a.alert_type, a.config),
+                "enabled": a.enabled,
+                "state": a.state,
+                "last_triggered_at": a.last_triggered_at.isoformat()
+                if a.last_triggered_at
+                else None,
+                "last_observed_value": a.last_observed_value,
+            }
+            for a in alerts
+        ],
+    }
+
+
+async def handle_get_alert_detail(db: AsyncSession, user: Any, args: dict) -> dict:
+    """Full configuration of one alert, plus a 7-day firing count."""
+    from datetime import timedelta
+
+    from app.db.models import Alert, AlertEvent
+    from app.models.alert_schemas import describe_condition
+    from app.services.alert_access import accessible_alerts_filter
+
+    alert_id = _coerce_uuid(args.get("alert_id"))
+    if alert_id is None:
+        return {"error": "alert_id is required"}
+
+    result = await db.execute(
+        select(Alert).where(Alert.id == alert_id, accessible_alerts_filter(user.id))
+    )
+    alert = result.scalar_one_or_none()
+    if alert is None:
+        return {"error": "Alert not found"}
+
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(AlertEvent)
+        .where(AlertEvent.alert_id == alert_id, AlertEvent.triggered_at >= since)
+    )
+
+    return {
+        "id": str(alert.id),
+        "name": alert.name,
+        "description": alert.description,
+        "alert_type": alert.alert_type,
+        "scope": alert.scope,
+        "workflow_id": str(alert.workflow_id) if alert.workflow_id else None,
+        "condition": describe_condition(alert.alert_type, alert.config),
+        "config": alert.config,
+        "enabled": alert.enabled,
+        "state": alert.state,
+        "renotify_mode": alert.renotify_mode,
+        "cooldown_minutes": alert.cooldown_minutes,
+        "notify_workflow_id": str(alert.notify_workflow_id) if alert.notify_workflow_id else None,
+        "last_triggered_at": alert.last_triggered_at.isoformat()
+        if alert.last_triggered_at
+        else None,
+        "last_observed_value": alert.last_observed_value,
+        "firings_last_7_days": int(count_result.scalar() or 0),
+    }
+
+
+async def handle_get_alert_events(db: AsyncSession, user: Any, args: dict) -> dict:
+    """Why and when alerts fired.
+
+    The stored ``context`` is returned verbatim: it is a snapshot of the window at
+    firing time. Recomputing it now would give a different answer, because the
+    window has passed.
+    """
+    from datetime import timedelta
+
+    from app.db.models import Alert, AlertEvent
+    from app.services.alert_access import accessible_alerts_filter
+
+    filters: list[Any] = [accessible_alerts_filter(user.id)]
+    alert_id = _coerce_uuid(args.get("alert_id"))
+    if alert_id is not None:
+        filters.append(AlertEvent.alert_id == alert_id)
+
+    time_range = args.get("time_range") or "7d"
+    if time_range != "all":
+        hours = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30}.get(time_range, 24 * 7)
+        filters.append(
+            AlertEvent.triggered_at >= datetime.now(timezone.utc) - timedelta(hours=hours)
+        )
+
+    limit = min(int(args.get("limit") or 20), 50)
+
+    result = await db.execute(
+        select(AlertEvent, Alert.name, Alert.alert_type)
+        .join(Alert, Alert.id == AlertEvent.alert_id)
+        .where(*filters)
+        .order_by(AlertEvent.triggered_at.desc())
+        .limit(limit)
+    )
+    rows = list(result.all())
+
+    return {
+        "count": len(rows),
+        "time_range": time_range,
+        "events": [
+            {
+                "id": str(event.id),
+                "alert_id": str(event.alert_id),
+                "alert_name": alert_name,
+                "alert_type": alert_type,
+                "triggered_at": event.triggered_at.isoformat() if event.triggered_at else None,
+                "observed_value": event.observed_value,
+                "threshold_value": event.threshold_value,
+                "window_start": event.window_start.isoformat() if event.window_start else None,
+                "window_end": event.window_end.isoformat() if event.window_end else None,
+                "context": event.context,
+                "notify_status": event.notify_status,
+            }
+            for event, alert_name, alert_type in rows
+        ],
+    }
+
+
+def _coerce_uuid(value: Any) -> uuid.UUID | None:
+    if not value:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 async def get_credential_for_user(
@@ -3566,6 +3791,48 @@ async def stream_dashboard_chat(
                                 "workflow_id": workflow_id_str or None,
                                 "time_range": time_range,
                             },
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name in ("list_alerts", "get_alert_detail", "get_alert_events"):
+                    step_label = {
+                        "list_alerts": "Reading alerts...",
+                        "get_alert_detail": "Reading alert configuration...",
+                        "get_alert_events": "Reading alert firings...",
+                    }[name]
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    alert_handler = {
+                        "list_alerts": handle_list_alerts,
+                        "get_alert_detail": handle_get_alert_detail,
+                        "get_alert_events": handle_get_alert_events,
+                    }[name]
+                    result = json.dumps(await alert_handler(db, user, args), default=str)
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }
