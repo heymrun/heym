@@ -6,11 +6,10 @@ export interface ShowcaseIntroContent {
 }
 
 /**
- * null means "no recording yet". Every consumer already gates on a falsy src:
- * the panel and mobile sheet skip the video section, and ShowcaseIntroDialog
- * refuses to open. Pointing at a file that does not exist would 404 instead.
+ * Every context has a recording, and the exhaustive Record keeps it that way:
+ * adding a context without one is a compile error rather than a 404 at runtime.
  */
-export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string | null> = {
+export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = {
   "dashboard:workflows": "/features/showcase/workflows.webm",
   "dashboard:board": "/features/showcase/board.webm",
   "dashboard:templates": "/features/showcase/templates.webm",
@@ -23,9 +22,7 @@ export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string | n
   "dashboard:vectorstores": "/features/showcase/vectorstores.webm",
   "dashboard:mcp": "/features/showcase/mcp.webm",
   "dashboard:traces": "/features/showcase/traces.webm",
-  // Placeholder: the board recording stands in until an alerts one is recorded.
-  // Swap the path, nothing else, once it exists.
-  "dashboard:alerts": "/features/showcase/board.webm",
+  "dashboard:alerts": "/features/showcase/alerts.webm",
   "dashboard:analytics": "/features/showcase/analytics.webm",
   "dashboard:dashboard": "/features/showcase/dashboard.webm",
   evals: "/features/showcase/evals.webm",
