@@ -115,6 +115,16 @@ OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstr
 - Keep handler changes behavior-preserving unless the task explicitly asks for product behavior changes. Handlers may use `NodeExecutionContext.executor` for shared executor services, but should not duplicate retry, tracing, cancellation, or final `NodeResult` packaging.
 - When adding a new node type, add its handler, register it in the node execution registry, update the node DSL/schema/docs required by the node integration policy, and add focused backend tests for the handler behavior.
 
+### Alert type modularity
+`backend/app/services/alerts/evaluator.py` owns claiming, the fire/recover state machine, event packaging, notify dispatch, and error containment. Metric computation for each alert type belongs under `backend/app/services/alerts/types/`, one module per alert type, registered in `backend/app/services/alerts/registry.py`.
+
+- Do not add `alert_type` branches to the evaluator. A new alert type is one handler module, one registry entry, one config model in `backend/app/models/alert_schemas.py`, and focused tests.
+- Handlers compute a metric over a window and return an `AlertObservation`. They must not write events, dispatch notifications, mutate alert state, or re-derive scope — `workflow_ids` arrives already resolved on the `AlertEvaluationContext`.
+- Cost metrics must resolve USD through `app/services/llm_pricing.py`, and duration percentiles through `app/api/analytics.py::calculate_percentile`. An alert that disagrees with the Traces or Analytics tab about the same window is worse than no alert.
+- Evaluation runs inside the leader-gated `CronScheduler` loop and claims rows with `FOR UPDATE SKIP LOCKED` while advancing `next_check_at` in the same statement. Preserve that claim when touching the loop; without it a leader handoff mid-pass double-fires.
+- The frontend mirrors this: `StepCondition.vue` selects per-type field components from a lookup map, not a `v-if` chain, and node-type-style branching does not belong in `AlertsTab.vue`.
+- When adding a new alert type, also update `frontend/src/docs/content/tabs/alerts-tab.md`, `reference/features.md`, and the alert tool descriptions in `backend/app/api/ai_assistant.py`.
+
 ## Repository Layout
 ```
 heymrun/

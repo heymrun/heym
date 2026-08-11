@@ -744,6 +744,16 @@ See also [Execution History](./execution-history.md), [Agent Node](../nodes/agen
 <video src="/features/showcase/traces.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/traces.webm">▶ Watch Traces demo</a></p>
 
+### [Alerts](../tabs/alerts-tab.md)
+
+The Alerts tab defines threshold conditions over a time window and tells you when they are crossed. Four alert types cover the questions operators actually ask: **error threshold** (did this fail more than N times in the window), **workflow duration** (did runs get slower, measured as max, average, or p95), **token / USD cost** (did spend cross a budget, resolved through the same pricing table as [Traces](../tabs/traces-tab.md)), and **execution count** (did this run far more often than it should have). Every type is judged over a window you choose, never on a single event, because one failed run is noise and a burst is an incident. Alerts watch one workflow or every workflow you can access.
+
+A five-step wizard walks through type, scope, condition, response, and review. The Review step **backtests** the condition first, reporting how often it would have fired over the last 24 hours to 7 days, so a threshold that is far too low is caught before it is saved rather than after it pages someone. Describe what you want in plain language and AI fills in every step it can, marking its guesses; a partial request still moves the wizard forward, opening on the first step that still needs a decision rather than making you start over. By default an alert fires once and stays quiet until the metric recovers; you can instead have it repeat on an interval.
+
+On the response step an alert can create and assign a new workflow to run when it fires, use one you already have, or do nothing. The firing payload carries the observed value, threshold, window, and the workflows that contributed to the number, which is how alerts reach Slack, email, or Telegram using nodes you already have. Firing history records what was true at the moment each alert fired and is kept for 90 days; acknowledging a firing changes the badge from Firing to Acknowledged without pretending the condition has cleared. The [Chat](../tabs/chat-tab.md) tab can answer what alerts exist and why or when one triggered. Alerts can be shared with users and [teams](../tabs/teams-tab.md).
+
+See also [Analytics](../tabs/analytics-tab.md), [Traces](../tabs/traces-tab.md), and [Execution History](./execution-history.md).
+
 ### [Analytics](../tabs/analytics-tab.md)
 
 The Analytics tab shows execution metrics and trends. Summary stats include total executions, success rate, error rate, latency breakdowns, and total **Time Saved** (from each workflow's estimated minutes saved per run × its successful runs). Select a base time range (24h, 7d, 30d, or all), optionally filter by workflow, then drag across any chart to drill into a selected date range. Charts and workflow tables refresh to the selection, and auto refresh keeps metrics updated. It complements [Execution History](./execution-history.md) and the [Scheduled](../tabs/scheduled-tab.md) view when you need both past results and upcoming runs.

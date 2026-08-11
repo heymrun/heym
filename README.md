@@ -205,6 +205,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Command Palette** — Ctrl+K for instant search, navigation, and workflow actions
 - **Evals** — Define test suites and run them against any workflow with one click
 - **LLM Traces** — Full observability for every agent call: requests, responses, tool calls, and timing
+- **Alerts** — Threshold rules over a time window on error count, run duration, LLM spend, and execution count, built in an AI-fillable wizard that backtests the condition before you save it and can run any workflow when it fires
 - **LLM Cost Tracking** — Per-trace token counts (input / output) with real-time USD cost calculation, historical analytics with time-range filtering, and a synced pricing table covering all major models
 - **Self-Hosted** — Your data, your infrastructure
 
@@ -212,7 +213,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 
 ## Full Feature Set
 
-For a complete list of all features with short descriptions, see **[Full Feature Set](frontend/src/docs/content/reference/features.md)**. It covers Getting Started, every node type, reference topics (Expression DSL, workflow structure, webhooks, SSE streaming, AI Assistant, Chat with Docs, Portal, security, etc.), and all dashboard tabs (Workflows, Templates, Variables, Chat, Credentials, Vectorstores, MCP, Traces, Analytics, Evals, Teams, Logs and more).
+For a complete list of all features with short descriptions, see **[Full Feature Set](frontend/src/docs/content/reference/features.md)**. It covers Getting Started, every node type, reference topics (Expression DSL, workflow structure, webhooks, SSE streaming, AI Assistant, Chat with Docs, Portal, security, etc.), and all dashboard tabs (Workflows, Templates, Variables, Chat, Credentials, Vectorstores, MCP, Traces, Alerts, Analytics, Evals, Teams, Logs and more).
 
 <div align="center">
 
@@ -264,6 +265,7 @@ Heym is built for developers who want control and enterprise teams that need a t
 | LLM trace inspection | ✅ | limited⁴ | ❌ | ✅ |
 | OpenTelemetry tracing export | ✅ | ✅¹⁷ | ❌¹⁷ | ❌¹⁷ |
 | LLM token cost tracking (USD) | ✅ | ❌¹⁶ | ❌¹⁶ | limited¹⁶ |
+| Metric alerts (errors, duration, cost, run count) | ✅ | limited²⁵ | limited²⁵ | limited²⁵ |
 | Built-in evals for AI workflows | ✅ | ✅ | ❌ | ❌ |
 | Parallel DAG execution | ✅ | limited⁹ | ❌ | ❌ |
 | Self-hostable, source-available | ✅ MIT + Commons Clause | ✅ fair-code¹⁰ | ❌ | ❌ |
@@ -296,6 +298,8 @@ Heym is built for developers who want control and enterprise teams that need a t
 22. Heym's Board tab is a built-in agentic Kanban board whose columns execute workflows and whose cards carry context, conversation history, execution state, and runs. n8n, Zapier, and Make only integrate with third-party kanban apps (Kanban Tool, Wekan, NocoDB); none documents a built-in board that runs its own automations, as of July 20, 2026
 23. Heym's Drive tab stores workflow/skill-generated files with public or password-protected share links, team sharing, and bulk ZIP/share/delete actions. n8n keeps execution binary data internally (optionally on [S3-compatible external storage](https://docs.n8n.io/hosting/scaling/external-storage/)) with no user-facing file drive; Zapier's Files by Zapier holds files only for the duration of a Zap run and Storage by Zapier holds small text values; Make's data stores hold structured records and its file handling passes files between apps without persistent built-in storage
 24. Heym's Playwright node is first-party browser automation with visual steps, AI-generated steps, and a full-code mode. n8n offers only community packages with a still-open [feature request for native browser automation nodes](https://community.n8n.io/t/front-end-web-mobile-app-test-automation-nodes/129796); Zapier Agents can browse and read pages but Zapier documents no scripted browser-automation step; Make documents HTTP modules and third-party scraping apps rather than a native browser module, as of July 20, 2026
+
+25. Heym Alerts are user-defined thresholds evaluated over a time window across four metrics — error count, run duration (max/avg/p95), LLM token or USD spend, and execution count — built in a wizard that backtests the condition before saving and can run a workflow when it fires. The competitors notify per failed run rather than on a windowed threshold, and none documents user-set duration or cost alerts. [n8n Insights](https://docs.n8n.io/insights/) displays failure rate and run time average (dashboard on Pro and above) but sets no thresholds and sends no alerts; n8n's alerting path is the per-execution [error workflow](https://docs.n8n.io/flow-logic/error-handling/). [Zapier](https://help.zapier.com/hc/en-us/articles/8496289225229-Manage-notifications-when-errors-occur-in-Zap-workflows) sends configurable per-error notifications and applies one Zapier-set rule (a Zap erroring 95% of the time across 20+ runs in 7 days), which the user cannot define or extend to other metrics. [Make](https://help.make.com/introduction-to-errors-and-warnings) reports scenario errors and warnings, and a per-scenario operations threshold remains an open community request. Checked August 9, 2026
 
 </details>
 
@@ -557,6 +561,11 @@ Full visibility into every agent call: request and response payloads, tool call 
 
 ### LLM Cost Tracking
 Every trace records input and output token counts alongside a real-time USD cost calculated from a synced pricing table that covers all major models (OpenAI, Anthropic, Google, and more). A time-range filtered cost analytics view lets you see spending trends across workflows — no third-party cost dashboard needed.
+
+### Alerts
+Set thresholds over a **time window** on four metrics: error count, run duration (max, average, or p95), LLM token or USD spend, and execution count. Every alert is judged over a window you choose rather than on a single event, because one failed run is noise and a burst is an incident. Scope an alert to one workflow or to everything you can access.
+
+A five-step wizard covers type, scope, condition, response, and review, and the review step **backtests** the condition before you save it: *over the last 24 hours this would have fired 3 times, peaking at 14 errors*. Describe what you want in plain English and AI fills the whole form for you. By default an alert fires once and stays quiet until the metric recovers, so a broken workflow checked every minute does not produce 60 notifications an hour. An alert can run any workflow when it fires, receiving the observed value, threshold, window, and contributing detail as input, which is how alerts reach Slack, email, or Telegram with nodes you already have. The Chat tab can tell you what alerts exist and why one triggered.
 
 ### Evals
 Define test cases with expected outputs. Run the entire suite with one click. Review pass/fail, actual vs expected, and historical run data. Ship AI workflows with confidence.

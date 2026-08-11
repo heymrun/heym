@@ -153,6 +153,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "vectorstores-tab", title: "Vectorstores" },
       { slug: "mcp-tab", title: "MCP" },
       { slug: "traces-tab", title: "Traces" },
+      { slug: "alerts-tab", title: "Alerts" },
       { slug: "analytics-tab", title: "Analytics" },
       { slug: "dashboard-tab", title: "Dashboard" },
       { slug: "evals-tab", title: "Evals" },

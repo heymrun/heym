@@ -77,6 +77,22 @@ waiting for you, not as running. This is the same data as the active-runs badge 
 so Chat and the badge never disagree. For runs that already finished, ask for recent executions
 instead — that reads [Execution History](../reference/execution-history.md).
 
+## Asking About Alerts
+
+Chat can answer questions about the [alerts](./alerts-tab.md) you have defined:
+
+- **What exists** — "what alerts do I have?", "is there an alert on the invoice workflow?",
+  "which alerts are firing right now?"
+- **How one is set up** — "what is the threshold on the cost alert?", "how is that configured?"
+- **Why and when it fired** — "why did the cost alert fire?", "when did this last trigger?"
+
+For a "why did it fire" question, Chat reads the firing record and quotes the actual observed
+value, the threshold, and the exact window that was evaluated, plus the contributing detail:
+failing execution ids and error messages for error alerts, per-model spend for cost alerts, or
+the trigger-source breakdown for execution-count alerts. It reports what was true when the alert
+fired rather than recomputing the window, because the window has passed and a fresh calculation
+can give a different answer.
+
 ## User Rules
 
 [User Rules](../reference/user-settings.md) (configured in Settings) are automatically injected into every Chat conversation as system-level instructions. Set them once to apply persistent preferences to all chat requests.
@@ -92,6 +108,7 @@ instead — that reads [Execution History](../reference/execution-history.md).
 - [AI Assistant](../reference/ai-assistant.md) – Editor assistant powered by the same workflow builder DSL
 - [Execution History](../reference/execution-history.md) – View past runs (History button in header)
 - [Scheduled Tab](./scheduled-tab.md) – Calendar of upcoming cron runs (same data Chat can summarize)
+- [Alerts Tab](./alerts-tab.md) – Threshold alerts Chat can list and explain
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact in-app orientation for this page
 - [Chat Voice (TTS & STT)](../reference/chat-voice.md) – Read messages aloud and talk hands-free with ElevenLabs
 

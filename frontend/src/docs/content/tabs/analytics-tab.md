@@ -51,3 +51,5 @@ Two tables show workflow usage: **Most Used** and **Most Failed**.
 - [Traces Tab](./traces-tab.md) – Detailed trace inspection
 - [Logs Tab](./logs-tab.md) – Runtime logs for debugging
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces
+
+When a chart shows a trend you want to be told about rather than watch for, turn it into an [alert](./alerts-tab.md): error count, run duration, LLM spend, and execution count can all be given a threshold over a time window.
