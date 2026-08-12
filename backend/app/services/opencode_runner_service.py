@@ -21,6 +21,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -51,6 +52,7 @@ _REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
 # for back-compat and behaves identically.
 _OPEN_OR_UPDATE_MODES: frozenset[str] = frozenset({"update_existing_pr", "open_or_update_pr"})
 _PR_SCREENSHOT_RELEASE_TAG = "opencode-pr-assets"
+_RUNNER_CONTAINER_PREFIX = "heym-opencode-"
 
 _LOCAL_ONLY_RULES = (
     "Apply ALL changes by editing files on disk in the current working directory. "
@@ -118,6 +120,10 @@ class OpenCodeRunRequest:
     variant: str = ""
 
 
+class OpenCodeCancelledError(Exception):
+    """The workflow was stopped while the OpenCode CLI was still running."""
+
+
 @dataclass(frozen=True)
 class _CliOutcome:
     """How one supervised ``opencode run`` ended."""
@@ -128,6 +134,7 @@ class _CliOutcome:
     timed_out: bool = False
     # Set when Heym stopped a CLI that refused to exit; carries the reason to report.
     stalled_reason: str = ""
+    cancelled: bool = False
 
 
 @dataclass
@@ -185,9 +192,18 @@ class OpenCodeRunnerService:
         self,
         cli_command: str | None = None,
         workspace_root: str | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> None:
         self.cli_command = cli_command or settings.opencode_cli_command
         self.workspace_root = Path(workspace_root or settings.opencode_workspace_dir)
+        # Set by the node handler so a stopped workflow ends the CLI instead of waiting it out.
+        self.is_cancelled = is_cancelled or (lambda: False)
+
+    def _cancelled(self) -> bool:
+        try:
+            return bool(self.is_cancelled())
+        except Exception:  # noqa: BLE001 - a broken probe must not fail the run
+            return False
 
     # --- auth / config ---
     def _resolve_model(self, model: str) -> str:
@@ -390,7 +406,17 @@ class OpenCodeRunnerService:
         workspace = (self.workspace_root / str(uuid.uuid4())).resolve()
         home = Path(f"{workspace}.oc-home")
         home.mkdir(parents=True, exist_ok=True)
+        try:
+            return self._run_in_workspace(workspace, home, request)
+        except BaseException:
+            # A failed or stopped run would otherwise leave its clone behind: only the success
+            # path reaches the handler's cleanup.
+            self.cleanup_workspace(str(workspace))
+            raise
 
+    def _run_in_workspace(
+        self, workspace: Path, home: Path, request: OpenCodeRunRequest
+    ) -> OpenCodeRunResult:
         # update/open-or-update modes clone the existing PR branch so OpenCode works on top of it;
         # if that branch does not exist yet it falls back to the base branch (same as Codex).
         if request.publish_mode in _OPEN_OR_UPDATE_MODES:
@@ -540,6 +566,10 @@ class OpenCodeRunnerService:
         env["HOME"] = str(home)
         env["XDG_CONFIG_HOME"] = str(home / ".config")
         env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+        # Names the sibling runner container so Heym can reclaim it when the CLI is killed —
+        # ``docker run`` is only a client, so killing it leaves the container running.
+        run_id = uuid.uuid4().hex
+        env["HEYM_OPENCODE_RUN_ID"] = run_id
         cmd = self.build_run_command(model, request, workspace, prompt=prompt_override)
         try:
             process = subprocess.Popen(  # noqa: S603 - argv is built, never shell-interpolated
@@ -557,7 +587,12 @@ class OpenCodeRunnerService:
             raise ValueError(
                 "OpenCode CLI is not installed or not on PATH (install 'opencode')"
             ) from exc
-        outcome = self._supervise_cli(process, request.timeout_seconds)
+        try:
+            outcome = self._supervise_cli(process, request.timeout_seconds)
+        finally:
+            self._remove_runner_container(run_id)
+        if outcome.cancelled:
+            raise OpenCodeCancelledError("Workflow stopped while OpenCode was running")
         if outcome.timed_out:
             raise TimeoutError(f"OpenCode timed out after {request.timeout_seconds:.0f} seconds")
         if outcome.stalled_reason:
@@ -569,6 +604,22 @@ class OpenCodeRunnerService:
             )
             raise ValueError(detail)
         return outcome.stdout
+
+    @staticmethod
+    def _remove_runner_container(run_id: str) -> None:
+        """Force-remove the sibling runner container; a no-op outside Docker deployments."""
+        if not run_id or not shutil.which("docker"):
+            return
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", f"{_RUNNER_CONTAINER_PREFIX}{run_id}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     def _supervise_cli(self, process: subprocess.Popen, timeout_seconds: float) -> _CliOutcome:
         """Drain the CLI's streams, stopping it when it wedges instead of waiting out the timeout.
@@ -592,6 +643,7 @@ class OpenCodeRunnerService:
         fatal_detail = ""
         open_streams = len(readers)
         timed_out = False
+        cancelled = False
         stalled_reason = ""
 
         while open_streams > 0:
@@ -619,6 +671,9 @@ class OpenCodeRunnerService:
                         fatal_at = time.monotonic()
                         fatal_detail = self._log_line_error(line)
 
+            if self._cancelled():
+                cancelled = True
+                break
             now = time.monotonic()
             if now - started >= timeout_seconds:
                 timed_out = True
@@ -637,7 +692,7 @@ class OpenCodeRunnerService:
                 )
                 break
 
-        if timed_out or stalled_reason:
+        if timed_out or stalled_reason or cancelled:
             self._terminate_process(process)
         returncode = process.poll()
         if returncode is None:
@@ -653,6 +708,7 @@ class OpenCodeRunnerService:
             stderr="".join(stderr_parts),
             timed_out=timed_out,
             stalled_reason=stalled_reason,
+            cancelled=cancelled,
         )
 
     @staticmethod

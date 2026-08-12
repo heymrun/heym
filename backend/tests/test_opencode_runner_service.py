@@ -113,13 +113,16 @@ class TestOpenCodeRunCommand(unittest.TestCase):
                 return_value=MagicMock(),
             ):
                 with patch.object(self.svc, "_supervise_cli", return_value=outcome):
-                    with self.assertRaises(TimeoutError) as ctx:
-                        self.svc._exec_opencode(
-                            workspace,
-                            home,
-                            _request(timeout_seconds=1),
-                            "opencode-go/kimi-k3",
-                        )
+                    # subprocess.run() also builds a Popen, so the patch above would break the
+                    # container cleanup call.
+                    with patch.object(self.svc, "_remove_runner_container"):
+                        with self.assertRaises(TimeoutError) as ctx:
+                            self.svc._exec_opencode(
+                                workspace,
+                                home,
+                                _request(timeout_seconds=1),
+                                "opencode-go/kimi-k3",
+                            )
         self.assertIn("OpenCode timed out", str(ctx.exception))
 
     def test_run_command_includes_variant(self):
@@ -714,3 +717,131 @@ class TestOpenCodeFailureDetail(unittest.TestCase):
             'error.error="AI_APICallError: Model gpt-5-nano is not supported"\n'
         )
         self.assertEqual(OpenCodeRunnerService._extract_log_error(stderr), "")
+
+
+class TestOpenCodeCancellation(unittest.TestCase):
+    """A stopped workflow must end the CLI instead of waiting it out."""
+
+    @staticmethod
+    def _spawn():
+        import subprocess
+        import sys
+
+        return subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(600)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+
+    def test_cancel_ends_the_run_and_kills_the_process(self):
+        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws", is_cancelled=lambda: True)
+        process = self._spawn()
+        outcome = svc._supervise_cli(process, timeout_seconds=600)
+        self.assertTrue(outcome.cancelled)
+        self.assertFalse(outcome.timed_out)
+        self.assertIsNotNone(process.poll())
+
+    def test_cancel_reaps_the_server_the_cli_spawned(self):
+        import os
+        import subprocess
+        import sys
+        import time
+
+        script = (
+            "import subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "print('PID', child.pid, flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws", is_cancelled=lambda: True)
+        outcome = svc._supervise_cli(process, timeout_seconds=60)
+        child_pid = int(outcome.stdout.split()[1])
+        time.sleep(0.5)
+        with self.assertRaises(OSError):
+            os.kill(child_pid, 0)
+
+    def test_broken_cancel_probe_does_not_fail_the_run(self):
+        def _boom() -> bool:
+            raise RuntimeError("registry down")
+
+        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws", is_cancelled=_boom)
+        self.assertFalse(svc._cancelled())
+
+    def test_exec_raises_cancelled_error(self):
+        from app.services.opencode_runner_service import OpenCodeCancelledError, _CliOutcome
+
+        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            home = Path(f"{tmp}.oc-home")
+            home.mkdir()
+            outcome = _CliOutcome(returncode=-15, stdout="", stderr="", cancelled=True)
+            with patch(
+                "app.services.opencode_runner_service.subprocess.Popen", return_value=MagicMock()
+            ):
+                with patch.object(svc, "_supervise_cli", return_value=outcome):
+                    with patch.object(svc, "_remove_runner_container"):
+                        with self.assertRaises(OpenCodeCancelledError):
+                            svc._exec_opencode(workspace, home, _request(), "opencode-go/kimi-k3")
+
+    def test_failed_run_cleans_up_its_workspace(self):
+        with tempfile.TemporaryDirectory() as root:
+            svc = OpenCodeRunnerService(workspace_root=root)
+            with patch.object(svc, "_run_in_workspace", side_effect=ValueError("boom")):
+                with self.assertRaises(ValueError):
+                    svc.run_task(_request())
+            leftovers = [p.name for p in Path(root).iterdir()]
+        self.assertEqual(leftovers, [])
+
+
+class TestOpenCodeRunnerContainerCleanup(unittest.TestCase):
+    """Killing ``docker run`` leaves the container alive; it has to be removed by name."""
+
+    def test_removes_container_by_run_id(self):
+        with patch(
+            "app.services.opencode_runner_service.shutil.which", return_value="/usr/bin/docker"
+        ):
+            with patch("app.services.opencode_runner_service.subprocess.run") as run:
+                OpenCodeRunnerService._remove_runner_container("abc123")
+        self.assertEqual(run.call_args[0][0], ["docker", "rm", "-f", "heym-opencode-abc123"])
+
+    def test_no_docker_is_a_noop(self):
+        with patch("app.services.opencode_runner_service.shutil.which", return_value=None):
+            with patch("app.services.opencode_runner_service.subprocess.run") as run:
+                OpenCodeRunnerService._remove_runner_container("abc123")
+        run.assert_not_called()
+
+    def test_exec_passes_run_id_to_the_wrapper(self):
+        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        from app.services.opencode_runner_service import _CliOutcome
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            home = Path(f"{tmp}.oc-home")
+            home.mkdir()
+            with patch(
+                "app.services.opencode_runner_service.subprocess.Popen", return_value=MagicMock()
+            ) as popen:
+                with patch.object(
+                    svc,
+                    "_supervise_cli",
+                    return_value=_CliOutcome(returncode=0, stdout="{}", stderr=""),
+                ):
+                    with patch.object(svc, "_remove_runner_container") as remove:
+                        svc._exec_opencode(workspace, home, _request(), "opencode-go/kimi-k3")
+        run_id = popen.call_args.kwargs["env"]["HEYM_OPENCODE_RUN_ID"]
+        self.assertTrue(run_id)
+        remove.assert_called_once_with(run_id)

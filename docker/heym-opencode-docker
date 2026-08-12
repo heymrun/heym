@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import uuid
@@ -98,6 +99,18 @@ def _workspace_mount(workspace_dir: Path) -> list[str]:
     return ["--mount", f"type=bind,src={source},dst={workspace_dir}"]
 
 
+def _remove_container(name: str) -> None:
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def main() -> int:
     image = _runner_image()
     workspace_dir = Path(
@@ -114,7 +127,8 @@ def main() -> int:
         )
         return 2
 
-    name = f"heym-opencode-{uuid.uuid4().hex}"
+    # The backend names the run so it can reclaim the container if this wrapper is killed.
+    name = f"heym-opencode-{_env_value('HEYM_OPENCODE_RUN_ID') or uuid.uuid4().hex}"
     entrypoint = _env_value("HEYM_OPENCODE_DOCKER_ENTRYPOINT") or "opencode"
     # vue-tsc / Node tooling often needs >2g; keep headroom above default Codex sandbox.
     memory = _env_value("HEYM_OPENCODE_DOCKER_MEMORY") or "4g"
@@ -179,10 +193,27 @@ def main() -> int:
 
     cmd.extend(["--entrypoint", entrypoint, image, *sys.argv[1:]])
     try:
-        return subprocess.run(cmd, stdin=sys.stdin, check=False).returncode
+        process = subprocess.Popen(cmd, stdin=sys.stdin)
     except FileNotFoundError:
         print("Docker CLI is not installed or not on PATH", file=sys.stderr)
         return 127
+
+    # ``docker run`` is only a client: killing it leaves the container running, and ``--rm`` never
+    # fires. Stop the container on every exit path so a failed or stopped workflow leaves nothing.
+    def _stop(signum: int, _frame: object) -> None:
+        _remove_container(name)
+        process.terminate()
+        raise SystemExit(128 + signum)
+
+    for caught in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(caught, _stop)
+        except (OSError, ValueError):
+            pass
+    try:
+        return process.wait()
+    finally:
+        _remove_container(name)
 
 
 if __name__ == "__main__":

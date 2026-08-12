@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.opencode_runner_service import (
+    OpenCodeCancelledError,
     OpenCodeRunnerService,
     OpenCodeRunRequest,
 )
@@ -58,22 +60,28 @@ def execute(ctx: NodeExecutionContext) -> object:
     variant = str(node_data.get("opencodeVariant") or "").strip()
     timeout_seconds = _coerce_timeout(node_data.get("timeoutSeconds"))
 
-    runner = OpenCodeRunnerService()
-    result = runner.run_task(
-        OpenCodeRunRequest(
-            repository_url=repository_url,
-            base_branch=base_branch,
-            task_prompt=task_prompt,
-            branch_name=branch_name,
-            publish_mode=publish_mode,
-            timeout_seconds=timeout_seconds,
-            api_key=str(opencode_config.get("api_key") or ""),
-            base_url=str(opencode_config.get("base_url") or ""),
-            github_config=github_config,
-            model=model,
-            variant=variant,
+    runner = OpenCodeRunnerService(is_cancelled=lambda: _is_cancelled(self))
+    try:
+        result = runner.run_task(
+            OpenCodeRunRequest(
+                repository_url=repository_url,
+                base_branch=base_branch,
+                task_prompt=task_prompt,
+                branch_name=branch_name,
+                publish_mode=publish_mode,
+                timeout_seconds=timeout_seconds,
+                api_key=str(opencode_config.get("api_key") or ""),
+                base_url=str(opencode_config.get("base_url") or ""),
+                github_config=github_config,
+                model=model,
+                variant=variant,
+            )
         )
-    )
+    except OpenCodeCancelledError as exc:
+        # Raises WorkflowCancelledError/WorkflowTimeoutError so the run ends instead of the node
+        # being retried and the execution staying "running" on the board.
+        self.check_cancelled()
+        raise ValueError(str(exc)) from exc
 
     output = result.to_output()
     if publish_mode == "patch_artifact":
@@ -85,6 +93,15 @@ def execute(ctx: NodeExecutionContext) -> object:
     # diff/patch have been captured into the result.
     runner.cleanup_workspace(result.workspace_path)
     return output
+
+
+def _is_cancelled(executor: object) -> bool:
+    """True once the workflow is stopped or past its deadline."""
+    cancel_event = getattr(executor, "cancel_event", None)
+    if cancel_event is not None and cancel_event.is_set():
+        return True
+    deadline = getattr(executor, "_deadline", None)
+    return deadline is not None and time.monotonic() > deadline
 
 
 def _load_credentials(executor: object, node_data: dict) -> tuple[dict, dict]:

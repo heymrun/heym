@@ -128,3 +128,44 @@ class TestOpenCodeGoNode(unittest.TestCase):
         from app.services.node_execution.registry import get_node_handler
 
         self.assertIsNotNone(get_node_handler("opencodeGo"))
+
+
+class TestOpenCodeGoNodeCancellation(unittest.TestCase):
+    def test_cancelled_run_raises_the_executor_cancellation(self):
+        from app.services.node_execution.nodes import opencode_go_node
+        from app.services.opencode_runner_service import OpenCodeCancelledError
+        from app.services.workflow_executor import WorkflowCancelledError
+
+        ctx, executor = _ctx(
+            {
+                "credentialId": "oc",
+                "githubCredentialId": "gh",
+                "repositoryUrl": "https://github.com/a/b",
+                "taskPrompt": "do it",
+            }
+        )
+        executor.check_cancelled.side_effect = WorkflowCancelledError("Workflow cancelled")
+        runner = MagicMock()
+        runner.run_task.side_effect = OpenCodeCancelledError("stopped")
+        with (
+            patch.object(
+                opencode_go_node,
+                "_load_credentials",
+                return_value=({"api_key": "sk", "base_url": ""}, {"api_key": "gh"}),
+            ),
+            patch.object(opencode_go_node, "OpenCodeRunnerService", return_value=runner),
+        ):
+            with self.assertRaises(WorkflowCancelledError):
+                opencode_go_node.execute(ctx)
+
+    def test_cancel_probe_reads_the_executor_cancel_event(self):
+        from threading import Event
+
+        from app.services.node_execution.nodes import opencode_go_node
+
+        executor = MagicMock()
+        executor.cancel_event = Event()
+        executor._deadline = None
+        self.assertFalse(opencode_go_node._is_cancelled(executor))
+        executor.cancel_event.set()
+        self.assertTrue(opencode_go_node._is_cancelled(executor))
