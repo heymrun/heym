@@ -4408,8 +4408,8 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
     `draft_pr`, `open_pr`, `commit_push`, `direct_commit`, `open_or_update_pr`,
     `update_existing_pr`, `patch_artifact` (`open_or_update_pr` updates the agent's existing open
     PR when one exists, else opens a new one — best for re-runs)
-  - `opencodeModel`: OpenCode Go model id, e.g. `opencode/kimi-k3`, `opencode/deepseek-v4-pro`;
-    empty uses the runner default (`opencode/kimi-k3`)
+  - `opencodeModel`: OpenCode Go model id, e.g. `opencode-go/kimi-k3`,
+    `opencode-go/deepseek-v4-pro`; empty uses the runner default (`opencode-go/kimi-k3`)
   - `opencodeVariant`: optional model reasoning variant passed to `opencode run --variant`
   - `timeoutSeconds` (default 3600)
 - **As an agent tool**: The OpenCode Go node can be attached to an agent's `tool-input` handle; the
@@ -4441,7 +4441,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
         "taskPrompt": "$input.text",
         "publishMode": "open_pr",
         "branchName": "opencode/$executionId",
-        "opencodeModel": "opencode/kimi-k3"
+        "opencodeModel": "opencode-go/kimi-k3"
       }
     },
     {

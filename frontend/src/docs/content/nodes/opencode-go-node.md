@@ -30,7 +30,7 @@ OpenCode only edits files on disk; Heym owns every git/GitHub action.
 
 ## Models
 
-OpenCode Go's model roster changes often, so the **Model** field is populated live from the gateway's model list (`GET https://opencode.ai/zen/go/v1/models`) and shown as a searchable dropdown. If the live list is unavailable, a built-in fallback list is used. Model ids use the `opencode/<model>` form (for example `opencode/kimi-k3`, `opencode/deepseek-v4-pro`, `opencode/qwen3.7-max`). Leave the field empty to use the runner default (`opencode/kimi-k3`).
+OpenCode Go's model roster changes often, so the **Model** field is populated live from the gateway's model list (`GET https://opencode.ai/zen/go/v1/models`) and shown as a searchable dropdown. If the live list is unavailable, a built-in fallback list is used. Model ids use the `opencode-go/<model>` form (for example `opencode-go/kimi-k3`, `opencode-go/deepseek-v4-pro`, `opencode-go/qwen3.7-max`) — `opencode-go` is the OpenCode CLI's provider id for the Go gateway. Leave the field empty to use the runner default (`opencode-go/kimi-k3`). Model ids saved in the older `opencode/<model>` form are rewritten automatically at run time.
 
 ## Fields
 
@@ -40,7 +40,7 @@ OpenCode Go's model roster changes often, so the **Model** field is populated li
 | GitHub Credential | GitHub PAT credential used for repository access |
 | Repository URL | HTTPS GitHub repository URL; supports expressions |
 | Base Branch | Branch to clone before OpenCode runs, default `main` |
-| Model | OpenCode Go model (live searchable dropdown, `opencode/<model>`); empty uses the runner default |
+| Model | OpenCode Go model (live searchable dropdown, `opencode-go/<model>`); empty uses the runner default |
 | Reasoning Variant | Optional; maps to `opencode run --variant` for models that support reasoning effort |
 | Task Prompt | Coding task for OpenCode; supports expressions such as `$input.text` |
 | Publish Mode | How changes are delivered (see table below) |
@@ -110,7 +110,7 @@ The OpenCode Go node can be attached to an **AI Agent** node's tool handle so th
     "taskPrompt": "$input.text",
     "publishMode": "open_pr",
     "branchName": "opencode/$executionId",
-    "opencodeModel": "opencode/kimi-k3",
+    "opencodeModel": "opencode-go/kimi-k3",
     "timeoutSeconds": 3600
   }
 }

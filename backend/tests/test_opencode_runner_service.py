@@ -26,7 +26,7 @@ def _request(**overrides) -> OpenCodeRunRequest:
         api_key="sk-secret",
         base_url="",
         github_config={"api_key": "ghp"},
-        model="opencode/kimi-k3",
+        model="opencode-go/kimi-k3",
         variant="",
     )
     base.update(overrides)
@@ -38,12 +38,12 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.svc = OpenCodeRunnerService(cli_command="opencode", workspace_root="/tmp/heym-oc-ws")
 
     def test_run_command_shape(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[0], "opencode")
         self.assertEqual(cmd[1], "run")
         self.assertIn("--format", cmd)
         self.assertEqual(cmd[cmd.index("--format") + 1], "json")
-        self.assertEqual(cmd[cmd.index("--model") + 1], "opencode/kimi-k3")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opencode-go/kimi-k3")
         self.assertEqual(cmd[cmd.index("--agent") + 1], "build")
         self.assertNotIn("--variant", cmd)
         self.assertIn("Task:", cmd[-1])
@@ -54,12 +54,12 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertNotIn("Do NOT install package managers", cmd[-1])
 
     def test_run_command_states_pull_request_content_policy(self):
-        prompt = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)[-1]
+        prompt = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)[-1]
         self.assertIn(pr_publish.PR_CONTENT_POLICY, prompt)
         self.assertIn("## Change Summary", prompt)
 
     def test_run_command_emphasizes_mandatory_pr_title(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
         prompt = cmd[-1]
         self.assertIn("PR metadata is MANDATORY", prompt)
         self.assertIn("good PR title is specific", prompt)
@@ -67,7 +67,7 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertIn("## Change Summary", prompt)
 
     def test_run_command_includes_screenshot_instructions(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
         prompt = cmd[-1]
         self.assertIn("MUST save at least one PNG screenshot", prompt)
         self.assertIn("frontend/.e2e-artifacts/", prompt)
@@ -75,16 +75,18 @@ class TestOpenCodeRunCommand(unittest.TestCase):
 
     def test_run_command_forbids_ending_on_screenshot_announcement(self):
         # Regression for the observed "…Now let me take a screenshot" early stop.
-        prompt = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)[-1]
+        prompt = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)[-1]
         self.assertIn("Capture screenshots BEFORE you write your final message", prompt)
         self.assertIn("Now let me take a screenshot", prompt)
 
     def test_build_run_command_prompt_override(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS, prompt="FINISH NOW")
+        cmd = self.svc.build_run_command(
+            "opencode-go/kimi-k3", _request(), _WS, prompt="FINISH NOW"
+        )
         self.assertEqual(cmd[-1], "FINISH NOW")
 
     def test_run_command_pins_workspace_dir(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[cmd.index("--dir") + 1], str(_WS))
 
     def test_run_command_timeout_stays_value_error_for_git_recovery(self) -> None:
@@ -99,34 +101,36 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertIn("timed out", str(ctx.exception))
 
     def test_opencode_exec_timeout_raises_timeout_error(self) -> None:
-        import subprocess
+        from app.services.opencode_runner_service import _CliOutcome
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             home = Path(f"{tmp}.oc-home")
             home.mkdir()
+            outcome = _CliOutcome(returncode=-9, stdout="", stderr="", timed_out=True)
             with patch(
-                "app.services.opencode_runner_service.subprocess.run",
-                side_effect=subprocess.TimeoutExpired(cmd=["opencode"], timeout=1),
+                "app.services.opencode_runner_service.subprocess.Popen",
+                return_value=MagicMock(),
             ):
-                with self.assertRaises(TimeoutError) as ctx:
-                    self.svc._exec_opencode(
-                        workspace,
-                        home,
-                        _request(timeout_seconds=1),
-                        "opencode/kimi-k3",
-                    )
+                with patch.object(self.svc, "_supervise_cli", return_value=outcome):
+                    with self.assertRaises(TimeoutError) as ctx:
+                        self.svc._exec_opencode(
+                            workspace,
+                            home,
+                            _request(timeout_seconds=1),
+                            "opencode-go/kimi-k3",
+                        )
         self.assertIn("OpenCode timed out", str(ctx.exception))
 
     def test_run_command_includes_variant(self):
-        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(variant="high"), _WS)
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(variant="high"), _WS)
         self.assertEqual(cmd[cmd.index("--variant") + 1], "high")
 
     def test_run_command_uses_wrapper_cli(self):
         svc = OpenCodeRunnerService(
             cli_command="/usr/local/bin/heym-opencode-docker", workspace_root="/tmp/x"
         )
-        cmd = svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        cmd = svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[0], "/usr/local/bin/heym-opencode-docker")
 
 
@@ -141,22 +145,22 @@ class TestOpenCodeAuthConfig(unittest.TestCase):
                 home,
                 api_key="sk-secret",
                 base_url="https://opencode.ai/zen/go/v1",
-                model="opencode/kimi-k3",
+                model="opencode-go/kimi-k3",
             )
             auth = json.loads((home / ".local" / "share" / "opencode" / "auth.json").read_text())
-            self.assertEqual(auth["opencode"], {"type": "api", "key": "sk-secret"})
+            self.assertEqual(auth["opencode-go"], {"type": "api", "key": "sk-secret"})
             cfg = json.loads((home / ".config" / "opencode" / "opencode.json").read_text())
             self.assertEqual(cfg["permission"]["edit"], "allow")
             self.assertEqual(cfg["permission"]["bash"], "allow")
-            self.assertEqual(cfg["model"], "opencode/kimi-k3")
-            options = cfg["provider"]["opencode"]["options"]
+            self.assertEqual(cfg["model"], "opencode-go/kimi-k3")
+            options = cfg["provider"]["opencode-go"]["options"]
             self.assertEqual(options["baseURL"], "https://opencode.ai/zen/go/v1")
             self.assertEqual(options["apiKey"], "sk-secret")
 
     def test_default_model_when_empty(self):
-        self.assertEqual(self.svc._resolve_model(""), "opencode/kimi-k3")
+        self.assertEqual(self.svc._resolve_model(""), "opencode-go/kimi-k3")
         self.assertEqual(
-            self.svc._resolve_model("opencode/deepseek-v4-pro"), "opencode/deepseek-v4-pro"
+            self.svc._resolve_model("opencode-go/deepseek-v4-pro"), "opencode-go/deepseek-v4-pro"
         )
 
 
@@ -497,7 +501,7 @@ class TestOpenCodeFinishIncompleteRun(unittest.TestCase):
 
         with patch.object(pr_publish, "discover_pr_screenshots", return_value=[]):
             self.svc._finish_incomplete_run(
-                self.ws, self.home, _request(), "opencode/kimi-k3", result
+                self.ws, self.home, _request(), "opencode-go/kimi-k3", result
             )
 
         self.svc._exec_opencode.assert_called_once()
@@ -522,7 +526,7 @@ class TestOpenCodeFinishIncompleteRun(unittest.TestCase):
             return_value=[Path("/tmp/ws/frontend/.e2e-artifacts/shot.png")],
         ):
             self.svc._finish_incomplete_run(
-                self.ws, self.home, _request(), "opencode/kimi-k3", result
+                self.ws, self.home, _request(), "opencode-go/kimi-k3", result
             )
 
         self.svc._exec_opencode.assert_not_called()
@@ -559,3 +563,154 @@ class TestOpenCodeOpenOrUpdatePublish(unittest.TestCase):
 
         self.svc._create_pr.assert_called_once()
         self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/99")
+
+
+class TestOpenCodeGoProvider(unittest.TestCase):
+    """The Go gateway is its own CLI provider (``opencode-go``), not plain ``opencode``."""
+
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(cli_command="opencode", workspace_root="/tmp/heym-oc-ws")
+
+    def test_legacy_model_id_is_rewritten(self):
+        self.assertEqual(self.svc._resolve_model("opencode/kimi-k3"), "opencode-go/kimi-k3")
+        self.assertEqual(self.svc._resolve_model("kimi-k3"), "opencode-go/kimi-k3")
+
+    def test_run_command_qualifies_legacy_model(self):
+        cmd = self.svc.build_run_command("opencode/deepseek-v4-pro", _request(), _WS)
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opencode-go/deepseek-v4-pro")
+
+    def test_run_command_enables_cli_logs(self):
+        cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
+        self.assertIn("--print-logs", cmd)
+        self.assertEqual(cmd[cmd.index("--log-level") + 1], "ERROR")
+
+    def test_config_uses_go_provider_and_trims_base_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.svc._write_opencode_config(
+                home,
+                api_key="sk-secret",
+                base_url="https://opencode.ai/zen/go/v1/",
+                model="opencode/kimi-k3",
+            )
+            auth = json.loads((home / ".local" / "share" / "opencode" / "auth.json").read_text())
+            cfg = json.loads((home / ".config" / "opencode" / "opencode.json").read_text())
+        self.assertEqual(auth["opencode-go"], {"type": "api", "key": "sk-secret"})
+        self.assertNotIn("opencode", auth)
+        self.assertEqual(cfg["model"], "opencode-go/kimi-k3")
+        # A trailing slash would produce ".../v1//chat/completions".
+        self.assertEqual(
+            cfg["provider"]["opencode-go"]["options"]["baseURL"],
+            "https://opencode.ai/zen/go/v1",
+        )
+
+
+class TestOpenCodeCliSupervision(unittest.TestCase):
+    """The CLI can report a fatal provider error and then never exit."""
+
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(cli_command="opencode", workspace_root="/tmp/heym-oc-ws")
+
+    @staticmethod
+    def _spawn(script: str):
+        import subprocess
+        import sys
+
+        return subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+
+    def test_normal_exit_returns_streams(self):
+        process = self._spawn(
+            'import sys; sys.stdout.write(\'{"type":"step"}\\n\'); sys.stdout.flush()'
+        )
+        outcome = self.svc._supervise_cli(process, timeout_seconds=30)
+        self.assertEqual(outcome.returncode, 0)
+        self.assertIn('"type":"step"', outcome.stdout)
+        self.assertFalse(outcome.timed_out)
+        self.assertEqual(outcome.stalled_reason, "")
+
+    def test_fatal_stream_error_without_exit_is_ended(self):
+        # OpenCode Zen's "Monthly usage limit reached": logged, no JSON event, never exits.
+        script = (
+            "import sys, time\n"
+            'sys.stderr.write(\'timestamp=1 level=ERROR message="stream error" '
+            'providerID=opencode-go small=false error.error="AI_APICallError: Monthly usage limit '
+            "reached.\"\\n')\n"
+            "sys.stderr.flush()\n"
+            "time.sleep(600)\n"
+        )
+        process = self._spawn(script)
+        with patch("app.services.opencode_runner_service._FATAL_ERROR_GRACE_SECONDS", 1.0):
+            outcome = self.svc._supervise_cli(process, timeout_seconds=120)
+        self.assertIn("Monthly usage limit reached.", outcome.stalled_reason)
+        self.assertIn("never exited", outcome.stalled_reason)
+        self.assertFalse(outcome.timed_out)
+        self.assertIsNotNone(process.poll())
+
+    def test_title_agent_error_is_not_fatal(self):
+        # small=true is the title agent; the CLI recovers from those on its own.
+        script = (
+            "import sys\n"
+            'sys.stderr.write(\'timestamp=1 level=ERROR message="stream error" small=true '
+            'error.error="AI_APICallError: Model gpt-5-nano is not supported"\\n\')\n'
+            "sys.stderr.flush()\n"
+            'sys.stdout.write(\'{"type":"step"}\\n\')\n'
+        )
+        process = self._spawn(script)
+        with patch("app.services.opencode_runner_service._FATAL_ERROR_GRACE_SECONDS", 1.0):
+            outcome = self.svc._supervise_cli(process, timeout_seconds=30)
+        self.assertEqual(outcome.stalled_reason, "")
+        self.assertEqual(outcome.returncode, 0)
+
+    def test_silent_process_is_ended_as_unresponsive(self):
+        process = self._spawn("import time; time.sleep(600)")
+        with patch("app.services.opencode_runner_service._STALL_TIMEOUT_SECONDS", 1.0):
+            outcome = self.svc._supervise_cli(process, timeout_seconds=120)
+        self.assertIn("unresponsive", outcome.stalled_reason)
+        self.assertIsNotNone(process.poll())
+
+    def test_timeout_is_reported_and_process_killed(self):
+        process = self._spawn("import time; time.sleep(600)")
+        outcome = self.svc._supervise_cli(process, timeout_seconds=1)
+        self.assertTrue(outcome.timed_out)
+        self.assertIsNotNone(process.poll())
+
+
+class TestOpenCodeFailureDetail(unittest.TestCase):
+    def test_provider_error_from_logs_replaces_oom_guess(self):
+        stderr = (
+            'timestamp=1 level=ERROR message="stream error" small=false '
+            'error.error="AI_APICallError: Invalid API key."\n'
+        )
+        stdout = json.dumps({"type": "error", "sessionID": "ses_1", "error": {"name": "X"}})
+        detail = OpenCodeRunnerService._format_exec_failure(1, stdout, stderr)
+        self.assertEqual(detail, "AI_APICallError: Invalid API key.")
+        self.assertNotIn("OOM", detail)
+
+    def test_nested_error_event_message_is_read(self):
+        stdout = json.dumps(
+            {
+                "type": "error",
+                "sessionID": "ses_1",
+                "error": {
+                    "name": "UnknownError",
+                    "data": {"message": "Unexpected server error.", "ref": "err_1"},
+                },
+            }
+        )
+        detail = OpenCodeRunnerService._format_exec_failure(1, stdout, "")
+        self.assertEqual(detail, "UnknownError: Unexpected server error.")
+
+    def test_title_agent_log_error_is_ignored(self):
+        stderr = (
+            'timestamp=1 level=ERROR message="stream error" small=true '
+            'error.error="AI_APICallError: Model gpt-5-nano is not supported"\n'
+        )
+        self.assertEqual(OpenCodeRunnerService._extract_log_error(stderr), "")

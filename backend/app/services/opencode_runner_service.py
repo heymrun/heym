@@ -13,8 +13,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
+import re
 import shutil
+import signal
 import subprocess
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -22,7 +27,12 @@ from pathlib import Path
 from app.config import settings
 from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
-from app.services.opencode_catalog import OPENCODE_DEFAULT_MODEL, OPENCODE_ZEN_BASE_URL
+from app.services.opencode_catalog import (
+    OPENCODE_DEFAULT_MODEL,
+    OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_BASE_URL,
+    qualify_model_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +83,19 @@ _LOCAL_ONLY_RULES = (
     f"{pr_publish.PR_CONTENT_POLICY}"
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
+
+# ``--print-logs`` puts the CLI's own errors on stderr; without it a provider failure surfaces only
+# as an opaque ``UnknownError`` event.
+_CLI_LOG_LEVEL = "ERROR"
+# The CLI does not always exit on a fatal provider error (OpenCode Zen's "Monthly usage limit
+# reached" leaves it alive forever with zero stdout). Let it exit on its own, then stop it.
+_FATAL_ERROR_GRACE_SECONDS = 20.0
+# Generous: one model turn can run for minutes without emitting an event.
+_STALL_TIMEOUT_SECONDS = 900.0
+_MAX_CAPTURED_STDERR_LINES = 200
+# ``small=false`` is the build agent; ``small=true`` is the title agent, which the CLI recovers from.
+_STREAM_ERROR_RE = re.compile(r'message="stream error".*?\bsmall=false\b')
+_LOG_ERROR_VALUE_RE = re.compile(r'\berror(?:\.error)?="((?:[^"\\]|\\.)*)"')
 # Used when OpenCode produces no final assistant message. It never describes the change, so it
 # must not become a PR/commit subject — and it deliberately does not restate the task prompt.
 _NO_FINAL_MESSAGE_SUMMARY = "OpenCode completed without a final assistant message."
@@ -93,6 +116,18 @@ class OpenCodeRunRequest:
     github_config: dict
     model: str = ""
     variant: str = ""
+
+
+@dataclass(frozen=True)
+class _CliOutcome:
+    """How one supervised ``opencode run`` ended."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+    # Set when Heym stopped a CLI that refused to exit; carries the reason to report.
+    stalled_reason: str = ""
 
 
 @dataclass
@@ -156,7 +191,7 @@ class OpenCodeRunnerService:
 
     # --- auth / config ---
     def _resolve_model(self, model: str) -> str:
-        return model.strip() or OPENCODE_DEFAULT_MODEL
+        return qualify_model_id(model) or OPENCODE_DEFAULT_MODEL
 
     def _write_opencode_config(
         self, home: Path, *, api_key: str, base_url: str, model: str
@@ -166,16 +201,18 @@ class OpenCodeRunnerService:
         data_dir.mkdir(parents=True, exist_ok=True)
         config_dir.mkdir(parents=True, exist_ok=True)
         auth_path = data_dir / "auth.json"
-        auth_path.write_text(json.dumps({"opencode": {"type": "api", "key": api_key}}))
+        auth_path.write_text(json.dumps({OPENCODE_PROVIDER_ID: {"type": "api", "key": api_key}}))
         auth_path.chmod(0o600)
+        # A trailing slash would produce ``…/v1//chat/completions``.
+        resolved_base_url = (base_url or "").strip().rstrip("/") or OPENCODE_ZEN_BASE_URL
         config = {
             "$schema": "https://opencode.ai/config.json",
-            "model": model,
+            "model": self._resolve_model(model),
             "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow"},
             "provider": {
-                "opencode": {
+                OPENCODE_PROVIDER_ID: {
                     "options": {
-                        "baseURL": base_url or OPENCODE_ZEN_BASE_URL,
+                        "baseURL": resolved_base_url,
                         "apiKey": api_key,
                     }
                 }
@@ -477,9 +514,12 @@ class OpenCodeRunnerService:
             "--format",
             "json",
             "--model",
-            model,
+            self._resolve_model(model),
             "--agent",
             "build",
+            "--print-logs",
+            "--log-level",
+            _CLI_LOG_LEVEL,
         ]
         if request.variant.strip():
             cmd.extend(["--variant", request.variant.strip()])
@@ -502,37 +542,167 @@ class OpenCodeRunnerService:
         env["XDG_DATA_HOME"] = str(home / ".local" / "share")
         cmd = self.build_run_command(model, request, workspace, prompt=prompt_override)
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(  # noqa: S603 - argv is built, never shell-interpolated
                 cmd,
                 cwd=workspace,
                 env=env,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=request.timeout_seconds,
-                check=False,
+                bufsize=1,
+                start_new_session=True,  # the CLI spawns a server; kill the whole group
             )
         except FileNotFoundError as exc:
             raise ValueError(
                 "OpenCode CLI is not installed or not on PATH (install 'opencode')"
             ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError(
-                f"OpenCode timed out after {request.timeout_seconds:.0f} seconds"
-            ) from exc
-        if completed.returncode != 0:
+        outcome = self._supervise_cli(process, request.timeout_seconds)
+        if outcome.timed_out:
+            raise TimeoutError(f"OpenCode timed out after {request.timeout_seconds:.0f} seconds")
+        if outcome.stalled_reason:
+            raise ValueError(pr_publish.mask_sensitive(outcome.stalled_reason, [request.api_key]))
+        if outcome.returncode != 0:
             detail = pr_publish.mask_sensitive(
-                self._format_exec_failure(completed.returncode, completed.stdout, completed.stderr),
+                self._format_exec_failure(outcome.returncode, outcome.stdout, outcome.stderr),
                 [request.api_key],
             )
             raise ValueError(detail)
-        return completed.stdout
+        return outcome.stdout
+
+    def _supervise_cli(self, process: subprocess.Popen, timeout_seconds: float) -> _CliOutcome:
+        """Drain the CLI's streams, stopping it when it wedges instead of waiting out the timeout.
+
+        Besides exiting, a run ends when the node timeout expires, when the CLI reports a fatal
+        primary-agent error but keeps running, or when it goes completely silent.
+        """
+        lines: queue.Queue[tuple[str, str] | None] = queue.Queue()
+        readers = [
+            threading.Thread(target=self._pump_stream, args=(stream, name, lines), daemon=True)
+            for stream, name in ((process.stdout, "stdout"), (process.stderr, "stderr"))
+        ]
+        for reader in readers:
+            reader.start()
+
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+        started = time.monotonic()
+        last_output = started
+        fatal_at: float | None = None
+        fatal_detail = ""
+        open_streams = len(readers)
+        timed_out = False
+        stalled_reason = ""
+
+        while open_streams > 0:
+            try:
+                item = lines.get(timeout=1.0)
+            except queue.Empty:
+                item = None
+                if process.poll() is not None:
+                    if lines.empty():
+                        break
+                    continue
+            if item is None:
+                pass
+            elif item[0] == "":
+                open_streams -= 1
+            else:
+                name, line = item
+                last_output = time.monotonic()
+                if name == "stdout":
+                    stdout_parts.append(line)
+                else:
+                    if len(stderr_parts) < _MAX_CAPTURED_STDERR_LINES:
+                        stderr_parts.append(line)
+                    if fatal_at is None and _STREAM_ERROR_RE.search(line):
+                        fatal_at = time.monotonic()
+                        fatal_detail = self._log_line_error(line)
+
+            now = time.monotonic()
+            if now - started >= timeout_seconds:
+                timed_out = True
+                break
+            if fatal_at is not None and now - fatal_at >= _FATAL_ERROR_GRACE_SECONDS:
+                stalled_reason = (
+                    "OpenCode stopped after a provider error but never exited; Heym ended the run "
+                    f"after {_FATAL_ERROR_GRACE_SECONDS:.0f}s.\n\n"
+                    f"{fatal_detail or 'The model provider rejected the request.'}"
+                )
+                break
+            if now - last_output >= _STALL_TIMEOUT_SECONDS:
+                stalled_reason = (
+                    "OpenCode produced no output for "
+                    f"{_STALL_TIMEOUT_SECONDS / 60:.0f} minutes and was ended as unresponsive."
+                )
+                break
+
+        if timed_out or stalled_reason:
+            self._terminate_process(process)
+        returncode = process.poll()
+        if returncode is None:
+            try:
+                returncode = process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._terminate_process(process)
+                polled = process.poll()
+                returncode = polled if polled is not None else -1
+        return _CliOutcome(
+            returncode=returncode,
+            stdout="".join(stdout_parts),
+            stderr="".join(stderr_parts),
+            timed_out=timed_out,
+            stalled_reason=stalled_reason,
+        )
+
+    @staticmethod
+    def _pump_stream(stream: object, name: str, sink: queue.Queue) -> None:
+        """Forward one stream line by line, then post an end marker."""
+        try:
+            if stream is not None:
+                for line in stream:  # type: ignore[attr-defined]
+                    sink.put((name, line))
+        except (OSError, ValueError):  # closed underneath us during termination
+            pass
+        finally:
+            sink.put(("", name))
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen) -> None:
+        """Stop the CLI and the local server it spawned, escalating to SIGKILL."""
+        for send in (signal.SIGTERM, signal.SIGKILL):
+            if process.poll() is not None:
+                return
+            try:
+                os.killpg(os.getpgid(process.pid), send)
+            except (OSError, ProcessLookupError):
+                try:
+                    process.kill()
+                except OSError:
+                    return
+            try:
+                process.wait(timeout=5)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
+    @staticmethod
+    def _log_line_error(line: str) -> str:
+        """Pull the human-readable provider error out of a CLI ``level=ERROR`` log line."""
+        match = _LOG_ERROR_VALUE_RE.search(line)
+        if not match:
+            return ""
+        return match.group(1).replace("\\n", "\n").replace('\\"', '"').strip()
 
     @classmethod
     def _format_exec_failure(cls, returncode: int, stdout: str, stderr: str) -> str:
         """Build a short failure message; never dump the full OpenCode JSONL event stream."""
+        # A named provider error is the whole story; the OOM guess below would only mislead.
+        explicit = cls._extract_log_error(stderr) or cls._extract_event_error(stdout)
+        if explicit:
+            return cls._truncate_detail(explicit)
         extracted = cls._extract_exec_error(stdout)
-        stderr_clean = (stderr or "").strip()
+        stderr_clean = cls._plain_stderr(stderr)
         parts: list[str] = []
         if extracted:
             parts.append(extracted)
@@ -546,15 +716,74 @@ class OpenCodeRunnerService:
         elif not parts:
             detail = (stdout or "").strip() or f"OpenCode exec failed (exit code {returncode})"
             parts.append(detail)
-        detail = "\n\n".join(parts)
+        return cls._truncate_detail("\n\n".join(parts))
+
+    @staticmethod
+    def _truncate_detail(detail: str) -> str:
         if len(detail) > _MAX_ERROR_DETAIL_CHARS:
-            detail = detail[:_MAX_ERROR_DETAIL_CHARS].rstrip() + "\n…(truncated)"
+            return detail[:_MAX_ERROR_DETAIL_CHARS].rstrip() + "\n…(truncated)"
         return detail
+
+    @classmethod
+    def _extract_log_error(cls, stderr: str) -> str:
+        """Return the last provider error reported by the CLI's own ``level=ERROR`` log lines."""
+        found = ""
+        for raw_line in (stderr or "").splitlines():
+            if "level=ERROR" not in raw_line:
+                continue
+            message = cls._log_line_error(raw_line)
+            if message and "small=true" not in raw_line:
+                found = message
+        return found
+
+    @staticmethod
+    def _plain_stderr(stderr: str) -> str:
+        """Stderr with the CLI's structured log lines removed."""
+        kept = [line for line in (stderr or "").splitlines() if "level=" not in line]
+        return "\n".join(kept).strip()
 
     @staticmethod
     def _looks_like_event_stream(text: str) -> bool:
         sample = (text or "").lstrip()[:80]
         return sample.startswith('{"type":') or '"sessionID"' in sample
+
+    @staticmethod
+    def _error_event_message(event: dict) -> str:
+        """Read an ``{"type":"error"}`` event; 1.17 nests the message under ``error.data``."""
+        error = event.get("error")
+        candidates: list[object] = [event.get("message")]
+        name = ""
+        if isinstance(error, dict):
+            name = str(error.get("name") or "").strip()
+            data = error.get("data")
+            if isinstance(data, dict):
+                candidates.append(data.get("message"))
+            candidates.append(error.get("message"))
+        else:
+            candidates.append(error)
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                message = candidate.strip()
+                return f"{name}: {message}" if name and name not in message else message
+        return name
+
+    @classmethod
+    def _extract_event_error(cls, stdout: str) -> str:
+        """Return the last explicit error event from the JSONL stream, if any."""
+        found = ""
+        for raw_line in (stdout or "").splitlines():
+            line = raw_line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and str(event.get("type") or "") == "error":
+                message = cls._error_event_message(event)
+                if message:
+                    found = message
+        return found
 
     @classmethod
     def _extract_exec_error(cls, stdout: str) -> str:
@@ -573,9 +802,9 @@ class OpenCodeRunnerService:
                 continue
             event_type = str(event.get("type") or "")
             if event_type == "error":
-                message = event.get("message") or event.get("error") or ""
-                if isinstance(message, str) and message.strip():
-                    explicit = message.strip()
+                message = cls._error_event_message(event)
+                if message:
+                    explicit = message
                 continue
             part = event.get("part")
             if not isinstance(part, dict):

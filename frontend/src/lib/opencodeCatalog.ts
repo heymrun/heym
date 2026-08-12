@@ -1,13 +1,13 @@
 /** OpenCode Go (zen) fallback model catalog + reasoning variants. */
 
 export const OPENCODE_MODEL_FALLBACK = [
-  { id: "opencode/kimi-k3", name: "Kimi K3" },
-  { id: "opencode/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
-  { id: "opencode/qwen3.7-max", name: "Qwen3.7 Max" },
-  { id: "opencode/minimax-m3", name: "MiniMax M3" },
+  { id: "opencode-go/kimi-k3", name: "Kimi K3" },
+  { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+  { id: "opencode-go/qwen3.7-max", name: "Qwen3.7 Max" },
+  { id: "opencode-go/minimax-m3", name: "MiniMax M3" },
 ] as const;
 
-export const OPENCODE_DEFAULT_MODEL = "opencode/kimi-k3";
+export const OPENCODE_DEFAULT_MODEL = "opencode-go/kimi-k3";
 
 export interface OpenCodeModel {
   id: string;

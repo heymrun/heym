@@ -16,7 +16,7 @@ class TestFetchOpenCodeModels(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.opencode_models._get_json", new=AsyncMock(return_value=payload)):
             models, source = await fetch_opencode_models(base_url="https://opencode.ai/zen/go/v1")
         self.assertEqual(source, "live")
-        self.assertEqual(models[0]["id"], "opencode/kimi-k3")
+        self.assertEqual(models[0]["id"], "opencode-go/kimi-k3")
 
     async def test_fallback_on_error(self):
         with patch(
@@ -24,7 +24,7 @@ class TestFetchOpenCodeModels(unittest.IsolatedAsyncioTestCase):
         ):
             models, source = await fetch_opencode_models(base_url="https://opencode.ai/zen/go/v1")
         self.assertEqual(source, "fallback")
-        self.assertTrue(any(m["id"] == "opencode/kimi-k3" for m in models))
+        self.assertTrue(any(m["id"] == "opencode-go/kimi-k3" for m in models))
 
     async def test_fallback_on_empty(self):
         with patch(
