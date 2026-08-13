@@ -48,6 +48,10 @@ test("reloads traces on time range change and toggles the search box", async ({ 
 test("opens nested pricing dialogs with layered Escape behavior", async ({ page }) => {
   const createdAt = "2026-07-20T12:00:00Z";
   const unpricedModels = ["acme/private-chat", "acme/private-reasoner"];
+  let releasePricingRows = (): void => {};
+  const pricingRowsGate = new Promise<void>((resolve) => {
+    releasePricingRows = resolve;
+  });
   const pricingRows: Record<string, string | boolean | null>[] = [
     {
       id: "33333333-3333-4333-8333-333333333333",
@@ -146,8 +150,8 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
       return;
     }
     if (pathname === "/api/llm-pricing" && request.method() === "GET") {
-      // Land the rows after the open animation, as a real fetch does.
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Held so the dialog can be measured before and after its rows land.
+      await pricingRowsGate;
       await route.fulfill({ json: pricingRows });
       return;
     }
@@ -178,13 +182,13 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
   await expect(firstPricingLink).toBeVisible();
   await expect(secondPricingLink).toBeVisible();
 
-  // Each layer needs its own backdrop for depth, without either flash: a fading ancestor above
-  // a backdrop, or a panel that resizes once its rows land.
+  // A backdrop under an ancestor below opacity 1 becomes its own backdrop root, so its blur only
+  // appears once the fade ends. Sample on a timer rather than per frame: a loaded runner drops
+  // frames, and this has to hold through the whole 250ms open animation.
   await page.evaluate(() => {
-    const samples: { backdrops: number; fadingAncestors: number; outerHeight: number }[] = [];
+    const samples: { backdrops: number; fadingAncestors: number }[] = [];
     (window as unknown as { __openSamples: typeof samples }).__openSamples = samples;
-    let frames = 0;
-    const tick = (): void => {
+    const timer = setInterval(() => {
       const backdrops = Array.from(document.querySelectorAll(".dialog-backdrop"));
       const fadingAncestors = backdrops.filter((backdrop) => {
         let node = backdrop.parentElement;
@@ -196,18 +200,11 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
         }
         return false;
       });
-      const outerPanel = document.querySelector(".dialog-content");
-      samples.push({
-        backdrops: backdrops.length,
-        fadingAncestors: fadingAncestors.length,
-        outerHeight: Math.round(outerPanel?.getBoundingClientRect().height ?? 0),
-      });
-      frames += 1;
-      if (frames < 60) {
-        requestAnimationFrame(tick);
-      }
-    };
-    requestAnimationFrame(tick);
+      samples.push({ backdrops: backdrops.length, fadingAncestors: fadingAncestors.length });
+    }, 10);
+    (window as unknown as { __stopOpenSamples: () => void }).__stopOpenSamples = () =>
+      clearInterval(timer);
+    setTimeout(() => clearInterval(timer), 30_000);
   });
 
   await firstPricingLink.click();
@@ -216,21 +213,28 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
   await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Add Custom Model Pricing", exact: true })).toBeVisible();
 
-  await page.waitForTimeout(1200);
-  const openSamples = await page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          __openSamples: { backdrops: number; fadingAncestors: number; outerHeight: number }[];
-        }
-      ).__openSamples,
-  );
+  // Both dialogs are up; give the 250ms animation room to finish, then stop sampling.
+  await page.waitForTimeout(400);
+  const openSamples = await page.evaluate(() => {
+    const scope = window as unknown as {
+      __openSamples: { backdrops: number; fadingAncestors: number }[];
+      __stopOpenSamples: () => void;
+    };
+    scope.__stopOpenSamples();
+    return scope.__openSamples;
+  });
+  expect(openSamples.length).toBeGreaterThan(0);
   expect(Math.max(...openSamples.map((sample) => sample.backdrops))).toBe(2);
   expect(Math.max(...openSamples.map((sample) => sample.fadingAncestors))).toBe(0);
 
-  // Frame 20 onwards the scale-in is over.
-  const settledHeights = new Set(openSamples.slice(20).map((sample) => sample.outerHeight));
-  expect([...settledHeights]).toHaveLength(1);
+  // The rows are still held, so this is the dialog at its reserved height.
+  const outerPanel = page.locator(".dialog-content").first();
+  const heightBeforeRows = (await outerPanel.boundingBox())?.height ?? 0;
+  expect(heightBeforeRows).toBeGreaterThan(0);
+
+  releasePricingRows();
+  await expect(page.getByText("gpt-4.1-mini", { exact: true })).toBeVisible();
+  expect((await outerPanel.boundingBox())?.height).toBe(heightBeforeRows);
 
   const modelInput = page.getByPlaceholder("e.g. my-org/private-llm");
   await expect(modelInput).toHaveValue(unpricedModels[0]);
