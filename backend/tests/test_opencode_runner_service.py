@@ -723,6 +723,24 @@ class TestOpenCodeCancellation(unittest.TestCase):
     """A stopped workflow must end the CLI instead of waiting it out."""
 
     @staticmethod
+    def _is_running(pid: int) -> bool:
+        """Return True if the process is still alive (running), not a zombie or reaped.
+
+        ``os.kill(pid, 0)`` also succeeds for orphaned zombies, so read the state
+        field from ``/proc`` instead. Once the CLI is killed its server is reparented
+        to init, which may not reap it immediately, leaving it a zombie that has
+        still terminated.
+        """
+        try:
+            with open(f"/proc/{pid}/stat") as stat_file:
+                stat = stat_file.read()
+        except FileNotFoundError:
+            return False
+        # The state field follows the parenthesized comm, which may itself contain
+        # spaces and parentheses, so read the char after the final ")".
+        return stat[stat.rfind(")") + 2] not in ("Z", "X")
+
+    @staticmethod
     def _spawn():
         import subprocess
         import sys
@@ -746,7 +764,6 @@ class TestOpenCodeCancellation(unittest.TestCase):
         self.assertIsNotNone(process.poll())
 
     def test_cancel_reaps_the_server_the_cli_spawned(self):
-        import os
         import subprocess
         import sys
         import time
@@ -770,8 +787,7 @@ class TestOpenCodeCancellation(unittest.TestCase):
         outcome = svc._supervise_cli(process, timeout_seconds=60)
         child_pid = int(outcome.stdout.split()[1])
         time.sleep(0.5)
-        with self.assertRaises(OSError):
-            os.kill(child_pid, 0)
+        self.assertFalse(self._is_running(child_pid))
 
     def test_broken_cancel_probe_does_not_fail_the_run(self):
         def _boom() -> bool:
