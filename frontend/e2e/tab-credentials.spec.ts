@@ -279,6 +279,37 @@ test("shows Linear test connection failure message", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("filters credentials by name with the search input", async ({ page }) => {
+  const credentialName = `e2e-search-${Date.now()}`;
+  const createResponse = await page.request.post("/api/credentials", {
+    data: { name: credentialName, type: "openai", config: { api_key: "sk-e2e-test" } },
+  });
+  await expectOk(createResponse);
+  const credential = (await createResponse.json()) as { id: string };
+
+  try {
+    await page.goto("/?tab=credentials");
+    const searchInput = page.locator("#credential-search");
+    await expect(searchInput).toBeVisible();
+
+    await searchInput.fill(credentialName);
+    await expect(page.getByTestId(`credential-card-${credential.id}`)).toBeVisible();
+
+    await searchInput.fill("definitely-not-present-credential");
+    await expect(page.getByText("No credentials found")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(searchInput).toHaveValue("");
+    await expect(page.getByTestId(`credential-card-${credential.id}`)).toBeVisible();
+
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("Control+f");
+    await expect(searchInput).toBeFocused();
+  } finally {
+    await deleteCredential(page, credential.id);
+  }
+});
+
 test("tests an existing Linear credential without re-entering the API key", async ({ page }) => {
   const credentialName = `e2e-linear-edit-${Date.now()}`;
   const createResponse = await page.request.post("/api/credentials", {

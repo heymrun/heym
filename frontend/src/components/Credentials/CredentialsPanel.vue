@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Brain, Database, Globe, Key, MessageSquare, Plus, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
+import { useMediaQuery } from "@vueuse/core";
+import { Brain, Database, Globe, Key, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
 
 import type { Credential, CredentialListItem, CredentialShare, CredentialType } from "@/types/credential";
 import type { Team, TeamShare } from "@/types/team";
@@ -23,6 +24,122 @@ const loading = ref(true);
 const showDialog = ref(false);
 const editingCredential = ref<Credential | null>(null);
 
+const credentialSearchQuery = ref("");
+const credentialSearchInput = ref<HTMLInputElement | null>(null);
+const isMobile = useMediaQuery("(max-width: 767px)");
+
+const normalizedCredentialSearchQuery = computed((): string =>
+  credentialSearchQuery.value.trim().toLowerCase(),
+);
+const isCredentialSearchActive = computed((): boolean => normalizedCredentialSearchQuery.value.length > 0);
+
+function matchesCredentialSearch(credential: CredentialListItem, normalizedQuery: string): boolean {
+  if (normalizedQuery.length === 0) {
+    return true;
+  }
+
+  return `${credential.name} ${CREDENTIAL_TYPE_LABELS[credential.type]}`.toLowerCase().includes(normalizedQuery);
+}
+
+const filteredCredentials = computed<CredentialListItem[]>(() => {
+  if (!isCredentialSearchActive.value) {
+    return credentials.value;
+  }
+
+  return credentials.value.filter((credential) =>
+    matchesCredentialSearch(credential, normalizedCredentialSearchQuery.value),
+  );
+});
+
+const credentialSearchMatchCount = computed((): number => {
+  if (!isCredentialSearchActive.value) {
+    return credentials.value.length;
+  }
+
+  return filteredCredentials.value.length;
+});
+
+const credentialCountLabel = computed((): string => {
+  if (!isCredentialSearchActive.value) {
+    return String(credentials.value.length);
+  }
+
+  return `${credentialSearchMatchCount.value}/${credentials.value.length}`;
+});
+
+const isMac = computed((): boolean => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return navigator.platform.toLowerCase().startsWith("mac") || navigator.userAgent.includes("Mac");
+});
+
+const searchShortcutLabel = computed((): string => {
+  if (isMobile.value) return "";
+  return isMac.value ? "⌘F" : "Ctrl+F";
+});
+
+const searchPlaceholder = computed((): string => {
+  const label = searchShortcutLabel.value;
+  return label ? `Search credentials (${label})` : "Search credentials";
+});
+
+function clearCredentialSearch(): void {
+  credentialSearchQuery.value = "";
+  credentialSearchInput.value?.blur();
+}
+
+function clearCredentialSearchAndKeepFocus(): void {
+  credentialSearchQuery.value = "";
+  credentialSearchInput.value?.focus();
+}
+
+function focusCredentialSearch(): void {
+  requestAnimationFrame(() => {
+    credentialSearchInput.value?.focus();
+    credentialSearchInput.value?.select();
+  });
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!target) return false;
+  const element = target as HTMLElement;
+  return (
+    element.tagName === "INPUT" ||
+    element.tagName === "TEXTAREA" ||
+    element.isContentEditable ||
+    element.closest("input, textarea, [contenteditable]") !== null
+  );
+}
+
+function handleCredentialKeyDown(event: KeyboardEvent): void {
+  if (showDialog.value || showShareDialog.value) return;
+
+  const isTyping = isTypingTarget(event.target);
+  const isMeta = event.metaKey || event.ctrlKey;
+  const key = event.key.toLowerCase();
+
+  if (
+    key === "escape" &&
+    isCredentialSearchActive.value &&
+    (!isTyping || event.target === credentialSearchInput.value)
+  ) {
+    event.preventDefault();
+    clearCredentialSearch();
+    return;
+  }
+
+  if (
+    isMeta &&
+    key === "f" &&
+    (!isTyping || event.target === credentialSearchInput.value)
+  ) {
+    event.preventDefault();
+    focusCredentialSearch();
+  }
+}
+
 const showShareDialog = ref(false);
 const sharingCredential = ref<CredentialListItem | null>(null);
 const credentialShares = ref<CredentialShare[]>([]);
@@ -35,11 +152,15 @@ const shareError = ref("");
 
 onMounted(async () => {
   await loadCredentials();
+  window.addEventListener("keydown", handleCredentialKeyDown);
   const unsub = onDismissOverlays(() => {
     showDialog.value = false;
     showShareDialog.value = false;
   });
-  onUnmounted(() => unsub());
+  onUnmounted(() => {
+    window.removeEventListener("keydown", handleCredentialKeyDown);
+    unsub();
+  });
 });
 
 async function loadCredentials(): Promise<void> {
@@ -265,20 +386,55 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
   <div class="overflow-x-hidden">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
       <div>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight">
-          Credentials
-        </h2>
+        <div class="flex items-center gap-3">
+          <h2 class="text-2xl md:text-3xl font-bold tracking-tight">
+            Credentials
+          </h2>
+          <span
+            v-if="!loading && credentials.length > 0"
+            class="inline-flex items-center px-2 py-px rounded-full text-xs font-medium bg-primary/10 text-primary ring-1 ring-inset ring-primary/20 mt-0.5 dark:bg-primary/15 dark:text-accent-foreground dark:ring-primary/35"
+          >
+            {{ credentialCountLabel }}
+          </span>
+        </div>
         <p class="text-muted-foreground mt-1">
           Manage API keys and authentication credentials
         </p>
       </div>
-      <Button
-        variant="gradient"
-        @click="openCreateDialog"
-      >
-        <Plus class="w-4 h-4" />
-        New Credential
-      </Button>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-end gap-2 sm:gap-3">
+        <div
+          v-if="!loading && credentials.length > 0"
+          class="relative w-full sm:w-72 md:w-80"
+        >
+          <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            id="credential-search"
+            ref="credentialSearchInput"
+            v-model="credentialSearchQuery"
+            type="text"
+            autocomplete="off"
+            class="h-11 min-h-[44px] md:h-9 w-full rounded-xl border border-border bg-background px-9 py-2 text-sm shadow-sm transition-all duration-200 placeholder:text-muted-foreground/60 hover:border-border/80 focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
+            :placeholder="searchPlaceholder"
+            @keydown.esc.prevent.stop="clearCredentialSearch"
+          >
+          <button
+            v-if="isCredentialSearchActive"
+            type="button"
+            title="Clear search"
+            class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            @click="clearCredentialSearchAndKeepFocus"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <Button
+          variant="gradient"
+          @click="openCreateDialog"
+        >
+          <Plus class="w-4 h-4" />
+          New Credential
+        </Button>
+      </div>
     </div>
 
     <div
@@ -325,11 +481,24 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
     </div>
 
     <div
+      v-else-if="isCredentialSearchActive && credentialSearchMatchCount === 0"
+      class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-16 text-center"
+    >
+      <Search class="mb-3 h-8 w-8 text-muted-foreground/60" />
+      <p class="text-sm font-medium text-foreground">
+        No credentials found
+      </p>
+      <p class="mt-1 max-w-md text-xs text-muted-foreground">
+        Try a different name or type.
+      </p>
+    </div>
+
+    <div
       v-else
       class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
     >
       <Card
-        v-for="(credential, index) in credentials"
+        v-for="(credential, index) in filteredCredentials"
         :key="credential.id"
         :data-testid="`credential-card-${credential.id}`"
         :class="cn(
