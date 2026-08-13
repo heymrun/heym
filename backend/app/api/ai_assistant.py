@@ -168,7 +168,7 @@ A bulleted list of concrete, actionable suggestions (reliability, error handling
 1. **Error handling** — Inspect the provided `analysisContext`. ONLY when BOTH `hasErrorHandler` is false AND `errorWorkflowConfigured` is false (the workflow has no error handling at all), call this out and recommend adding an errorHandler node and/or configuring an error workflow ("on error, run workflow"). If at least one is present (`hasErrorHandler` true OR `errorWorkflowConfigured` true), the workflow already catches errors — do NOT mention error handling at all: no suggestion to add more, and no acknowledgement.
 2. **Time saved** — ONLY when `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is already set, do NOT mention time saved at all (no acknowledgement).
 3. **Network nodes** — For any node that performs network I/O (e.g. `httpRequest` and integration/API nodes such as slack, drive, notion, etc.), recommend node-specific error handling (enable retry and/or onError "continue on error") on those specific nodes by label.
-4. **Alerts** — Inspect the provided `analysisContext`. ONLY when `hasProductionTrigger` is true AND `hasAlertConfigured` is false (the workflow runs on a trigger but has no alerts watching it), recommend setting up alerts before going to prod — for example an error, duration, or cost alert. If the workflow has no production trigger or alerts are already configured, do NOT mention alerts at all.
+4. **Alerts** — Inspect the provided `analysisContext`. ONLY when `hasAlertConfigured` is false (no alerts watch this workflow), recommend setting up alerts before going to prod — for example an error, duration, or cost alert. If alerts are already configured, do NOT mention alerts at all.
 
 If the workflow already looks solid, say so and suggest small refinements.
 
@@ -179,22 +179,6 @@ One or two sentences on what this workflow is for.
 A numbered, step-by-step walk through the nodes in execution order, in plain language.
 
 Output ONLY Markdown. Do not include JSON, code fences around the whole document, or tool calls. Be concise and specific to THIS workflow."""
-
-
-_PRODUCTION_TRIGGER_NODE_TYPES = {"textInput", "cron"}
-
-
-def _has_production_trigger(nodes: list[Any] | None) -> bool:
-    """True when the workflow has a trigger/input node that runs it in production."""
-    for node in nodes or []:
-        if not isinstance(node, dict):
-            continue
-        node_type = node.get("type")
-        if isinstance(node_type, str) and (
-            node_type in _PRODUCTION_TRIGGER_NODE_TYPES or node_type.endswith("Trigger")
-        ):
-            return True
-    return False
 
 
 def _build_workflow_analysis_context(
@@ -209,7 +193,6 @@ def _build_workflow_analysis_context(
         "hasErrorHandler": has_error_handler,
         "errorWorkflowConfigured": bool(workflow.get("error_workflow_id")),
         "minutesSavedPerRun": workflow.get("minutes_saved_per_run"),
-        "hasProductionTrigger": _has_production_trigger(nodes),
         "hasAlertConfigured": has_alert_configured,
     }
 

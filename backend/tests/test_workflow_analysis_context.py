@@ -5,30 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.api.ai_assistant import (
     _build_workflow_analysis_context,
-    _has_production_trigger,
     _workflow_has_alert,
 )
-
-
-class HasProductionTriggerTests(unittest.TestCase):
-    def test_true_for_cron_node(self) -> None:
-        self.assertTrue(_has_production_trigger([{"type": "cron"}]))
-
-    def test_true_for_text_input_node(self) -> None:
-        self.assertTrue(_has_production_trigger([{"type": "textInput"}]))
-
-    def test_true_for_trigger_node(self) -> None:
-        self.assertTrue(_has_production_trigger([{"type": "telegramTrigger"}]))
-
-    def test_false_for_regular_node(self) -> None:
-        self.assertFalse(_has_production_trigger([{"type": "llm"}]))
-
-    def test_false_for_empty_or_none(self) -> None:
-        self.assertFalse(_has_production_trigger([]))
-        self.assertFalse(_has_production_trigger(None))
-
-    def test_ignores_non_dict_entries(self) -> None:
-        self.assertFalse(_has_production_trigger(["cron", None, 42]))
 
 
 class BuildWorkflowAnalysisContextTests(unittest.TestCase):
@@ -43,10 +21,9 @@ class BuildWorkflowAnalysisContextTests(unittest.TestCase):
         self.assertTrue(ctx["errorWorkflowConfigured"])
         self.assertEqual(ctx["minutesSavedPerRun"], 12.5)
 
-    def test_flags_production_trigger_and_alert_configured(self) -> None:
+    def test_flags_alert_configured(self) -> None:
         workflow = {"nodes": [{"type": "cron"}]}
         ctx = _build_workflow_analysis_context(workflow, has_alert_configured=True)
-        self.assertTrue(ctx["hasProductionTrigger"])
         self.assertTrue(ctx["hasAlertConfigured"])
 
     def test_defaults_when_workflow_none(self) -> None:
@@ -54,7 +31,6 @@ class BuildWorkflowAnalysisContextTests(unittest.TestCase):
         self.assertFalse(ctx["hasErrorHandler"])
         self.assertFalse(ctx["errorWorkflowConfigured"])
         self.assertIsNone(ctx["minutesSavedPerRun"])
-        self.assertFalse(ctx["hasProductionTrigger"])
         self.assertFalse(ctx["hasAlertConfigured"])
 
 

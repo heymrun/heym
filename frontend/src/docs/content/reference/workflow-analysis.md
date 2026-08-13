@@ -48,7 +48,7 @@ The **Improvement areas** section always runs four explicit checks:
 1. **Error coverage** — if the canvas has no [Error Handler](../nodes/error-handler-node.md) node and no error workflow is configured, the report calls this out and recommends adding error handling.
 2. **Time saved** — if no estimated time saved per run is set, the report recommends configuring one so the [Analytics](../tabs/analytics-tab.md) **Time Saved** metric can populate.
 3. **Network nodes** — for nodes that make network calls (such as [HTTP](../nodes/http-node.md) and integration nodes), the report recommends node-specific error handling (retry and/or continue-on-error) on those nodes.
-4. **Alerts** — when the workflow has a trigger or input node (so it runs on its own in production) but no [alerts](../tabs/alerts-tab.md) are configured for it, the report recommends setting up alerts before going to prod.
+4. **Alerts** — when no [alerts](../tabs/alerts-tab.md) are configured for the workflow, the report recommends setting up alerts before going to prod.
 
 ### Run Analyzer from Properties
 
