@@ -723,6 +723,29 @@ class TestOpenCodeCancellation(unittest.TestCase):
     """A stopped workflow must end the CLI instead of waiting it out."""
 
     @staticmethod
+    def _is_running(pid: int) -> bool:
+        """Return True while the process is alive; a zombie has already terminated.
+
+        ``os.kill(pid, 0)`` also succeeds for an orphaned zombie, so read the process
+        state instead. Once the CLI is killed its server is reparented to init, which
+        may not reap it immediately.
+        """
+        import subprocess
+
+        if Path("/proc/self/stat").exists():  # Linux
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text()
+            except (FileNotFoundError, ProcessLookupError):
+                return False
+            # The state field follows the parenthesized comm, which may itself contain
+            # spaces and parentheses, so read the char after the final ")".
+            return stat[stat.rfind(")") + 2] not in ("Z", "X")
+        state = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout.strip()
+        return bool(state) and not state.startswith("Z")
+
+    @staticmethod
     def _spawn():
         import subprocess
         import sys
@@ -746,32 +769,47 @@ class TestOpenCodeCancellation(unittest.TestCase):
         self.assertIsNotNone(process.poll())
 
     def test_cancel_reaps_the_server_the_cli_spawned(self):
-        import os
         import subprocess
         import sys
         import time
 
-        script = (
-            "import subprocess, sys, time\n"
-            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-            "print('PID', child.pid, flush=True)\n"
-            "time.sleep(60)\n"
-        )
-        process = subprocess.Popen(
-            [sys.executable, "-c", script],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-        )
-        svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws", is_cancelled=lambda: True)
-        outcome = svc._supervise_cli(process, timeout_seconds=60)
-        child_pid = int(outcome.stdout.split()[1])
-        time.sleep(0.5)
-        with self.assertRaises(OSError):
-            os.kill(child_pid, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            # Cancel only once the spawned server exists, otherwise a slow interpreter
+            # start-up makes the run end before there is anything to reap.
+            pid_file = Path(tmp) / "server.pid"
+            script = (
+                "import os, subprocess, sys, time\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                f"open({str(pid_file) + '.tmp'!r}, 'w').write(str(child.pid))\n"
+                f"os.replace({str(pid_file) + '.tmp'!r}, {str(pid_file)!r})\n"
+                "time.sleep(60)\n"
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", script],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + 30.0
+            svc = OpenCodeRunnerService(
+                workspace_root="/tmp/heym-oc-ws",
+                is_cancelled=lambda: pid_file.exists() or time.monotonic() >= deadline,
+            )
+            try:
+                outcome = svc._supervise_cli(process, timeout_seconds=60)
+                self.assertTrue(outcome.cancelled)
+                self.assertTrue(pid_file.exists(), "the CLI never reported its server pid")
+                child_pid = int(pid_file.read_text())
+                for _ in range(100):
+                    if not self._is_running(child_pid):
+                        break
+                    time.sleep(0.05)
+                self.assertFalse(self._is_running(child_pid))
+            finally:
+                svc._terminate_process(process)
 
     def test_broken_cancel_probe_does_not_fail_the_run(self):
         def _boom() -> bool:
