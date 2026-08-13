@@ -774,7 +774,7 @@ with sync_playwright() as p:
           </Label>
         </div>
         <p class="text-xs text-muted-foreground">
-          Steps mode only. Uses a standard Chrome user agent and turns off common Playwright signals so sites are less likely to treat the session as a bot. Does not hide DevTools Protocol. Docker/Linux has no GPU and stays headless.
+          Steps mode only. Uses a standard Chrome user agent and turns off common Playwright signals so sites are less likely to treat the session as a bot.
         </p>
       </div>
       <div class="flex flex-col gap-1">

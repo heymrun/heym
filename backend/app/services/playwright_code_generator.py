@@ -192,6 +192,26 @@ STEALTH_INIT_SCRIPT = r"""(() => {
     };
   }
 
+  const softwareGpu = /swiftshader|llvmpipe|softpipe|lavapipe/i;
+  const linuxArm = /Linux/.test(ua) && /aarch64|arm64/i.test(ua);
+  const linuxWebglVendor = linuxArm ? 'Google Inc. (ARM)' : 'Google Inc. (Intel)';
+  const linuxWebglRenderer = linuxArm
+    ? 'ANGLE (ARM, Mali-G78 MC14, OpenGL ES 3.2)'
+    : 'ANGLE (Intel, Mesa Intel(R) Graphics (RPL-U), OpenGL 4.6)';
+  const replaceSoftwareRenderer = (ctxProto) => {
+    if (!ctxProto || !ctxProto.getParameter) return;
+    const original = ctxProto.getParameter;
+    ctxProto.getParameter = function (param) {
+      const value = original.call(this, param);
+      if (param !== 0x9245 && param !== 0x9246) return value;
+      const renderer = String(original.call(this, 0x9246) || value || '');
+      if (!softwareGpu.test(renderer) && !softwareGpu.test(String(value || ''))) return value;
+      return param === 0x9245 ? linuxWebglVendor : linuxWebglRenderer;
+    };
+  };
+  if (typeof WebGLRenderingContext !== 'undefined') replaceSoftwareRenderer(WebGLRenderingContext.prototype);
+  if (typeof WebGL2RenderingContext !== 'undefined') replaceSoftwareRenderer(WebGL2RenderingContext.prototype);
+
   try {
     const originalDebug = console.debug.bind(console);
     console.debug = function (...args) {

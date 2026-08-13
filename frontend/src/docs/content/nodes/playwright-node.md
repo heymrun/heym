@@ -79,7 +79,7 @@ This option applies only in **Steps** mode. It:
 - Drops Chromium's `--enable-automation` flag and sets `--disable-blink-features=AutomationControlled`
 - Sends a standard Chrome user agent (no `HeadlessChrome`)
 - Restores common browser surfaces that Playwright leaves empty (`window.chrome`, plugins)
-- Leaves the host GPU renderer unchanged when a GPU is available (local macOS/Windows). Docker and other Linux environments have no GPU; Chromium stays headless with software rendering and a Linux user agent. This option does not invent a GPU.
+- Leaves the host GPU renderer unchanged when a GPU is available (local macOS/Windows). Linux/Docker has no GPU; Chromium’s software renderer string is reported as a typical Mali (ARM) or Mesa (x86) GPU instead of SwiftShader.
 
 It does not hide that the session is driven over Chrome DevTools Protocol, and it is not a way to bypass site security, CAPTCHAs, or access controls. Use it for workflows you are authorized to run — internal tools, your own sites, and permitted browser automation.
 
