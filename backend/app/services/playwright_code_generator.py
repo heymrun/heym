@@ -1,6 +1,45 @@
 """Generate Playwright Python code from step definitions."""
 
+import inspect
 import json
+from urllib.error import HTTPError
+from urllib.request import urlopen
+
+
+def http_error_message(status_code: int, reason: str, body: str) -> str:
+    """Turn an HTTP error body into a user-facing message.
+
+    urllib's HTTPError string is typically ``HTTP Error 502: Bad Gateway``. FastAPI
+    (and most LLM proxies) put the useful text in the JSON body ``detail``/``message``.
+    """
+    detail = (body or "").strip()
+    if detail:
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            raw = parsed.get("detail", parsed.get("message", parsed.get("error")))
+            if isinstance(raw, dict):
+                message = raw.get("message")
+                detail = str(message) if message else json.dumps(raw)
+            elif raw is not None:
+                detail = str(raw)
+    return f"HTTP {status_code}: {detail or reason}"
+
+
+def _heym_urlopen_json(req: object, timeout: float) -> object:
+    """urlopen wrapper that surfaces the response body instead of a bare status phrase."""
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except HTTPError as err:
+        body = ""
+        try:
+            body = err.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(http_error_message(err.code, str(err.reason), body)) from None
 
 
 def _expr_to_python(expr: str, default: str = '""') -> str:
@@ -263,8 +302,7 @@ def _generate_step_lines(
                 "    headers={'Content-Type': 'application/json', 'X-Execution-Token': _heym_execution_token},",
                 "    method='POST',",
                 ")",
-                f"with urlopen(_req, timeout={ai_timeout_sec}) as _resp:",
-                "    _ai_result = json.loads(_resp.read().decode())",
+                f"_ai_result = _heym_urlopen_json(_req, {ai_timeout_sec})",
                 "_ai_steps = _ai_result.get('steps', [])",
                 "_effective_steps = list(_ai_steps)",
                 "_heal_timeout = 5000",
@@ -385,8 +423,7 @@ def _generate_step_lines(
                 "                        headers={'Content-Type': 'application/json', 'X-Execution-Token': _heym_execution_token},",
                 "                        method='POST',",
                 "                    )",
-                f"                    with urlopen(_heal_req, timeout={ai_timeout_sec}) as _heal_resp:",
-                "                        _heal_result = json.loads(_heal_resp.read().decode())",
+                f"                    _heal_result = _heym_urlopen_json(_heal_req, {ai_timeout_sec})",
                 "                    _heal_steps = _heal_result.get('steps', [])",
                 "                    if _heal_steps:",
                 "                        _hs = _heal_steps[0]",
@@ -448,12 +485,26 @@ def generate_playwright_code(
     lines = [
         "import base64",
         "import json",
+        "from urllib.error import HTTPError",
         "from urllib.request import Request, urlopen",
         "from playwright.sync_api import sync_playwright",
         "",
-        "with sync_playwright() as p:",
-        "    browser = p.chromium.launch(headless=headless)",
     ]
+    if has_ai_steps:
+        lines.extend(
+            [
+                inspect.getsource(http_error_message).strip(),
+                "",
+                inspect.getsource(_heym_urlopen_json).strip(),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "with sync_playwright() as p:",
+            "    browser = p.chromium.launch(headless=headless)",
+        ]
+    )
 
     if auth_enabled and auth_state and auth_state.get("mode") == "storageState":
         lines.append(

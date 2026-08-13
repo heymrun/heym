@@ -6866,13 +6866,10 @@ export function usePropertiesPanelController() {
     credentialId: string | undefined,
     currentModel?: string,
   ): { value: string; label: string }[] {
-    if (!credentialId) return [{ value: "", label: "Select credential first..." }];
+    if (!credentialId) return [];
     const cached = playwrightAiStepModelsCache.value[credentialId];
     if (cached) {
-      const options: { value: string; label: string }[] = [
-        { value: "", label: "Select model..." },
-        ...cached,
-      ];
+      const options: { value: string; label: string }[] = [...cached];
 
       if (
         currentModel &&
@@ -6890,7 +6887,7 @@ export function usePropertiesPanelController() {
     // While loading: keep current model in options so save preserves it
     return currentModel
       ? [{ value: currentModel, label: `${currentModel} (loading...)` }]
-      : [{ value: "", label: "Loading..." }];
+      : [];
   }
 
   interface PlaywrightStepSection {

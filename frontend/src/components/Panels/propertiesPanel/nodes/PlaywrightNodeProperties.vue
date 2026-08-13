@@ -4,6 +4,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { PlaywrightStepAction } from "@/types/workflow";
@@ -485,13 +486,19 @@ with sync_playwright() as p:
                     @update:model-value="(v) => { updatePlaywrightStep(section.key, index, 'credentialId', v); loadPlaywrightAiStepModels(v as string); }"
                   />
                 </div>
-                <div class="space-y-1">
+                <div
+                  class="space-y-1"
+                  data-testid="playwright-ai-step-model-field"
+                >
                   <Label class="text-xs">Model</Label>
-                  <Select
+                  <SearchableSelect
                     :model-value="step.model || ''"
                     :options="playwrightAiStepModelOptions(step.credentialId, step.model)"
+                    :placeholder="step.credentialId ? 'Select model...' : 'Select credential first...'"
+                    search-placeholder="Search models..."
+                    :empty-text="step.credentialId ? 'No models found.' : 'Select a credential first.'"
                     :disabled="!step.credentialId"
-                    @update:model-value="updatePlaywrightStep(section.key, index, 'model', $event)"
+                    @update:model-value="updatePlaywrightStep(section.key, index, 'model', $event || '')"
                   />
                 </div>
                 <div class="flex flex-col gap-2 pt-1">

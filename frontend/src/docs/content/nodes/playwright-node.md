@@ -51,7 +51,7 @@ The **aiStep** action uses an LLM to analyze the page HTML (and optionally a scr
 |--------|-------------|
 | `instructions` | What the AI should do (e.g. "Click the Login button") |
 | `credentialId` | LLM credential (OpenAI, Google, or Custom) |
-| `model` | Model to use |
+| `model` | Searchable list of models from the selected LLM credential |
 | `saveStepsForFuture` | Cache generated steps for next runs (avoids LLM call) |
 | `sendScreenshot` | Send screenshot to LLM for visual elements |
 | `aiStepTimeout` | Timeout for LLM call in ms (default 30000) |

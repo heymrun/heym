@@ -24,6 +24,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def llm_exception_message(exc: BaseException) -> str:
+    """Prefer the provider response body over a generic HTTP status phrase."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            message = err.get("message")
+            if message:
+                return str(message)
+        message = body.get("message") or body.get("detail")
+        if message:
+            return str(message)
+        return json.dumps(body)[:2000]
+    if isinstance(body, str) and body.strip():
+        return body.strip()[:2000]
+    response = getattr(exc, "response", None)
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()[:2000]
+    message = getattr(exc, "message", None)
+    if message:
+        return str(message)
+    return str(exc)
+
+
 AI_STEP_SYSTEM_PROMPT = """You are a Playwright automation expert. Given HTML (and optionally a screenshot description), analyze the page and return a JSON object with a "steps" array of Playwright actions to fulfill the user's instructions.
 
 Each step must have an "action" field. Supported actions (do not use "aiStep"):
@@ -273,19 +299,19 @@ async def ai_step(
                 logger.exception("Playwright AI step LLM retry without image failed")
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"LLM call failed: {str(retry_e)}",
+                    detail=f"LLM call failed: {llm_exception_message(retry_e)}",
                 ) from retry_e
         else:
             logger.exception("Playwright AI step LLM call failed")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM call failed: {str(e)}",
+                detail=f"LLM call failed: {llm_exception_message(e)}",
             ) from e
     except Exception as e:
         logger.exception("Playwright AI step LLM call failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM call failed: {str(e)}",
+            detail=f"LLM call failed: {llm_exception_message(e)}",
         ) from e
 
     text = result.get("text", "")
@@ -479,19 +505,19 @@ async def ai_step_heal(
                 logger.exception("Playwright AI step heal LLM retry without image failed")
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"LLM heal failed: {str(retry_e)}",
+                    detail=f"LLM heal failed: {llm_exception_message(retry_e)}",
                 ) from retry_e
         else:
             logger.exception("Playwright AI step heal LLM call failed")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM heal failed: {str(e)}",
+                detail=f"LLM heal failed: {llm_exception_message(e)}",
             ) from e
     except Exception as e:
         logger.exception("Playwright AI step heal LLM call failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM heal failed: {str(e)}",
+            detail=f"LLM heal failed: {llm_exception_message(e)}",
         ) from e
 
     text_res = result.get("text", "")

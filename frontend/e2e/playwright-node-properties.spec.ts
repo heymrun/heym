@@ -46,3 +46,46 @@ test("shows Playwright Mode dropdown with Run Code", async ({ page }) => {
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("uses a searchable model dropdown for Playwright AI step", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Playwright AI Step ${Date.now()}`,
+    [
+      {
+        id: "pw-node",
+        type: "playwright",
+        position: { x: 120, y: 160 },
+        data: {
+          label: "playwright",
+          playwrightMode: "steps",
+          playwrightSteps: [
+            {
+              action: "aiStep",
+              instructions: "Click the login button",
+              credentialId: "",
+              model: "",
+            },
+          ],
+          playwrightCode: "",
+          playwrightHeadless: true,
+          playwrightTimeout: 30000,
+        },
+      },
+    ],
+  );
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(1);
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await page.locator('.vue-flow__node[data-id="pw-node"]').click();
+
+    const modelField = page.locator(".properties-panel").getByTestId("playwright-ai-step-model-field");
+    await expect(modelField).toBeVisible();
+    await expect(modelField.getByRole("combobox")).toBeVisible();
+    await expect(modelField.locator("select")).toHaveCount(0);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
