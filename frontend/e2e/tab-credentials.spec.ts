@@ -300,6 +300,7 @@ test("filters credentials by name with the search input", async ({ page }) => {
 
     await page.keyboard.press("Escape");
     await expect(searchInput).toHaveValue("");
+    await expect(searchInput).not.toBeFocused();
     await expect(page.getByTestId(`credential-card-${credential.id}`)).toBeVisible();
 
     await page.locator("body").click({ position: { x: 5, y: 5 } });

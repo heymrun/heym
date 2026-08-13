@@ -156,6 +156,7 @@ onMounted(async () => {
   const unsub = onDismissOverlays(() => {
     showDialog.value = false;
     showShareDialog.value = false;
+    clearCredentialSearch();
   });
   onUnmounted(() => {
     window.removeEventListener("keydown", handleCredentialKeyDown);
