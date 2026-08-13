@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, X, XCircle } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
+import ImageLightbox from "@/components/ui/ImageLightbox.vue";
 import SelectorPickerDialog from "@/components/Dialogs/SelectorPickerDialog.vue";
 import SkillBuilderModal from "@/components/Panels/SkillBuilderModal.vue";
 import SkillHistoryDialog from "@/components/Dialogs/SkillHistoryDialog.vue";
@@ -26,6 +27,8 @@ const {
   closeValidationDialog,
   selectNodeFromError,
   imageLightboxSrc,
+  imageLightboxSrcs,
+  closeImageLightbox,
 } = usePropertiesPanelContext();
 </script>
 
@@ -97,22 +100,13 @@ const {
     </Transition>
   </Teleport>
 
-  <Teleport to="body">
-    <Transition name="fade">
-      <div
-        v-if="imageLightboxSrc"
-        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-        @click="imageLightboxSrc = null"
-      >
-        <img
-          :src="imageLightboxSrc"
-          alt="Enlarged"
-          class="max-w-[95vw] max-h-[95vh] object-contain rounded-lg shadow-2xl"
-          @click.stop
-        >
-      </div>
-    </Transition>
-  </Teleport>
+  <ImageLightbox
+    :src="imageLightboxSrc"
+    :srcs="imageLightboxSrcs"
+    alt="Node output image"
+    @update:src="imageLightboxSrc = $event"
+    @close="closeImageLightbox"
+  />
 
   <SelectorPickerDialog
     :open="selectorPickerOpen"

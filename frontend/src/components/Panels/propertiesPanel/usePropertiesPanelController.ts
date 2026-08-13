@@ -8918,6 +8918,21 @@ export function usePropertiesPanelController() {
   });
 
   const imageLightboxSrc = ref<string | null>(null);
+  const imageLightboxSrcs = ref<string[]>([]);
+
+  function openImageLightbox(src: string, gallery: readonly string[]): void {
+    const unique = [...new Set(gallery.length > 0 ? gallery : [src])];
+    if (!unique.includes(src)) {
+      unique.unshift(src);
+    }
+    imageLightboxSrcs.value = unique;
+    imageLightboxSrc.value = src;
+  }
+
+  function closeImageLightbox(): void {
+    imageLightboxSrc.value = null;
+    imageLightboxSrcs.value = [];
+  }
 
 
   async function copyOutput(): Promise<void> {
@@ -8969,7 +8984,7 @@ export function usePropertiesPanelController() {
     }
     if (e.key === "Escape" && imageLightboxSrc.value) {
       e.stopPropagation();
-      imageLightboxSrc.value = null;
+      closeImageLightbox();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
@@ -9671,6 +9686,9 @@ export function usePropertiesPanelController() {
     displayNodeOutput,
     nodeOutputImageSrcs,
     imageLightboxSrc,
+    imageLightboxSrcs,
+    openImageLightbox,
+    closeImageLightbox,
     copyOutput,
     canVisitWorkflow,
     visitWorkflow,

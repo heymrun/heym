@@ -22,6 +22,7 @@ import type { WorkflowWithInputs } from "@/services/api";
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import Dialog from "@/components/ui/Dialog.vue";
+import ImageLightbox from "@/components/ui/ImageLightbox.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Textarea from "@/components/ui/Textarea.vue";
@@ -1296,6 +1297,21 @@ function getOutputImageSrcs(output: unknown): string[] {
 }
 
 const imageLightboxSrc = ref<string | null>(null);
+const imageLightboxSrcs = ref<string[]>([]);
+
+function openImageLightbox(src: string, gallery: readonly string[]): void {
+  const unique = [...new Set(gallery.length > 0 ? gallery : [src])];
+  if (!unique.includes(src)) {
+    unique.unshift(src);
+  }
+  imageLightboxSrcs.value = unique;
+  imageLightboxSrc.value = src;
+}
+
+function closeImageLightbox(): void {
+  imageLightboxSrc.value = null;
+  imageLightboxSrcs.value = [];
+}
 
 function handleDebugPanelWindowKeyDown(e: KeyboardEvent): void {
   // AI Assistant: Ctrl+I / Cmd+I toggles the panel, even while typing.
@@ -1313,19 +1329,27 @@ function handleDebugPanelWindowKeyDown(e: KeyboardEvent): void {
   }
   if (e.key === "Escape" && imageLightboxSrc.value) {
     e.stopPropagation();
-    imageLightboxSrc.value = null;
+    closeImageLightbox();
   }
 }
 
-/** All screenshots from the run, in execution order. */
-const allScreenshotsFromRun = computed(() => {
+/** Screenshots from the run, grouped so lightbox navigation stays on one node. */
+interface RunScreenshotThumb {
+  src: string;
+  gallery: string[];
+}
+
+const allScreenshotsFromRun = computed((): RunScreenshotThumb[] => {
   const results = executionResult.value ? executionResult.value.node_results : nodeResults.value;
-  const srcs: string[] = [];
+  const thumbs: RunScreenshotThumb[] = [];
   for (const r of results) {
     if (r.node_type === "condition" || r.node_type === "sticky" || r.status === "skipped") continue;
-    srcs.push(...getOutputImageSrcs(r.output));
+    const gallery = getOutputImageSrcs(r.output);
+    for (const src of gallery) {
+      thumbs.push({ src, gallery });
+    }
   }
-  return srcs;
+  return thumbs;
 });
 
 interface SkillGeneratedFile {
@@ -3353,7 +3377,7 @@ function renderContent(content: string): string {
                   :src="src"
                   :alt="`Screenshot ${idx + 1}`"
                   class="w-16 h-16 rounded border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                  @click="imageLightboxSrc = src"
+                  @click="openImageLightbox(src, getOutputImageSrcs(result.rawOutput))"
                 >
               </div>
               <div
@@ -3495,12 +3519,12 @@ function renderContent(content: string): string {
           </div>
           <div class="flex flex-wrap gap-2">
             <img
-              v-for="(src, idx) in allScreenshotsFromRun"
+              v-for="(item, idx) in allScreenshotsFromRun"
               :key="idx"
-              :src="src"
+              :src="item.src"
               :alt="`Screenshot ${idx + 1}`"
               class="w-20 h-20 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-              @click="imageLightboxSrc = src"
+              @click="openImageLightbox(item.src, item.gallery)"
             >
           </div>
         </div>
@@ -3904,22 +3928,13 @@ function renderContent(content: string): string {
       </div>
     </Dialog>
 
-    <Teleport to="body">
-      <Transition name="fade">
-        <div
-          v-if="imageLightboxSrc"
-          class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-          @click="imageLightboxSrc = null"
-        >
-          <img
-            :src="imageLightboxSrc"
-            alt="Enlarged"
-            class="max-w-[95vw] max-h-[95vh] object-contain rounded-lg shadow-2xl"
-            @click.stop
-          >
-        </div>
-      </Transition>
-    </Teleport>
+    <ImageLightbox
+      :src="imageLightboxSrc"
+      :srcs="imageLightboxSrcs"
+      alt="Node output image"
+      @update:src="imageLightboxSrc = $event"
+      @close="closeImageLightbox"
+    />
   </div>
 </template>
 

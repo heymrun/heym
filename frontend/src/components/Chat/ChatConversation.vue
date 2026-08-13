@@ -104,6 +104,21 @@ const isSpeechSupported = ref(false);
 const isListening = ref(false);
 const isFixingTranscription = ref(false);
 const imageLightboxSrc = ref<string | null>(null);
+const imageLightboxSrcs = ref<string[]>([]);
+
+function openImageLightbox(src: string, gallery: readonly string[]): void {
+  const unique = [...new Set(gallery.length > 0 ? gallery : [src])];
+  if (!unique.includes(src)) {
+    unique.unshift(src);
+  }
+  imageLightboxSrcs.value = unique;
+  imageLightboxSrc.value = src;
+}
+
+function closeImageLightbox(): void {
+  imageLightboxSrc.value = null;
+  imageLightboxSrcs.value = [];
+}
 const selectedWorkflowPreviewNodes = ref<Record<string, Record<string, unknown> | null>>({});
 const chatScrollbarThumbTop = ref(0);
 const chatScrollbarThumbHeight = ref(44);
@@ -505,7 +520,8 @@ onMounted(() => {
 function handleMarkdownImageClick(event: MouseEvent): void {
   const target = event.target as HTMLElement;
   if (target.tagName === "IMG") {
-    imageLightboxSrc.value = (target as HTMLImageElement).src;
+    const src = (target as HTMLImageElement).src;
+    openImageLightbox(src, [src]);
   }
 }
 
@@ -1060,7 +1076,7 @@ onUnmounted(() => {
                 :src="imgSrc"
                 alt="Generated image"
                 class="max-h-48 max-w-full rounded-lg object-contain cursor-zoom-in border border-border/30 hover:border-border/60 transition-colors"
-                @click.stop="imageLightboxSrc = imgSrc"
+                @click.stop="openImageLightbox(imgSrc, msg.images)"
               >
             </div>
             <div
@@ -1184,7 +1200,7 @@ onUnmounted(() => {
                 :src="imgSrc"
                 alt="Generated image"
                 class="max-h-48 max-w-full rounded-lg object-contain cursor-zoom-in border border-border/30 hover:border-border/60 transition-colors"
-                @click.stop="imageLightboxSrc = imgSrc"
+                @click.stop="openImageLightbox(imgSrc, streamState.images)"
               >
             </div>
             <div
@@ -1278,8 +1294,10 @@ onUnmounted(() => {
 
     <ImageLightbox
       :src="imageLightboxSrc"
+      :srcs="imageLightboxSrcs"
       alt="Generated image"
-      @close="imageLightboxSrc = null"
+      @update:src="imageLightboxSrc = $event"
+      @close="closeImageLightbox"
     />
 
     <InteractiveVoiceMode

@@ -21,7 +21,7 @@ const {
   formatOutput,
   displayNodeOutput,
   nodeOutputImageSrcs,
-  imageLightboxSrc,
+  openImageLightbox,
   copyOutput,
 } = usePropertiesPanelContext();
 </script>
@@ -143,7 +143,7 @@ const {
             :src="src"
             :alt="`Screenshot ${idx + 1}`"
             class="w-24 h-24 sm:w-28 sm:h-28 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-            @click="imageLightboxSrc = src"
+            @click="openImageLightbox(src, nodeOutputImageSrcs)"
           >
         </div>
         <div
@@ -275,7 +275,7 @@ const {
                   :src="src"
                   :alt="`Screenshot ${idx + 1}`"
                   class="w-24 h-24 sm:w-28 sm:h-28 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                  @click="imageLightboxSrc = src"
+                  @click="openImageLightbox(src, nodeOutputImageSrcs)"
                 >
               </div>
               <div
