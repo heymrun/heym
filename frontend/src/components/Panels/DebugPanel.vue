@@ -1333,23 +1333,15 @@ function handleDebugPanelWindowKeyDown(e: KeyboardEvent): void {
   }
 }
 
-/** Screenshots from the run, grouped so lightbox navigation stays on one node. */
-interface RunScreenshotThumb {
-  src: string;
-  gallery: string[];
-}
-
-const allScreenshotsFromRun = computed((): RunScreenshotThumb[] => {
+/** All screenshots from the run, in execution order. The strip lightbox cycles this full list. */
+const allScreenshotsFromRun = computed((): string[] => {
   const results = executionResult.value ? executionResult.value.node_results : nodeResults.value;
-  const thumbs: RunScreenshotThumb[] = [];
+  const srcs: string[] = [];
   for (const r of results) {
     if (r.node_type === "condition" || r.node_type === "sticky" || r.status === "skipped") continue;
-    const gallery = getOutputImageSrcs(r.output);
-    for (const src of gallery) {
-      thumbs.push({ src, gallery });
-    }
+    srcs.push(...getOutputImageSrcs(r.output));
   }
-  return thumbs;
+  return srcs;
 });
 
 interface SkillGeneratedFile {
@@ -3519,12 +3511,12 @@ function renderContent(content: string): string {
           </div>
           <div class="flex flex-wrap gap-2">
             <img
-              v-for="(item, idx) in allScreenshotsFromRun"
+              v-for="(src, idx) in allScreenshotsFromRun"
               :key="idx"
-              :src="item.src"
+              :src="src"
               :alt="`Screenshot ${idx + 1}`"
               class="w-20 h-20 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-              @click="openImageLightbox(item.src, item.gallery)"
+              @click="openImageLightbox(src, allScreenshotsFromRun)"
             >
           </div>
         </div>
