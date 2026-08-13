@@ -349,19 +349,22 @@ def resolve_update_existing_pr_branch(
     base_branch: str,
     configured_branch: str,
 ) -> str:
-    """Head branch to reuse for ``update_existing_pr`` so a re-run updates the agent's existing
+    """Head branch to reuse for ``update_existing_pr`` so a re-run updates *this task's* existing
     open pull request instead of opening a new one.
 
-    ``update_existing_pr`` used to trust ``configured_branch`` to already equal an open PR's head.
-    In agentic/board flows the branch name is generated per run (e.g. by an LLM planner), so it
-    never matches and every "update the open PR" run opened a *new* PR. This resolves the real
-    target:
+    Every candidate has to be tied back to ``configured_branch``. An earlier version adopted the
+    token account's most-recently-updated open PR whenever the branch did not match, which made
+    concurrent board cards land on whichever pull request happened to be touched last: one agent
+    pushed its alerts work onto an unrelated dialog PR. Resolution order:
 
     * an open PR whose head already equals ``configured_branch`` wins (explicit targeting);
-    * otherwise the token account's most-recently-updated open PR into ``base_branch`` is adopted;
+    * a branch that names a pull request (``reuse-branch-from-pr-401``) resolves to that PR's head;
+    * an open PR whose head carries the same task slug, ignoring the agent prefix, is adopted, so
+      the same card re-run through a different agent keeps one pull request;
     * otherwise ``configured_branch`` is returned unchanged (a fresh PR is created downstream).
 
-    Best-effort: any GitHub error falls back to ``configured_branch`` (never raises).
+    Adoption is limited to the token account's own pull requests. Best-effort: any GitHub error
+    falls back to ``configured_branch`` (never raises).
     """
     try:
         pulls = gh.list_pull_requests(owner, repo, state="open", per_page=100)
@@ -374,16 +377,37 @@ def resolve_update_existing_pr_branch(
             return configured_branch
 
     author = _authenticated_login(gh)
-    if author:
-        candidates = [pull for pull in to_base if _pr_author_login(pull) == author]
-    else:
-        # Without a known author, only adopt when there is exactly one open PR into the base,
-        # so a re-run never hijacks an unrelated contributor's pull request.
-        candidates = to_base if len(to_base) == 1 else []
-    if not candidates:
-        return configured_branch
-    target = max(candidates, key=lambda pull: str(pull.get("updated_at") or ""))
-    return _pr_head_ref(target) or configured_branch
+    candidates = [pull for pull in to_base if _pr_author_login(pull) == author] if author else []
+
+    referenced = _referenced_pr_number(configured_branch)
+    if referenced is not None:
+        for pull in candidates:
+            if pull.get("number") == referenced:
+                return _pr_head_ref(pull) or configured_branch
+
+    slug = _branch_task_slug(configured_branch)
+    if slug:
+        matching = [pull for pull in candidates if _branch_task_slug(_pr_head_ref(pull)) == slug]
+        if matching:
+            target = max(matching, key=lambda pull: str(pull.get("updated_at") or ""))
+            return _pr_head_ref(target) or configured_branch
+
+    return configured_branch
+
+
+def _referenced_pr_number(branch: str) -> int | None:
+    """PR number a placeholder branch such as ``reuse-branch-from-pr-401`` points at."""
+    match = re.search(r"(?:^|[-_/])pr[-_]?(\d+)(?:$|[-_/])", str(branch or ""), re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _branch_task_slug(branch: str) -> str:
+    """``opencode/alerts-dialog-improvements`` and ``codex/alerts_dialog_improvements`` share a
+    slug, so one card keeps one pull request across agents. Unrelated tasks never collide."""
+    tail = str(branch or "").strip().strip("/").split("/")[-1].lower()
+    return re.sub(r"[^a-z0-9]+", "-", tail).strip("-")
 
 
 def _pr_head_ref(pull: dict) -> str:

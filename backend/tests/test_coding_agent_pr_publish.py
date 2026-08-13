@@ -311,18 +311,25 @@ class TestChangeSummaryExtraction(unittest.TestCase):
         self.assertEqual(pr_publish.extract_change_summary_section("Just prose."), "")
 
 
-def _pr(head: str, base: str = "main", login: str = "heym-coder", updated_at: str = "") -> dict:
+def _pr(
+    head: str,
+    base: str = "main",
+    login: str = "heym-coder",
+    updated_at: str = "",
+    number: int = 1,
+) -> dict:
     return {
         "head": {"ref": head},
         "base": {"ref": base},
         "user": {"login": login},
         "updated_at": updated_at,
-        "html_url": f"https://github.com/acme/app/pull/{head}",
+        "number": number,
+        "html_url": f"https://github.com/acme/app/pull/{number}",
     }
 
 
 class TestResolveUpdateExistingPrBranch(unittest.TestCase):
-    """update_existing_pr must find the agent's real open PR, not trust the configured branch."""
+    """update_existing_pr must find this task's open PR, never an unrelated one."""
 
     def _gh(self, pulls: list[dict], login: str = "heym-coder") -> MagicMock:
         gh = MagicMock()
@@ -337,53 +344,67 @@ class TestResolveUpdateExistingPrBranch(unittest.TestCase):
         )
         self.assertEqual(branch, "configured")
 
-    def test_adopts_authors_open_pr_when_branch_does_not_match(self):
-        # The real board bug: the configured branch was LLM-generated and never matched PR #401.
-        gh = self._gh([_pr("feat/running-workflow-count-badge")])
+    def test_branch_naming_a_pull_request_resolves_to_its_head(self):
+        # The board bug behind this fallback: the planner emitted a placeholder for PR #401.
+        gh = self._gh([_pr("feat/running-workflow-count-badge", number=401)])
         branch = pr_publish.resolve_update_existing_pr_branch(
             gh, "acme", "app", base_branch="main", configured_branch="reuse-branch-from-pr-401"
         )
         self.assertEqual(branch, "feat/running-workflow-count-badge")
 
-    def test_picks_most_recently_updated_of_the_authors_prs(self):
+    def test_adopts_the_same_task_under_a_different_agent_prefix(self):
+        gh = self._gh([_pr("codex/alerts-dialog-improvements", number=7)])
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh,
+            "acme",
+            "app",
+            base_branch="main",
+            configured_branch="opencode/alerts-dialog-improvements",
+        )
+        self.assertEqual(branch, "codex/alerts-dialog-improvements")
+
+    def test_never_adopts_an_unrelated_task(self):
+        # A concurrent card pushed its alerts work onto an unrelated dialog PR this way.
         gh = self._gh(
             [
-                _pr("older", updated_at="2026-07-20T10:00:00Z"),
-                _pr("newest", updated_at="2026-07-22T10:00:00Z"),
+                _pr(
+                    "codex/traces-models-without-pricing-dialog", updated_at="2026-08-13T15:00:00Z"
+                ),
+                _pr("opencode/board-card-filters", updated_at="2026-08-13T14:00:00Z"),
             ]
         )
         branch = pr_publish.resolve_update_existing_pr_branch(
-            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+            gh,
+            "acme",
+            "app",
+            base_branch="main",
+            configured_branch="opencode/alerts-dialog-improvements",
         )
-        self.assertEqual(branch, "newest")
+        self.assertEqual(branch, "opencode/alerts-dialog-improvements")
 
     def test_ignores_other_authors_and_other_base_branches(self):
         gh = self._gh(
             [
-                _pr("human-pr", login="someone-else"),
-                _pr("wrong-base", base="develop"),
+                _pr("human/unmatched", login="someone-else"),
+                _pr("bot/unmatched", base="develop"),
             ]
         )
         branch = pr_publish.resolve_update_existing_pr_branch(
-            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+            gh, "acme", "app", base_branch="main", configured_branch="agent/unmatched"
         )
-        self.assertEqual(branch, "unmatched")
+        self.assertEqual(branch, "agent/unmatched")
 
-    def test_without_author_only_adopts_a_single_open_pr(self):
-        gh = self._gh([_pr("only-one")])
+    def test_without_a_readable_author_nothing_is_adopted(self):
+        gh = self._gh([_pr("codex/alerts-dialog-improvements")])
         gh.get_authenticated_user.side_effect = ValueError("token cannot read /user")
         branch = pr_publish.resolve_update_existing_pr_branch(
-            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+            gh,
+            "acme",
+            "app",
+            base_branch="main",
+            configured_branch="opencode/alerts-dialog-improvements",
         )
-        self.assertEqual(branch, "only-one")
-
-    def test_without_author_does_not_adopt_when_ambiguous(self):
-        gh = self._gh([_pr("one"), _pr("two")])
-        gh.get_authenticated_user.side_effect = ValueError("token cannot read /user")
-        branch = pr_publish.resolve_update_existing_pr_branch(
-            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
-        )
-        self.assertEqual(branch, "unmatched")
+        self.assertEqual(branch, "opencode/alerts-dialog-improvements")
 
     def test_github_error_falls_back_to_configured_branch(self):
         gh = MagicMock()
