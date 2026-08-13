@@ -912,6 +912,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       playwrightSteps: [],
       playwrightCode: "",
       playwrightHeadless: true,
+      playwrightStealth: false,
       playwrightTimeout: 30000,
       playwrightCaptureNetwork: false,
       playwrightAuthEnabled: false,

@@ -39,6 +39,11 @@ test("shows Playwright Mode dropdown with Run Code", async ({ page }) => {
     await expect(modeField.locator("select")).toHaveValue("steps");
     await expect(modeField.locator("option[value='code']")).toHaveText("Run Code");
 
+    const stealthField = panel.getByTestId("playwright-stealth-field");
+    await expect(stealthField).toBeVisible();
+    await expect(stealthField.getByText("Reduce automation flags")).toBeVisible();
+    await expect(stealthField.locator("#playwright-stealth")).not.toBeChecked();
+
     await modeField.locator("select").selectOption("code");
     await expect(panel.getByTestId("playwright-code-field")).toBeVisible();
     await expect(panel.getByText("Auth & Session")).toHaveCount(0);

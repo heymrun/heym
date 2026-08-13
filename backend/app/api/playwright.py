@@ -123,6 +123,7 @@ async def generate_code(
         auth_check_selector=str(body.get("authCheckSelector", "") or ""),
         auth_check_timeout=auth_check_timeout,
         auth_fallback_steps=body.get("authFallbackSteps") or [],
+        stealth=body.get("stealth", False),
     )
     has_ai = any(s.get("action") == "aiStep" for s in steps)
     if has_ai:

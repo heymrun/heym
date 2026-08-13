@@ -1122,6 +1122,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       playwrightSteps: [],
       playwrightCode: "",
       playwrightHeadless: true,
+      playwrightStealth: false,
       playwrightTimeout: 30000,
       playwrightCaptureNetwork: false,
       playwrightAuthEnabled: false,

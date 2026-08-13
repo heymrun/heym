@@ -754,6 +754,29 @@ with sync_playwright() as p:
           Only applies in local development. Docker always runs headless (no display).
         </p>
       </div>
+      <div
+        class="flex flex-col gap-1"
+        data-testid="playwright-stealth-field"
+      >
+        <div class="flex items-center gap-2">
+          <input
+            id="playwright-stealth"
+            type="checkbox"
+            class="h-4 w-4 rounded border-input bg-background"
+            :checked="selectedNode.data.playwrightStealth === true"
+            @change="updateNodeData('playwrightStealth', ($event.target as HTMLInputElement).checked)"
+          >
+          <Label
+            for="playwright-stealth"
+            class="text-sm font-normal"
+          >
+            Reduce automation flags
+          </Label>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Steps mode only. Uses a standard Chrome user agent and turns off common Playwright signals so sites are less likely to treat the session as a bot. Does not hide DevTools Protocol. Docker/Linux has no GPU and stays headless.
+        </p>
+      </div>
       <div class="flex flex-col gap-1">
         <div class="flex items-center gap-2">
           <input

@@ -741,6 +741,8 @@ export interface NodeData {
   playwrightMode?: "steps" | "code";
   playwrightCode?: string;
   playwrightHeadless?: boolean;
+  /** Opt-in: reduce common Playwright automation signals. Properties label: Reduce automation flags. */
+  playwrightStealth?: boolean;
   playwrightTimeout?: number;
   playwrightCaptureNetwork?: boolean;
   playwrightAuthEnabled?: boolean;

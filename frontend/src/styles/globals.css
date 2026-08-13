@@ -157,7 +157,7 @@
     --node-rabbitmq: 25 88% 55%;
     --node-crawler: 162 94% 45%;
     --node-console-log: 168 35% 52%;
-    --node-playwright: 262 83% 63%;
+    --node-playwright: 262 92% 78%;
   }
 }
 

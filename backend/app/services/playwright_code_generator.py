@@ -74,6 +74,268 @@ def _as_py_bool_literal(value: object) -> str:
     return "True" if bool(value) else "False"
 
 
+STEALTH_INIT_SCRIPT = r"""(() => {
+  const nativeWebdriver = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+  if (nativeWebdriver && nativeWebdriver.get) {
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+      configurable: true,
+      enumerable: nativeWebdriver.enumerable,
+      get: new Proxy(nativeWebdriver.get, { apply: () => false }),
+    });
+  } else {
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+      configurable: true,
+      enumerable: true,
+      get: function () { return false; },
+    });
+  }
+
+  window.chrome = window.chrome || {};
+  window.chrome.runtime = window.chrome.runtime || {
+    connect: function () {},
+    sendMessage: function () {},
+    id: undefined,
+  };
+  window.chrome.csi = window.chrome.csi || function () { return {}; };
+  window.chrome.loadTimes = window.chrome.loadTimes || function () { return {}; };
+  window.chrome.app = window.chrome.app || {
+    isInstalled: false,
+    InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+    RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+  };
+
+  const ua = String(navigator.userAgent || '').replace(/HeadlessChrome/g, 'Chrome');
+  const appVersion = ua.replace(/^Mozilla\//, '');
+  Object.defineProperty(navigator, 'userAgent', { get: () => ua, configurable: true });
+  Object.defineProperty(navigator, 'appVersion', { get: () => appVersion, configurable: true });
+  Object.defineProperty(navigator, 'languages', { get: () => Object.freeze(['en-US', 'en']), configurable: true });
+
+  const chromeMajor = (ua.match(/Chrome\/(\d+)/) || [])[1] || '145';
+  const chromeFull = (ua.match(/Chrome\/([\d.]+)/) || [])[1] || chromeMajor;
+  const brands = [
+    { brand: 'Not/A)Brand', version: '8' },
+    { brand: 'Chromium', version: chromeMajor },
+    { brand: 'Google Chrome', version: chromeMajor },
+  ];
+  if (navigator.userAgentData) {
+    try {
+      Object.defineProperty(navigator.userAgentData, 'brands', { get: () => brands, configurable: true });
+      const originalHighEntropy = navigator.userAgentData.getHighEntropyValues.bind(navigator.userAgentData);
+      navigator.userAgentData.getHighEntropyValues = async (hints) => {
+        const values = await originalHighEntropy(hints);
+        values.brands = brands;
+        values.fullVersionList = brands.map((b) => ({
+          brand: b.brand,
+          version: b.brand === 'Not/A)Brand' ? '10.0.0.0' : chromeFull,
+        }));
+        return values;
+      };
+    } catch (e) {}
+  }
+
+  const pdfEntries = [
+    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+  ];
+  const pluginArray = Object.create(PluginArray.prototype);
+  const mimeArray = Object.create(MimeTypeArray.prototype);
+  const plugins = [];
+  const mimes = [];
+  pdfEntries.forEach((entry, index) => {
+    const plugin = Object.create(Plugin.prototype);
+    const mime = Object.create(MimeType.prototype);
+    Object.defineProperties(mime, {
+      type: { enumerable: true, value: 'application/pdf' },
+      suffixes: { enumerable: true, value: 'pdf' },
+      description: { enumerable: true, value: entry.description },
+      enabledPlugin: { enumerable: true, get: () => plugin },
+    });
+    Object.defineProperties(plugin, {
+      name: { enumerable: true, value: entry.name },
+      filename: { enumerable: true, value: entry.filename },
+      description: { enumerable: true, value: entry.description },
+      length: { value: 1 },
+      0: { enumerable: true, value: mime },
+    });
+    plugin.item = function (i) { return i === 0 ? mime : null; };
+    plugin.namedItem = function (type) { return type === 'application/pdf' ? mime : null; };
+    plugins.push(plugin);
+    if (index === 0) mimes.push(mime);
+    Object.defineProperty(pluginArray, index, { enumerable: true, value: plugin });
+    Object.defineProperty(pluginArray, entry.name, { value: plugin });
+  });
+  Object.defineProperty(pluginArray, 'length', { value: plugins.length });
+  pluginArray.item = function (i) { return this[i] || null; };
+  pluginArray.namedItem = function (name) { return plugins.find((p) => p.name === name) || null; };
+  pluginArray.refresh = function () {};
+  Object.defineProperty(mimeArray, 0, { enumerable: true, value: mimes[0] });
+  Object.defineProperty(mimeArray, 'application/pdf', { value: mimes[0] });
+  Object.defineProperty(mimeArray, 'length', { value: 1 });
+  mimeArray.item = function (i) { return this[i] || null; };
+  mimeArray.namedItem = function (type) { return type === 'application/pdf' ? mimes[0] : null; };
+  Object.defineProperty(navigator, 'plugins', { get: () => pluginArray, configurable: true });
+  Object.defineProperty(navigator, 'mimeTypes', { get: () => mimeArray, configurable: true });
+
+  try {
+    Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
+  } catch (e) {}
+  const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+  if (originalQuery) {
+    window.navigator.permissions.query = function (parameters) {
+      if (parameters && parameters.name === 'notifications') {
+        return Promise.resolve({ state: 'prompt', onchange: null, name: 'notifications' });
+      }
+      return originalQuery.call(window.navigator.permissions, parameters);
+    };
+  }
+
+  try {
+    const originalDebug = console.debug.bind(console);
+    console.debug = function (...args) {
+      if (args.length === 1 && args[0] instanceof Error) return;
+      return originalDebug(...args);
+    };
+  } catch (e) {}
+
+  const originalCreateElement = Document.prototype.createElement;
+  Document.prototype.createElement = function () {
+    const el = originalCreateElement.apply(this, arguments);
+    if (el && el.tagName === 'IFRAME') {
+      el.addEventListener('load', () => {
+        try {
+          if (el.contentWindow && !el.contentWindow.chrome) {
+            el.contentWindow.chrome = window.chrome;
+          }
+        } catch (err) {}
+      });
+    }
+    return el;
+  };
+})();"""
+
+
+def _stealth_user_agent(browser: object) -> str:
+    """Build a Chrome UA matching the launched browser version without HeadlessChrome."""
+    import platform
+
+    ver = str(getattr(browser, "version", "") or "145.0.0.0")
+    system = platform.system()
+    if system == "Darwin":
+        os_token = "(Macintosh; Intel Mac OS X 10_15_7)"
+    elif system == "Windows":
+        os_token = "(Windows NT 10.0; Win64; x64)"
+    else:
+        linux_arch = "aarch64" if platform.machine().lower() in {"arm64", "aarch64"} else "x86_64"
+        os_token = f"(X11; Linux {linux_arch})"
+    return (
+        f"Mozilla/5.0 {os_token} AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ver} Safari/537.36"
+    )
+
+
+def _stealth_chromium_launch_kwargs(headless: object) -> dict:
+    """Launch Chromium without automation flags; use a host GPU only when one exists.
+
+    Production Playwright runs in a Linux Docker sandbox with no display and no GPU.
+    Do not request Metal/D3D, ignore ``--disable-gpu``, or flip ``headless=False`` there.
+    """
+    import platform
+
+    args = [
+        "--disable-blink-features=AutomationControlled",
+        "--exclude-switches=enable-automation",
+    ]
+    ignore_default_args = ["--enable-automation"]
+    system = platform.system()
+    if system == "Linux":
+        args.append("--no-sandbox")
+        return {
+            "headless": bool(headless),
+            "args": args,
+            "ignore_default_args": ignore_default_args,
+        }
+
+    args.extend(
+        [
+            "--enable-gpu",
+            "--ignore-gpu-blocklist",
+            "--use-gl=angle",
+        ]
+    )
+    if system == "Darwin":
+        args.append("--use-angle=metal")
+    elif system == "Windows":
+        args.append("--use-angle=d3d11")
+    ignore_default_args.append("--disable-gpu")
+    if headless:
+        args.append("--headless=new")
+    return {
+        "headless": False,
+        "args": args,
+        "ignore_default_args": ignore_default_args,
+    }
+
+
+def _apply_stealth_user_agent_override(page: object, browser: object) -> None:
+    """Keep Chrome's frozen UA while Client Hints report the host OS and CPU."""
+    import platform
+
+    ua = _stealth_user_agent(browser)
+    ver = str(getattr(browser, "version", "") or "145.0.0.0")
+    major = ver.split(".")[0]
+    machine = platform.machine().lower()
+    architecture = "arm" if machine in {"arm64", "aarch64"} else "x86"
+    system = platform.system()
+    if system == "Darwin":
+        platform_name = "macOS"
+        navigator_platform = "MacIntel"
+        platform_version = platform.mac_ver()[0] or "15.6.1"
+        if platform_version.count(".") == 1:
+            platform_version = f"{platform_version}.0"
+    elif system == "Windows":
+        platform_name = "Windows"
+        navigator_platform = "Win32"
+        platform_version = "19.0.0"
+    else:
+        linux_arch = "aarch64" if machine in {"arm64", "aarch64"} else "x86_64"
+        platform_name = "Linux"
+        navigator_platform = f"Linux {linux_arch}"
+        platform_version = "6.8.0"
+
+    brands = [
+        {"brand": "Not/A)Brand", "version": "8"},
+        {"brand": "Chromium", "version": major},
+        {"brand": "Google Chrome", "version": major},
+    ]
+    session = page.context.new_cdp_session(page)
+    session.send(
+        "Emulation.setUserAgentOverride",
+        {
+            "userAgent": ua,
+            "acceptLanguage": "en-US,en",
+            "platform": navigator_platform,
+            "userAgentMetadata": {
+                "brands": brands,
+                "fullVersionList": [
+                    {"brand": "Not/A)Brand", "version": "10.0.0.0"},
+                    {"brand": "Chromium", "version": ver},
+                    {"brand": "Google Chrome", "version": ver},
+                ],
+                "fullVersion": ver,
+                "platform": platform_name,
+                "platformVersion": platform_version,
+                "architecture": architecture,
+                "model": "",
+                "mobile": False,
+                "bitness": "64",
+                "wow64": False,
+            },
+        },
+    )
+
+
 def _step_timeout_kwarg(step: dict) -> str:
     """Return 'timeout=X' if step has timeout, else ''."""
     t = step.get("timeout")
@@ -473,6 +735,7 @@ def generate_playwright_code(
     auth_check_selector: str = "",
     auth_check_timeout: int = 5000,
     auth_fallback_steps: list[dict] | None = None,
+    stealth: object = False,
 ) -> str:
     """Convert PlaywrightStep list to executable Python code."""
     fallback_steps = auth_fallback_steps or []
@@ -481,6 +744,7 @@ def generate_playwright_code(
     has_fallback_ai_steps = any(step.get("action") == "aiStep" for step in fallback_steps)
     has_ai_steps = has_main_ai_steps or has_fallback_ai_steps
     collect_cookies = capture_network or auth_enabled
+    stealth_enabled = _as_py_bool_literal(stealth) == "True"
 
     lines = [
         "import base64",
@@ -499,25 +763,44 @@ def generate_playwright_code(
                 "",
             ]
         )
-    lines.extend(
-        [
-            "with sync_playwright() as p:",
-            "    browser = p.chromium.launch(headless=headless)",
-        ]
-    )
-
-    if auth_enabled and auth_state and auth_state.get("mode") == "storageState":
-        lines.append(
-            f"    context = browser.new_context(storage_state={repr(auth_state['storageState'])})"
+    if stealth_enabled:
+        lines.extend(
+            [
+                inspect.getsource(_stealth_user_agent).strip(),
+                "",
+                inspect.getsource(_stealth_chromium_launch_kwargs).strip(),
+                "",
+                inspect.getsource(_apply_stealth_user_agent_override).strip(),
+                "",
+            ]
         )
+    lines.append("with sync_playwright() as p:")
+    if stealth_enabled:
+        lines.append("    browser = p.chromium.launch(**_stealth_chromium_launch_kwargs(headless))")
+    else:
+        lines.append("    browser = p.chromium.launch(headless=headless)")
+
+    context_args: list[str] = []
+    if stealth_enabled:
+        context_args.append("user_agent=_stealth_user_agent(browser)")
+        context_args.append('locale="en-US"')
+        context_args.append('viewport={"width": 1280, "height": 720}')
+    if auth_enabled and auth_state and auth_state.get("mode") == "storageState":
+        context_args.append(f"storage_state={repr(auth_state['storageState'])}")
+    if context_args:
+        lines.append(f"    context = browser.new_context({', '.join(context_args)})")
     else:
         lines.append("    context = browser.new_context()")
-        if auth_enabled and auth_state and auth_state.get("mode") == "cookies":
-            lines.append(f"    context.add_cookies({repr(auth_state['cookies'])})")
+    if auth_enabled and auth_state and auth_state.get("mode") == "cookies":
+        lines.append(f"    context.add_cookies({repr(auth_state['cookies'])})")
+    if stealth_enabled:
+        lines.append(f"    context.add_init_script({repr(STEALTH_INIT_SCRIPT)})")
 
+    lines.append("    page = context.new_page()")
+    if stealth_enabled:
+        lines.append("    _apply_stealth_user_agent_override(page, browser)")
     lines.extend(
         [
-            "    page = context.new_page()",
             "    page.set_default_timeout(timeout_ms)",
             "    results = {}",
             "    screenshot = None",

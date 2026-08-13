@@ -3148,6 +3148,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
   - `playwrightSteps`: Array of step definitions (required when mode is steps)
   - `playwrightCode`: Custom Playwright Python code used when `playwrightMode` is `"code"` (or legacy: steps empty and code set). Auth bootstrap does not apply. DISABLED by default (operator must set `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true`). Prefer `playwrightSteps` — do not emit `playwrightCode` / mode `"code"` unless explicitly requested.
   - `playwrightHeadless`: Boolean - run browser headless (default: true)
+  - `playwrightStealth`: Boolean - opt-in Steps-mode setting that reduces common Playwright/Chromium automation signals (default: false). UI label: "Reduce automation flags". When true, generated Chromium launch drops `--enable-automation`, uses a standard Chrome user agent matching the host OS, and restores `navigator.webdriver` / `window.chrome` / plugins so sites are less likely to treat the session as a bot. Docker/Linux has no GPU and stays headless with a Linux UA — do not invent a Mac/Windows GPU. Does not hide DevTools Protocol, does not bypass site security, and does not apply to Run Code mode. Enable only for authorized automation when HeadlessChrome is blocked.
   - `playwrightTimeout`: Overall timeout in milliseconds (default: 30000)
   - `playwrightCaptureNetwork`: Boolean - capture JSON API responses, headers, cookies, localStorage, and sessionStorage
   - `playwrightAuthEnabled`: Boolean - restore session before running steps using cookies or Playwright storageState
@@ -3189,6 +3190,22 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
     ],
     "playwrightHeadless": true,
     "playwrightTimeout": 30000
+  }
+}
+```
+
+**Example - Reduce automation flags** (when HeadlessChrome / `navigator.webdriver` causes a false bot block on a site you are authorized to automate):
+```json
+{
+  "type": "playwright",
+  "data": {
+    "label": "compatBrowse",
+    "playwrightSteps": [
+      { "action": "navigate", "url": "$userInput.body.url" },
+      { "action": "getVisibleTextOnPage", "outputKey": "pageText" }
+    ],
+    "playwrightHeadless": true,
+    "playwrightStealth": true
   }
 }
 ```

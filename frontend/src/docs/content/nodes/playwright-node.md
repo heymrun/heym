@@ -18,6 +18,7 @@ The **Playwright** node automates browser interactions with configurable steps. 
 | `playwrightSteps` | array | Steps: navigate, click, type, aiStep, etc. Each step has action and selector/params |
 | `playwrightCode` | string | Custom Playwright Python used when Mode is Run Code. Runs in the hardened sandbox and is **disabled by default** — see the security note below |
 | `playwrightHeadless` | boolean | Run headless (default: true) |
+| `playwrightStealth` | boolean | Opt-in Steps-mode setting that reduces common Playwright automation signals (default: false). Properties Panel label: Reduce automation flags |
 | `playwrightTimeout` | number | Timeout in ms (default: 30000) |
 | `playwrightCaptureNetwork` | boolean | Capture JSON responses, headers, cookies, and browser storage |
 | `playwrightAuthEnabled` | boolean | Restore browser auth from cookies/storageState before running steps |
@@ -68,6 +69,21 @@ Enable **Auto heal mode** in the AI step properties. If the saved step fails:
 4. Retries with the new selector
 
 This reduces flakiness when sites update their markup or class names.
+
+## Reduce automation flags
+
+Enable **Reduce automation flags** (`playwrightStealth: true`) when a site treats Playwright's bundled Chromium as a bot because of standard automation signals (`HeadlessChrome` in the user agent, `navigator.webdriver`, missing `window.chrome`).
+
+This option applies only in **Steps** mode. It:
+
+- Drops Chromium's `--enable-automation` flag and sets `--disable-blink-features=AutomationControlled`
+- Sends a standard Chrome user agent (no `HeadlessChrome`)
+- Restores common browser surfaces that Playwright leaves empty (`window.chrome`, plugins)
+- Leaves the host GPU renderer unchanged when a GPU is available (local macOS/Windows). Docker and other Linux environments have no GPU; Chromium stays headless with software rendering and a Linux user agent. This option does not invent a GPU.
+
+It does not hide that the session is driven over Chrome DevTools Protocol, and it is not a way to bypass site security, CAPTCHAs, or access controls. Use it for workflows you are authorized to run — internal tools, your own sites, and permitted browser automation.
+
+Run Code mode is unchanged — custom scripts launch Chromium themselves.
 
 ## Network Capture
 

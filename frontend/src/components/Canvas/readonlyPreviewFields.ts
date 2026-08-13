@@ -111,6 +111,7 @@ const FIELD_LABELS: Record<string, string> = {
   playwrightMode: "Mode",
   playwrightCode: "Code",
   playwrightHeadless: "Headless",
+  playwrightStealth: "Reduced flags",
   playwrightTimeout: "Timeout (ms)",
   playwrightCaptureNetwork: "Capture Network",
   playwrightAuthEnabled: "Auth Enabled",

@@ -7184,6 +7184,7 @@ class WorkflowExecutor:
                 auth_check_selector=auth_check_selector,
                 auth_check_timeout=auth_check_timeout,
                 auth_fallback_steps=auth_fallback_steps,
+                stealth=node_data.get("playwrightStealth", False),
             )
         else:
             raise ValueError(
