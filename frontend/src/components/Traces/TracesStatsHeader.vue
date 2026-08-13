@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RouterLink, type RouteLocationRaw } from "vue-router";
 
 import type { TraceStatsResponse } from "@/types/trace";
 
@@ -23,6 +22,9 @@ interface ApexDonutTooltipContext {
 }
 
 const props = defineProps<Props>();
+const emit = defineEmits<{
+  (e: "configure-pricing", model: string): void;
+}>();
 const themeStore = useThemeStore();
 
 function fmtNum(value: number): string {
@@ -167,12 +169,6 @@ const callsOverTimeSeries = computed(() => {
 const hasCostData = computed(() => costByModelSeries.value.some((v) => v > 0));
 const unpricedModels = computed(() => kpis.value?.unpriced_models ?? []);
 const showUnpriced = computed(() => unpricedModels.value.length > 0);
-const pricingTableRoute = computed<RouteLocationRaw>(() => ({
-  query: {
-    tab: "datatable/llm-pricing",
-    unpricedModel: unpricedModels.value,
-  },
-}));
 </script>
 
 <template>
@@ -286,14 +282,22 @@ const pricingTableRoute = computed<RouteLocationRaw>(() => ({
           :options="costByModelOptions"
           :series="costByModelSeries"
         />
-        <RouterLink
+        <div
           v-if="showUnpriced"
-          :to="pricingTableRoute"
-          class="mt-2 inline-block max-w-full text-[11px] text-muted-foreground underline decoration-muted-foreground/60 underline-offset-2 transition-colors hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 rounded-sm break-words"
+          class="mt-2 max-w-full text-[11px] text-muted-foreground break-words"
         >
           {{ unpricedModels.length }} model(s) without pricing:
-          <span class="font-mono">{{ unpricedModels.join(", ") }}</span>
-        </RouterLink>
+          <template
+            v-for="(model, index) in unpricedModels"
+            :key="model"
+          >
+            <a
+              href="#"
+              class="font-mono underline decoration-muted-foreground/60 underline-offset-2 transition-colors hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 rounded-sm"
+              @click.prevent="emit('configure-pricing', model)"
+            >{{ model }}</a><span v-if="index < unpricedModels.length - 1">, </span>
+          </template>
+        </div>
       </Card>
       <Card
         variant="flat"

@@ -14,10 +14,12 @@ import { llmPricingApi } from "@/services/api";
 
 interface Props {
   initialModels?: string[];
+  embedded?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialModels: () => [],
+  embedded: false,
 });
 
 const rows = ref<LLMPricingRow[]>([]);
@@ -277,7 +279,10 @@ onBeforeUnmount(() => {
 <template>
   <div class="space-y-4">
     <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-      <div class="min-w-0">
+      <div
+        v-if="!embedded"
+        class="min-w-0"
+      >
         <h2 class="text-xl font-semibold flex items-center gap-2">
           <Coins class="w-5 h-5" />
           LLM Cost Table
@@ -305,7 +310,10 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
+      <div
+        class="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end"
+        :class="{ 'md:ml-auto': embedded }"
+      >
         <Button
           variant="outline"
           size="sm"

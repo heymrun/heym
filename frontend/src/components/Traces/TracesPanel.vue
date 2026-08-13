@@ -7,6 +7,7 @@ import type { CredentialListItem } from "@/types/credential";
 import type { LLMTraceDetail, LLMTraceListItem, TraceStatsResponse, TraceTimeRange } from "@/types/trace";
 import type { WorkflowListItem } from "@/types/workflow";
 
+import LLMPricingPanel from "@/components/DataTable/LLMPricingPanel.vue";
 import TraceDurationChart, { type TraceSpan } from "@/components/Traces/TraceDurationChart.vue";
 import TraceJsonContent from "@/components/Traces/TraceJsonContent.vue";
 import TracesStatsHeader from "@/components/Traces/TracesStatsHeader.vue";
@@ -82,6 +83,8 @@ const detailLoading = ref(false);
 const detailError = ref("");
 const selectedTrace = ref<LLMTraceDetail | null>(null);
 const selectedTraceIndex = ref(-1);
+const pricingDialogOpen = ref(false);
+const pricingDialogModel = ref<string | null>(null);
 const clearing = ref(false);
 const copiedRequest = ref(false);
 const copiedResponse = ref(false);
@@ -94,6 +97,9 @@ const tracePositionLabel = computed(() =>
   selectedTraceIndex.value >= 0
     ? `${selectedTraceIndex.value + 1} / ${traces.value.length}`
     : "Direct trace",
+);
+const pricingDialogModels = computed(() =>
+  pricingDialogModel.value ? [pricingDialogModel.value] : [],
 );
 
 interface ToolCallEntry {
@@ -552,6 +558,21 @@ function closeDetail(): void {
   }
 }
 
+function openPricingDialog(model: string): void {
+  pricingDialogModel.value = model;
+  pricingDialogOpen.value = true;
+}
+
+function closePricingDialog(): void {
+  pricingDialogOpen.value = false;
+  pricingDialogModel.value = null;
+}
+
+function closeOverlays(): void {
+  closeDetail();
+  closePricingDialog();
+}
+
 async function openTraceFromRoute(): Promise<void> {
   const rawTraceId = route.query.traceId;
   const traceId = Array.isArray(rawTraceId) ? rawTraceId[0] : rawTraceId;
@@ -641,7 +662,7 @@ onMounted(async () => {
   await loadWorkflows();
   await loadAll();
   await openTraceFromRoute();
-  const unsub = onDismissOverlays(closeDetail);
+  const unsub = onDismissOverlays(closeOverlays);
   document.addEventListener("keydown", handleKeyDown);
   onBeforeUnmount(() => {
     unsub();
@@ -720,6 +741,7 @@ onMounted(async () => {
     <TracesStatsHeader
       :stats="stats"
       :loading="statsLoading"
+      @configure-pricing="openPricingDialog"
     />
 
     <div class="space-y-4">
@@ -865,6 +887,21 @@ onMounted(async () => {
         </button>
       </Card>
     </div>
+
+    <Dialog
+      :open="pricingDialogOpen"
+      title="LLM Cost Table"
+      size="6xl"
+      close-on-back
+      @close="closePricingDialog"
+    >
+      <LLMPricingPanel
+        v-if="pricingDialogModel"
+        :key="pricingDialogModel"
+        :initial-models="pricingDialogModels"
+        embedded
+      />
+    </Dialog>
 
     <Dialog
       :open="detailOpen"

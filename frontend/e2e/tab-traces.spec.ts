@@ -45,7 +45,7 @@ test("reloads traces on time range change and toggles the search box", async ({ 
   await expect(search).toHaveValue("");
 });
 
-test("opens the pricing table and prefills an unpriced trace model", async ({ page }) => {
+test("opens the pricing dialog and prefills each selected unpriced trace model", async ({ page }) => {
   const createdAt = "2026-07-20T12:00:00Z";
   const unpricedModels = ["acme/private-chat", "acme/private-reasoner"];
   let customPricingPayload: Record<string, unknown> | null = null;
@@ -173,11 +173,13 @@ test("opens the pricing table and prefills an unpriced trace model", async ({ pa
   });
 
   await page.goto("/?tab=traces");
-  const pricingLink = page.getByRole("link", { name: /2 model\(s\) without pricing/ });
-  await expect(pricingLink).toBeVisible();
-  await pricingLink.click();
+  const firstPricingLink = page.getByRole("link", { name: unpricedModels[0], exact: true });
+  const secondPricingLink = page.getByRole("link", { name: unpricedModels[1], exact: true });
+  await expect(firstPricingLink).toBeVisible();
+  await expect(secondPricingLink).toBeVisible();
+  await firstPricingLink.click();
 
-  await expect(page).toHaveURL(/tab=datatable(?:%2F|\/)llm-pricing/);
+  await expect(page).toHaveURL(/tab=traces/);
   await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add Custom Model", exact: true }).click();
 
@@ -193,6 +195,10 @@ test("opens the pricing table and prefills an unpriced trace model", async ({ pa
     output_per_1m_usd: "1.25",
   });
 
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).not.toBeVisible();
+
+  await secondPricingLink.click();
   await page.getByRole("button", { name: "Add Custom Model", exact: true }).click();
   await expect(modelInput).toHaveValue(unpricedModels[1]);
 });
