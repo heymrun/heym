@@ -247,3 +247,7 @@ class TestDraftSystemPrompt(unittest.TestCase):
     def test_prompt_asks_for_partial_answers(self):
         prompt = build_draft_system_prompt([])
         self.assertIn("A partial answer", prompt)
+
+    def test_prompt_requires_a_description(self):
+        prompt = build_draft_system_prompt([])
+        self.assertIn("description   REQUIRED", prompt)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { Loader2, Sparkles } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
@@ -27,6 +27,16 @@ const prompt = ref("");
 const loading = ref(false);
 const clarification = ref<string | null>(null);
 const error = ref<string | null>(null);
+
+const navigatorPlatformIsMac = computed((): boolean => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return (
+    navigator.platform.toLowerCase().startsWith("mac") ||
+    navigator.userAgent.includes("Mac")
+  );
+});
 
 onMounted(bootstrap);
 
@@ -103,6 +113,7 @@ async function submit(): Promise<void> {
         size="sm"
         class="ml-auto"
         :disabled="!prompt.trim() || !isReady || loading"
+        :title="navigatorPlatformIsMac ? 'Fill the form (⌘Enter)' : 'Fill the form (Ctrl+Enter)'"
         @click="submit"
       >
         <Loader2
@@ -110,11 +121,10 @@ async function submit(): Promise<void> {
           class="mr-1 h-3.5 w-3.5 animate-spin"
         />
         Fill the form
+        <span class="text-[11px] font-normal tracking-wide text-primary-foreground/80">
+          {{ navigatorPlatformIsMac ? "⌘↵" : "⌃↵" }}
+        </span>
       </Button>
-    </div>
-
-    <div class="mt-1.5 text-[11px] text-muted-foreground">
-      Ctrl or Cmd + Enter sends.
     </div>
 
     <p

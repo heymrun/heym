@@ -45,7 +45,8 @@ Alert types, and the config each one requires:
 
 Top-level fields:
   name          short, specific, human readable
-  description   optional one line
+  description   REQUIRED - always write one natural English sentence that says what
+                the alert watches and when it fires
   alert_type    one of the four above
   scope         "workflow" for one workflow, "system" for all of the user's workflows
   workflow_id   REQUIRED when scope is "workflow", omitted when scope is "system"
