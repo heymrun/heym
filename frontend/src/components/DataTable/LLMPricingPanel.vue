@@ -15,11 +15,13 @@ import { llmPricingApi } from "@/services/api";
 interface Props {
   initialModels?: string[];
   embedded?: boolean;
+  autoOpenAddDialog?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialModels: () => [],
   embedded: false,
+  autoOpenAddDialog: false,
 });
 
 const rows = ref<LLMPricingRow[]>([]);
@@ -268,6 +270,9 @@ function badgeFor(row: LLMPricingRow): { label: string; classes: string } | null
 }
 
 onMounted(() => {
+  if (props.autoOpenAddDialog) {
+    openAddDialog();
+  }
   loadAll({ startPoll: true });
 });
 

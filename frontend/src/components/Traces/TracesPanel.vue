@@ -899,6 +899,7 @@ onMounted(async () => {
         v-if="pricingDialogModel"
         :key="pricingDialogModel"
         :initial-models="pricingDialogModels"
+        auto-open-add-dialog
         embedded
       />
     </Dialog>

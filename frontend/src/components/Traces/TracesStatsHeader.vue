@@ -284,7 +284,7 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
         />
         <div
           v-if="showUnpriced"
-          class="mt-2 max-w-full text-[11px] text-muted-foreground break-words"
+          class="unpriced-models-notice mt-2 max-w-full text-[11px] text-muted-foreground break-words"
         >
           {{ unpricedModels.length }} model(s) without pricing:
           <template
@@ -336,6 +336,13 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
   border-color: hsl(var(--border)) !important;
   color: hsl(var(--popover-foreground)) !important;
   box-shadow: 0 12px 30px hsl(var(--background) / 0.3) !important;
+}
+
+.unpriced-models-notice {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .trace-chart-card :deep(.apexcharts-tooltip-title) {
