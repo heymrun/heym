@@ -562,6 +562,14 @@ const isLLMPricingSelected = computed(() => {
   return parsed.kind === "detail" && parsed.id === LLM_PRICING_ROUTE_ID;
 });
 
+const initialPricingModels = computed(() => {
+  const rawModels = route.query.unpricedModel;
+  const models = Array.isArray(rawModels) ? rawModels : [rawModels];
+  return models.filter(
+    (model): model is string => typeof model === "string" && model.trim().length > 0,
+  );
+});
+
 watch(
   () => route.query.tab,
   async (tab) => {
@@ -655,7 +663,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
     <template v-if="detailLoading" />
 
     <template v-else-if="isLLMPricingSelected">
-      <LLMPricingPanel />
+      <LLMPricingPanel :initial-models="initialPricingModels" />
     </template>
 
     <template v-else-if="!selectedTable">

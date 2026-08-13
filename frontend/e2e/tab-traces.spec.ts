@@ -45,6 +45,158 @@ test("reloads traces on time range change and toggles the search box", async ({ 
   await expect(search).toHaveValue("");
 });
 
+test("opens the pricing table and prefills an unpriced trace model", async ({ page }) => {
+  const createdAt = "2026-07-20T12:00:00Z";
+  const unpricedModels = ["acme/private-chat", "acme/private-reasoner"];
+  let customPricingPayload: Record<string, unknown> | null = null;
+  const pricingRows = [
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      provider: "OpenAI",
+      model: "gpt-4.1-mini",
+      operator: "equals",
+      input_per_1m_usd: "0.40",
+      output_per_1m_usd: "1.60",
+      source: "seed",
+      is_override: false,
+      is_custom: false,
+      override_id: null,
+      updated_at: createdAt,
+    },
+  ];
+
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({
+      json: {
+        id: "22222222-2222-4222-8222-222222222222",
+        email: "trace-pricing@example.com",
+        name: "Trace Pricing Test",
+        user_rules: null,
+        tts_credential_id: null,
+        tts_voice_id: null,
+        preferred_credential_id: null,
+        preferred_model: null,
+        created_at: createdAt,
+      },
+    });
+  });
+  await page.route("**/api/credentials/llm", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/workflows/with-inputs", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/workflows", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/folders/tree", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/templates**", async (route) => {
+    await route.fulfill({ json: { workflow_templates: [], node_templates: [] } });
+  });
+  await page.route("**/api/data-tables", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/traces**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/traces/stats") {
+      await route.fulfill({
+        json: {
+          range: { start: null, end: createdAt, bucket_seconds: 3600 },
+          kpis: {
+            total_calls: 2,
+            success_calls: 2,
+            error_calls: 0,
+            error_pct: 0,
+            prompt_tokens: 90,
+            completion_tokens: 30,
+            total_tokens: 120,
+            total_cost_usd: "0",
+            avg_latency_ms: 450,
+            unpriced_models: unpricedModels,
+          },
+          by_model: [
+            {
+              model: unpricedModels[0],
+              prompt_tokens: 90,
+              completion_tokens: 30,
+              total_tokens: 120,
+              calls: 2,
+              cost_usd: "0",
+            },
+          ],
+          by_time: [],
+        },
+      });
+      return;
+    }
+    if (pathname === "/api/traces") {
+      await route.fulfill({ json: { items: [], total: 0, limit: 25, offset: 0 } });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/llm-pricing**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === "/api/llm-pricing/sync-status") {
+      await route.fulfill({
+        json: { last_synced_at: "2025-01-01T00:00:00Z", total_rows: 1, override_rows: 0 },
+      });
+      return;
+    }
+    if (pathname === "/api/llm-pricing" && request.method() === "GET") {
+      await route.fulfill({ json: pricingRows });
+      return;
+    }
+    if (pathname === "/api/llm-pricing/custom" && request.method() === "POST") {
+      customPricingPayload = request.postDataJSON() as Record<string, unknown>;
+      const customPricing = {
+        id: "44444444-4444-4444-8444-444444444444",
+        provider: "acme",
+        model: "private-chat",
+        operator: "equals",
+        input_per_1m_usd: "0.75",
+        output_per_1m_usd: "1.25",
+        source: "user",
+        is_override: false,
+        is_custom: true,
+        override_id: "44444444-4444-4444-8444-444444444444",
+        updated_at: createdAt,
+      };
+      pricingRows.push(customPricing);
+      await route.fulfill({ status: 201, json: customPricing });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/?tab=traces");
+  const pricingLink = page.getByRole("link", { name: /2 model\(s\) without pricing/ });
+  await expect(pricingLink).toBeVisible();
+  await pricingLink.click();
+
+  await expect(page).toHaveURL(/tab=datatable(?:%2F|\/)llm-pricing/);
+  await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add Custom Model", exact: true }).click();
+
+  const modelInput = page.getByPlaceholder("e.g. my-org/private-llm");
+  await expect(modelInput).toHaveValue(unpricedModels[0]);
+  await page.getByPlaceholder("0.50").fill("0.75");
+  await page.getByPlaceholder("1.50").fill("1.25");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect.poll(() => customPricingPayload).toEqual({
+    model: unpricedModels[0],
+    input_per_1m_usd: "0.75",
+    output_per_1m_usd: "1.25",
+  });
+
+  await page.getByRole("button", { name: "Add Custom Model", exact: true }).click();
+  await expect(modelInput).toHaveValue(unpricedModels[1]);
+});
+
 test("renders JSON trace events as expandable trees with a raw toggle", async ({ page }) => {
   const traceId = "11111111-1111-4111-8111-111111111111";
   const createdAt = "2026-07-20T12:00:00Z";

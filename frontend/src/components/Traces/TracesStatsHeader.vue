@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { RouterLink, type RouteLocationRaw } from "vue-router";
 
 import type { TraceStatsResponse } from "@/types/trace";
 
@@ -164,7 +165,14 @@ const callsOverTimeSeries = computed(() => {
 });
 
 const hasCostData = computed(() => costByModelSeries.value.some((v) => v > 0));
-const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) > 0);
+const unpricedModels = computed(() => kpis.value?.unpriced_models ?? []);
+const showUnpriced = computed(() => unpricedModels.value.length > 0);
+const pricingTableRoute = computed<RouteLocationRaw>(() => ({
+  query: {
+    tab: "datatable/llm-pricing",
+    unpricedModel: unpricedModels.value,
+  },
+}));
 </script>
 
 <template>
@@ -278,13 +286,14 @@ const showUnpriced = computed(() => (kpis.value?.unpriced_models?.length ?? 0) >
           :options="costByModelOptions"
           :series="costByModelSeries"
         />
-        <div
+        <RouterLink
           v-if="showUnpriced"
-          class="mt-2 text-[11px] text-muted-foreground break-words"
+          :to="pricingTableRoute"
+          class="mt-2 inline-block max-w-full text-[11px] text-muted-foreground underline decoration-muted-foreground/60 underline-offset-2 transition-colors hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 rounded-sm break-words"
         >
-          {{ kpis?.unpriced_models.length }} model(s) without pricing:
-          <span class="font-mono">{{ kpis?.unpriced_models.join(", ") }}</span>
-        </div>
+          {{ unpricedModels.length }} model(s) without pricing:
+          <span class="font-mono">{{ unpricedModels.join(", ") }}</span>
+        </RouterLink>
       </Card>
       <Card
         variant="flat"

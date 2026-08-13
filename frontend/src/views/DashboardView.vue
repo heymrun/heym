@@ -150,11 +150,16 @@ function openCredentialsTab(): void {
 }
 
 watch(activeTab, (newTab) => {
-  const query: Record<string, string> = newTab === "workflows" ? {} : { tab: newTab };
-  if (newTab === "traces" && typeof route.query.traceId === "string") {
-    query.traceId = route.query.traceId;
+  const routeTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab;
+  const isDataTableSubRoute =
+    newTab === "datatable" && typeof routeTab === "string" && routeTab.startsWith("datatable/");
+  if (!isDataTableSubRoute) {
+    const query: Record<string, string> = newTab === "workflows" ? {} : { tab: newTab };
+    if (newTab === "traces" && typeof route.query.traceId === "string") {
+      query.traceId = route.query.traceId;
+    }
+    router.replace({ query });
   }
-  router.replace({ query });
 
   if (newTab === "workflows") {
     quickDrawerStore.syncPreferencesFromStorage();

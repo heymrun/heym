@@ -12,6 +12,14 @@ import Label from "@/components/ui/Label.vue";
 import { formatDate } from "@/lib/utils";
 import { llmPricingApi } from "@/services/api";
 
+interface Props {
+  initialModels?: string[];
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  initialModels: () => [],
+});
+
 const rows = ref<LLMPricingRow[]>([]);
 const syncStatus = ref<LLMPricingSyncStatus | null>(null);
 const loading = ref(false);
@@ -49,6 +57,17 @@ const filteredRows = computed(() => {
 const customizedRowsCount = computed(
   () => rows.value.filter((row) => row.is_custom || row.is_override).length,
 );
+
+function rowMatchesModel(row: LLMPricingRow, model: string): boolean {
+  return row.model === model || (row.provider !== null && `${row.provider}/${row.model}` === model);
+}
+
+const suggestedModel = computed(() => {
+  const missingModel = props.initialModels.find(
+    (model) => !rows.value.some((row) => rowMatchesModel(row, model)),
+  );
+  return missingModel ?? props.initialModels[0] ?? "";
+});
 
 function stopPolling(): void {
   pollGeneration += 1;
@@ -154,6 +173,13 @@ async function clearAll(): Promise<void> {
   } finally {
     clearing.value = false;
   }
+}
+
+function openAddDialog(): void {
+  if (!addForm.value.model && suggestedModel.value) {
+    addForm.value = { ...addForm.value, model: suggestedModel.value };
+  }
+  showAddDialog.value = true;
 }
 
 function startEdit(row: LLMPricingRow): void {
@@ -291,7 +317,7 @@ onBeforeUnmount(() => {
         <Button
           variant="outline"
           size="sm"
-          @click="showAddDialog = true"
+          @click="openAddDialog"
         >
           <Plus class="w-4 h-4 mr-1" />
           <span class="hidden sm:inline">Add Custom Model</span>
