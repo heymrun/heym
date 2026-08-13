@@ -294,7 +294,8 @@ defineExpose({ clearFocusedSearchOnEscape });
 </script>
 
 <template>
-  <div class="space-y-4">
+  <!-- Reserve the dialog's full height so the late-arriving rows cannot resize it. -->
+  <div :class="embedded ? 'flex min-h-[85vh] flex-col gap-4' : 'space-y-4'">
     <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
       <div
         v-if="!embedded"
@@ -379,7 +380,7 @@ defineExpose({ clearFocusedSearchOnEscape });
     <Card
       variant="flat"
       :hover="false"
-      class="p-0 overflow-hidden"
+      :class="embedded ? 'p-0 overflow-hidden flex-1' : 'p-0 overflow-hidden'"
     >
       <div class="overflow-x-auto">
         <table class="w-full min-w-[640px] text-sm">

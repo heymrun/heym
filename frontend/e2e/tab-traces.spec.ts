@@ -48,7 +48,7 @@ test("reloads traces on time range change and toggles the search box", async ({ 
 test("opens nested pricing dialogs with layered Escape behavior", async ({ page }) => {
   const createdAt = "2026-07-20T12:00:00Z";
   const unpricedModels = ["acme/private-chat", "acme/private-reasoner"];
-  const pricingRows = [
+  const pricingRows: Record<string, string | boolean | null>[] = [
     {
       id: "33333333-3333-4333-8333-333333333333",
       provider: "OpenAI",
@@ -146,6 +146,8 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
       return;
     }
     if (pathname === "/api/llm-pricing" && request.method() === "GET") {
+      // Land the rows after the open animation, as a real fetch does.
+      await new Promise((resolve) => setTimeout(resolve, 400));
       await route.fulfill({ json: pricingRows });
       return;
     }
@@ -175,11 +177,60 @@ test("opens nested pricing dialogs with layered Escape behavior", async ({ page 
   const secondPricingLink = page.getByRole("link", { name: unpricedModels[1], exact: true });
   await expect(firstPricingLink).toBeVisible();
   await expect(secondPricingLink).toBeVisible();
+
+  // Each layer needs its own backdrop for depth, without either flash: a fading ancestor above
+  // a backdrop, or a panel that resizes once its rows land.
+  await page.evaluate(() => {
+    const samples: { backdrops: number; fadingAncestors: number; outerHeight: number }[] = [];
+    (window as unknown as { __openSamples: typeof samples }).__openSamples = samples;
+    let frames = 0;
+    const tick = (): void => {
+      const backdrops = Array.from(document.querySelectorAll(".dialog-backdrop"));
+      const fadingAncestors = backdrops.filter((backdrop) => {
+        let node = backdrop.parentElement;
+        while (node !== null && node !== document.body) {
+          if (Number(getComputedStyle(node).opacity) < 1) {
+            return true;
+          }
+          node = node.parentElement;
+        }
+        return false;
+      });
+      const outerPanel = document.querySelector(".dialog-content");
+      samples.push({
+        backdrops: backdrops.length,
+        fadingAncestors: fadingAncestors.length,
+        outerHeight: Math.round(outerPanel?.getBoundingClientRect().height ?? 0),
+      });
+      frames += 1;
+      if (frames < 60) {
+        requestAnimationFrame(tick);
+      }
+    };
+    requestAnimationFrame(tick);
+  });
+
   await firstPricingLink.click();
 
   await expect(page).toHaveURL(/tab=traces/);
   await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Add Custom Model Pricing", exact: true })).toBeVisible();
+
+  await page.waitForTimeout(1200);
+  const openSamples = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __openSamples: { backdrops: number; fadingAncestors: number; outerHeight: number }[];
+        }
+      ).__openSamples,
+  );
+  expect(Math.max(...openSamples.map((sample) => sample.backdrops))).toBe(2);
+  expect(Math.max(...openSamples.map((sample) => sample.fadingAncestors))).toBe(0);
+
+  // Frame 20 onwards the scale-in is over.
+  const settledHeights = new Set(openSamples.slice(20).map((sample) => sample.outerHeight));
+  expect([...settledHeights]).toHaveLength(1);
 
   const modelInput = page.getByPlaceholder("e.g. my-org/private-llm");
   await expect(modelInput).toHaveValue(unpricedModels[0]);

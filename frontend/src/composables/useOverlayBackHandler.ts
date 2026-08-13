@@ -1,5 +1,7 @@
 import { onMounted, onUnmounted } from "vue";
 
+import { hasOpenDialog } from "@/composables/useDialogStack";
+
 export const DISMISS_OVERLAYS_EVENT = "heym:dismiss-overlays";
 
 /**
@@ -24,6 +26,10 @@ export function pushOverlayState(): void {
 export function useOverlayBackHandler(): void {
   function handleKeyDown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
+      // Dialogs dismiss themselves one layer at a time.
+      if (hasOpenDialog()) {
+        return;
+      }
       if (document.body.dataset.heymOverlayEscapeTrap === "true") {
         return;
       }

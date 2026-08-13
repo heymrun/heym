@@ -1,28 +1,15 @@
-<script lang="ts">
-import { ref as createRef } from "vue";
-
-const dialogStack = createRef<symbol[]>([]);
-
-function syncBodyScrollLock(): void {
-  document.body.style.overflow = dialogStack.value.length > 0 ? "hidden" : "";
-}
-
-function addToDialogStack(dialogId: symbol): void {
-  dialogStack.value = [...dialogStack.value.filter((id) => id !== dialogId), dialogId];
-  syncBodyScrollLock();
-}
-
-function removeFromDialogStack(dialogId: symbol): void {
-  dialogStack.value = dialogStack.value.filter((id) => id !== dialogId);
-  syncBodyScrollLock();
-}
-</script>
-
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, useSlots, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
 
 import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
+import {
+  addToDialogStack,
+  dialogStackPosition,
+  isBottommostDialog,
+  isTopmostDialog,
+  removeFromDialogStack,
+} from "@/composables/useDialogStack";
 
 const slots = useSlots();
 const hasHeaderActions = computed(() => typeof slots["header-actions"] === "function");
@@ -52,15 +39,9 @@ const props = withDefaults(defineProps<Props>(), {
 
 const isFullscreen = ref(props.defaultFullscreen);
 const dialogId = Symbol("dialog");
-const isTopmost = computed(() => {
-  const stack = dialogStack.value;
-  return props.open && stack[stack.length - 1] === dialogId;
-});
-const isBackdropOwner = computed(() => props.open && dialogStack.value[0] === dialogId);
-const dialogZIndex = computed(() => {
-  const stackPosition = Math.max(dialogStack.value.indexOf(dialogId), 0);
-  return 50 + stackPosition * 10;
-});
+const isTopmost = computed(() => props.open && isTopmostDialog(dialogId));
+const isNestedBackdrop = computed(() => props.open && !isBottommostDialog(dialogId));
+const dialogZIndex = computed(() => 50 + dialogStackPosition(dialogId) * 10);
 
 const sizeClasses = computed(() => {
   if (isFullscreen.value) {
@@ -147,7 +128,10 @@ function toggleFullscreen(): void {
 
 <template>
   <Teleport to="body">
-    <Transition name="dialog">
+    <Transition
+      name="dialog"
+      :duration="{ enter: 250, leave: 200 }"
+    >
       <div
         v-if="open"
         ref="containerRef"
@@ -159,8 +143,7 @@ function toggleFullscreen(): void {
         tabindex="0"
       >
         <div
-          v-if="isBackdropOwner"
-          class="dialog-backdrop fixed inset-0"
+          :class="['dialog-backdrop fixed inset-0', isNestedBackdrop ? 'dialog-backdrop-nested' : '']"
           @click="emit('close')"
         />
         <div
@@ -262,8 +245,16 @@ function toggleFullscreen(): void {
 
 <style scoped>
 .dialog-backdrop {
-  background: hsl(0 0% 0% / 0.65);
-  backdrop-filter: blur(12px);
+  --dialog-backdrop-tint: 0.65;
+  --dialog-backdrop-blur: 12px;
+  background: hsl(0 0% 0% / var(--dialog-backdrop-tint));
+  backdrop-filter: blur(var(--dialog-backdrop-blur));
+}
+
+/* A stacked dialog pushes the one under it back rather than dimming the page a second time. */
+.dialog-backdrop-nested {
+  --dialog-backdrop-tint: 0.4;
+  --dialog-backdrop-blur: 8px;
 }
 
 .dialog-content {
@@ -271,7 +262,6 @@ function toggleFullscreen(): void {
     0 0 0 1px hsl(var(--border) / 0.5),
     0 0 1px hsl(0 0% 0% / 0.0125),
     0 0 1px hsl(0 0% 0% / 0.0075);
-  animation: dialog-scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dark .dialog-content {
@@ -289,6 +279,39 @@ function toggleFullscreen(): void {
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes dialog-scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98) translateY(4px);
+  }
+}
+
+@keyframes dialog-backdrop-in {
+  from {
+    background-color: hsl(0 0% 0% / 0);
+    backdrop-filter: blur(0px);
+  }
+  to {
+    background-color: hsl(0 0% 0% / var(--dialog-backdrop-tint));
+    backdrop-filter: blur(var(--dialog-backdrop-blur));
+  }
+}
+
+@keyframes dialog-backdrop-out {
+  from {
+    background-color: hsl(0 0% 0% / var(--dialog-backdrop-tint));
+    backdrop-filter: blur(var(--dialog-backdrop-blur));
+  }
+  to {
+    background-color: hsl(0 0% 0% / 0);
+    backdrop-filter: blur(0px);
   }
 }
 
@@ -321,20 +344,20 @@ function toggleFullscreen(): void {
   background: hsl(var(--muted));
 }
 
-.dialog-enter-active {
-  transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+/* Fading the container would make the backdrop its own backdrop root and snap the blur on at the end. */
+.dialog-enter-active .dialog-backdrop {
+  animation: dialog-backdrop-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.dialog-leave-active {
-  transition: opacity 0.2s ease;
+.dialog-leave-active .dialog-backdrop {
+  animation: dialog-backdrop-out 0.2s ease both;
 }
 
-.dialog-enter-from,
-.dialog-leave-to {
-  opacity: 0;
+.dialog-enter-active .dialog-content {
+  animation: dialog-scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.dialog-enter-from .dialog-content {
-  transform: scale(0.96) translateY(8px);
+.dialog-leave-active .dialog-content {
+  animation: dialog-scale-out 0.2s ease both;
 }
 </style>
