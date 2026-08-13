@@ -1075,8 +1075,8 @@ function bringToCanvas(): void {
                             Skill
                           </span>
                         </div>
-                        <div class="mt-1 text-muted-foreground break-all">
-                          → {{ typeof tc.result === 'object' ? JSON.stringify(tc.result) : tc.result }}
+                        <div class="mt-1 min-w-0 text-muted-foreground break-all whitespace-pre-wrap max-h-40 overflow-auto">
+                          → {{ typeof tc.result === 'object' ? JSON.stringify(tc.result, null, 2) : tc.result }}
                         </div>
                       </div>
                     </div>
