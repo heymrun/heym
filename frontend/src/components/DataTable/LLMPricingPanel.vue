@@ -31,6 +31,7 @@ const syncing = ref(false);
 const clearing = ref(false);
 const error = ref("");
 const search = ref("");
+const isSearchFocused = ref(false);
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollGeneration = 0;
 
@@ -186,6 +187,14 @@ function openAddDialog(): void {
   showAddDialog.value = true;
 }
 
+function clearFocusedSearchOnEscape(): boolean {
+  if (!isSearchFocused.value || !search.value) {
+    return false;
+  }
+  search.value = "";
+  return true;
+}
+
 function startEdit(row: LLMPricingRow): void {
   editingId.value = row.id;
   editInput.value = {
@@ -269,16 +278,19 @@ function badgeFor(row: LLMPricingRow): { label: string; classes: string } | null
   return null;
 }
 
+if (props.autoOpenAddDialog) {
+  openAddDialog();
+}
+
 onMounted(() => {
-  if (props.autoOpenAddDialog) {
-    openAddDialog();
-  }
   loadAll({ startPoll: true });
 });
 
 onBeforeUnmount(() => {
   stopPolling();
 });
+
+defineExpose({ clearFocusedSearchOnEscape });
 </script>
 
 <template>
@@ -353,6 +365,8 @@ onBeforeUnmount(() => {
     <Input
       v-model="search"
       placeholder="Search model or provider…"
+      @focus="isSearchFocused = true"
+      @blur="isSearchFocused = false"
     />
 
     <div

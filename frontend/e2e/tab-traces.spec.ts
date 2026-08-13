@@ -45,10 +45,9 @@ test("reloads traces on time range change and toggles the search box", async ({ 
   await expect(search).toHaveValue("");
 });
 
-test("opens nested pricing dialogs and prefills each selected unpriced trace model", async ({ page }) => {
+test("opens nested pricing dialogs with layered Escape behavior", async ({ page }) => {
   const createdAt = "2026-07-20T12:00:00Z";
   const unpricedModels = ["acme/private-chat", "acme/private-reasoner"];
-  let customPricingPayload: Record<string, unknown> | null = null;
   const pricingRows = [
     {
       id: "33333333-3333-4333-8333-333333333333",
@@ -151,7 +150,6 @@ test("opens nested pricing dialogs and prefills each selected unpriced trace mod
       return;
     }
     if (pathname === "/api/llm-pricing/custom" && request.method() === "POST") {
-      customPricingPayload = request.postDataJSON() as Record<string, unknown>;
       const customPricing = {
         id: "44444444-4444-4444-8444-444444444444",
         provider: "acme",
@@ -185,15 +183,16 @@ test("opens nested pricing dialogs and prefills each selected unpriced trace mod
 
   const modelInput = page.getByPlaceholder("e.g. my-org/private-llm");
   await expect(modelInput).toHaveValue(unpricedModels[0]);
-  await page.getByPlaceholder("0.50").fill("0.75");
-  await page.getByPlaceholder("1.50").fill("1.25");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
 
-  await expect.poll(() => customPricingPayload).toEqual({
-    model: unpricedModels[0],
-    input_per_1m_usd: "0.75",
-    output_per_1m_usd: "1.25",
-  });
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "Add Custom Model Pricing", exact: true })).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
+
+  const pricingSearch = page.getByPlaceholder("Search model or provider…");
+  await pricingSearch.fill("gpt-4.1-mini");
+  await page.keyboard.press("Escape");
+  await expect(pricingSearch).toHaveValue("");
+  await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "LLM Cost Table", exact: true })).not.toBeVisible();

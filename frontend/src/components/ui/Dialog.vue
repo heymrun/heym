@@ -1,3 +1,23 @@
+<script lang="ts">
+import { ref as createRef } from "vue";
+
+const dialogStack = createRef<symbol[]>([]);
+
+function syncBodyScrollLock(): void {
+  document.body.style.overflow = dialogStack.value.length > 0 ? "hidden" : "";
+}
+
+function addToDialogStack(dialogId: symbol): void {
+  dialogStack.value = [...dialogStack.value.filter((id) => id !== dialogId), dialogId];
+  syncBodyScrollLock();
+}
+
+function removeFromDialogStack(dialogId: symbol): void {
+  dialogStack.value = dialogStack.value.filter((id) => id !== dialogId);
+  syncBodyScrollLock();
+}
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, useSlots, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
@@ -31,6 +51,16 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const isFullscreen = ref(props.defaultFullscreen);
+const dialogId = Symbol("dialog");
+const isTopmost = computed(() => {
+  const stack = dialogStack.value;
+  return props.open && stack[stack.length - 1] === dialogId;
+});
+const isBackdropOwner = computed(() => props.open && dialogStack.value[0] === dialogId);
+const dialogZIndex = computed(() => {
+  const stackPosition = Math.max(dialogStack.value.indexOf(dialogId), 0);
+  return 50 + stackPosition * 10;
+});
 
 const sizeClasses = computed(() => {
   if (isFullscreen.value) {
@@ -65,21 +95,19 @@ const { pushDialogHistoryEntry, removeDialogHistoryEntry } = useDialogBackHistor
 });
 
 function handleEscape(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
-    emit("escape", event);
-    if (!props.closeOnEscape) {
-      return;
-    }
-    if (event.defaultPrevented) {
-      return;
-    }
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (isFullscreen.value) {
-      isFullscreen.value = false;
-    } else {
-      emit("close");
-    }
+  if (event.key !== "Escape" || !isTopmost.value) {
+    return;
+  }
+  emit("escape", event);
+  if (!props.closeOnEscape || event.defaultPrevented) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (isFullscreen.value) {
+    isFullscreen.value = false;
+  } else {
+    emit("close");
   }
 }
 
@@ -89,7 +117,7 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      document.body.style.overflow = "hidden";
+      addToDialogStack(dialogId);
       isFullscreen.value = props.defaultFullscreen;
       window.addEventListener("keydown", handleEscape, captureOptions);
       pushDialogHistoryEntry();
@@ -97,7 +125,7 @@ watch(
         containerRef.value?.focus();
       });
     } else {
-      document.body.style.overflow = "";
+      removeFromDialogStack(dialogId);
       isFullscreen.value = props.defaultFullscreen;
       window.removeEventListener("keydown", handleEscape, captureOptions);
       removeDialogHistoryEntry();
@@ -108,6 +136,7 @@ watch(
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleEscape, captureOptions);
+  removeFromDialogStack(dialogId);
   removeDialogHistoryEntry();
 });
 
@@ -126,9 +155,11 @@ function toggleFullscreen(): void {
           'fixed inset-0 z-50 flex items-center justify-center',
           isFullscreen ? 'p-0' : 'p-4 sm:p-6'
         ]"
+        :style="{ zIndex: dialogZIndex }"
         tabindex="0"
       >
         <div
+          v-if="isBackdropOwner"
           class="dialog-backdrop fixed inset-0"
           @click="emit('close')"
         />

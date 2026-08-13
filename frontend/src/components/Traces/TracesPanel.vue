@@ -28,6 +28,10 @@ interface SelectOption {
   label: string;
 }
 
+interface PricingPanelExposed {
+  clearFocusedSearchOnEscape(): boolean;
+}
+
 const TRACE_SOURCE_LABELS: Record<string, string> = {
   workflow: "Workflow LLM",
   assistant: "AI Assistant",
@@ -85,6 +89,7 @@ const selectedTrace = ref<LLMTraceDetail | null>(null);
 const selectedTraceIndex = ref(-1);
 const pricingDialogOpen = ref(false);
 const pricingDialogModel = ref<string | null>(null);
+const pricingPanelRef = ref<PricingPanelExposed | null>(null);
 const clearing = ref(false);
 const copiedRequest = ref(false);
 const copiedResponse = ref(false);
@@ -568,6 +573,13 @@ function closePricingDialog(): void {
   pricingDialogModel.value = null;
 }
 
+function handlePricingDialogEscape(event: KeyboardEvent): void {
+  if (pricingPanelRef.value?.clearFocusedSearchOnEscape()) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}
+
 function closeOverlays(): void {
   closeDetail();
   closePricingDialog();
@@ -894,9 +906,11 @@ onMounted(async () => {
       size="6xl"
       close-on-back
       @close="closePricingDialog"
+      @escape="handlePricingDialogEscape"
     >
       <LLMPricingPanel
         v-if="pricingDialogModel"
+        ref="pricingPanelRef"
         :key="pricingDialogModel"
         :initial-models="pricingDialogModels"
         auto-open-add-dialog
