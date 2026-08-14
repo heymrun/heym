@@ -1,32 +1,58 @@
-"""Format Code node Python with Ruff.
+"""Format Code node Python with Ruff, inside the same sandbox the node runs in.
 
-Ruff only parses and rewrites the source — it never executes it — so this runs
-as a plain subprocess rather than in the Code node's container sandbox. The
-input is still untrusted text, so it is size-capped and time-capped to keep a
-pathological file from tying up a worker.
+Ruff parses and rewrites the source rather than executing it, so formatting is
+not obviously dangerous on its own. It is still containerised for the same
+reason the node is: the source is untrusted, and a host subprocess would
+inherit the backend's whole environment — ``SECRET_KEY``, ``DATABASE_URL``,
+provider keys. In the sandbox there is nothing to reach: no network, no Docker
+socket, no backend secrets, a read-only root filesystem, and a non-root user.
+
+Like the node itself, this fails closed when Docker is unavailable rather than
+falling back to the host.
 """
 
 from __future__ import annotations
 
 import logging
-import subprocess
-import sys
-from pathlib import Path
+import uuid
+
+from app.services.code_python_executor import (
+    docker_available,
+    hardening_args,
+    resolve_sandbox_image,
+    run_sandbox_container,
+)
 
 logger = logging.getLogger(__name__)
 
 # Generous next to any hand-written node body, small enough that a pasted blob
-# cannot make Ruff chew through a worker.
+# cannot make Ruff chew through a container.
 MAX_SOURCE_BYTES = 200_000
-_TIMEOUT_SECONDS = 10.0
+_TIMEOUT_SECONDS = 20.0
+_FORMAT_TMPFS = "/tmp:rw,nosuid,size=64m"
 _STDIN_FILENAME = "code.py"
 
+# The venv lives at a different path in each image (backend/Dockerfile -> /app,
+# docker/release.Dockerfile -> /app/backend) and its bin directory is not on
+# PATH, so probe both rather than adding an environment variable.
+_RUFF_CANDIDATES = ("/app/.venv/bin/ruff", "/app/backend/.venv/bin/ruff")
 
-def _ruff_command() -> list[str]:
-    """Locate Ruff next to the running interpreter, falling back to PATH."""
-    candidate = Path(sys.executable).with_name("ruff")
-    executable = str(candidate) if candidate.exists() else "ruff"
-    return [executable, "format", "--stdin-filename", _STDIN_FILENAME, "-"]
+# --isolated makes the result independent of any pyproject.toml that happens to
+# be visible, so the same source always formats the same way.
+_PROBE_SCRIPT = (
+    "for p in " + " ".join(_RUFF_CANDIDATES) + "; do "
+    'if [ -x "$p" ]; then '
+    f'exec "$p" format --isolated --stdin-filename {_STDIN_FILENAME} -; '
+    "fi; done; "
+    'echo "ruff not found in the sandbox image" >&2; exit 127'
+)
+
+
+def _build_format_command(image: str, name: str) -> list[str]:
+    """Build the hardened, offline ``docker run`` invocation for Ruff."""
+    cmd = hardening_args(name, "none", _FORMAT_TMPFS)
+    cmd.extend(["--workdir", "/tmp", "--entrypoint", "sh", image, "-c", _PROBE_SCRIPT])
+    return cmd
 
 
 def format_python(source: str) -> str:
@@ -34,32 +60,38 @@ def format_python(source: str) -> str:
 
     Raises:
         ValueError: The source is too large, or Ruff rejected it as invalid.
-        RuntimeError: Ruff is unavailable or did not finish in time.
+        RuntimeError: The sandbox is unavailable or did not finish in time.
     """
     if not source.strip():
         return source
     if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError(f"Code is too large to format (limit {MAX_SOURCE_BYTES:,} bytes).")
 
-    try:
-        result = subprocess.run(
-            _ruff_command(),
-            input=source,
-            capture_output=True,
-            text=True,
-            timeout=_TIMEOUT_SECONDS,
+    if not docker_available():
+        raise RuntimeError(
+            "Formatting requires Docker: the formatter runs in the same isolated sandbox as "
+            "the Code node and is never run on the backend host."
         )
-    except FileNotFoundError as exc:
-        raise RuntimeError("The ruff formatter is not installed on the backend.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Formatting timed out.") from exc
-    except OSError as exc:
-        raise RuntimeError(f"The ruff formatter could not be started: {exc}") from exc
+    image = resolve_sandbox_image()
+    if image is None:
+        raise RuntimeError(
+            "The Code node sandbox image could not be resolved. Set HEYM_PYTHON_TOOL_IMAGE "
+            "to the backend image."
+        )
 
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        # Ruff prefixes parse failures with the stdin filename; drop that noise.
+    name = f"heym-code-format-{uuid.uuid4().hex}"
+    try:
+        returncode, stdout, stderr = run_sandbox_container(
+            _build_format_command(image, name), source, _TIMEOUT_SECONDS, name, "formatting"
+        )
+    except TimeoutError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    if returncode == 127:
+        raise RuntimeError("The ruff formatter is not installed in the sandbox image.")
+    if returncode != 0:
+        detail = (stderr or stdout or "").strip()
         detail = detail.replace(f"{_STDIN_FILENAME}:", "line ").strip()
         raise ValueError(detail or "The code could not be parsed as Python.")
 
-    return result.stdout
+    return stdout

@@ -89,7 +89,7 @@ def _truncate(text: str, limit: int = _MAX_INSTALL_LOG_CHARS) -> str:
     return text[:limit] + f"\n... truncated, {len(text) - limit} more characters"
 
 
-def _docker_available() -> bool:
+def docker_available() -> bool:
     """Return True when a working Docker daemon is reachable (cached)."""
     global _docker_available_cache
     if _docker_available_cache is not None:
@@ -107,7 +107,7 @@ def _docker_available() -> bool:
     return _docker_available_cache
 
 
-def _resolve_image() -> str | None:
+def resolve_sandbox_image() -> str | None:
     """Resolve the sandbox image without introducing a new variable."""
     override = (
         os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
@@ -263,7 +263,7 @@ def _forwarded_env() -> dict[str, str]:
     }
 
 
-def _hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
+def hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
     """Flags shared by both sandbox phases. No Docker socket, no backend secrets."""
     args = [
         "docker",
@@ -313,7 +313,7 @@ def _build_install_command(
     """Build the dependency install container command for ``uv`` or ``pip``."""
     target = str(run_dir / _DEPS_DIRNAME)
     requirements = str(run_dir / _REQUIREMENTS_FILENAME)
-    cmd = _hardening_args(name, "bridge", _INSTALL_TMPFS)
+    cmd = hardening_args(name, "bridge", _INSTALL_TMPFS)
     cmd.extend(mount_args)
     cmd.extend(["--workdir", "/tmp", "--entrypoint", tool, image])
     if tool == "uv":
@@ -331,7 +331,7 @@ def _build_run_command(
     deps_path: Path | None,
 ) -> list[str]:
     """Build the code execution container command."""
-    cmd = _hardening_args(name, "bridge" if allow_network else "none", _RUN_TMPFS)
+    cmd = hardening_args(name, "bridge" if allow_network else "none", _RUN_TMPFS)
     cmd.extend(mount_args)
     if deps_path is not None:
         cmd.extend(["--env", f"PYTHONPATH={deps_path}"])
@@ -346,7 +346,7 @@ def _force_remove_container(name: str) -> None:
         pass
 
 
-def _run_container(
+def run_sandbox_container(
     cmd: list[str],
     stdin_text: str | None,
     timeout_seconds: float,
@@ -392,7 +392,7 @@ def _install_dependencies(image: str, run_dir: Path, requirements: str) -> tuple
     for tool in ("uv", "pip"):
         name = f"heym-code-install-{uuid.uuid4().hex}"
         cmd = _build_install_command(image, name, mount_args, run_dir, tool)
-        returncode, stdout, stderr = _run_container(
+        returncode, stdout, stderr = run_sandbox_container(
             cmd, None, _INSTALL_TIMEOUT_SECONDS, name, "dependency install"
         )
         attempts.append(f"[{tool}] exit {returncode}\n{stdout}{stderr}".strip())
@@ -441,13 +441,13 @@ def execute_code(
         TimeoutError: Install or execution exceeded its limit.
         ValueError: The code raised, or produced unreadable output.
     """
-    if not _docker_available():
+    if not docker_available():
         raise RuntimeError(
             "The Code node requires Docker to run Python in an isolated sandbox, but no "
             "working Docker daemon is reachable. No fallback exists for this node: user "
             "code is never executed in the backend process."
         )
-    image = _resolve_image()
+    image = resolve_sandbox_image()
     if image is None:
         raise RuntimeError(
             "The Code node sandbox image could not be resolved. Set HEYM_PYTHON_TOOL_IMAGE "
@@ -473,7 +473,7 @@ def execute_code(
 
         name = f"heym-code-{uuid.uuid4().hex}"
         cmd = _build_run_command(image, name, allow_network, mount_args, deps_path)
-        returncode, stdout, stderr = _run_container(
+        returncode, stdout, stderr = run_sandbox_container(
             cmd, payload, _RUN_TIMEOUT_SECONDS, name, "execution"
         )
         if returncode in _DOCKER_START_FAILURE_CODES:

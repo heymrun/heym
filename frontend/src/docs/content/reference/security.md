@@ -108,6 +108,8 @@ Dependencies are installed with `uv`, retried with `pip`, and never cached betwe
 
 Only non-secret, portable environment variables are forwarded into the containers — proxy settings, CA bundles, and locale, which dependency installation needs to reach PyPI behind a corporate proxy. Database URLs, `SECRET_KEY`/`ENCRYPTION_KEY`, provider API keys, and OAuth secrets are withheld by an allowlist, so a new backend secret is dropped by default rather than leaked until someone updates a denylist. The backend's `HOME` never overrides the sandbox's own writable path.
 
+The **Format** button uses the same sandbox. Ruff parses and rewrites the source rather than executing it, but running it on the backend host would hand an untrusted file a process that inherits the backend's whole environment, so it gets its own throwaway `--network none` container with the same limits and the same allowlisted environment. It fails closed without Docker rather than formatting on the host.
+
 Sandbox limits are constants rather than environment variables — 512 MB of memory, one CPU, 256 processes, a 120-second install timeout, and a 60-second execution timeout. The image is resolved from the existing `HEYM_PYTHON_TOOL_IMAGE` / `HEYM_CODEX_DOCKER_IMAGE` chain; the node introduces no configuration of its own.
 
 ## Related

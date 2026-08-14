@@ -243,7 +243,7 @@ class ExecuteCodeTest(unittest.TestCase):
         executor._docker_available_cache = None
 
     def test_fails_closed_when_docker_is_unavailable(self) -> None:
-        with patch.object(executor, "_docker_available", return_value=False):
+        with patch.object(executor, "docker_available", return_value=False):
             with self.assertRaises(RuntimeError) as ctx:
                 executor.execute_code("def main(params):\n    return 1\n", "", {}, False)
         self.assertIn("requires Docker", str(ctx.exception))
@@ -251,8 +251,8 @@ class ExecuteCodeTest(unittest.TestCase):
 
     def test_fails_when_the_image_cannot_be_resolved(self) -> None:
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value=None),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value=None),
         ):
             with self.assertRaises(RuntimeError) as ctx:
                 executor.execute_code("def main(params):\n    return 1\n", "", {}, False)
@@ -260,8 +260,8 @@ class ExecuteCodeTest(unittest.TestCase):
 
     def test_empty_requirements_runs_a_single_container(self) -> None:
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(
                 executor.subprocess, "Popen", return_value=_fake_proc(_OK_ENVELOPE)
             ) as popen,
@@ -279,8 +279,8 @@ class ExecuteCodeTest(unittest.TestCase):
 
     def test_payload_carries_the_runner_source_code_and_params(self) -> None:
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(
                 executor.subprocess, "Popen", return_value=_fake_proc(_OK_ENVELOPE)
             ) as popen,
@@ -295,8 +295,8 @@ class ExecuteCodeTest(unittest.TestCase):
     def test_requirements_trigger_install_then_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch.object(executor, "_docker_available", return_value=True),
-                patch.object(executor, "_resolve_image", return_value="img"),
+                patch.object(executor, "docker_available", return_value=True),
+                patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
                 patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
                 patch.object(
@@ -321,8 +321,8 @@ class ExecuteCodeTest(unittest.TestCase):
     def test_uv_failure_retries_with_pip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch.object(executor, "_docker_available", return_value=True),
-                patch.object(executor, "_resolve_image", return_value="img"),
+                patch.object(executor, "docker_available", return_value=True),
+                patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
                 patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
                 patch.object(
@@ -348,8 +348,8 @@ class ExecuteCodeTest(unittest.TestCase):
     def test_install_failing_under_both_tools_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch.object(executor, "_docker_available", return_value=True),
-                patch.object(executor, "_resolve_image", return_value="img"),
+                patch.object(executor, "docker_available", return_value=True),
+                patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
                 patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
                 patch.object(
@@ -372,8 +372,8 @@ class ExecuteCodeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with (
-                patch.object(executor, "_docker_available", return_value=True),
-                patch.object(executor, "_resolve_image", return_value="img"),
+                patch.object(executor, "docker_available", return_value=True),
+                patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=root),
                 patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
                 patch.object(
@@ -390,8 +390,8 @@ class ExecuteCodeTest(unittest.TestCase):
 
     def test_sandbox_start_failure_is_not_treated_as_a_result(self) -> None:
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(
                 executor.subprocess, "Popen", return_value=_fake_proc("", "no such image", 127)
             ),
@@ -403,8 +403,8 @@ class ExecuteCodeTest(unittest.TestCase):
     def test_runner_error_envelope_becomes_a_value_error(self) -> None:
         envelope = json.dumps({"success": False, "error": "ValueError: boom", "logs": "before\n"})
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(executor.subprocess, "Popen", return_value=_fake_proc(envelope)),
         ):
             with self.assertRaises(ValueError) as ctx:
@@ -416,8 +416,8 @@ class ExecuteCodeTest(unittest.TestCase):
         proc = MagicMock()
         proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="docker", timeout=60)
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(executor.subprocess, "Popen", return_value=proc),
             patch.object(executor, "_force_remove_container") as force_remove,
         ):
@@ -428,8 +428,8 @@ class ExecuteCodeTest(unittest.TestCase):
 
     def test_unparseable_stdout_is_reported(self) -> None:
         with (
-            patch.object(executor, "_docker_available", return_value=True),
-            patch.object(executor, "_resolve_image", return_value="img"),
+            patch.object(executor, "docker_available", return_value=True),
+            patch.object(executor, "resolve_sandbox_image", return_value="img"),
             patch.object(executor.subprocess, "Popen", return_value=_fake_proc("not json")),
         ):
             with self.assertRaises(ValueError) as ctx:
