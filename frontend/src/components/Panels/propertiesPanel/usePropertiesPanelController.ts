@@ -690,6 +690,7 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const codeParametersInputRef = ref<ExpandableFieldRef | null>(null);
   type ConverterExpressionFieldKey = "source" | "converterFileId" | "ocrPageRange";
 
   interface ConverterExpressionField {
@@ -2270,6 +2271,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
+    codeParametersInputRef.value?.closeExpandDialog();
     closeConverterExpressionDialogs();
     closeHeymExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
@@ -2886,6 +2888,16 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "code") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        if (codeParametersInputRef.value) {
+          nextTick(() => codeParametersInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "heym") {
       currentHeymExpressionFieldIndex.value = 0;
       const tryOpenDialog = (attempts = 0): void => {
@@ -3187,6 +3199,7 @@ export function usePropertiesPanelController() {
       case "crawler":
       case "consoleLog":
       case "converter":
+      case "code":
       case "switch":
       case "loop":
       case "grist":
@@ -9146,6 +9159,7 @@ export function usePropertiesPanelController() {
     websocketTriggerEventOptions,
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
+    codeParametersInputRef,
     converterExpressionFieldCount,
     converterExpressionFieldIndex,
     setConverterExpressionInputRef,
