@@ -120,7 +120,7 @@ Untrusted Agent Python **skills** run in a hardened, throwaway sibling container
 
 **The Code node adds no variables of its own, and deliberately has no `subprocess` escape hatch.** It runs arbitrary user Python with arbitrary dependencies, so it always requires a reachable Docker daemon and fails closed without one — `HEYM_PYTHON_TOOL_SANDBOX` does not apply to it. Its limits (512m memory, 1 CPU, 256 PIDs, 120s install timeout, 60s execution timeout) are constants in `app/services/code_python_executor.py`, not configuration.
 
-It reuses existing variables only: `HEYM_PYTHON_TOOL_IMAGE` then `HEYM_CODEX_DOCKER_IMAGE` for image resolution (falling back to inspecting the backend's own image), and `HEYM_CODEX_WORKSPACE_DIR` / `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` for the per-run dependency workspace. Code nodes with an empty `requirements.txt` need no workspace volume at all, since the install phase is skipped and nothing is mounted.
+It reuses existing variables only: `HEYM_PYTHON_TOOL_IMAGE` then `HEYM_CODEX_DOCKER_IMAGE` for image resolution (falling back to inspecting the backend's own image), and `HEYM_CODEX_WORKSPACE_DIR` / `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` for the per-run dependency workspace when the backend is containerised. A native `run.sh` backend needs neither variable: it bind-mounts a local temporary directory instead. Code nodes with an empty `requirements.txt` mount nothing at all, since the install phase is skipped.
 
 ## MCP stdio sandbox
 

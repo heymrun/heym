@@ -27,6 +27,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -139,8 +140,20 @@ def _workspace_mount_point() -> Path:
     return Path(os.environ.get("HEYM_CODEX_WORKSPACE_DIR", "").strip() or _DEFAULT_WORKSPACE_MOUNT)
 
 
+def _is_containerized() -> bool:
+    """True when the backend itself runs inside a container."""
+    return Path("/.dockerenv").exists()
+
+
 def _code_run_root() -> Path:
-    """Directory inside the shared volume that holds per-run Code node directories."""
+    """Directory that holds per-run Code node directories.
+
+    Inside a container this must live on the volume shared with the sibling.
+    On a native backend (``run.sh``) there is no such volume, but there is also
+    no need for one: a host path can be bind-mounted straight into the sibling.
+    """
+    if not _is_containerized():
+        return Path(tempfile.gettempdir()) / "heym-code-runs"
     return _workspace_mount_point() / _CODE_RUN_SUBDIR
 
 
@@ -173,6 +186,13 @@ def _current_container_mounts() -> list[dict[str, Any]]:
 
 def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
     """Return ``docker run`` mount args exposing only ``run_dir`` to the sibling."""
+    suffix = ",readonly" if readonly else ""
+
+    # A native backend already holds a real host path, so bind it straight
+    # through at the same location. No shared volume is involved.
+    if not _is_containerized():
+        return ["--mount", f"type=bind,src={run_dir},dst={run_dir}{suffix}"]
+
     mount_point = _workspace_mount_point()
     try:
         rel = run_dir.relative_to(mount_point)
@@ -180,7 +200,6 @@ def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
         raise RuntimeError(
             f"Code run dir {run_dir} is not under the workspace volume mount {mount_point}"
         ) from exc
-    suffix = ",readonly" if readonly else ""
 
     volume = os.environ.get("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME", "").strip()
     if volume:

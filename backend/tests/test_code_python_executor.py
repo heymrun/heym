@@ -111,6 +111,60 @@ class BuildInstallCommandTest(unittest.TestCase):
         self.assertNotIn("docker.sock", " ".join(cmd))
 
 
+class WorkspaceLocationTest(unittest.TestCase):
+    """Native (non-containerised) backends bind-mount a local run dir directly."""
+
+    def test_run_root_is_local_when_the_backend_is_not_containerised(self) -> None:
+        with patch.object(executor, "_is_containerized", return_value=False):
+            root = executor._code_run_root()
+        self.assertTrue(str(root).startswith(tempfile.gettempdir()))
+
+    def test_run_root_is_the_shared_volume_inside_a_container(self) -> None:
+        with (
+            patch.object(executor, "_is_containerized", return_value=True),
+            patch.dict("os.environ", {"HEYM_CODEX_WORKSPACE_DIR": "/app/data/codex-workspaces"}),
+        ):
+            root = executor._code_run_root()
+        self.assertEqual(str(root), "/app/data/codex-workspaces/_code-runs")
+
+    def test_native_backend_binds_the_run_dir_at_the_same_path(self) -> None:
+        run_dir = Path(tempfile.gettempdir()) / "heym-code-runs" / "abc"
+        with (
+            patch.object(executor, "_is_containerized", return_value=False),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            args = executor._resolve_workspace_mount(run_dir, readonly=True)
+        self.assertEqual(args, ["--mount", f"type=bind,src={run_dir},dst={run_dir},readonly"])
+
+    def test_native_backend_bind_is_writable_for_the_install_phase(self) -> None:
+        run_dir = Path(tempfile.gettempdir()) / "heym-code-runs" / "abc"
+        with patch.object(executor, "_is_containerized", return_value=False):
+            args = executor._resolve_workspace_mount(run_dir, readonly=False)
+        self.assertEqual(args, ["--mount", f"type=bind,src={run_dir},dst={run_dir}"])
+
+    def test_named_volume_still_wins_inside_a_container(self) -> None:
+        with (
+            patch.object(executor, "_is_containerized", return_value=True),
+            patch.dict(
+                "os.environ",
+                {
+                    "HEYM_CODEX_WORKSPACE_DIR": "/app/data/codex-workspaces",
+                    "HEYM_CODEX_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces",
+                },
+            ),
+        ):
+            run_dir = Path("/app/data/codex-workspaces/_code-runs/abc")
+            args = executor._resolve_workspace_mount(run_dir, readonly=True)
+        self.assertEqual(
+            args,
+            [
+                "--mount",
+                f"type=volume,src=heym-codex-workspaces,dst={run_dir},"
+                "volume-subpath=_code-runs/abc,readonly",
+            ],
+        )
+
+
 class RunnerSourceTest(unittest.TestCase):
     def test_runner_source_is_the_module_on_disk(self) -> None:
         source = executor._runner_source()

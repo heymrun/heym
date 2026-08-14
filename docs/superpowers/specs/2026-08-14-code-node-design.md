@@ -92,10 +92,12 @@ path below.
 
 ### With dependencies — two containers sharing one per-run directory
 
-The backend creates a per-run directory on the shared workspace volume (the
-same one the skill sandbox rides, via `volume-subpath`) and writes
-`requirements.txt` into it. Both containers mount only that subtree, so a run
-never sees another run's files.
+The backend creates a per-run directory and writes `requirements.txt` into it.
+When the backend is containerised that directory lives on the shared workspace
+volume the skill sandbox rides, mounted via `volume-subpath`; a native
+(`run.sh`) backend already holds a real host path, so it bind-mounts a local
+temporary directory straight through instead and needs no volume. Both
+containers mount only that subtree, so a run never sees another run's files.
 
 ```
 run_dir = <codex-workspace-volume>/_code-runs/<uuid>/
