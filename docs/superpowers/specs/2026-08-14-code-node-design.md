@@ -57,12 +57,32 @@ New service `backend/app/services/code_python_executor.py`, patterned on
 `skill_python_executor.py` (which already solves per-run workspaces,
 `volume-subpath` mounting, and image resolution).
 
-### Fast path — empty `requirements.txt`
+### How the runner reaches the container
 
-The install phase is skipped entirely; a single container runs:
+`code_runner.py` is **not** read from a baked image path. The two images place
+the backend differently (`backend/Dockerfile` puts it at `/app`,
+`docker/release.Dockerfile` at `/app/backend`), and `python_tool_executor.py`
+papers over that with a `HEYM_PYTHON_TOOL_RUNNER_PATH` override — a variable
+this node is not allowed to add.
+
+Instead the backend reads its own `code_runner.py` source and ships it inside
+the stdin payload. The container entrypoint is a short bootstrap:
 
 ```
-Phase 2  [--network none]  python code_runner.py < payload  ->  JSON envelope
+--entrypoint python <image> -c "import sys,json;p=json.loads(sys.stdin.read());
+g={'__name__':'__heym_runner__'};exec(compile(p['runner'],'code_runner.py','exec'),g);g['run'](p)"
+```
+
+No path guessing, no environment variable, and — importantly — the run phase
+needs no mounted filesystem at all when there are no dependencies.
+
+### Fast path — empty `requirements.txt`
+
+The install phase is skipped entirely, and because the runner arrives over
+stdin the container needs **no volume and no mount**:
+
+```
+Phase 2  [--network none]  python -c <bootstrap> < payload  ->  JSON envelope
 ```
 
 This is the common case (pure transforms). With `codeAllowNetwork` left at its
@@ -72,22 +92,34 @@ path below.
 
 ### With dependencies — two containers sharing one per-run directory
 
+The backend creates a per-run directory on the shared workspace volume (the
+same one the skill sandbox rides, via `volume-subpath`) and writes
+`requirements.txt` into it. Both containers mount only that subtree, so a run
+never sees another run's files.
+
 ```
 run_dir = <codex-workspace-volume>/_code-runs/<uuid>/
 
 Phase 1  [--network bridge]
-    uv pip install --target run_dir/.deps -r requirements.txt
-    on failure: pip install --target run_dir/.deps -r requirements.txt
+    entrypoint uv  ->  pip install --no-cache --target run_dir/.deps
+                       -r run_dir/requirements.txt
+    on any non-zero exit, a second container retries with
+    entrypoint pip  ->  install --no-cache-dir --target ... -r ...
     no cache mount — every run installs from scratch
 
 Phase 2  [--network none  |  --network bridge if codeAllowNetwork]
-    PYTHONPATH=run_dir/.deps  python code_runner.py < payload
+    PYTHONPATH=run_dir/.deps  python -c <bootstrap> < payload
 
-finally: shutil.rmtree(run_dir)     # both containers already --rm
+finally: shutil.rmtree(run_dir)     # every container already --rm
 ```
 
-Phase 2 mounts `.deps` read-only and never sees the Phase 1 install log
-directory beyond it.
+`run_dir` is a per-run read-write scratch (the container root filesystem stays
+`--read-only`). `.deps` is not separately made read-only: the directory is
+disposable, isolated to this single run, and deleted in `finally`, so a
+write-back buys the code nothing.
+
+Two separate containers for uv and pip, rather than one `uv || pip` shell, so
+the result records which tool actually installed the packages.
 
 ### Container hardening (both phases)
 
