@@ -14,6 +14,8 @@ falling back to the host.
 from __future__ import annotations
 
 import logging
+import re
+import textwrap
 import uuid
 
 from app.services.code_python_executor import (
@@ -48,6 +50,50 @@ _PROBE_SCRIPT = (
 )
 
 
+_TAB_WIDTH = 4
+
+
+def _expand_leading_tabs(line: str) -> str:
+    """Turn tabs in a line's indentation into spaces, leaving the body untouched.
+
+    Expanding the whole line would rewrite tabs inside string literals, which
+    silently changes what the code does.
+    """
+    stripped = line.lstrip("\t ")
+    indent = line[: len(line) - len(stripped)]
+    return indent.expandtabs(_TAB_WIDTH) + stripped
+
+
+def _normalize_source(source: str) -> str:
+    """Repair the indentation damage that pasting code usually causes.
+
+    A block copied out of a document arrives uniformly indented, and mixing
+    tabs with spaces is a parse error rather than a formatting problem. Both
+    are mechanical to fix, so fix them instead of refusing to format. Nothing
+    here changes well-formed code: ``dedent`` finds no common prefix when the
+    first line already starts at column zero.
+    """
+    text = source.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(_expand_leading_tabs(line) for line in text.split("\n"))
+    text = text.strip("\n")
+    if not text:
+        return source
+    text = textwrap.dedent(text)
+    return text + "\n"
+
+
+def _parse_error_message(raw: str) -> str:
+    """Turn Ruff's stderr into something worth showing above the editor."""
+    first = next((line.strip() for line in raw.splitlines() if line.strip()), "")
+    match = re.search(rf"{_STDIN_FILENAME}:(\d+):(\d+):\s*(.+)$", first)
+    if match:
+        line, column, reason = match.groups()
+        return f"Line {line}, column {column}: {reason.rstrip('.')}"
+    if first:
+        return first.removeprefix("error: ").strip()
+    return "The code could not be parsed as Python."
+
+
 def _build_format_command(image: str, name: str) -> list[str]:
     """Build the hardened, offline ``docker run`` invocation for Ruff."""
     cmd = hardening_args(name, "none", _FORMAT_TMPFS)
@@ -66,6 +112,7 @@ def format_python(source: str) -> str:
         return source
     if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError(f"Code is too large to format (limit {MAX_SOURCE_BYTES:,} bytes).")
+    source = _normalize_source(source)
 
     if not docker_available():
         raise RuntimeError(
@@ -90,8 +137,6 @@ def format_python(source: str) -> str:
     if returncode == 127:
         raise RuntimeError("The ruff formatter is not installed in the sandbox image.")
     if returncode != 0:
-        detail = (stderr or stdout or "").strip()
-        detail = detail.replace(f"{_STDIN_FILENAME}:", "line ").strip()
-        raise ValueError(detail or "The code could not be parsed as Python.")
+        raise ValueError(_parse_error_message(stderr or stdout or ""))
 
     return stdout

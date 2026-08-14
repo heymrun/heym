@@ -40,6 +40,47 @@ class BuildFormatCommandTest(unittest.TestCase):
         self.assertIn("/app/backend/.venv/bin/ruff", script)
 
 
+class NormalizeSourceTest(unittest.TestCase):
+    """Pasted code is repaired before Ruff sees it, instead of being rejected."""
+
+    def test_a_uniformly_indented_paste_is_dedented(self) -> None:
+        source = "    def main(params):\n        return 1\n"
+        self.assertEqual(
+            code_formatter._normalize_source(source), "def main(params):\n    return 1\n"
+        )
+
+    def test_leading_blank_lines_are_dropped_before_dedenting(self) -> None:
+        source = "\n\n def main(params):\n     return 1\n"
+        self.assertEqual(
+            code_formatter._normalize_source(source), "def main(params):\n    return 1\n"
+        )
+
+    def test_leading_tabs_become_spaces_so_mixed_indentation_parses(self) -> None:
+        source = "def main(params):\n    x = 1\n\ty = 2\n\treturn x\n"
+        normalized = code_formatter._normalize_source(source)
+        self.assertNotIn("\t", normalized)
+
+    def test_tabs_inside_string_literals_are_preserved(self) -> None:
+        source = 'def main(params):\n    return "a\\tb"\n'
+        self.assertIn('"a\\tb"', code_formatter._normalize_source(source))
+
+    def test_crlf_becomes_lf(self) -> None:
+        self.assertEqual(
+            code_formatter._normalize_source("def main(params):\r\n    return 1\r\n"),
+            "def main(params):\n    return 1\n",
+        )
+
+    def test_well_formed_code_is_left_alone(self) -> None:
+        source = 'def main(params):\n    return {"a": 1}\n'
+        self.assertEqual(code_formatter._normalize_source(source), source)
+
+    def test_a_missing_trailing_newline_is_added(self) -> None:
+        self.assertEqual(
+            code_formatter._normalize_source("def main(params):\n    return 1"),
+            "def main(params):\n    return 1\n",
+        )
+
+
 class FormatPythonTest(unittest.TestCase):
     def setUp(self) -> None:
         self._docker = patch.object(code_formatter, "docker_available", return_value=True)
@@ -74,12 +115,14 @@ class FormatPythonTest(unittest.TestCase):
         run.assert_not_called()
         self.assertIn("too large", str(ctx.exception).lower())
 
-    def test_syntax_error_surfaces_the_reason(self) -> None:
-        failure = self._sandbox("", "error: Failed to parse code.py:2:5", returncode=2)
+    def test_syntax_error_is_reported_as_a_readable_location(self) -> None:
+        failure = self._sandbox(
+            "", "error: Failed to parse code.py:2:5: Expected an expression", returncode=2
+        )
         with patch.object(code_formatter, "run_sandbox_container", failure):
             with self.assertRaises(ValueError) as ctx:
                 code_formatter.format_python("def main(params:\n    return 1\n")
-        self.assertIn("Failed to parse", str(ctx.exception))
+        self.assertEqual(str(ctx.exception), "Line 2, column 5: Expected an expression")
 
     def test_missing_ruff_in_the_image_fails_closed(self) -> None:
         missing = self._sandbox("", "ruff not found in the sandbox image", returncode=127)
