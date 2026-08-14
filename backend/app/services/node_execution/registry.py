@@ -13,6 +13,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "bigquery": "bigquery_node",
     "chartOutput": "chart_output_node",
     "clickhouse": "clickhouse_node",
+    "code": "code_node",
     "codex": "codex_node",
     "condition": "condition_node",
     "consoleLog": "console_log_node",
