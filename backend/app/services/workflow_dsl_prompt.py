@@ -1393,6 +1393,54 @@ Access the converted file downstream with `$convertDoc.id` and `$convertDoc.down
 
 **⚠️ USE `converter` FOR OCR**: When the user asks to read text out of a scan, screenshot, receipt, or image-only PDF, use `imageToText`/`pdfToText`. Do NOT send the raw file to an `llm` node for transcription and do NOT shell out to OCR tools from an `execute` node. The file has to live in Heym Drive first: chain `fileUploadTrigger` -> `converter`, or `drive` (`downloadUrl`) -> `converter`. Leave `ocrLanguage` at `"auto"` unless the user names a language.
 
+### 13c. code (Run Python)
+- **Purpose**: Run Python that Heym has no dedicated node for — custom maths, bespoke parsing, algorithms, or reshaping data in a way `set` cannot express. The code runs in a disposable, network-isolated container that is created and destroyed for every execution.
+- **Inputs**: 1 | **Outputs**: 1
+- **Data fields**:
+  - `label`: Node identifier
+  - `codeSource`: Python source. It MUST define `def main(params):` and return a JSON-serializable value. Anything the code `print`s is captured separately.
+  - `codeRequirements`: `requirements.txt` contents, one package per line (e.g. `"requests==2.32.3\\npandas\\n"`). Leave it `""` when the standard library is enough — that skips dependency installation entirely and makes the node much faster.
+  - `codeParameters`: A JSON object string wiring workflow data into the code, e.g. `"{\\"name\\": \\"$trigger.body.name\\", \\"rows\\": \\"$fetchRows.result\\"}"`. Expressions are resolved before the code runs. Inside `main`, read them with dot notation: `params.name`, `params.rows[0].id`. Keys that are not valid Python identifiers are read as `params["my key"]`.
+  - `codeAllowNetwork`: Boolean, default `false`. When `false` the execution container has no network at all. Set `true` ONLY when the code itself must reach the internet. Dependency installation always has network regardless of this flag.
+- **Output**: `$label.result` is whatever `main` returned. `$label.logs` is the captured `print` output. `$label.install` is `{ok, tool, log}` describing the dependency install.
+
+**Example** (compute a weighted score from upstream rows):
+```json
+{
+  "type": "code",
+  "data": {
+    "label": "scoreRows",
+    "codeSource": "def main(params):\\n    rows = params.rows\\n    total = sum(r.amount * r.weight for r in rows)\\n    return {\\"total\\": round(total, 2), \\"count\\": len(rows)}\\n",
+    "codeRequirements": "",
+    "codeParameters": "{\\"rows\\": \\"$fetchRows.result\\"}",
+    "codeAllowNetwork": false
+  }
+}
+```
+Downstream nodes read `$scoreRows.result.total` and `$scoreRows.result.count`.
+
+**Example** (third-party dependency):
+```json
+{
+  "type": "code",
+  "data": {
+    "label": "parseFeed",
+    "codeSource": "import feedparser\\n\\ndef main(params):\\n    parsed = feedparser.parse(params.xml)\\n    return [{\\"title\\": e.title, \\"link\\": e.link} for e in parsed.entries]\\n",
+    "codeRequirements": "feedparser==6.0.11\\n",
+    "codeParameters": "{\\"xml\\": \\"$fetchFeed.body\\"}",
+    "codeAllowNetwork": false
+  }
+}
+```
+
+**⚠️ `codeSource` MUST NOT CONTAIN BACKTICKS**: The code field is plain Python only. NEVER wrap it in triple backticks or use backticks inside the string. Backticks break workflow JSON extraction, exactly as they do for agent tool `code` (rule 36b).
+
+**⚠️ `main` IS MANDATORY**: A `code` node without a top-level `def main(params):` fails. Module-level statements run, but the return value comes from `main` only.
+
+**⚠️ PREFER A PURPOSE-BUILT NODE OVER `code`**: Do NOT reach for `code` when a dedicated node already does the job — CSV/TSV/XML/OCR/file conversion belong in `converter`, HTTP calls belong in the `http` node, simple field mapping belongs in `set`, and calling another workflow belongs in `execute`. Use `code` for logic those nodes genuinely cannot express.
+
+**⚠️ KEEP `codeAllowNetwork` FALSE**: Leave it `false` unless the user's requirement explicitly needs the code to call the internet directly. Fetching data with an `http` node and passing the body in through `codeParameters` is the preferred shape.
+
 ### 14. sticky (Note)
 - **Purpose**: Add documentation notes to canvas (not executed)
 - **Inputs**: 0 | **Outputs**: 0
