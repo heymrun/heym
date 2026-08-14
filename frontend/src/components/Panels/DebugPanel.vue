@@ -2654,10 +2654,15 @@ function clearAiChat(): void {
 }
 
 function handleAiKeydown(event: KeyboardEvent): void {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    sendAiMessage();
+  if (event.key !== "Enter" || event.shiftKey) {
+    return;
   }
+  event.preventDefault();
+  // Ctrl/Cmd+Enter is also the editor's "run workflow" shortcut, listening on
+  // window in the bubble phase. Without this the same keystroke both sent the
+  // message and started a run behind the panel.
+  event.stopPropagation();
+  sendAiMessage();
 }
 
 function sanitizeForDisplay(data: unknown): unknown {

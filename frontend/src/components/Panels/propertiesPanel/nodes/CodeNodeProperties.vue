@@ -36,12 +36,11 @@ async function formatCode(): Promise<void> {
   isFormatting.value = true;
   try {
     const formatted = await codeApi.format(source);
-    if (formatted === source) {
-      showToast("Code is already formatted", "info");
-      return;
+    // Nothing to say when the code was already tidy; only report real changes.
+    if (formatted !== source) {
+      updateNodeData("codeSource", formatted);
+      showToast("Code formatted", "success");
     }
-    updateNodeData("codeSource", formatted);
-    showToast("Code formatted", "success");
   } catch (error: unknown) {
     const detail = axios.isAxiosError(error)
       ? (error.response?.data as { detail?: string } | undefined)?.detail

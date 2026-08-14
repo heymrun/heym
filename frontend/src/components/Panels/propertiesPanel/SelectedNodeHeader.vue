@@ -14,6 +14,22 @@ const {
   toggleActive,
   deleteNode,
 } = usePropertiesPanelContext();
+
+// Some node colours are picked for their icon tile, where they sit on a tinted
+// background. As small text on the panel they fall below a comfortable contrast
+// ratio, so those types get a dedicated readability-tuned token.
+const HEADER_FOREGROUND_TOKENS: Partial<Record<string, string>> = {
+  agent: "--node-agent-header-foreground",
+  code: "--node-code-header-foreground",
+};
+
+function typeLabelColor(nodeType: string): string {
+  const token = HEADER_FOREGROUND_TOKENS[nodeType];
+  if (token) {
+    return `hsl(var(${token}))`;
+  }
+  return `hsl(var(--${nodeColorMap[nodeType as keyof typeof nodeColorMap]}) / 0.8)`;
+}
 </script>
 
 <template>
@@ -46,11 +62,7 @@ const {
           <div class="flex items-center gap-1.5">
             <span
               class="text-xs text-muted-foreground"
-              :style="{
-                color: selectedNode.type === 'agent'
-                  ? 'hsl(var(--node-agent-header-foreground))'
-                  : `hsl(var(--${nodeColorMap[selectedNode.type]}) / 0.8)`,
-              }"
+              :style="{ color: typeLabelColor(selectedNode.type) }"
             >{{ selectedNodeTypeLabel
             }}</span>
             <span

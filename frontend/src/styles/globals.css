@@ -44,6 +44,7 @@
     --node-llm: 252 87% 62%;
     --node-agent: 180 80% 45%;
     --node-agent-header-foreground: 180 72% 30%;
+    --node-code-header-foreground: 265 72% 42%;
     --node-codex: 168 76% 32%;
     --node-condition: 25 95% 53%;
     --node-switch: 189 94% 43%;
@@ -121,6 +122,7 @@
     --node-llm: 252 87% 67%;
     --node-agent: 180 80% 50%;
     --node-agent-header-foreground: 180 80% 50%;
+    --node-code-header-foreground: 265 90% 78%;
     --node-codex: 168 68% 50%;
     --node-condition: 25 95% 58%;
     --node-switch: 189 94% 48%;

@@ -61,9 +61,10 @@ defineExpose({ focus: () => textareaRef.value?.focus() });
 </script>
 
 <template>
-  <!-- p-1 keeps the gutter and the code off the border on all four sides. -->
+  <!-- No top inset: the gutter and textarea already carry their own py-2.
+       The right side gets 8px so the code clears the scrollbar. -->
   <div
-    class="flex overflow-hidden rounded-md border border-input bg-background p-1 font-mono text-xs leading-5"
+    class="flex overflow-hidden rounded-md border border-input bg-background pb-1 pl-1 pr-2 font-mono text-xs leading-5"
     :style="height ? { height } : undefined"
   >
     <div
