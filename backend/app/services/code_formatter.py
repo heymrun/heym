@@ -82,6 +82,99 @@ def _normalize_source(source: str) -> str:
     return text + "\n"
 
 
+# How far an indent may sit from an established level and still count as a typo
+# rather than a deliberate (if broken) structure.
+_MAX_SNAP_SPACES = 3
+_OPENERS = "([{"
+_CLOSERS = ")]}"
+
+
+def _scan_line(text: str, triple: str | None, depth: int) -> tuple[str | None, int]:
+    """Track open triple-quoted strings and bracket depth across a line."""
+    i = 0
+    while i < len(text):
+        if triple:
+            if text.startswith(triple, i):
+                triple, i = None, i + 3
+                continue
+            i += 1
+            continue
+        chunk = text[i : i + 3]
+        if chunk in ('"""', "'''"):
+            triple, i = chunk, i + 3
+            continue
+        char = text[i]
+        if char == "#":
+            break
+        if char in ("'", '"'):
+            quote, i = char, i + 1
+            while i < len(text) and text[i] != quote:
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if char in _OPENERS:
+            depth += 1
+        elif char in _CLOSERS:
+            depth = max(0, depth - 1)
+        i += 1
+    return triple, depth
+
+
+def _repair_indentation(source: str) -> str | None:
+    """Snap near-miss indents onto established levels.
+
+    Returns ``None`` when nothing needed fixing, or when the indentation is too
+    far off to guess at safely — a wrong guess would silently move a statement
+    into a different block, which is worse than refusing. Continuation lines
+    inside brackets and the bodies of triple-quoted strings are never touched,
+    because Python lets those sit at any indent and rewriting them would change
+    what the code means.
+    """
+    levels = [0]
+    triple: str | None = None
+    depth = 0
+    out: list[str] = []
+    changed = False
+
+    for line in source.split("\n"):
+        if triple is not None or depth > 0:
+            out.append(line)
+            triple, depth = _scan_line(line, triple, depth)
+            continue
+
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out.append(line)
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        body = line[indent:]
+
+        if indent > levels[-1]:
+            levels.append(indent)
+        elif indent in levels:
+            while levels[-1] > indent:
+                levels.pop()
+        else:
+            ranked = sorted(levels, key=lambda level: abs(level - indent))
+            nearest = ranked[0]
+            distance = abs(nearest - indent)
+            tied = len(ranked) > 1 and abs(ranked[1] - indent) == distance
+            # A tie means two blocks are equally plausible homes for the line.
+            # Guessing there could silently move a statement, so refuse.
+            if distance > _MAX_SNAP_SPACES or tied:
+                return None
+            while levels[-1] > nearest:
+                levels.pop()
+            indent = nearest
+            changed = True
+
+        out.append(" " * indent + body)
+        triple, depth = _scan_line(body, triple, depth)
+
+    return "\n".join(out) if changed else None
+
+
 def _parse_error_message(raw: str) -> str:
     """Turn Ruff's stderr into something worth showing above the editor."""
     first = next((line.strip() for line in raw.splitlines() if line.strip()), "")
@@ -99,6 +192,17 @@ def _build_format_command(image: str, name: str) -> list[str]:
     cmd = hardening_args(name, "none", _FORMAT_TMPFS)
     cmd.extend(["--workdir", "/tmp", "--entrypoint", "sh", image, "-c", _PROBE_SCRIPT])
     return cmd
+
+
+def _run_ruff(image: str, source: str) -> tuple[int, str, str]:
+    """Run one throwaway Ruff container over ``source``."""
+    name = f"heym-code-format-{uuid.uuid4().hex}"
+    try:
+        return run_sandbox_container(
+            _build_format_command(image, name), source, _TIMEOUT_SECONDS, name, "formatting"
+        )
+    except TimeoutError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def format_python(source: str) -> str:
@@ -126,17 +230,19 @@ def format_python(source: str) -> str:
             "to the backend image."
         )
 
-    name = f"heym-code-format-{uuid.uuid4().hex}"
-    try:
-        returncode, stdout, stderr = run_sandbox_container(
-            _build_format_command(image, name), source, _TIMEOUT_SECONDS, name, "formatting"
-        )
-    except TimeoutError as exc:
-        raise RuntimeError(str(exc)) from exc
+    returncode, stdout, stderr = _run_ruff(image, source)
+    if returncode == 0:
+        return stdout
+
+    # An indentation typo is mechanical to fix, so try once more with the
+    # near-miss lines snapped onto the levels around them. Ruff validates the
+    # attempt: a repair that does not parse is discarded for the real error.
+    repaired = _repair_indentation(source)
+    if repaired is not None:
+        retry_code, retry_stdout, _ = _run_ruff(image, repaired)
+        if retry_code == 0:
+            return retry_stdout
 
     if returncode == 127:
         raise RuntimeError("The ruff formatter is not installed in the sandbox image.")
-    if returncode != 0:
-        raise ValueError(_parse_error_message(stderr or stdout or ""))
-
-    return stdout
+    raise ValueError(_parse_error_message(stderr or stdout or ""))

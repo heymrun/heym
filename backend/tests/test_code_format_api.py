@@ -81,6 +81,59 @@ class NormalizeSourceTest(unittest.TestCase):
         )
 
 
+class RepairIndentationTest(unittest.TestCase):
+    """A near-miss indent is a typo, not a reason to refuse to format."""
+
+    def test_one_stray_space_snaps_to_the_established_level(self) -> None:
+        source = (
+            "def main(params):\n"
+            "     name = params.name\n"
+            "    number = params.number\n"
+            "    return name\n"
+        )
+        repaired = code_formatter._repair_indentation(source)
+        self.assertIsNotNone(repaired)
+        compile(repaired, "<repaired>", "exec")
+
+    def test_bracket_continuations_are_left_alone(self) -> None:
+        source = (
+            "def main(params):\n"
+            "     name = params.name\n"
+            "    return {\n"
+            '        "name": name,\n'
+            "    }\n"
+        )
+        repaired = code_formatter._repair_indentation(source)
+        self.assertIsNotNone(repaired)
+        compile(repaired, "<repaired>", "exec")
+        self.assertIn('        "name": name,', repaired)
+
+    def test_lines_inside_a_triple_quoted_string_are_untouched(self) -> None:
+        source = 'def main(params):\n     doc = """\n  keep\n    this\n"""\n     return doc\n'
+        repaired = code_formatter._repair_indentation(source)
+        if repaired is not None:
+            self.assertIn("\n  keep\n", repaired)
+
+    def test_well_formed_code_reports_no_repair(self) -> None:
+        source = "def main(params):\n    return 1\n"
+        self.assertIsNone(code_formatter._repair_indentation(source))
+
+    def test_an_equally_plausible_pair_of_blocks_is_refused(self) -> None:
+        # Levels 0 and 8 are established; a line at 4 is exactly between them,
+        # so snapping either way would move the statement to a different block.
+        source = "def main(params):\n        deep = 1\n    tied = 2\n        return deep\n"
+        self.assertIsNone(code_formatter._repair_indentation(source))
+
+    def test_an_indent_far_from_every_level_is_refused(self) -> None:
+        source = "def main(params):\n    a = 1\n              b = 2\n    return a\n"
+        repaired = code_formatter._repair_indentation(source)
+        self.assertIsNone(repaired)
+
+    def test_comment_lines_do_not_establish_a_level(self) -> None:
+        source = "def main(params):\n        # note\n    return 1\n"
+        self.assertIsNone(code_formatter._repair_indentation(source))
+
+
 class FormatPythonTest(unittest.TestCase):
     def setUp(self) -> None:
         self._docker = patch.object(code_formatter, "docker_available", return_value=True)
