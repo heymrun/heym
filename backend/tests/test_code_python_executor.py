@@ -165,6 +165,58 @@ class WorkspaceLocationTest(unittest.TestCase):
         )
 
 
+class ForwardedEnvTest(unittest.TestCase):
+    """Proxy/CA settings must survive, secrets must not."""
+
+    def test_proxy_and_ca_settings_reach_the_install_container(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "HTTPS_PROXY": "http://corp:3128",
+                "no_proxy": "localhost",
+                "REQUESTS_CA_BUNDLE": "/etc/ssl/corp.pem",
+                "LANG": "en_US.UTF-8",
+            },
+        ):
+            cmd = executor._build_install_command(
+                image="img", name="n", mount_args=[], run_dir=Path("/r"), tool="uv"
+            )
+        self.assertIn("HTTPS_PROXY=http://corp:3128", cmd)
+        self.assertIn("no_proxy=localhost", cmd)
+        self.assertIn("REQUESTS_CA_BUNDLE=/etc/ssl/corp.pem", cmd)
+        self.assertIn("LANG=en_US.UTF-8", cmd)
+
+    def test_secrets_are_never_forwarded(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "SECRET_KEY": "jwt-signing-key",
+                "ENCRYPTION_KEY": "credential-key",
+                "DATABASE_URL": "postgresql://u:p@db/heym",
+                "OPENAI_API_KEY": "sk-nope",
+                "AWS_SECRET_ACCESS_KEY": "nope",
+            },
+        ):
+            install = executor._build_install_command(
+                image="img", name="n", mount_args=[], run_dir=Path("/r"), tool="uv"
+            )
+            run = executor._build_run_command(
+                image="img", name="n", allow_network=True, mount_args=[], deps_path=None
+            )
+        for cmd in (install, run):
+            joined = " ".join(cmd)
+            for secret in ("jwt-signing-key", "credential-key", "postgresql://", "sk-nope", "nope"):
+                self.assertNotIn(secret, joined)
+
+    def test_host_home_never_overrides_the_sandbox_home(self) -> None:
+        with patch.dict("os.environ", {"HOME": "/root"}):
+            cmd = executor._build_run_command(
+                image="img", name="n", allow_network=False, mount_args=[], deps_path=None
+            )
+        self.assertIn("HOME=/tmp", cmd)
+        self.assertNotIn("HOME=/root", cmd)
+
+
 class RunnerSourceTest(unittest.TestCase):
     def test_runner_source_is_the_module_on_disk(self) -> None:
         source = executor._runner_source()

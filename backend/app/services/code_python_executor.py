@@ -228,9 +228,44 @@ def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
     )
 
 
+# Non-secret, portable settings forwarded into both phases. Dependency install
+# has to reach PyPI, which fails behind a corporate proxy or a custom CA bundle
+# unless these survive. Everything else -- database URLs, SECRET_KEY /
+# ENCRYPTION_KEY, provider API keys -- is withheld by this allowlist, which
+# fails safe: a new backend secret is dropped by default.
+_ENV_FORWARD_PREFIXES: tuple[str, ...] = (
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "LC_",
+    "SSL_",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+)
+
+
+def _forwarded_env() -> dict[str, str]:
+    """Return the allowlisted, non-secret environment to pass into the sandbox."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        # HOME is set explicitly to a writable tmpfs path; the backend's value
+        # must never override it.
+        if key != "HOME" and key.startswith(_ENV_FORWARD_PREFIXES)
+    }
+
+
 def _hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
     """Flags shared by both sandbox phases. No Docker socket, no backend secrets."""
-    return [
+    args = [
         "docker",
         "run",
         "--rm",
@@ -263,6 +298,9 @@ def _hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
         "--env",
         "PYTHONIOENCODING=utf-8",
     ]
+    for key, value in _forwarded_env().items():
+        args.extend(["--env", f"{key}={value}"])
+    return args
 
 
 def _build_install_command(

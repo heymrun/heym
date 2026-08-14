@@ -106,6 +106,8 @@ Execution is one or two throwaway containers, both hardened like the tool and sk
 
 Dependencies are installed with `uv`, retried with `pip`, and never cached between runs. When the backend runs in a container, the per-run directory lives on the same `heym-codex-workspaces` volume the skill sandbox uses, mounted through a per-run `volume-subpath` so one run never sees another's files; that form needs **Docker Engine 25.0 or newer**. A native backend (`./run.sh`) has no such volume and does not need one — its per-run directory is a local temporary path bind-mounted straight into the sibling. Either way the directory is deleted after every execution regardless of outcome.
 
+Only non-secret, portable environment variables are forwarded into the containers — proxy settings, CA bundles, and locale, which dependency installation needs to reach PyPI behind a corporate proxy. Database URLs, `SECRET_KEY`/`ENCRYPTION_KEY`, provider API keys, and OAuth secrets are withheld by an allowlist, so a new backend secret is dropped by default rather than leaked until someone updates a denylist. The backend's `HOME` never overrides the sandbox's own writable path.
+
 Sandbox limits are constants rather than environment variables — 512 MB of memory, one CPU, 256 processes, a 120-second install timeout, and a 60-second execution timeout. The image is resolved from the existing `HEYM_PYTHON_TOOL_IMAGE` / `HEYM_CODEX_DOCKER_IMAGE` chain; the node introduces no configuration of its own.
 
 ## Related
