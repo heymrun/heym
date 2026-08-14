@@ -61,14 +61,15 @@ defineExpose({ focus: () => textareaRef.value?.focus() });
 </script>
 
 <template>
+  <!-- p-1 keeps the gutter and the code off the border on all four sides. -->
   <div
-    class="flex overflow-hidden rounded-md border border-input bg-background font-mono text-xs leading-5"
+    class="flex overflow-hidden rounded-md border border-input bg-background p-1 font-mono text-xs leading-5"
     :style="height ? { height } : undefined"
   >
     <div
       ref="gutterRef"
       aria-hidden="true"
-      class="select-none overflow-hidden border-r border-input/60 bg-muted/40 py-2 text-right text-muted-foreground/70"
+      class="select-none overflow-hidden rounded-l-sm border-r border-input/60 bg-muted/40 py-2 text-right text-muted-foreground/70"
       :style="{ width: gutterWidth, paddingRight: '0.5ch' }"
     >
       <div

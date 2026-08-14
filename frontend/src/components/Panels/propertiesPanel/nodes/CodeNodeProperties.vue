@@ -73,16 +73,18 @@ async function formatCode(): Promise<void> {
             <Wand2 class="h-3.5 w-3.5" />
             {{ isFormatting ? "Formatting…" : "Format" }}
           </Button>
+          <!-- No fixed width: the size preset's horizontal padding would
+               otherwise squeeze the icon's content box to nothing. -->
           <Button
             variant="ghost"
             size="sm"
-            class="h-7 w-7 p-0"
+            class="h-7 gap-1 px-2 text-xs"
             title="Open a larger editor (Esc closes it)"
             aria-label="Expand the code editor"
             data-testid="code-expand-button"
             @click="isExpanded = true"
           >
-            <Maximize2 class="h-3.5 w-3.5" />
+            <Maximize2 class="h-3.5 w-3.5 shrink-0" />
           </Button>
         </div>
       </div>
@@ -171,11 +173,12 @@ async function formatCode(): Promise<void> {
       </p>
     </div>
 
+    <!-- No allow-fullscreen: this dialog is already the large view, and a
+         second level would make the first Escape only exit fullscreen. -->
     <Dialog
       :open="isExpanded"
       title="Code"
       size="5xl"
-      allow-fullscreen
       @close="isExpanded = false"
     >
       <template #header-actions>
