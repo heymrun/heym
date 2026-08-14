@@ -2603,7 +2603,11 @@ function applyWorkflowChanges(showMessage = true): void {
       }
     }
     if (isPlaceholderOrInvalidModel(model)) {
-      data.model = existingAgent?.data?.model || effectiveModel || "";
+      if (mergedNode.type === "agent" && existingAgent) {
+        data.model = existingAgent.data?.model ?? "";
+      } else {
+        data.model = effectiveModel || "";
+      }
     }
 
     const fb = data.fallbackCredentialId as string | undefined;
