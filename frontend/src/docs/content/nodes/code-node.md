@@ -32,7 +32,7 @@ def main(params):
 
 Module-level statements do run, but only what `main` returns becomes the node's output.
 
-The **Format** button above the editor reformats your code with Ruff, preserving comments. It reports the parse error instead if the code is not valid Python. Formatting runs in the same isolated container the node runs in — no network, no backend environment — so it needs Docker just like execution does.
+The editor shows line numbers, and the expand button beside **Format** opens a larger one that closes with `Esc` — edits apply as you type, so there is nothing to save. The **Format** button reformats your code with Ruff, preserving comments. It also repairs the indentation damage that pasting usually causes: a uniformly indented block, tabs mixed with spaces, and a line sitting a space or two off its block are all fixed rather than rejected. A genuine syntax error is reported with its line and column instead. Formatting runs in the same isolated container the node runs in — no network, no backend environment — so it needs Docker just like execution does.
 
 ## Reading parameters
 

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { Wand2 } from "lucide-vue-next";
+import { Maximize2, Wand2 } from "lucide-vue-next";
 import axios from "axios";
 
 import Button from "@/components/ui/Button.vue";
+import CodeEditor from "@/components/ui/CodeEditor.vue";
+import Dialog from "@/components/ui/Dialog.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
@@ -24,6 +26,7 @@ const {
 
 const { showToast } = useToast();
 const isFormatting = ref(false);
+const isExpanded = ref(false);
 
 async function formatCode(): Promise<void> {
   const source = selectedNode.value?.data.codeSource || "";
@@ -58,24 +61,35 @@ async function formatCode(): Promise<void> {
     >
       <div class="flex items-center justify-between gap-2">
         <Label>Code</Label>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1 px-2 text-xs"
-          :disabled="isFormatting || !(selectedNode.data.codeSource || '').trim()"
-          data-testid="code-format-button"
-          @click="formatCode"
-        >
-          <Wand2 class="h-3.5 w-3.5" />
-          {{ isFormatting ? "Formatting…" : "Format" }}
-        </Button>
+        <div class="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 gap-1 px-2 text-xs"
+            :disabled="isFormatting || !(selectedNode.data.codeSource || '').trim()"
+            data-testid="code-format-button"
+            @click="formatCode"
+          >
+            <Wand2 class="h-3.5 w-3.5" />
+            {{ isFormatting ? "Formatting…" : "Format" }}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 w-7 p-0"
+            title="Open a larger editor (Esc closes it)"
+            aria-label="Expand the code editor"
+            data-testid="code-expand-button"
+            @click="isExpanded = true"
+          >
+            <Maximize2 class="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
-      <Textarea
+      <CodeEditor
         :model-value="selectedNode.data.codeSource || ''"
         :placeholder="CODE_PLACEHOLDER"
         :rows="10"
-        wrap="off"
-        class="font-mono text-xs leading-relaxed"
         @update:model-value="updateNodeData('codeSource', $event)"
       />
       <p class="text-xs text-muted-foreground">
@@ -156,5 +170,41 @@ async function formatCode(): Promise<void> {
         must reach the internet.
       </p>
     </div>
+
+    <Dialog
+      :open="isExpanded"
+      title="Code"
+      size="5xl"
+      allow-fullscreen
+      @close="isExpanded = false"
+    >
+      <template #header-actions>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1 px-2 text-xs"
+          :disabled="isFormatting || !(selectedNode.data.codeSource || '').trim()"
+          data-testid="code-expanded-format-button"
+          @click="formatCode"
+        >
+          <Wand2 class="h-3.5 w-3.5" />
+          {{ isFormatting ? "Formatting…" : "Format" }}
+        </Button>
+      </template>
+      <!-- Bound to the node directly, so edits are already applied by the time
+           Escape closes the dialog; there is no draft to lose. -->
+      <CodeEditor
+        :model-value="selectedNode.data.codeSource || ''"
+        :placeholder="CODE_PLACEHOLDER"
+        height="min(70vh, 40rem)"
+        data-testid="code-expanded-editor"
+        @update:model-value="updateNodeData('codeSource', $event)"
+      />
+      <p class="mt-2 text-xs text-muted-foreground">
+        Changes apply as you type. Press
+        <kbd class="rounded border border-input px-1 font-mono">Esc</kbd>
+        to close.
+      </p>
+    </Dialog>
   </template>
 </template>
