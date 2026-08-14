@@ -56,6 +56,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "loop-node", title: "Loop" },
       { slug: "set-node", title: "Set" },
       { slug: "converter-node", title: "Converter" },
+      { slug: "code-node", title: "Code" },
       { slug: "variable-node", title: "Variable" },
       { slug: "execute-node", title: "Execute" },
       { slug: "heym-node", title: "Heym" },

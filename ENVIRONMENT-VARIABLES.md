@@ -116,6 +116,12 @@ Untrusted Agent Python **skills** run in a hardened, throwaway sibling container
 | `HEYM_SKILL_DOCKER_WORKSPACE_VOLUME` | Docker volume shared with each skill runner. Falls back to `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` (`heym-codex-workspaces` in Compose), else the backend's own mount is inspected. | — |
 | `HEYM_SKILL_HOST_WORKSPACE_DIR` | Absolute host path for the workspace mount when using a bind mount instead of a Docker volume. | — |
 
+## Code node sandbox
+
+**The Code node adds no variables of its own, and deliberately has no `subprocess` escape hatch.** It runs arbitrary user Python with arbitrary dependencies, so it always requires a reachable Docker daemon and fails closed without one — `HEYM_PYTHON_TOOL_SANDBOX` does not apply to it. Its limits (512m memory, 1 CPU, 256 PIDs, 120s install timeout, 60s execution timeout) are constants in `app/services/code_python_executor.py`, not configuration.
+
+It reuses existing variables only: `HEYM_PYTHON_TOOL_IMAGE` then `HEYM_CODEX_DOCKER_IMAGE` for image resolution (falling back to inspecting the backend's own image), and `HEYM_CODEX_WORKSPACE_DIR` / `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` for the per-run dependency workspace. Code nodes with an empty `requirements.txt` need no workspace volume at all, since the install phase is skipped and nothing is mounted.
+
 ## MCP stdio sandbox
 
 The MCP `stdio` transport starts a server process from a command supplied in the node configuration (Agent MCP connections, the MCP Call node, and the editor's "Fetch tools" preview). That process runs in a hardened, throwaway sibling container rather than on the backend host: non-root, `cap-drop ALL`, `no-new-privileges`, read-only root fs, resource limits, and **no Docker socket**. Network egress is allowed, because `npx` / `uvx` must fetch their package and MCP servers exist to call APIs.

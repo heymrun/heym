@@ -46,6 +46,7 @@ See [Triggers](./triggers.md) for all entry points.
 |------|-------------|--------|---------|
 | [Set](../nodes/set-node.md) | Transform and map data | 1 | 1 |
 | [Converter](../nodes/converter-node.md) | Convert data between formats (CSV, JSON, XML) and OCR images or PDFs to text | 1 | 1 |
+| [Code](../nodes/code-node.md) | Run Python in a disposable, network-isolated sandbox with its own requirements.txt | 1 | 1 |
 | [Variable](../nodes/variable-node.md) | Set or get a variable (workflow-local or [global](./global-variables.md)) | 1 | 1 |
 | [Execute](../nodes/execute-node.md) | Call another workflow | 1 | 1 |
 | [Heym](../nodes/heym-node.md) | Read Heym workflows and execution history | 1 | 1 |
