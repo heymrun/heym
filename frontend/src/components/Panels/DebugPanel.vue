@@ -2593,6 +2593,9 @@ function applyWorkflowChanges(showMessage = true): void {
     const credId = data.credentialId as string | undefined;
     const model = data.model as string | undefined;
 
+    const existingAgent =
+      mergedNode.type === "agent" ? findMatchingExistingAgentNode(mergedNode) : undefined;
+
     if (isPlaceholderOrInvalidCredential(credId)) {
       data.credentialId = effectiveCredentialId || "";
       if (!effectiveCredentialId) {
@@ -2600,7 +2603,7 @@ function applyWorkflowChanges(showMessage = true): void {
       }
     }
     if (isPlaceholderOrInvalidModel(model)) {
-      data.model = effectiveModel || "";
+      data.model = existingAgent?.data?.model || effectiveModel || "";
     }
 
     const fb = data.fallbackCredentialId as string | undefined;
