@@ -6,6 +6,7 @@ license = { text = "MIT with Commons Clause condition" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.136.1",
+    "ruff>=0.15.12",
     "uvicorn[standard]>=0.46.0",
     "sqlalchemy[asyncio]>=2.0.49",
     "asyncpg>=0.29.0",
@@ -74,5 +75,4 @@ filterwarnings = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
-    "ruff>=0.15.12",
 ]

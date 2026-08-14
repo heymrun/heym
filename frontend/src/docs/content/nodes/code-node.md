@@ -32,6 +32,8 @@ def main(params):
 
 Module-level statements do run, but only what `main` returns becomes the node's output.
 
+The **Format** button above the editor reformats your code with Ruff, preserving comments. It reports the parse error instead if the code is not valid Python.
+
 ## Reading parameters
 
 `params` supports dot notation, including through nested objects and lists:

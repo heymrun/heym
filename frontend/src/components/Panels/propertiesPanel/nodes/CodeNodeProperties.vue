@@ -1,7 +1,14 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import { Wand2 } from "lucide-vue-next";
+import axios from "axios";
+
+import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { codeApi } from "@/services/api";
+import { useToast } from "@/composables/useToast";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const CODE_PLACEHOLDER = `def main(params):
@@ -14,6 +21,33 @@ const {
   selectedNodeEvaluateDialogLabel,
   updateNodeData,
 } = usePropertiesPanelContext();
+
+const { showToast } = useToast();
+const isFormatting = ref(false);
+
+async function formatCode(): Promise<void> {
+  const source = selectedNode.value?.data.codeSource || "";
+  if (!source.trim() || isFormatting.value) {
+    return;
+  }
+  isFormatting.value = true;
+  try {
+    const formatted = await codeApi.format(source);
+    if (formatted === source) {
+      showToast("Code is already formatted", "info");
+      return;
+    }
+    updateNodeData("codeSource", formatted);
+    showToast("Code formatted", "success");
+  } catch (error: unknown) {
+    const detail = axios.isAxiosError(error)
+      ? (error.response?.data as { detail?: string } | undefined)?.detail
+      : undefined;
+    showToast(detail || "Could not format the code", "error");
+  } finally {
+    isFormatting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -22,11 +56,24 @@ const {
       class="space-y-2"
       data-testid="code-source-field"
     >
-      <Label>Code</Label>
+      <div class="flex items-center justify-between gap-2">
+        <Label>Code</Label>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1 px-2 text-xs"
+          :disabled="isFormatting || !(selectedNode.data.codeSource || '').trim()"
+          data-testid="code-format-button"
+          @click="formatCode"
+        >
+          <Wand2 class="h-3.5 w-3.5" />
+          {{ isFormatting ? "Formatting…" : "Format" }}
+        </Button>
+      </div>
       <Textarea
         :model-value="selectedNode.data.codeSource || ''"
         :placeholder="CODE_PLACEHOLDER"
-        :rows="16"
+        :rows="10"
         wrap="off"
         class="font-mono text-xs leading-relaxed"
         @update:model-value="updateNodeData('codeSource', $event)"

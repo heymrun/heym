@@ -3689,6 +3689,15 @@ export const chatApi = {
   },
 };
 
+export const codeApi = {
+  format: async (code: string): Promise<string> => {
+    const response = await api.post<{ formatted: string }>("/code/format", {
+      code,
+    });
+    return response.data.formatted;
+  },
+};
+
 export const expressionApi = {
   evaluate: async (
     request: ExpressionEvaluateRequest,
