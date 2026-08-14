@@ -149,6 +149,7 @@ export type NodeType =
   | "merge"
   | "set"
   | "converter"
+  | "code"
   | "jsonOutputMapper"
   | "telegram"
   | "slack"
@@ -439,6 +440,10 @@ export interface NodeData {
   converterColumns?: string;
   converterFileId?: string;
   converterTargetFormat?: string;
+  codeSource?: string;
+  codeRequirements?: string;
+  codeParameters?: string;
+  codeAllowNetwork?: boolean;
   ocrLanguage?: string;
   ocrLanguageCustom?: string;
   ocrEncoding?: string;

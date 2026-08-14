@@ -1082,6 +1082,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     merge: { label: "merge", inputCount: 2 },
     set: { label: "set", mappings: [{ key: "text", value: "$input.text" }] },
     converter: { label: "converter", conversion: "csvToJson", source: "$input.text", delimiter: ",", hasHeader: true, trimValues: true, includeHeader: true, converterColumns: "", converterFileId: "", converterTargetFormat: "", ocrLanguage: "auto", ocrLanguageCustom: "", ocrEncoding: "utf-8", ocrNormalizeUnicode: true, ocrPsm: "3", ocrDpi: 300, ocrPageRange: "" },
+    code: { label: "code", codeSource: 'def main(params):\n    name = params.name\n    return {"message": f"Hello, {name}!", "length": len(name)}\n', codeRequirements: "", codeParameters: '{\n  "name": "Heym"\n}', codeAllowNetwork: false },
     jsonOutputMapper: {
       label: "jsonResponse",
       mappings: [{ key: "message", value: "$input.text" }],

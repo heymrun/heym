@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Code2, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 
 import type { NodeData, NodeType } from "@/types/workflow";
@@ -45,6 +45,7 @@ const icons = {
   merge: GitMerge,
   set: Settings2,
   converter: Repeat,
+  code: Code2,
   jsonOutputMapper: Braces,
   telegram: MessageSquare,
   slack: MessageSquare,
@@ -107,6 +108,7 @@ const nodeColorMap = {
   merge: "node-merge",
   set: "node-set",
   converter: "node-set",
+  code: "node-set",
   jsonOutputMapper: "node-output",
   telegram: "node-telegram",
   slack: "node-slack",

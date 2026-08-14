@@ -371,6 +371,24 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       ocrPageRange: "",
     },
   },
+  code: {
+    type: "code",
+    label: "Code",
+    description:
+      "Run Python in a disposable, network-isolated sandbox with its own requirements.txt and return JSON",
+    color: "node-set",
+    icon: "Code2",
+    inputs: 1,
+    outputs: 1,
+    defaultData: {
+      label: "code",
+      codeSource:
+        'def main(params):\n    name = params.name\n    return {"message": f"Hello, {name}!", "length": len(name)}\n',
+      codeRequirements: "",
+      codeParameters: '{\n  "name": "Heym"\n}',
+      codeAllowNetwork: false,
+    },
+  },
   jsonOutputMapper: {
     type: "jsonOutputMapper",
     label: "JSON output mapper",
