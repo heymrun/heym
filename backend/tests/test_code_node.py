@@ -123,6 +123,60 @@ class CodeNodeTest(unittest.TestCase):
         )
 
 
+class ParameterResolutionTest(unittest.TestCase):
+    """Expressions inside the Parameters JSON must survive quoting and keep their type."""
+
+    @staticmethod
+    def _ctx(parameters: str, resolved: dict) -> NodeExecutionContext:
+        ctx = _context(
+            {"codeSource": "def main(params):\n    return 1\n", "codeParameters": parameters}
+        )
+        ctx.executor.resolve_expression.side_effect = lambda expr, *a, **k: resolved[expr]
+        ctx.executor.evaluate_message_template.side_effect = lambda tpl, *a, **k: "".join(
+            str(resolved.get(part, part)) for part in [tpl]
+        )
+        return ctx
+
+    def _params_for(self, parameters: str, resolved: dict) -> dict:
+        ctx = self._ctx(parameters, resolved)
+        with patch.object(
+            code_node, "execute_code", return_value=CodeExecutionResult(result=None)
+        ) as run_code:
+            code_node.execute(ctx)
+        return run_code.call_args.kwargs["params"]
+
+    def test_string_with_quotes_does_not_break_the_json(self) -> None:
+        params = self._params_for(
+            '{"name": "$trigger.name"}', {"$trigger.name": 'Ada "A" Lovelace'}
+        )
+        self.assertEqual(params, {"name": 'Ada "A" Lovelace'})
+
+    def test_multiline_string_does_not_break_the_json(self) -> None:
+        params = self._params_for('{"body": "$fetch.text"}', {"$fetch.text": "line1\nline2"})
+        self.assertEqual(params, {"body": "line1\nline2"})
+
+    def test_list_keeps_its_type_instead_of_being_stringified(self) -> None:
+        rows = [{"id": 1}, {"id": 2}]
+        params = self._params_for('{"rows": "$fetch.result"}', {"$fetch.result": rows})
+        self.assertEqual(params, {"rows": rows})
+
+    def test_integer_stays_an_integer(self) -> None:
+        params = self._params_for('{"n": "$fetch.count"}', {"$fetch.count": 7})
+        self.assertEqual(params, {"n": 7})
+        self.assertIsInstance(params["n"], int)
+
+    def test_nested_objects_and_arrays_are_resolved(self) -> None:
+        params = self._params_for(
+            '{"cfg": {"name": "$t.name"}, "ids": ["$t.id"]}',
+            {"$t.name": "Ada", "$t.id": 5},
+        )
+        self.assertEqual(params, {"cfg": {"name": "Ada"}, "ids": [5]})
+
+    def test_literal_values_are_left_alone(self) -> None:
+        params = self._params_for('{"a": 1, "b": "plain", "c": true}', {})
+        self.assertEqual(params, {"a": 1, "b": "plain", "c": True})
+
+
 class RegistryTest(unittest.TestCase):
     def test_code_node_is_registered(self) -> None:
         from app.services.node_execution.registry import get_node_handler

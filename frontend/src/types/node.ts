@@ -374,8 +374,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   code: {
     type: "code",
     label: "Code",
-    description:
-      "Run Python in a disposable, network-isolated sandbox with its own requirements.txt and return JSON",
+    description: "Run sandboxed Python with its own dependencies",
     color: "node-set",
     icon: "Code2",
     inputs: 1,
