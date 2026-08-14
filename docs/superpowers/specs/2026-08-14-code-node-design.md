@@ -113,10 +113,11 @@ Phase 2  [--network none  |  --network bridge if codeAllowNetwork]
 finally: shutil.rmtree(run_dir)     # every container already --rm
 ```
 
-`run_dir` is a per-run read-write scratch (the container root filesystem stays
-`--read-only`). `.deps` is not separately made read-only: the directory is
-disposable, isolated to this single run, and deleted in `finally`, so a
-write-back buys the code nothing.
+Phase 1 mounts `run_dir` read-write, because that is where the packages land.
+Phase 2 mounts the same subtree with `readonly`, so the user's code can read
+`.deps` but cannot modify it. In both phases the container root filesystem is
+`--read-only` and the only writable location for the code itself is a
+`--tmpfs /tmp`.
 
 Two separate containers for uv and pip, rather than one `uv || pip` shell, so
 the result records which tool actually installed the packages.
