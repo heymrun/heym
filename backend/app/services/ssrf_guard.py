@@ -49,6 +49,12 @@ _ALLOWED_URL_SCHEMES = ("http", "https")
 _DEFAULT_URL_SUBJECT = "HTTP node URL"
 _PINNED_DIAL_SUBJECT = "Guarded request URL"
 
+# IPv6 forms that carry an IPv4 destination but that ``is_global`` still reports
+# as globally routable, so the embedded address has to be checked instead.
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")  # RFC 6052
+_NAT64_LOCAL_USE_PREFIX = ipaddress.ip_network("64:ff9b:1::/48")  # RFC 8215
+_IPV4_COMPATIBLE_PREFIX = ipaddress.ip_network("::/96")  # deprecated ::x.x.x.x
+
 _GUARDED_CLIENT: httpx.Client | None = None
 _GUARDED_CLIENT_LOCK = Lock()
 
@@ -98,16 +104,43 @@ def _resolve_host_addresses(
     return addresses
 
 
+def _embedded_ipv4(
+    address: ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | None:
+    """Return the IPv4 address carried inside an IPv6 transition address, if any.
+
+    Only the forms ``is_global`` misjudges are unwrapped. It already refuses 6to4
+    (``2002::/16``) and Teredo (``2001::/32``) wholesale, so those are left alone
+    rather than re-admitted through their embedded IPv4. The NAT64 well-known
+    prefix and the deprecated IPv4-compatible form are the gap: both are reported
+    globally routable even when they carry loopback, private, or cloud-metadata
+    IPv4 (GHSA-79qr-f49h-6g8c).
+    """
+    if address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    if address in _NAT64_WELL_KNOWN_PREFIX or address in _IPV4_COMPATIBLE_PREFIX:
+        return ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    return None
+
+
 def _is_public_address(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> bool:
-    """Whether an address is globally routable (IPv4-mapped IPv6 unwrapped first).
+    """Whether an address is globally routable (embedded IPv4 unwrapped first).
 
     ``is_global`` alone treats multicast (e.g. ``224.0.0.1``, ``239.255.255.250``)
-    as public, so multicast is rejected explicitly.
+    as public, so multicast is rejected explicitly, and it misjudges two IPv6
+    transition forms, so those are decided by the IPv4 they carry.
     """
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        if address in _NAT64_LOCAL_USE_PREFIX:
+            # Already private per RFC 8215, asserted here so a future change in
+            # the stdlib classification cannot silently open a local-use range
+            # whose embedded IPv4 offset depends on the deployed prefix length.
+            return False
+        embedded = _embedded_ipv4(address)
+        if embedded is not None:
+            address = embedded
     return address.is_global and not address.is_multicast
 
 

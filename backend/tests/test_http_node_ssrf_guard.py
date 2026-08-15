@@ -140,6 +140,90 @@ class PublicAddressTests(unittest.TestCase):
         self.assertTrue(_is_public_address(ipaddress.ip_address("8.8.8.8")))
 
 
+class Ipv6TransitionAddressTests(unittest.TestCase):
+    """IPv6 transition forms are judged by the IPv4 they carry, not by is_global.
+
+    NAT64 (64:ff9b::/96) and the deprecated IPv4-compatible form (::x.x.x.x) are
+    reported globally routable by ipaddress even when the embedded IPv4 is
+    loopback, private, or the cloud-metadata endpoint (GHSA-79qr-f49h-6g8c).
+    """
+
+    def setUp(self) -> None:
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_transition_forms_wrapping_internal_ipv4_blocked(self) -> None:
+        import ipaddress
+
+        for label, literal in (
+            ("nat64-metadata", "64:ff9b::169.254.169.254"),
+            ("nat64-loopback", "64:ff9b::127.0.0.1"),
+            ("nat64-private", "64:ff9b::10.0.0.1"),
+            ("nat64-local-use-prefix", "64:ff9b:1::a9fe:a9fe"),
+            ("ipv4-compatible-metadata", "::169.254.169.254"),
+            ("ipv4-compatible-private", "::10.0.0.1"),
+            ("sixtofour-metadata", "2002:a9fe:a9fe::"),
+            ("sixtofour-private", "2002:0a00:0001::"),
+        ):
+            with self.subTest(label):
+                self.assertFalse(_is_public_address(ipaddress.ip_address(literal)))
+
+    def test_sixtofour_and_teredo_stay_blocked_even_when_public(self) -> None:
+        import ipaddress
+
+        # ipaddress refuses 2002::/16 and 2001::/32 wholesale. Unwrapping them to
+        # their embedded IPv4 would re-admit addresses that are blocked today, so
+        # the fix deliberately leaves both to is_global.
+        for label, literal in (
+            ("sixtofour-public-embedded", "2002:5db8:d822::"),
+            ("sixtofour-public-embedded-dns", "2002:0808:0808::"),
+            ("teredo-public-server-and-client", "2001:0:0808:0808:0000:0000:f5ff:fffe"),
+            ("teredo-sample", "2001:0:4136:e378:8000:63bf:3fff:fdd2"),
+        ):
+            with self.subTest(label):
+                self.assertFalse(_is_public_address(ipaddress.ip_address(literal)))
+
+    def test_transition_forms_wrapping_public_ipv4_allowed(self) -> None:
+        import ipaddress
+
+        # IPv6-only deployments legitimately reach public IPv4 through NAT64, and
+        # these were already allowed before the fix, so nothing narrows here.
+        for label, literal in (
+            ("nat64-public", "64:ff9b::1.1.1.1"),
+            ("ipv4-compatible-public", "::8.8.8.8"),
+            ("native-public-v6", "2606:4700:4700::1111"),
+        ):
+            with self.subTest(label):
+                self.assertTrue(_is_public_address(ipaddress.ip_address(literal)))
+
+    def test_guard_rejects_nat64_metadata_url(self) -> None:
+        with self.assertRaises(SsrfBlockedError):
+            guard_http_url("http://[64:ff9b::169.254.169.254]/latest/meta-data/")
+
+    def test_guard_rejects_ipv4_compatible_metadata_url(self) -> None:
+        with self.assertRaises(SsrfBlockedError):
+            guard_http_url("http://[::169.254.169.254]/latest/meta-data/")
+
+    def test_pinned_dial_rejects_nat64_metadata(self) -> None:
+        with patch.object(
+            ssrf_guard.socket,
+            "getaddrinfo",
+            return_value=_addrinfo("64:ff9b::169.254.169.254"),
+        ):
+            with self.assertRaises(SsrfBlockedError):
+                _resolve_pinned_ip("rebind.example.com")
+
+    def test_pinned_dial_rejects_ipv4_compatible_metadata(self) -> None:
+        with patch.object(
+            ssrf_guard.socket,
+            "getaddrinfo",
+            return_value=_addrinfo("::169.254.169.254"),
+        ):
+            with self.assertRaises(SsrfBlockedError):
+                _resolve_pinned_ip("rebind.example.com")
+
+
 class PinBackendTests(unittest.TestCase):
     """The dial-time pin re-validates and rewrites the target to a public IP."""
 
