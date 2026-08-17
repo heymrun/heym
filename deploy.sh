@@ -215,7 +215,7 @@ migrate_pgdata() {
     dc down
 
     echo -e "${YELLOW}Copying data/postgres into the ${PG_VOLUME} volume...${NC}"
-    docker volume create "$PG_VOLUME" >/dev/null
+    dc up --no-start postgres >/dev/null 2>&1 || docker volume create "$PG_VOLUME" >/dev/null
     if ! docker run --rm \
         -v "$LEGACY_PGDATA:/legacy:ro" \
         -v "$PG_VOLUME:/pgdata" \
