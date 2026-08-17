@@ -145,20 +145,22 @@ assert_pgdata_migrated() {
 # The copy above is byte-for-byte, so any index damage the bind mount caused travels
 # with it. Rebuilding indexes on the new volume is the point of the exercise: a
 # virtiofs-corrupted cluster typically carries index entries pointing past the end of
-# the heap, which a clean pg_amcheck does not detect. Runs against a throwaway
-# container so the stack stays down until the cluster is known good.
+# the heap, which a clean pg_amcheck does not detect.
+#
+# Runs through the compose postgres service, not a bare postgres:16 container: that
+# entrypoint installs pgvector at start, and an index built on the vector opclass
+# cannot be rebuilt without $libdir/vector. Only postgres comes up, so the app stays
+# down until the cluster is known good.
 reindex_pgdata() {
     local pg_user="$1" pg_db="$2"
-    local tmp="heym-pgdata-reindex"
 
-    docker rm -f "$tmp" >/dev/null 2>&1 || true
-    docker run -d --name "$tmp" \
-        -v "$PG_VOLUME:/var/lib/postgresql/data" \
-        postgres:16 >/dev/null
+    dc up -d postgres
 
+    # The entrypoint installs the pgvector package before Postgres boots, so this can
+    # take noticeably longer than starting a plain postgres container.
     local ready=false
-    for _ in {1..60}; do
-        if docker exec "$tmp" pg_isready -U "$pg_user" >/dev/null 2>&1; then
+    for _ in {1..120}; do
+        if dc exec -T postgres pg_isready -U "$pg_user" >/dev/null 2>&1; then
             ready=true
             break
         fi
@@ -169,23 +171,22 @@ reindex_pgdata() {
     # "migrated", so a half-repaired cluster must never be left behind to be deployed.
     if [ "$ready" != "true" ]; then
         echo -e "${RED}The migrated cluster did not accept connections. Last log lines:${NC}"
-        docker logs --tail 20 "$tmp" 2>&1 || true
-        docker rm -f "$tmp" >/dev/null 2>&1 || true
+        dc logs --tail 20 postgres 2>&1 || true
+        dc down
         docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
         echo -e "${RED}Volume removed. data/postgres is untouched — investigate before retrying.${NC}"
         exit 1
     fi
 
-    if ! docker exec "$tmp" reindexdb -U "$pg_user" -d "$pg_db"; then
-        docker rm -f "$tmp" >/dev/null 2>&1 || true
+    if ! dc exec -T postgres reindexdb -U "$pg_user" -d "$pg_db"; then
+        dc down
         docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
         echo -e "${RED}REINDEX failed. Volume removed; data/postgres is untouched.${NC}"
         exit 1
     fi
 
     # Clean shutdown, so the first real start does not begin with crash recovery.
-    docker stop -t 60 "$tmp" >/dev/null
-    docker rm "$tmp" >/dev/null
+    dc stop -t 60 postgres
 }
 
 # Copy (never move) the legacy cluster into the named volume. The source is left
