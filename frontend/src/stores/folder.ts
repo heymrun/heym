@@ -62,6 +62,12 @@ export const useFolderStore = defineStore("folder", () => {
     return folder;
   }
 
+  async function updateFolderIcon(id: string, icon: string | null): Promise<Folder> {
+    const folder = await folderApi.update(id, { icon });
+    await fetchFolderTree();
+    return folder;
+  }
+
   async function moveFolder(
     id: string,
     parentId: string | null,
@@ -168,6 +174,7 @@ export const useFolderStore = defineStore("folder", () => {
     fetchFolderTree,
     createFolder,
     renameFolder,
+    updateFolderIcon,
     moveFolder,
     deleteFolder,
     moveWorkflowToFolder,

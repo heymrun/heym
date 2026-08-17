@@ -151,7 +151,7 @@ function toggleFullscreen(): void {
             'dialog-content relative z-50 w-full border border-border/60',
             'bg-card',
             'p-4 sm:p-6 md:p-7 flex flex-col',
-            isFullscreen ? 'max-h-[100vh]' : 'max-h-[90vh] sm:max-h-[85vh] rounded-2xl',
+            isFullscreen ? 'max-h-[100dvh]' : 'max-h-[min(90vh,calc(100dvh-2rem))] sm:max-h-[min(85vh,calc(100dvh-3rem))] rounded-2xl',
             'overflow-hidden',
             sizeClasses
           ]"

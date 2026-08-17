@@ -15,6 +15,7 @@ import {
   FolderPlus,
   History,
   LayoutTemplate,
+  Palette,
   Pin,
   PinOff,
   Plus,
@@ -42,6 +43,7 @@ import WorkflowActionSheet from "@/components/Dialogs/WorkflowActionSheet.vue";
 import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.vue";
 import DockerLogsViewer from "@/components/LogsTab/DockerLogsViewer.vue";
 import FolderTreeItem from "@/components/Folders/FolderTreeItem.vue";
+import FolderIconPickerDialog from "@/components/Folders/FolderIconPickerDialog.vue";
 import AlertsTab from "@/components/Alerts/AlertsTab.vue";
 import WorkflowFolderDropPlaceholder from "@/components/Folders/WorkflowFolderDropPlaceholder.vue";
 import GlobalVariablesPanel from "@/components/GlobalVariables/GlobalVariablesPanel.vue";
@@ -227,6 +229,10 @@ const showRenameFolderDialog = ref(false);
 const renamingFolder = ref<FolderTree | null>(null);
 const renameFolderName = ref("");
 const savingFolderRename = ref(false);
+
+const showFolderIconDialog = ref(false);
+const iconPickerFolder = ref<FolderTree | null>(null);
+const savingFolderIcon = ref(false);
 
 const draggedWorkflowId = ref<string | null>(null);
 const dragOverFolderId = ref<string | null>(null);
@@ -815,6 +821,31 @@ async function renameFolder(): Promise<void> {
   }
 }
 
+function openFolderIconDialog(folder: FolderTree): void {
+  iconPickerFolder.value = folderStore.findFolderById(folder.id) ?? folder;
+  showFolderIconDialog.value = true;
+  pushOverlayState();
+  closeContextMenu();
+}
+
+async function saveFolderIcon(icon: string | null): Promise<void> {
+  if (!iconPickerFolder.value) return;
+
+  savingFolderIcon.value = true;
+  try {
+    await folderStore.updateFolderIcon(iconPickerFolder.value.id, icon);
+    showFolderIconDialog.value = false;
+    iconPickerFolder.value = null;
+    showToast("Folder icon updated", "success");
+  } catch (error) {
+    if (error instanceof Error) {
+      showToast(error.message);
+    }
+  } finally {
+    savingFolderIcon.value = false;
+  }
+}
+
 async function deleteFolder(folder: FolderTree): Promise<void> {
   closeContextMenu();
 
@@ -992,7 +1023,7 @@ function openContextMenu(event: MouseEvent, folder: FolderTree): void {
   contextMenuFolder.value = folderStore.findFolderById(folder.id) ?? folder;
 
   const menuWidth = 160;
-  const menuHeight = 150;
+  const menuHeight = 210;
   const padding = 8;
 
   let x = event.clientX;
@@ -2349,6 +2380,14 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         </form>
       </Dialog>
 
+      <FolderIconPickerDialog
+        :open="showFolderIconDialog"
+        :folder-name="iconPickerFolder?.name ?? ''"
+        :current-icon="iconPickerFolder?.icon ?? null"
+        @close="showFolderIconDialog = false; iconPickerFolder = null"
+        @save="saveFolderIcon"
+      />
+
       <Teleport to="body">
         <div
           v-if="showContextMenu && contextMenuFolder"
@@ -2371,6 +2410,15 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
           >
             <Edit2 class="w-4 h-4" />
             Rename
+          </button>
+          <div class="border-t border-border/50 my-1.5" />
+          <button
+            class="w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 rounded-lg mx-1 transition-colors"
+            style="width: calc(100% - 8px)"
+            @click="openFolderIconDialog(contextMenuFolder)"
+          >
+            <Palette class="w-4 h-4" />
+            Change icon
           </button>
           <div class="border-t border-border/50 my-1.5" />
           <button

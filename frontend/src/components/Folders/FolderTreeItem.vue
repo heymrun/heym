@@ -11,6 +11,7 @@ import {
 import type { FolderTree, WorkflowListItem } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import { cn } from "@/lib/utils";
+import { getFolderIcon } from "@/lib/folderIcons";
 import { useFolderStore } from "@/stores/folder";
 import FolderWorkflowCard from "./FolderWorkflowCard.vue";
 import WorkflowFolderDropPlaceholder from "./WorkflowFolderDropPlaceholder.vue";
@@ -63,6 +64,7 @@ const folderDropZone = ref<HTMLElement | null>(null);
 let expandTimer: ReturnType<typeof setTimeout> | null = null;
 
 const hasContent = computed(() => props.folder.children.length > 0 || props.folder.workflows.length > 0);
+const folderIconComponent = computed(() => getFolderIcon(props.folder.icon));
 const folderPath = computed((): string => {
   return props.parentPath ? `${props.parentPath} / ${props.folder.name}` : props.folder.name;
 });
@@ -185,12 +187,8 @@ onUnmounted(clearExpandTimer);
       </button>
 
       <div class="w-6 h-6 rounded-md bg-gradient-to-br from-amber-500/15 to-amber-500/5 ring-1 ring-inset ring-amber-500/20 flex items-center justify-center transition-transform duration-200 group-hover:scale-[1.03]">
-        <FolderOpen
-          v-if="isExpanded"
-          class="w-3.5 h-3.5 text-amber-500"
-        />
-        <Folder
-          v-else
+        <component
+          :is="folderIconComponent ?? (isExpanded ? FolderOpen : Folder)"
           class="w-3.5 h-3.5 text-amber-500"
         />
       </div>

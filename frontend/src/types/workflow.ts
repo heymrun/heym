@@ -57,6 +57,7 @@ export interface Folder {
   id: string;
   name: string;
   parent_id: string | null;
+  icon?: string | null;
   owner_id: string;
   created_at: string;
   updated_at: string;
@@ -71,6 +72,7 @@ export interface FolderTree {
   id: string;
   name: string;
   parent_id: string | null;
+  icon?: string | null;
   children: FolderTree[];
   workflows: WorkflowListItem[];
 }

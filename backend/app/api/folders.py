@@ -174,6 +174,7 @@ async def get_folder_tree(
             id=folder.id,
             name=folder.name,
             parent_id=folder.parent_id,
+            icon=folder.icon,
             children=[],
             workflows=[
                 WorkflowListResponse(
@@ -286,6 +287,7 @@ async def get_folder(
         id=folder.id,
         name=folder.name,
         parent_id=folder.parent_id,
+        icon=folder.icon,
         owner_id=folder.owner_id,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
@@ -294,6 +296,7 @@ async def get_folder(
                 id=c.id,
                 name=c.name,
                 parent_id=c.parent_id,
+                icon=c.icon,
                 owner_id=c.owner_id,
                 created_at=c.created_at,
                 updated_at=c.updated_at,
@@ -337,6 +340,7 @@ async def create_folder(
     folder = Folder(
         name=data.name,
         parent_id=data.parent_id,
+        icon=data.icon or None,
         owner_id=current_user.id,
     )
     db.add(folder)
@@ -361,6 +365,9 @@ async def update_folder(
 
     if data.name is not None:
         folder.name = data.name
+
+    if "icon" in data.model_fields_set:
+        folder.icon = data.icon or None
 
     if data.parent_id is not None:
         if data.parent_id == folder_id:

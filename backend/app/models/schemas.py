@@ -854,17 +854,20 @@ class LLMModel(BaseModel):
 class FolderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     parent_id: uuid.UUID | None = None
+    icon: str | None = Field(None, max_length=64)
 
 
 class FolderUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     parent_id: uuid.UUID | None = None
+    icon: str | None = Field(None, max_length=64)
 
 
 class FolderResponse(BaseModel):
     id: uuid.UUID
     name: str
     parent_id: uuid.UUID | None = None
+    icon: str | None = None
     owner_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -877,6 +880,7 @@ class FolderWithContentsResponse(BaseModel):
     id: uuid.UUID
     name: str
     parent_id: uuid.UUID | None = None
+    icon: str | None = None
     owner_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -891,6 +895,7 @@ class FolderTreeResponse(BaseModel):
     id: uuid.UUID
     name: str
     parent_id: uuid.UUID | None = None
+    icon: str | None = None
     children: list["FolderTreeResponse"] = []
     workflows: list[WorkflowListResponse] = []
 
