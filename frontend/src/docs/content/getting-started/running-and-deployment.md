@@ -61,7 +61,7 @@ Database connection defaults (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
 
 1. Checks that `docker`, `bun`, and `uv` are available
 2. Creates `.env` from `.env.example` if missing, and generates a random `SECRET_KEY` and `ENCRYPTION_KEY` when either is empty
-3. Starts (or creates) a database Docker container on port `6543`
+3. Starts (or creates) a database Docker container on port `6543`, storing its data in the `heym-postgres-data` Docker volume rather than a host directory
 4. Installs Python dependencies via `uv sync`
 5. Runs Alembic database migrations (`alembic upgrade head`)
 6. Frees the backend and frontend ports if occupied
@@ -150,7 +150,23 @@ This performs a zero-downtime deploy: images are built first while the existing 
 | `./deploy.sh --logs` | Stream logs from all containers |
 | `./deploy.sh --restart` | Restart all containers |
 | `./deploy.sh --down` | Stop and remove all containers |
+| `./deploy.sh --migrate-pgdata` | One-time migration: copy an existing `data/postgres` directory into the `heym-postgres-data` Docker volume and rebuild its indexes |
 | `./deploy.sh --help` | Show usage information |
+
+**Database storage: a Docker named volume, not a host directory.**
+
+Compose stores PostgreSQL in the `heym-postgres-data` Docker volume. Earlier versions bind-mounted the host directory `./data/postgres` instead. Host bind mounts on macOS (virtiofs) and Windows/WSL2 do not give PostgreSQL the `fsync` and file-close guarantees it requires: clusters there hit `PANIC: could not close file … Input/output error` on WAL segments and corrupt over time. Linux bind mounts were never affected, but every platform now uses the same layout.
+
+Upgrading a deployment that still has data in `./data/postgres` is a one-time step. `./deploy.sh` detects it, stops before building, and asks you to migrate first:
+
+```bash
+./deploy.sh --migrate-pgdata   # stop services, copy into the volume, rebuild indexes
+./deploy.sh                    # deploy as usual
+```
+
+**The migration also rebuilds indexes.** The copy is byte-for-byte, so index damage the old bind mount caused travels with it. `--migrate-pgdata` therefore runs `reindexdb` against the migrated cluster in a throwaway container before handing it back. This matters because this class of corruption leaves index entries pointing past the end of the heap — a state `pg_amcheck` reports as clean, so a passing check is not evidence of a healthy table. REINDEX repairs those entries; it cannot restore heap pages the old filesystem already lost. On a large, known-healthy database you can bypass the rebuild with `./deploy.sh --migrate-pgdata --skip-reindex`.
+
+The copy is non-destructive. `./data/postgres` stays in place as a backup, and the migration refuses to overwrite a volume that already holds a database. If any step fails, the new volume is removed, so a half-migrated cluster can never be deployed by mistake. Delete the old directory once you have confirmed your workflows are intact. The `postgres` container carries the same guard, so a manual `docker compose up` cannot silently initialise an empty database over your data either. Fresh installs need no action.
 
 **Service addresses (production):**
 
@@ -175,6 +191,8 @@ The app header shows the running Docker build version. When that version is behi
 If you prefer not to build the app locally, you can pull the published container image and run it directly.
 
 The image starts the frontend and backend together in one container. PostgreSQL is still external, but you can provide either `DATABASE_URL` or the `POSTGRES_*` variables from `.env.example`.
+
+> **Store your database in a Docker named volume.** The release image ships no database, so the PostgreSQL behind `DATABASE_URL` is yours to run. Mount it as `-v heym-postgres-data:/var/lib/postgresql/data` rather than a host path: on macOS (virtiofs) and Windows/WSL2 a bind-mounted PostgreSQL data directory does not honour the `fsync` guarantees the database requires and corrupts the cluster over time.
 
 > **Vector store backend.** `run.sh` and `deploy.sh` run the official `postgres:16` image and auto-install the `postgresql-16-pgvector` package at startup, so the **Postgres (pgvector) RAG backend** works out of the box there with no change to your data. The prebuilt single-container image, however, connects to a PostgreSQL **you** provide — that database must support the `vector` extension to use the Postgres backend. Heym cannot install pgvector into a database it does not manage. Without it, the startup migration skips the pgvector table gracefully — the deploy still succeeds, Qdrant RAG keeps working, and creating or uploading to a Postgres vector store returns a clear "backend unavailable" message until pgvector is enabled.
 
@@ -248,6 +266,46 @@ docker run --rm \
 - When `POSTGRES_HOST=localhost`, the release image automatically rewrites it to `host.docker.internal` when needed so the same `.env` works with a host-level PostgreSQL container on macOS Docker/Desktop tools
 - Keep the `data/files` mount if you want Drive uploads and skill-generated files to survive container restarts
 - **Plugins:** to enable them, set `HEYM_PLUGINS_ENABLED=true` and `HEYM_PLUGIN_ADMIN_EMAILS`, and mount `data/plugins` so installed plugin files persist across container recreates. Plugin metadata lives in your PostgreSQL, so it also survives. A plugin's declared pip `dependencies` are installed into the container at install time; because the image filesystem is ephemeral, they are **reinstalled automatically on startup** for every installed plugin (the release image's `uv` venv is writable, so this works in the single-container image too)
+
+### Moving an existing database to a named volume
+
+`./deploy.sh --migrate-pgdata` only knows about the Compose stack. If you run the release image against your own PostgreSQL container and that container bind-mounts a host directory, migrate it yourself.
+
+Check what your database container uses first:
+
+```bash
+docker inspect <your-postgres-container> | grep -A8 Mounts
+```
+
+If `"Type"` reads `bind`, move it to a named volume:
+
+```bash
+# 1. Stop the database. Heym can stay down for this.
+docker stop <your-postgres-container>
+docker rm <your-postgres-container>
+
+# 2. Copy the data directory into a named volume. Give each instance its own
+#    volume name if this Docker host runs more than one Heym deployment.
+docker volume create heym-postgres-data
+docker run --rm \
+  -v "/path/to/your/data/postgres:/legacy:ro" \
+  -v heym-postgres-data:/pgdata \
+  --entrypoint sh <your-postgres-image> -c 'cp -a /legacy/. /pgdata/'
+
+# 3. Start PostgreSQL again on the volume, reusing the flags you had before
+#    but replacing the bind mount.
+docker run -d --name <your-postgres-container> --restart always \
+  ... your original -e / -p / --network flags ... \
+  -v heym-postgres-data:/var/lib/postgresql/data \
+  <your-postgres-image>
+
+# 4. Once it accepts connections, rebuild indexes.
+docker exec <your-postgres-container> reindexdb -U <user> -d <database>
+```
+
+**Use your own image in steps 2 and 3, not `postgres:16`.** If your database runs `pgvector/pgvector:pg16` or another variant, starting the copied cluster with the stock image can fail because the extension libraries it expects are missing.
+
+Your original data directory is untouched by this procedure, so it remains your rollback path. Delete it only after confirming the migrated database serves your workflows. Step 4 matters for the same reason it does in the Compose migration: the copy carries any existing index damage with it.
 
 ---
 

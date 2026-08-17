@@ -226,11 +226,15 @@ if docker ps -a --format '{{.Names}}' | grep -q '^heym-postgres$'; then
         echo -e "${GREEN}PostgreSQL started.${NC}"
     fi
 else
+    # Named volume, not a host bind mount: bind mounts on macOS (virtiofs) and
+    # Windows/WSL2 do not honour PostgreSQL's fsync guarantees. Only applies to
+    # newly created containers — an existing heym-postgres is started as-is above.
     docker run --name heym-postgres \
         -e POSTGRES_USER=${POSTGRES_USER:-postgres} \
         -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres} \
         -e POSTGRES_DB=${POSTGRES_DB:-heym} \
         -p 6543:5432 \
+        -v heym-postgres-data:/var/lib/postgresql/data \
         -d postgres:16
     echo -e "${GREEN}PostgreSQL container created and started.${NC}"
 fi

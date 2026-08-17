@@ -7,10 +7,30 @@ services:
     # start before Postgres boots, so the migration's CREATE EXTENSION succeeds.
     # Non-fatal: if it cannot be installed (e.g. no network) Postgres still starts,
     # the migration skips the pgvector table, and Qdrant RAG keeps working.
+    #
+    # The guard below refuses to start when a pre-named-volume database is still
+    # sitting in ./data/postgres and the named volume is empty. Without it, initdb
+    # would create a fresh cluster, Alembic would build an empty schema, and the app
+    # would come up healthy but blank — unrecoverable with ALLOW_REGISTER=false.
+    # PG_VERSION is the probe, not the directory: Docker auto-creates an empty
+    # bind-mount source, so /legacy-pgdata always exists.
     entrypoint:
       - bash
       - -c
       - >-
+        if [ -f /legacy-pgdata/PG_VERSION ] && [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+        echo 'FATAL: a PostgreSQL data directory still exists at ./data/postgres, but the';
+        echo 'heym-postgres-data volume is empty. Heym moved PostgreSQL storage from a host';
+        echo 'bind mount to a Docker named volume — bind mounts on macOS (virtiofs) and';
+        echo 'Windows/WSL2 do not honour the fsync guarantees PostgreSQL requires and corrupt';
+        echo 'the cluster over time.';
+        echo '';
+        echo 'Copy your existing database into the named volume before starting:';
+        echo '  ./deploy.sh --migrate-pgdata';
+        echo '';
+        echo 'Starting now would initialise an empty database and lose your workflows.';
+        exit 1;
+        fi;
         ( dpkg -s postgresql-16-pgvector >/dev/null 2>&1
         || ( apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-16-pgvector ) )
         || echo 'pgvector unavailable; continuing without it';
@@ -21,7 +41,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-heym}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+      # Read-only, for the migration guard in the entrypoint only. Safe to drop
+      # once every deployment has moved off the bind mount.
+      - ./data/postgres:/legacy-pgdata:ro
     ports:
       - "${POSTGRES_PORT:-6543}:5432"
     healthcheck:
@@ -170,6 +193,8 @@ networks:
         - subnet: 172.35.0.0/16
 
 volumes:
+  postgres-data:
+    name: heym-postgres-data
   codex-workspaces:
     name: heym-codex-workspaces
   opencode-workspaces:

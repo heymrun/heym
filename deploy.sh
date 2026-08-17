@@ -16,11 +16,15 @@ show_help() {
     echo "Usage: ./deploy.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --down      Stop and remove containers"
-    echo "  --logs      View container logs"
-    echo "  --restart   Restart all services"
-    echo "  --status    Show container status"
-    echo "  --help      Show this help message"
+    echo "  --down              Stop and remove containers"
+    echo "  --logs              View container logs"
+    echo "  --restart           Restart all services"
+    echo "  --status            Show container status"
+    echo "  --migrate-pgdata    Copy a pre-existing data/postgres directory into the"
+    echo "                      heym-postgres-data Docker volume, then rebuild indexes"
+    echo "                      (one-time migration). Add --skip-reindex to skip the"
+    echo "                      rebuild on a large, known-healthy database."
+    echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
     echo "  ./deploy.sh           # Build and deploy"
@@ -101,6 +105,144 @@ dc() {
     fi
 }
 
+# PostgreSQL storage moved from the ./data/postgres bind mount to a Docker named
+# volume: bind mounts on macOS (virtiofs) and Windows/WSL2 do not honour the fsync
+# and close guarantees PostgreSQL needs, which corrupts the cluster over time.
+PG_VOLUME="heym-postgres-data"
+LEGACY_PGDATA="$PROJECT_ROOT/data/postgres"
+SKIP_REINDEX=false
+
+# PG_VERSION, not the directory: Docker auto-creates an empty bind-mount source,
+# so the directory alone proves nothing.
+legacy_pgdata_present() {
+    [ -f "$LEGACY_PGDATA/PG_VERSION" ]
+}
+
+volume_has_pgdata() {
+    docker volume inspect "$PG_VOLUME" >/dev/null 2>&1 || return 1
+    docker run --rm --entrypoint test -v "$PG_VOLUME:/v" postgres:16 -f /v/PG_VERSION >/dev/null 2>&1
+}
+
+# Fail before the build rather than letting the postgres container's own guard trip
+# after several minutes of `docker build --no-cache`.
+assert_pgdata_migrated() {
+    legacy_pgdata_present || return 0
+    volume_has_pgdata && return 0
+
+    echo -e "${RED}Existing database found at data/postgres, but the ${PG_VOLUME} volume is empty.${NC}"
+    echo ""
+    echo -e "${YELLOW}Heym now stores PostgreSQL in a Docker named volume. Host bind mounts on${NC}"
+    echo -e "${YELLOW}macOS (virtiofs) and Windows/WSL2 do not give PostgreSQL the fsync guarantees${NC}"
+    echo -e "${YELLOW}it requires and corrupt the cluster over time.${NC}"
+    echo ""
+    echo -e "Copy your database into the named volume, then deploy again:"
+    echo -e "  ${BLUE}./deploy.sh --migrate-pgdata${NC}"
+    echo ""
+    echo -e "${RED}Deploying now would initialise an empty database and lose your workflows.${NC}"
+    exit 1
+}
+
+# The copy above is byte-for-byte, so any index damage the bind mount caused travels
+# with it. Rebuilding indexes on the new volume is the point of the exercise: a
+# virtiofs-corrupted cluster typically carries index entries pointing past the end of
+# the heap, which a clean pg_amcheck does not detect. Runs against a throwaway
+# container so the stack stays down until the cluster is known good.
+reindex_pgdata() {
+    local pg_user="$1" pg_db="$2"
+    local tmp="heym-pgdata-reindex"
+
+    docker rm -f "$tmp" >/dev/null 2>&1 || true
+    docker run -d --name "$tmp" \
+        -v "$PG_VOLUME:/var/lib/postgresql/data" \
+        postgres:16 >/dev/null
+
+    local ready=false
+    for _ in {1..60}; do
+        if docker exec "$tmp" pg_isready -U "$pg_user" >/dev/null 2>&1; then
+            ready=true
+            break
+        fi
+        sleep 1
+    done
+
+    # Any failure below removes the volume. The guard treats a non-empty volume as
+    # "migrated", so a half-repaired cluster must never be left behind to be deployed.
+    if [ "$ready" != "true" ]; then
+        echo -e "${RED}The migrated cluster did not accept connections. Last log lines:${NC}"
+        docker logs --tail 20 "$tmp" 2>&1 || true
+        docker rm -f "$tmp" >/dev/null 2>&1 || true
+        docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
+        echo -e "${RED}Volume removed. data/postgres is untouched — investigate before retrying.${NC}"
+        exit 1
+    fi
+
+    if ! docker exec "$tmp" reindexdb -U "$pg_user" -d "$pg_db"; then
+        docker rm -f "$tmp" >/dev/null 2>&1 || true
+        docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
+        echo -e "${RED}REINDEX failed. Volume removed; data/postgres is untouched.${NC}"
+        exit 1
+    fi
+
+    # Clean shutdown, so the first real start does not begin with crash recovery.
+    docker stop -t 60 "$tmp" >/dev/null
+    docker rm "$tmp" >/dev/null
+}
+
+# Copy (never move) the legacy cluster into the named volume. The source is left
+# untouched so a failed migration is always recoverable.
+migrate_pgdata() {
+    if ! legacy_pgdata_present; then
+        echo -e "${GREEN}Nothing to migrate: no PostgreSQL data directory at data/postgres.${NC}"
+        exit 0
+    fi
+    if volume_has_pgdata; then
+        echo -e "${RED}Volume ${PG_VOLUME} already contains a database. Refusing to overwrite it.${NC}"
+        echo -e "${YELLOW}Remove the volume first if you really want to re-import data/postgres:${NC}"
+        echo -e "  docker volume rm ${PG_VOLUME}"
+        exit 1
+    fi
+
+    # Read POSTGRES_* for the reindex step. Deliberately not prepare_env: a migration
+    # has no business generating keys or rewriting .env.
+    if [ -f "$ENV_FILE" ]; then
+        source "$ENV_FILE"
+    fi
+    local pg_user="${POSTGRES_USER:-postgres}"
+    local pg_db="${POSTGRES_DB:-heym}"
+
+    echo -e "${YELLOW}Stopping services so the database is not written to during the copy...${NC}"
+    dc down
+
+    echo -e "${YELLOW}Copying data/postgres into the ${PG_VOLUME} volume...${NC}"
+    docker volume create "$PG_VOLUME" >/dev/null
+    if ! docker run --rm \
+        -v "$LEGACY_PGDATA:/legacy:ro" \
+        -v "$PG_VOLUME:/pgdata" \
+        --entrypoint sh postgres:16 -c 'cp -a /legacy/. /pgdata/'; then
+        docker volume rm "$PG_VOLUME" >/dev/null 2>&1 || true
+        echo -e "${RED}Copy failed. Volume removed; data/postgres is unchanged.${NC}"
+        exit 1
+    fi
+
+    if [ "$SKIP_REINDEX" = "true" ]; then
+        echo -e "${YELLOW}Skipping REINDEX (--skip-reindex).${NC}"
+        echo -e "${YELLOW}Index damage caused by the old bind mount, if any, was copied along.${NC}"
+    else
+        echo -e "${YELLOW}Rebuilding indexes on the migrated cluster (database: ${pg_db})...${NC}"
+        echo -e "${YELLOW}This can take a while on a large database. Use --skip-reindex to bypass.${NC}"
+        reindex_pgdata "$pg_user" "$pg_db"
+        echo -e "${GREEN}Indexes rebuilt.${NC}"
+    fi
+
+    echo -e "${GREEN}Migration complete. data/postgres was left in place as a backup.${NC}"
+    echo -e "Start the stack with: ${BLUE}./deploy.sh${NC}"
+    echo -e "Once you have confirmed your data is intact, you may delete data/postgres."
+    echo ""
+    echo -e "${YELLOW}Note: REINDEX repairs index entries that point at missing heap rows.${NC}"
+    echo -e "${YELLOW}It cannot bring back heap pages the old filesystem already lost.${NC}"
+    exit 0
+}
+
 case "${1:-}" in
     --help|-h)
         show_help
@@ -116,8 +258,18 @@ case "${1:-}" in
         dc logs -f
         exit 0
         ;;
+    --migrate-pgdata)
+        if [ "${2:-}" = "--skip-reindex" ]; then
+            SKIP_REINDEX=true
+        elif [ -n "${2:-}" ]; then
+            echo -e "${RED}Unknown option for --migrate-pgdata: $2${NC}"
+            exit 1
+        fi
+        migrate_pgdata
+        ;;
     --restart)
         prepare_env
+        assert_pgdata_migrated
         echo -e "${YELLOW}Restarting services...${NC}"
         if [ "$SECRET_KEY_WAS_GENERATED" = "true" ]; then
             # dc restart does not propagate new env vars to existing containers.
@@ -134,6 +286,7 @@ case "${1:-}" in
         ;;
     "")
         prepare_env
+        assert_pgdata_migrated
         # Zero-downtime deploy: build first (containers keep running), then swap
         echo -e "${YELLOW}Building Docker images v${VERSION} (containers stay up)...${NC}"
         if ! dc build --build-arg APP_VERSION=$VERSION --no-cache; then
