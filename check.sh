@@ -13,6 +13,7 @@ cd "$REPO_ROOT/frontend"
 rm -rf dist
 bun run lint
 bun run typecheck
+bun run test
 
 echo "Running backend checks..."
 cd "$REPO_ROOT/backend"

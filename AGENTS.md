@@ -9,7 +9,7 @@ Read and follow this `AGENTS.md` at the start of every session. Repository conve
 ```bash
 ./run.sh                    # Start all services (postgres, backend, frontend)
 ./run.sh --no-debug         # Start with INFO logging instead of DEBUG
-./check.sh                  # Run frontend lint/typecheck, backend Ruff checks, and backend tests
+./check.sh                  # Run frontend lint/typecheck/unit tests, backend Ruff checks, and backend tests
 ./run_e2e.sh                # Run frontend Playwright E2E tests separately
 SECRET_KEY=test-secret-key-for-tests-only-32-bytes ./check.sh  # Use when no SECRET_KEY is exported locally
 ```
@@ -19,6 +19,7 @@ SECRET_KEY=test-secret-key-for-tests-only-32-bytes ./check.sh  # Use when no SEC
 cd frontend && bun install && bun run dev    # Setup && start dev server (port 4017)
 bun run lint                  # ESLint - must pass before commits
 bun run typecheck             # TypeScript strict checks - must pass before commits
+bun run test                  # Vitest unit tests - must pass before commits
 bun run build && bun run preview  # Build && test production build
 ```
 
