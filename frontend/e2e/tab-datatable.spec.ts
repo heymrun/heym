@@ -35,6 +35,28 @@ test("creates a data table from the UI and opens its detail view", async ({ page
   }
 });
 
+test("opens a data table detail in a new tab on Ctrl+Click (Cmd+Click on macOS)", async ({ page, context }) => {
+  const table = await createDataTable(page, `E2E CtrlClick ${Date.now()}`, [
+    { name: "title", type: "string", order: 0 },
+  ]);
+
+  try {
+    await page.goto("/?tab=datatable");
+    const card = page.getByText(table.name, { exact: true }).locator("..");
+    await expect(card).toBeVisible();
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const [newPage] = await Promise.all([
+      context.waitForEvent("page"),
+      card.click({ modifiers: [modifier] }),
+    ]);
+    await newPage.waitForLoadState("networkidle");
+    expect(newPage.url()).toContain(`tab=datatable/${table.id}`);
+  } finally {
+    await deleteDataTable(page, table.id);
+  }
+});
+
 test("adds and deletes a row in a seeded table", async ({ page }) => {
   const table = await createDataTable(page, `E2E Rows ${Date.now()}`, [
     { name: "title", type: "string", order: 0 },
