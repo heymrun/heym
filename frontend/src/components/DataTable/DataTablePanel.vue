@@ -166,6 +166,20 @@ async function openTable(id: string, event?: MouseEvent): Promise<void> {
   }
 }
 
+function openLLMPricing(event?: MouseEvent): void {
+  // Ctrl/Cmd-click opens the system table detail in a new tab, matching the
+  // other listing-to-detail navigation. Middle-click is not supported.
+  if (event && (event.ctrlKey || event.metaKey)) {
+    const resolved = router.resolve({
+      path: "/",
+      query: { ...route.query, tab: "datatable/llm-pricing" },
+    });
+    window.open(resolved.href, "_blank");
+    return;
+  }
+  void router.push({ query: { ...route.query, tab: "datatable/llm-pricing" } });
+}
+
 async function loadRows() {
   if (!selectedTable.value) return;
   rowsLoading.value = true;
@@ -715,7 +729,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
         </div>
         <div
           class="group relative cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
-          @click="$router.push({ query: { ...$route.query, tab: 'datatable/llm-pricing' } })"
+          @click="openLLMPricing($event)"
         >
           <div class="flex items-start gap-3">
             <Coins class="w-5 h-5 text-primary mt-0.5" />
