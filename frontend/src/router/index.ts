@@ -127,6 +127,12 @@ const router = createRouter({
       component: () => import("@/views/DocsView.vue"),
       meta: { requiresAuth: true },
     },
+    {
+      path: "/datatable-screenshot",
+      name: "datatable-screenshot",
+      component: () => import("@/views/DataTableScreenshotView.vue"),
+      meta: { requiresAuth: false },
+    },
   ],
 });
 

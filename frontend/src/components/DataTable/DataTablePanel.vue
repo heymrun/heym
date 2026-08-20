@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   ArrowLeft,
   ArrowDown,
@@ -45,6 +45,7 @@ const LLM_PRICING_ROUTE_ID = "llm-pricing";
 const props = defineProps<{ initialTableId?: string | null }>();
 const emit = defineEmits<{ navigate: [id: string | null] }>();
 const route = useRoute();
+const router = useRouter();
 
 type RowSortField = "created_at" | "updated_at";
 type RowSortDirection = "asc" | "desc";
@@ -142,7 +143,25 @@ async function loadTables() {
   }
 }
 
-async function openTable(id: string): Promise<void> {
+function dataTableDetailUrl(id: string): string {
+  return router.resolve({ query: { ...route.query, tab: `datatable/${id}` } }).href;
+}
+
+function openInNewTab(url: string): void {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+async function openTable(id: string, event?: MouseEvent): Promise<void> {
+  if (event?.ctrlKey || event?.metaKey) {
+    openInNewTab(dataTableDetailUrl(id));
+    return;
+  }
   try {
     selectedTable.value = await dataTablesApi.get(id);
     rowPage.value = 0;
@@ -156,6 +175,15 @@ async function openTable(id: string): Promise<void> {
   } catch {
     error.value = "Failed to load data table";
   }
+}
+
+function openSystemTable(event: MouseEvent): void {
+  if (event.ctrlKey || event.metaKey) {
+    const url = router.resolve({ query: { ...route.query, tab: "datatable/llm-pricing" } }).href;
+    openInNewTab(url);
+    return;
+  }
+  router.push({ query: { ...route.query, tab: "datatable/llm-pricing" } });
 }
 
 async function loadRows() {
@@ -707,7 +735,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
         </div>
         <div
           class="group relative cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
-          @click="$router.push({ query: { ...$route.query, tab: 'datatable/llm-pricing' } })"
+          @click="openSystemTable($event)"
         >
           <div class="flex items-start gap-3">
             <Coins class="w-5 h-5 text-primary mt-0.5" />
@@ -759,7 +787,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
           v-for="table in filtered"
           :key="table.id"
           class="group relative cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
-          @click="openTable(table.id)"
+          @click="openTable(table.id, $event)"
         >
           <div class="flex items-start justify-between">
             <div class="min-w-0 flex-1">
