@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import vue from "@vitejs/plugin-vue";
 import fs from "node:fs";
 import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
@@ -76,10 +75,6 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
-  },
-  test: {
-    include: ["src/**/*.test.ts"],
-    environment: "node",
   },
   server: {
     port: 4017,
