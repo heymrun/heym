@@ -27,63 +27,6 @@ export function generateId(): string {
   return `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-export function hasNestedDollarInParentheses(text: string): boolean {
-  if (!text) return false;
-  let inString = false;
-  let stringChar = "";
-  let parenDepth = 0;
-  let bracketDepth = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    if (inString) {
-      if (char === stringChar && text[i - 1] !== "\\") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      inString = true;
-      stringChar = char;
-      continue;
-    }
-
-    if (char === "(") {
-      parenDepth++;
-      continue;
-    }
-
-    if (char === ")") {
-      parenDepth = Math.max(0, parenDepth - 1);
-      continue;
-    }
-
-    if (char === "[") {
-      bracketDepth++;
-      continue;
-    }
-
-    if (char === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1);
-      continue;
-    }
-
-    if (char === "$" && i + 1 < text.length && /[a-zA-Z]/.test(text[i + 1])) {
-      if (parenDepth > 0 || bracketDepth > 0) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-export function hasMultipleDollarExpressions(text: string): boolean {
-  return hasNestedDollarInParentheses(text);
-}
-
 export interface SourceNodeInfo {
   label: string;
   type: string;
