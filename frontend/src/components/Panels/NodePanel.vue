@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch, nextTick, ref } from "vue";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Code2, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
-import HeymIcon from "@/components/Nodes/HeymIcon.vue";
+import { LayoutTemplate, Puzzle, X } from "lucide-vue-next";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
 import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/types/workflow";
@@ -211,69 +210,6 @@ function scrollToSelectedNode(): void {
     }
   });
 }
-
-const icons = {
-  textInput: Type,
-  cron: CalendarClock,
-  telegramTrigger: MessageSquare,
-  websocketTrigger: Radio,
-  fileUploadTrigger: Upload,
-  llm: Brain,
-  agent: Bot,
-  codex: Terminal,
-  opencodeGo: Terminal,
-  condition: GitBranch,
-  switch: Shuffle,
-  execute: Play,
-  output: FileJson,
-  wait: Clock,
-  http: Globe,
-  websocketSend: Send,
-  sticky: StickyNote,
-  merge: GitMerge,
-  set: Settings2,
-  converter: Repeat,
-  code: Code2,
-  jsonOutputMapper: Braces,
-  telegram: MessageSquare,
-  slack: MessageSquare,
-  slackTrigger: MessageSquare,
-  discord: MessageSquare,
-  discordTrigger: MessageSquare,
-  imapTrigger: Inbox,
-  heym: HeymIcon,
-  heymTrigger: HeymIcon,
-  sendEmail: Mail,
-  errorHandler: AlertTriangle,
-  variable: Variable,
-  loop: Repeat,
-  disableNode: Ban,
-  redis: Database,
-  rag: Search,
-  grist: Table2,
-  github: Github,
-  jira: ListTodo,
-  linear: ListTodo,
-  googleSheets: Sheet,
-  googleDrive: FolderOpen,
-  bigquery: Database,
-  supabase: Database,
-  clickhouse: Database,
-  notion: FileText,
-  sentry: ShieldAlert,
-  throwError: XCircle,
-  rabbitmq: Rabbit,
-  crawler: Bug,
-  consoleLog: Terminal,
-  playwright: MonitorPlay,
-  dataTable: Table2,
-  drive: HardDrive,
-  s3: Server,
-  mcpCall: Plug,
-  chartOutput: BarChart3,
-  plugin: Puzzle,
-  pluginTrigger: Puzzle,
-};
 
 const allNodeTypes = Object.values(NODE_DEFINITIONS);
 
@@ -680,7 +616,7 @@ function handleDoubleClick(type: NodeType, extraData?: Record<string, unknown>):
             }"
           >
             <component
-              :is="icons[node.type]"
+              :is="nodeIcons[node.type]"
               :class="isTileFillingIcon(node.type) ? 'w-full h-full' : 'w-5 h-5'"
             />
           </div>
