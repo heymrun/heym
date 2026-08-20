@@ -378,7 +378,7 @@ Heym workflows are not limited to the editor. Run them from the canvas, call the
 
 Heym is built to be inspected and operated in your own infrastructure. Docker deployment, JWT auth, team controls, shared credentials, `SECURITY.md`, execution history, logs, LLM traces, OpenTelemetry export, evals, and per-model USD cost tracking all live in the core self-hostable product.
 
-Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck and production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
+Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck, frontend Vitest unit tests, production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
 
 <details>
 <summary><b>🐳 Docker Production Deployment</b></summary>
@@ -715,7 +715,7 @@ cd frontend && bun install && bun run dev
 
 Or run individually:
 ```bash
-cd frontend && bun run lint && bun run typecheck
+cd frontend && bun run lint && bun run typecheck && bun run test
 cd backend  && uv run ruff check . && uv run ruff format .
 ```
 
