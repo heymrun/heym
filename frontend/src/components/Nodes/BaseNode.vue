@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Code2, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
-import HeymIcon from "@/components/Nodes/HeymIcon.vue";
+import { AlertTriangle, Brain, Loader2, Pin, RefreshCw, Sparkles } from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
 import PluginIcon from "@/components/Panels/PluginIcon.vue";
-import { isTileFillingIcon, nodeIconColorClass } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -22,69 +21,6 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: "openAgentMemory", nodeId: string): void;
 }>();
-
-const icons = {
-  chartOutput: BarChart3,
-  textInput: Type,
-  cron: CalendarClock,
-  telegramTrigger: MessageSquare,
-  websocketTrigger: Radio,
-  fileUploadTrigger: Upload,
-  llm: Brain,
-  agent: Bot,
-  codex: Terminal,
-  opencodeGo: Terminal,
-  condition: GitBranch,
-  switch: Shuffle,
-  execute: Play,
-  output: FileJson,
-  wait: Clock,
-  http: Globe,
-  websocketSend: Send,
-  sticky: StickyNote,
-  merge: GitMerge,
-  set: Settings2,
-  converter: Repeat,
-  code: Code2,
-  jsonOutputMapper: Braces,
-  telegram: MessageSquare,
-  slack: MessageSquare,
-  slackTrigger: MessageSquare,
-  discord: MessageSquare,
-  discordTrigger: MessageSquare,
-  imapTrigger: Inbox,
-  heym: HeymIcon,
-  heymTrigger: HeymIcon,
-  sendEmail: Mail,
-  errorHandler: AlertTriangle,
-  variable: Variable,
-  loop: Repeat,
-  disableNode: Ban,
-  redis: Database,
-  rag: Search,
-  grist: Table2,
-  github: Github,
-  jira: ListTodo,
-  linear: ListTodo,
-  googleSheets: Sheet,
-  googleDrive: FolderOpen,
-  bigquery: Database,
-  supabase: Database,
-  clickhouse: Database,
-  notion: FileText,
-  sentry: ShieldAlert,
-  throwError: XCircle,
-  rabbitmq: Rabbit,
-  crawler: Bug,
-  consoleLog: Terminal,
-  playwright: MonitorPlay,
-  dataTable: Table2,
-  drive: HardDrive,
-  s3: Server,
-  mcpCall: Plug,
-  plugin: Puzzle,
-  pluginTrigger: Puzzle,
-};
 
 const nodeColorMap = {
   chartOutput: "node-output",
@@ -296,7 +232,7 @@ const batchRuntimeBadgeClass = computed(() => {
   return "text-node-llm bg-node-llm/10";
 });
 
-const Icon = computed(() => icons[props.type]);
+const Icon = computed(() => nodeIcons[props.type]);
 
 const RESERVED_NAMES = new Set([
   "headers",

@@ -12,8 +12,7 @@ import {
   type Ref,
 } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Code2, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
-import HeymIcon from "@/components/Nodes/HeymIcon.vue";
+
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
 import {
@@ -30,6 +29,7 @@ import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jira
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
 import { getSentryExpressionFields, type SentryExpressionFieldKey } from "@/lib/sentryExpressionFields";
+import { nodeIcons } from "@/lib/nodeIcons";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { configApi, credentialsApi, dataTablesApi, filesApi, gristApi, mcpApi, workflowApi } from "@/services/api";
 import type { MCPFetchToolItem } from "@/services/api";
@@ -93,69 +93,6 @@ interface CodexExpressionField {
 }
 
 export function usePropertiesPanelController() {
-  const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
-    chartOutput: BarChart3,
-    textInput: Type,
-    cron: CalendarClock,
-    websocketTrigger: Radio,
-    fileUploadTrigger: Upload,
-    llm: Brain,
-    agent: Bot,
-    codex: Terminal,
-    opencodeGo: Terminal,
-    condition: GitBranch,
-    switch: Shuffle,
-    execute: Play,
-    output: FileJson,
-    wait: Clock,
-    http: Globe,
-    websocketSend: Send,
-    sticky: StickyNote,
-    merge: GitMerge,
-    set: Settings2,
-    converter: Repeat,
-    code: Code2,
-    jsonOutputMapper: Braces,
-    telegramTrigger: MessageSquare,
-    telegram: MessageSquare,
-    slack: MessageSquare,
-    slackTrigger: MessageSquare,
-    discord: MessageSquare,
-    discordTrigger: MessageSquare,
-    imapTrigger: Inbox,
-    heym: HeymIcon,
-    heymTrigger: HeymIcon,
-    sendEmail: Mail,
-    errorHandler: AlertTriangle,
-    variable: Variable,
-    loop: Repeat,
-    disableNode: Ban,
-    redis: Database,
-    rag: Search,
-    grist: Table2,
-    github: Github,
-    jira: ListTodo,
-    linear: ListTodo,
-    googleSheets: Sheet,
-    googleDrive: FolderOpen,
-    bigquery: Database,
-    supabase: Database,
-    clickhouse: Database,
-    notion: FileText,
-    sentry: ShieldAlert,
-    throwError: XCircle,
-    rabbitmq: Rabbit,
-    crawler: Bug,
-    consoleLog: Terminal,
-    playwright: MonitorPlay,
-    dataTable: Table2,
-    drive: HardDrive,
-    s3: Server,
-    mcpCall: Plug,
-    plugin: Puzzle,
-    pluginTrigger: Puzzle,
-  };
-
   const nodeColorMap: Record<NodeType, string> = {
     chartOutput: "node-output",
     textInput: "node-input",
