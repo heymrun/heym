@@ -104,11 +104,11 @@ from app.services.heym_event_service import (
     workflow_event_payload,
 )
 from app.services.highlight.highlight_builder import build_highlight_payload
-from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
 )
+from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,

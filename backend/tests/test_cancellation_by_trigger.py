@@ -309,6 +309,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
         db.commit = AsyncMock()
 
         request = MagicMock()
+        request.method = "POST"
         request.headers = {}
         request.query_params = {}
         request.base_url = "http://localhost/"
@@ -373,6 +374,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
         db.flush = AsyncMock()
 
         request = MagicMock()
+        request.method = "POST"
         request.headers = {}
         request.query_params = {}
         request.base_url = "http://localhost/"
@@ -425,6 +427,7 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
         db.add = MagicMock()
         db.commit = AsyncMock()
         request = MagicMock()
+        request.method = "POST"
         request.headers = {}
         request.query_params = {}
         request.base_url = "http://localhost/"
