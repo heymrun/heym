@@ -305,6 +305,9 @@ class Workflow(Base):
     cache_ttl_seconds: Mapped[int | None] = mapped_column(nullable=True)
     rate_limit_requests: Mapped[int | None] = mapped_column(nullable=True)
     rate_limit_window_seconds: Mapped[int | None] = mapped_column(nullable=True)
+    http_method: Mapped[str] = mapped_column(
+        String(8), default="POST", server_default="POST", nullable=False
+    )
     sse_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sse_node_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mcp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

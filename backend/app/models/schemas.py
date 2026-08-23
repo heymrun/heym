@@ -228,6 +228,7 @@ class WorkflowUpdate(BaseModel):
     cache_ttl_seconds: int | None = None
     rate_limit_requests: int | None = None
     rate_limit_window_seconds: int | None = None
+    http_method: str | None = None
     sse_enabled: bool | None = None
     sse_node_config: dict | None = None
     auto_recover_runs: bool | None = None
@@ -274,6 +275,7 @@ class WorkflowResponse(BaseModel):
     cache_ttl_seconds: int | None = None
     rate_limit_requests: int | None = None
     rate_limit_window_seconds: int | None = None
+    http_method: str = "POST"
     sse_enabled: bool = False
     sse_node_config: dict | None = None
     auto_recover_runs: bool = True
