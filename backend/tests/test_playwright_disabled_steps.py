@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import patch
 
+from app.services.node_execution.nodes.playwright_node import _execute_playwright_node
 from app.services.playwright_code_generator import (
     active_steps,
     generate_playwright_code,
@@ -135,12 +136,15 @@ class DisabledStepExecutionTests(unittest.TestCase):
             return "print('noop')"
 
         with (
-            patch("app.services.workflow_executor._build_playwright_script", fake_build),
+            patch(
+                "app.services.node_execution.nodes.playwright_node._build_playwright_script",
+                fake_build,
+            ),
             patch("subprocess.Popen") as popen,
         ):
             popen.return_value.communicate.return_value = ('{"status": "ok"}', "")
             popen.return_value.returncode = 0
-            executor._execute_playwright_node(node_data, {}, "pw1", "browser")
+            _execute_playwright_node(executor, node_data, {}, "pw1", "browser")
         return captured["code"]
 
     def test_execution_skips_disabled_steps(self) -> None:
@@ -165,7 +169,7 @@ class DisabledStepExecutionTests(unittest.TestCase):
             ],
         }
         with self.assertRaises(ValueError) as ctx:
-            _executor(node_data)._execute_playwright_node(node_data, {}, "pw1", "browser")
+            _execute_playwright_node(_executor(node_data), node_data, {}, "pw1", "browser")
         self.assertIn("disabled", str(ctx.exception).lower())
 
     def test_all_steps_disabled_does_not_fall_back_to_custom_code(self) -> None:
@@ -179,7 +183,7 @@ class DisabledStepExecutionTests(unittest.TestCase):
             "playwrightCode": "print('legacy')",
         }
         with self.assertRaises(ValueError) as ctx:
-            _executor(node_data)._execute_playwright_node(node_data, {}, "pw1", "browser")
+            _execute_playwright_node(_executor(node_data), node_data, {}, "pw1", "browser")
         self.assertIn("disabled", str(ctx.exception).lower())
 
     def test_auth_first_step_check_uses_enabled_steps(self) -> None:

@@ -12,11 +12,12 @@ from unittest.mock import patch
 
 from app.config import settings
 from app.services import playwright_sandbox
-from app.services.playwright_code_generator import generate_playwright_code
-from app.services.workflow_executor import (
-    WorkflowExecutor,
+from app.services.node_execution.nodes.playwright_node import (
+    _execute_playwright_node,
     _scrubbed_playwright_subprocess_env,
 )
+from app.services.playwright_code_generator import generate_playwright_code
+from app.services.workflow_executor import WorkflowExecutor
 
 # A payload that would run at generation/exec time if interpolated as raw Python.
 _INJECTION = '(__import__("builtins").print("PWNED_MARKER"), False)[1]'
@@ -38,7 +39,7 @@ class CustomCodeGateTests(unittest.TestCase):
         executor = _executor(node_data)
         with patch.object(settings, "playwright_custom_code_enabled", False):
             with self.assertRaises(ValueError) as ctx:
-                executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+                _execute_playwright_node(executor, node_data, {}, "pw1", "rce")
         self.assertIn("disabled", str(ctx.exception).lower())
         self.assertIn("HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED", str(ctx.exception))
 
@@ -57,7 +58,7 @@ class CustomCodeGateTests(unittest.TestCase):
                 return_value=(0, '{"status": "ok", "results": {"x": 1}}', ""),
             ) as mock_run,
         ):
-            result = executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+            result = _execute_playwright_node(executor, node_data, {}, "pw1", "rce")
         mock_run.assert_called_once()
         self.assertEqual(result["results"]["x"], 1)
 
@@ -71,7 +72,7 @@ class CustomCodeGateTests(unittest.TestCase):
             patch("subprocess.Popen", side_effect=AssertionError("must not run in-process")),
         ):
             with self.assertRaises(ValueError) as ctx:
-                executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+                _execute_playwright_node(executor, node_data, {}, "pw1", "rce")
         self.assertIn("Docker sandbox", str(ctx.exception))
 
     def test_subprocess_mode_opts_custom_code_back_in_process(self) -> None:
@@ -84,7 +85,7 @@ class CustomCodeGateTests(unittest.TestCase):
             patch("subprocess.Popen", side_effect=RuntimeError("REACHED_SINK")),
         ):
             with self.assertRaises(RuntimeError) as ctx:
-                executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+                _execute_playwright_node(executor, node_data, {}, "pw1", "rce")
         self.assertIn("REACHED_SINK", str(ctx.exception))
 
     def test_step_based_node_is_not_gated(self) -> None:
@@ -98,7 +99,7 @@ class CustomCodeGateTests(unittest.TestCase):
             patch("subprocess.Popen", side_effect=RuntimeError("REACHED_SINK")),
         ):
             with self.assertRaises(RuntimeError) as ctx:
-                executor._execute_playwright_node(node_data, {}, "pw1", "safe")
+                _execute_playwright_node(executor, node_data, {}, "pw1", "safe")
         self.assertIn("REACHED_SINK", str(ctx.exception))
 
     def test_playwright_mode_code_uses_custom_code_even_when_steps_exist(self) -> None:
@@ -120,7 +121,7 @@ class CustomCodeGateTests(unittest.TestCase):
                 return_value=(0, '{"status": "ok", "results": {"via": "code"}}', ""),
             ) as mock_run,
         ):
-            result = executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+            result = _execute_playwright_node(executor, node_data, {}, "pw1", "rce")
         mock_run.assert_called_once()
         self.assertEqual(result["results"]["via"], "code")
 
@@ -137,7 +138,7 @@ class CustomCodeGateTests(unittest.TestCase):
             patch("subprocess.Popen", side_effect=RuntimeError("REACHED_SINK")),
         ):
             with self.assertRaises(RuntimeError) as ctx:
-                executor._execute_playwright_node(node_data, {}, "pw1", "safe")
+                _execute_playwright_node(executor, node_data, {}, "pw1", "safe")
         self.assertIn("REACHED_SINK", str(ctx.exception))
 
 
