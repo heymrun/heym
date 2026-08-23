@@ -16,14 +16,20 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     releaseId: "2026.08",
     publishedAt: new Date("2026-08-18T00:00:00Z"),
     headline:
-      "A rebuilt workflow list, Python on the canvas, branded folders, and readable Playwright runs",
+      "A rebuilt workflow list, Python on the canvas, branded folders, readable Playwright runs, and workflows that serve web pages",
     releaseTour: {
       label: "New in Heym",
-      introTitle: "Four new things in this release",
+      introTitle: "Five new things in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["workflow-listing", "code-node", "folder-icons", "playwright-ai-steps"],
+      sectionOrder: [
+        "workflow-listing",
+        "code-node",
+        "folder-icons",
+        "playwright-ai-steps",
+        "html-output-mapper",
+      ],
     },
     sections: [
       {
@@ -112,6 +118,32 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
           ],
           tourVisual: "playwright-ai-steps",
           docTarget: { categoryId: "nodes", slug: "playwright-node", title: "Playwright Node" },
+        },
+      },
+      {
+        id: "html-output-mapper",
+        title: "Workflows that answer with a web page",
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The new **HTML output mapper** node renders a page from a template, and when it is a workflow's only terminal node the execute webhook responds with `text/html` instead of JSON. The cURL dialog gained a **request method** selector, so a workflow can answer a plain browser `GET`, and the workflow list marks these with a **WEB** chip.",
+          },
+        ],
+        tour: {
+          description:
+            "Drop an HTML output mapper at the end of a workflow, set the request method to GET, and the workflow's URL opens in a browser as a real page.",
+          useCases: [
+            "Serve a generated status page without standing up a web server",
+            "Return a confirmation screen a person can actually read",
+            "Publish a report an Agent writes, straight to a URL",
+          ],
+          tourVisual: "html-output-mapper",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "html-output-mapper-node",
+            title: "HTML output mapper",
+          },
         },
       },
     ],
