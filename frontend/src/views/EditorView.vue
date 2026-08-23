@@ -97,7 +97,10 @@ const tokenCreating = ref(false);
 const tokenRevoking = ref<string | null>(null);
 const sseEnabled = ref(false);
 const httpMethod = ref("POST");
-const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE"] as const;
+const HTTP_METHOD_OPTIONS = ["GET", "POST", "PUT", "DELETE"].map((method) => ({
+  value: method,
+  label: method,
+}));
 const sendsRequestBody = computed(
   () => httpMethod.value !== "GET" && httpMethod.value !== "DELETE",
 );
@@ -963,10 +966,12 @@ async function saveSseEnabled(): Promise<void> {
   workflowStore.currentWorkflow.sse_enabled = sseEnabled.value;
 }
 
-async function saveHttpMethod(): Promise<void> {
+async function saveHttpMethod(value: string | undefined): Promise<void> {
+  if (!value) return;
+  httpMethod.value = value;
   if (!workflowStore.currentWorkflow) return;
-  await workflowApi.update(workflowId.value, { http_method: httpMethod.value });
-  workflowStore.currentWorkflow.http_method = httpMethod.value;
+  await workflowApi.update(workflowId.value, { http_method: value });
+  workflowStore.currentWorkflow.http_method = value;
 }
 
 async function saveSseNodeConfig(): Promise<void> {
@@ -2223,20 +2228,13 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 The verb this workflow accepts. Other methods are rejected with 405.
               </p>
             </div>
-            <select
-              id="http-method"
-              v-model="httpMethod"
-              class="h-9 rounded border border-input bg-background px-2 text-sm"
-              @change="saveHttpMethod"
-            >
-              <option
-                v-for="method in HTTP_METHODS"
-                :key="method"
-                :value="method"
-              >
-                {{ method }}
-              </option>
-            </select>
+            <Select
+              :model-value="httpMethod"
+              :options="HTTP_METHOD_OPTIONS"
+              placeholder=""
+              class="w-32 shrink-0"
+              @update:model-value="saveHttpMethod"
+            />
           </div>
         </div>
 
