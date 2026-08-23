@@ -104,6 +104,7 @@ from app.services.heym_event_service import (
     workflow_event_payload,
 )
 from app.services.highlight.highlight_builder import build_highlight_payload
+from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
@@ -2988,7 +2989,16 @@ async def execute_workflow_endpoint(
                 execution_result=execution_result,
             )
             if simple_response:
+                html_node_id = find_sole_html_terminal(workflow.nodes, workflow.edges)
+                html_response = (
+                    build_html_response(execution_result.node_results, html_node_id)
+                    if html_node_id
+                    else None
+                )
                 await db.commit()
+                if html_response is not None:
+                    html_response.background = background_tasks
+                    return html_response
                 return JSONResponse(
                     content=execution_result.outputs,
                     background=background_tasks,
@@ -3067,6 +3077,11 @@ async def execute_workflow_endpoint(
             )
 
     if simple_response:
+        html_node_id = find_sole_html_terminal(workflow.nodes, workflow.edges)
+        if html_node_id:
+            html_response = build_html_response(execution_result.node_results, html_node_id)
+            if html_response is not None:
+                return html_response
         return JSONResponse(content=execution_result.outputs)
     return WorkflowExecuteResponse(
         workflow_id=execution_result.workflow_id,
