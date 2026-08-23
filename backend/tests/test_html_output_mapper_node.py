@@ -78,6 +78,32 @@ class HtmlOutputMapperNodeTests(unittest.TestCase):
         outputs = _run(nodes, self.EDGES, {"text": "x"})
         self.assertEqual(outputs["html1"]["html"], "")
 
+    def test_counts_as_an_output_node_not_merely_a_leaf(self) -> None:
+        nodes = self._nodes({"label": "page", "html": "<p>$userInput.text</p>"})
+        ex = WorkflowExecutor(nodes=nodes, edges=self.EDGES)
+        ex.execute(
+            workflow_id=uuid.uuid4(),
+            initial_inputs={"headers": {}, "query": {}, "body": {"text": "x"}},
+        )
+        self.assertIn("html1", ex.get_output_nodes())
+
+    def test_outgoing_edges_are_severed_like_the_json_mapper(self) -> None:
+        """A sink's output must not flow downstream.
+
+        The orphaned node still runs - severing the edge leaves it unrooted, so it is
+        scheduled as a start node. That is pre-existing jsonOutputMapper behaviour; what
+        matters here is that htmlOutputMapper matches it rather than piping its page on.
+        """
+        nodes = [
+            *self._nodes({"label": "page", "html": "<p>x</p>"}),
+            {"id": "after", "type": "consoleLog", "data": {"label": "after"}},
+        ]
+        edges = [*self.EDGES, {"id": "e2", "source": "html1", "target": "after"}]
+        ex = WorkflowExecutor(nodes=nodes, edges=edges)
+        active_edge_ids = {e["id"] for e in ex.get_active_edges()}
+        self.assertNotIn("e2", active_edge_ids)
+        self.assertIn("e1", active_edge_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

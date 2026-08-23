@@ -1797,6 +1797,13 @@ class ExecutionResult:
             self.execution_time_ms = (time.time() - self._started_at) * 1000
 
 
+#: Terminal mappers: sinks whose output replaces the wrapped per-label response shape.
+TERMINAL_MAPPER_NODE_TYPES: frozenset[str] = frozenset({"jsonOutputMapper", "htmlOutputMapper"})
+
+#: Every node type that terminates a branch and contributes the workflow's final output.
+OUTPUT_TERMINAL_NODE_TYPES: frozenset[str] = frozenset({"output", *TERMINAL_MAPPER_NODE_TYPES})
+
+
 def unwrap_single_json_output_terminal_outputs(
     wf_executor: "WorkflowExecutor",
     final_outputs: dict[str, Any],
@@ -2575,7 +2582,7 @@ class WorkflowExecutor:
         output_nodes = [
             node_id
             for node_id, node in self.nodes.items()
-            if node.get("type") in ("output", "jsonOutputMapper")
+            if node.get("type") in OUTPUT_TERMINAL_NODE_TYPES
             and node_id not in self.error_handler_nodes
             and node_id not in error_flow_nodes
         ]
@@ -2610,7 +2617,7 @@ class WorkflowExecutor:
                 # not an execution dependency: scheduling it advances the loop while
                 # the body is still running.
                 continue
-            if source_node.get("type") == "jsonOutputMapper":
+            if source_node.get("type") in TERMINAL_MAPPER_NODE_TYPES:
                 continue
             if source_node.get("type") == "output":
                 allow_downstream = source_node.get("data", {}).get("allowDownstream")
@@ -9405,7 +9412,7 @@ def _execute_error_flow_streaming(
         yield {"type": "_internal_node_result", "result": result}
         completed.add(node_id)
 
-        if node_type in ("output", "jsonOutputMapper") and result.status == "success":
+        if node_type in OUTPUT_TERMINAL_NODE_TYPES and result.status == "success":
             error_flow_output = {result.node_label: output}
             if not final_output_emitted:
                 final_output_emitted = True
@@ -9820,7 +9827,7 @@ def _execute_workflow_streaming_impl(
             completed_nodes.add(node_id)
 
             node_for_final = wf_executor.nodes.get(node_id, {})
-            is_json_mapper_final = node_for_final.get("type") == "jsonOutputMapper"
+            is_json_mapper_final = node_for_final.get("type") in TERMINAL_MAPPER_NODE_TYPES
             if (
                 not final_output_emitted
                 and result.status == "success"

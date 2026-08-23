@@ -12,7 +12,7 @@ from typing import Any
 
 MESSAGE_CHAR_CAP = 100_000
 INPUT_NODE_TYPES = {"textInput", "cron"}
-OUTPUT_NODE_TYPES = {"output", "jsonOutputMapper", "chartOutput"}
+OUTPUT_NODE_TYPES = {"output", "jsonOutputMapper", "htmlOutputMapper", "chartOutput"}
 
 
 def _is_input_type(node_type: str) -> bool:
