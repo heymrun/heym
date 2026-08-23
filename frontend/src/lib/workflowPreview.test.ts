@@ -226,6 +226,33 @@ describe("buildWorkflowCurl", () => {
     expect(command).toContain('-H "X-Custom: <your-secret-value>"');
   });
 
+  it("defaults to POST when no method is configured", () => {
+    const command = buildWorkflowCurl(workflow(), "https://heym.test");
+
+    expect(command).toContain("curl -X POST");
+  });
+
+  it("uses the configured method", () => {
+    const command = buildWorkflowCurl(workflow({ http_method: "PUT" }), "https://heym.test");
+
+    expect(command).toContain("curl -X PUT");
+  });
+
+  it("drops the body and content type for GET", () => {
+    const command = buildWorkflowCurl(workflow({ http_method: "GET" }), "https://heym.test");
+
+    expect(command).toContain("curl -X GET");
+    expect(command).not.toContain("Content-Type");
+    expect(command).not.toContain("-d '");
+  });
+
+  it("drops the body for DELETE", () => {
+    const command = buildWorkflowCurl(workflow({ http_method: "DELETE" }), "https://heym.test");
+
+    expect(command).toContain("curl -X DELETE");
+    expect(command).not.toContain("-d '");
+  });
+
   it("omits an auth header for anonymous workflows", () => {
     const command = buildWorkflowCurl(workflow({ auth_type: "anonymous" }), "https://heym.test");
 

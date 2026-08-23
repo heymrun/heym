@@ -32,6 +32,8 @@ export interface Workflow {
   cache_ttl_seconds: number | null;
   rate_limit_requests: number | null;
   rate_limit_window_seconds: number | null;
+  /** The one HTTP verb this workflow accepts. Absent on older payloads; treat as POST. */
+  http_method?: string;
   sse_enabled: boolean;
   sse_node_config: Record<string, SseNodeConfig>;
   auto_recover_runs: boolean;

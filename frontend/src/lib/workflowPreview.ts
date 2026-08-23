@@ -187,10 +187,13 @@ export function buildWorkflowCurl(workflow: Workflow, origin?: string): string {
     : `/api/workflows/${workflow.id}/execute`;
   const url = `${base.replace(/\/$/, "")}${path}`;
 
-  const headers = [
-    '-H "Content-Type: application/json"',
-    '-H "X-Trigger-Source: API"',
-  ];
+  const method = (workflow.http_method || "POST").toUpperCase();
+  const sendsBody = method !== "GET" && method !== "DELETE";
+
+  const headers = ['-H "X-Trigger-Source: API"'];
+  if (sendsBody) {
+    headers.unshift('-H "Content-Type: application/json"');
+  }
   if (workflow.sse_enabled) {
     headers.push('-H "Accept: text/event-stream"');
   }
@@ -200,14 +203,17 @@ export function buildWorkflowCurl(workflow: Workflow, origin?: string): string {
     headers.push('-H "Authorization: Bearer <your-execution-token>"');
   }
 
-  const body = JSON.stringify(buildSampleInputs(workflow));
-
-  return [
-    `curl -X POST${workflow.sse_enabled ? " --no-buffer" : ""} \\`,
+  const lines = [
+    `curl -X ${method}${workflow.sse_enabled ? " --no-buffer" : ""} \\`,
     ...headers.map((header) => `  ${header} \\`),
-    `  "${url}" \\`,
-    `  -d '${body}'`,
-  ].join("\n");
+  ];
+  if (sendsBody) {
+    const body = JSON.stringify(buildSampleInputs(workflow));
+    lines.push(`  "${url}" \\`, `  -d '${body}'`);
+  } else {
+    lines.push(`  "${url}"`);
+  }
+  return lines.join("\n");
 }
 
 /** Body keys come from the input fields of start nodes, so the sample matches what the run reads. */

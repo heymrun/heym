@@ -581,6 +581,7 @@ export const workflowApi = {
         | "cache_ttl_seconds"
         | "rate_limit_requests"
         | "rate_limit_window_seconds"
+        | "http_method"
         | "sse_enabled"
         | "sse_node_config"
         | "auto_recover_runs"
