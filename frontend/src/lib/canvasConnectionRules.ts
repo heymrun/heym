@@ -26,6 +26,8 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
   "imapTrigger",
   "heymTrigger",
   "mcpCall",
+  "jsonOutputMapper",
+  "htmlOutputMapper",
 ]);
 
 export const NO_REGULAR_INPUT_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([

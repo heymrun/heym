@@ -35,6 +35,7 @@ const OPTIONS: { value: WorkflowStatusFilterValue; label: string }[] = [
   { value: "api", label: "API" },
   { value: "subWorkflow", label: "SubWorker" },
   { value: "portal", label: "Portal" },
+  { value: "web", label: "WEB" },
   { value: "removeScheduled", label: "Remove Scheduled" },
 ];
 

@@ -68,6 +68,12 @@ const STATUS_STYLES: Record<WorkflowRowStatus, StatusStyle> = {
     dot: "bg-teal-500",
     pulse: false,
   },
+  web: {
+    label: "WEB",
+    badge: "bg-rose-500/10 text-rose-600 dark:text-rose-400 ring-rose-500/20",
+    dot: "bg-rose-500",
+    pulse: false,
+  },
   removeScheduled: {
     label: "Remove Scheduled",
     badge:

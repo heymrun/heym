@@ -57,7 +57,8 @@ export type WorkflowTriggerStatus =
   | "manual"
   | "api"
   | "subWorkflow"
-  | "portal";
+  | "portal"
+  | "web";
 
 /** Trigger status plus the two states only the client knows about. */
 export type WorkflowRowStatus = WorkflowTriggerStatus | "running" | "removeScheduled";
