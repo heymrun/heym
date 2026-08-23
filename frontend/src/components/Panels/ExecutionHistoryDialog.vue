@@ -621,6 +621,12 @@ function openExternal(url: string): void {
   window.open(url, "_blank", "noopener");
 }
 
+/** Double-click shortcut: select the run, then load it onto the canvas. */
+async function openEntryOnCanvas(entryId: string): Promise<void> {
+  await selectEntry(entryId);
+  bringToCanvas();
+}
+
 function bringToCanvas(): void {
   if (!selectedEntry.value || !workflowStore.currentWorkflow?.id) return;
   const nodeResultsFromHistory = selectedEntry.value.result?.node_results || [];
@@ -824,7 +830,10 @@ function bringToCanvas(): void {
             :key="entry.id"
             class="w-full text-left p-2.5 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
             :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
+            title="Double-click to bring this run to the canvas"
+            :data-testid="`execution-history-entry-${entry.id}`"
             @click="selectEntry(entry.id)"
+            @dblclick="openEntryOnCanvas(entry.id)"
           >
             <div class="flex items-center gap-1.5 min-w-0">
               <component
