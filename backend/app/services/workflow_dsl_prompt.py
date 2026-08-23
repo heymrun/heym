@@ -3246,6 +3246,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 - `value`: For fill/selectOption - value (supports expressions)
 - `attribute`: For getAttribute - attribute name (e.g. `href`, `data-id`)
 - `timeout`: Optional step timeout in ms
+- `disabled`: Optional boolean. `true` keeps the step in the list but skips it at runtime (the editor's on/off toggle). Omit it for steps that should run.
 - `outputKey`: For getText/getAttribute/getHTML/getVisibleTextOnPage/screenshot - key to store result in `$nodeLabel.results.outputKey`
 - For `aiStep`: `instructions` (what to do), `credentialId`, `model`, `logStepsToConsole`, `saveStepsForFuture`, `autoHealMode`, `sendScreenshot`, `aiStepTimeout` (optional, ms, default 30000) - LLM analyzes page HTML and returns the same action set as manual steps (including `navigate`, `refresh`, `getText`, `getHTML`, `getAttribute`, `getVisibleTextOnPage`, etc.; not nested `aiStep`). `autoHealMode`: if a selector-based step fails 2x, ask LLM for an alternative locator (heal supports click/type/fill/hover/selectOption only).
 
@@ -3349,7 +3350,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 }
 ```
 
-**Note**: Prefer Steps mode in the Properties Panel (`playwrightMode: "steps"`). Steps are executed in order at runtime. Execution requires at least one step in `playwrightSteps` unless Mode is Run Code (`playwrightMode: "code"` with `playwrightCode`).
+**Note**: Prefer Steps mode in the Properties Panel (`playwrightMode: "steps"`). Steps are executed in order at runtime. Execution requires at least one step in `playwrightSteps` unless Mode is Run Code (`playwrightMode: "code"` with `playwrightCode`). Steps with `disabled: true` are skipped, so at least one enabled step is required.
 If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be `navigate`, auth bootstrap works only with step-based execution, and `playwrightAuthFallbackSteps` should leave the browser on the authenticated page expected by the remaining main steps.
 
 ### 32. drive (Drive File Management)

@@ -15,7 +15,7 @@ The **Playwright** node automates browser interactions with configurable steps. 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `playwrightMode` | string | `"steps"` (default) or `"code"` (Run Code). Choose in the Properties Panel Mode dropdown |
-| `playwrightSteps` | array | Steps: navigate, click, type, aiStep, etc. Each step has action and selector/params |
+| `playwrightSteps` | array | Steps: navigate, click, type, aiStep, etc. Each step has action and selector/params. `disabled: true` keeps a step in the list but skips it at runtime |
 | `playwrightCode` | string | Custom Playwright Python used when Mode is Run Code. Runs in the hardened sandbox and is **disabled by default** — see the security note below |
 | `playwrightHeadless` | boolean | Run headless (default: true) |
 | `playwrightStealth` | boolean | Opt-in Steps-mode setting that reduces common Playwright automation signals (default: false). Properties Panel label: Reduce automation flags |
@@ -44,6 +44,12 @@ The **Playwright** node automates browser interactions with configurable steps. 
 - **selectOption** – Select option in a `<select>`
 - **scrollDown** / **scrollUp** – Mouse wheel scroll (optional `amount` in pixels)
 - **aiStep** – LLM returns the same kinds of actions as manual steps (see below); nested `aiStep` is not supported
+
+## Turning a Step Off
+
+Every step has a power toggle in its header. A step switched off is marked **Off**, stays in the list with all its fields, and is skipped when the node runs — useful for isolating a failing selector without deleting work. The stored step carries `disabled: true`; steps without the flag run normally.
+
+Disabled steps are invisible to the rest of the node: they do not satisfy the "first step must be `navigate`" rule of auth bootstrap, a disabled `aiStep` makes no LLM call, and disabled entries in `playwrightAuthFallbackSteps` are skipped too. Switching every step off fails the run with a message asking you to enable one.
 
 ## AI Step
 

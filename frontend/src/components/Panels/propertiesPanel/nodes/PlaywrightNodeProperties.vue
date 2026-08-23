@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronRight, MousePointerClick, Plus, Trash2 } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, MousePointerClick, Plus, Power, Trash2 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
@@ -234,10 +234,34 @@ with sync_playwright() as p:
             :key="`${section.key}-${index}`"
             :data-playwright-step="section.key"
             class="space-y-2 p-3 border rounded-md bg-muted/30"
+            :class="step.disabled === true && 'border-dashed opacity-60'"
           >
             <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-medium shrink-0 whitespace-nowrap">Step {{ index + 1 }}</span>
+              <span class="text-xs font-medium shrink-0 whitespace-nowrap">
+                Step {{ index + 1 }}
+                <span
+                  v-if="step.disabled === true"
+                  class="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground"
+                >
+                  Off
+                </span>
+              </span>
               <div class="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="!h-7 !min-h-0 !w-7 !p-0 shrink-0"
+                  :class="step.disabled === true
+                    ? 'text-muted-foreground hover:text-foreground'
+                    : 'text-emerald-500 hover:text-emerald-400'"
+                  :aria-label="step.disabled === true ? 'Enable step' : 'Disable step'"
+                  :aria-pressed="step.disabled !== true"
+                  :title="step.disabled === true ? 'Step is skipped — click to enable' : 'Step runs — click to skip it'"
+                  :data-testid="`playwright-step-toggle-${section.key}-${index}`"
+                  @click="updatePlaywrightStep(section.key, index, 'disabled', step.disabled !== true)"
+                >
+                  <Power class="h-3.5 w-3.5 shrink-0" />
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

@@ -7152,10 +7152,12 @@ class WorkflowExecutor:
     def _execute_playwright_node(
         self, node_data: dict, inputs: dict, node_id: str, node_label: str
     ) -> dict:
-        from app.services.playwright_code_generator import generate_playwright_code
+        from app.services.playwright_code_generator import active_steps, generate_playwright_code
         from app.services.playwright_execution_tokens import create_token
 
-        steps = node_data.get("playwrightSteps") or []
+        # Steps toggled off in the editor never reach validation or code generation.
+        configured_steps = node_data.get("playwrightSteps") or []
+        steps = active_steps(configured_steps)
         auth_enabled = node_data.get("playwrightAuthEnabled", False) is True
         playwright_code = node_data.get("playwrightCode", "").strip()
         playwright_mode = str(node_data.get("playwrightMode") or "").strip().lower()
@@ -7163,12 +7165,12 @@ class WorkflowExecutor:
         auth_state: dict[str, object] | None = None
         auth_check_selector = ""
         auth_check_timeout = 5000
-        auth_fallback_steps = node_data.get("playwrightAuthFallbackSteps") or []
+        auth_fallback_steps = active_steps(node_data.get("playwrightAuthFallbackSteps"))
 
         # Mode "code" forces the custom playwrightCode path. Legacy nodes without
         # playwrightMode still use custom code when steps are empty and code is set.
         use_custom_code = playwright_mode == "code" or (
-            playwright_mode != "steps" and not steps and bool(playwright_code)
+            playwright_mode != "steps" and not configured_steps and bool(playwright_code)
         )
 
         if auth_enabled:
@@ -7240,6 +7242,10 @@ class WorkflowExecutor:
                 auth_check_timeout=auth_check_timeout,
                 auth_fallback_steps=auth_fallback_steps,
                 stealth=node_data.get("playwrightStealth", False),
+            )
+        elif configured_steps:
+            raise ValueError(
+                "Every Playwright step is disabled. Enable at least one step to run this node."
             )
         else:
             raise ValueError(

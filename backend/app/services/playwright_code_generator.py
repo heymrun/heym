@@ -754,6 +754,16 @@ def _generate_step_lines(
     return lines
 
 
+def is_step_disabled(step: dict) -> bool:
+    """A step marked ``disabled`` stays in the workflow but is skipped when it runs."""
+    return bool(step.get("disabled"))
+
+
+def active_steps(steps: list[dict] | None) -> list[dict]:
+    """Drop steps the user toggled off in the editor."""
+    return [step for step in (steps or []) if not is_step_disabled(step)]
+
+
 def generate_playwright_code(
     steps: list[dict],
     capture_network: bool = False,
@@ -765,8 +775,8 @@ def generate_playwright_code(
     stealth: object = False,
 ) -> str:
     """Convert PlaywrightStep list to executable Python code."""
-    fallback_steps = auth_fallback_steps or []
-    main_steps = steps or []
+    fallback_steps = active_steps(auth_fallback_steps)
+    main_steps = active_steps(steps)
     has_main_ai_steps = any(step.get("action") == "aiStep" for step in main_steps)
     has_fallback_ai_steps = any(step.get("action") == "aiStep" for step in fallback_steps)
     has_ai_steps = has_main_ai_steps or has_fallback_ai_steps

@@ -369,6 +369,8 @@ export type PlaywrightStepAction =
 
 export interface PlaywrightStep {
   action: PlaywrightStepAction;
+  /** Deactivated steps stay in the list but are skipped when the node runs. */
+  disabled?: boolean;
   selector?: string;
   url?: string;
   text?: string;
