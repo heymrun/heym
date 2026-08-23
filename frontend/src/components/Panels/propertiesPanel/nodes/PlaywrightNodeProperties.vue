@@ -237,14 +237,11 @@ with sync_playwright() as p:
             :class="step.disabled === true && 'border-dashed opacity-60'"
           >
             <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-medium shrink-0 whitespace-nowrap">
+              <span
+                class="text-xs font-medium shrink-0 whitespace-nowrap"
+                :class="step.disabled === true && 'line-through text-muted-foreground/70'"
+              >
                 Step {{ index + 1 }}
-                <span
-                  v-if="step.disabled === true"
-                  class="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground"
-                >
-                  Off
-                </span>
               </span>
               <div class="flex items-center gap-1 shrink-0">
                 <Button
@@ -252,8 +249,8 @@ with sync_playwright() as p:
                   size="sm"
                   class="!h-7 !min-h-0 !w-7 !p-0 shrink-0"
                   :class="step.disabled === true
-                    ? 'text-muted-foreground hover:text-foreground'
-                    : 'text-emerald-500 hover:text-emerald-400'"
+                    ? 'text-muted-foreground/40 hover:text-muted-foreground'
+                    : 'text-muted-foreground hover:text-foreground'"
                   :aria-label="step.disabled === true ? 'Enable step' : 'Disable step'"
                   :aria-pressed="step.disabled !== true"
                   :title="step.disabled === true ? 'Step is skipped — click to enable' : 'Step runs — click to skip it'"

@@ -47,7 +47,7 @@ The **Playwright** node automates browser interactions with configurable steps. 
 
 ## Turning a Step Off
 
-Every step has a power toggle in its header. A step switched off is marked **Off**, stays in the list with all its fields, and is skipped when the node runs — useful for isolating a failing selector without deleting work. The stored step carries `disabled: true`; steps without the flag run normally.
+Every step has a power toggle in its header. A step switched off shows its title struck through and dimmed, stays in the list with all its fields, and is skipped when the node runs — useful for isolating a failing selector without deleting work. The stored step carries `disabled: true`; steps without the flag run normally.
 
 Disabled steps are invisible to the rest of the node: they do not satisfy the "first step must be `navigate`" rule of auth bootstrap, a disabled `aiStep` makes no LLM call, and disabled entries in `playwrightAuthFallbackSteps` are skipped too. Switching every step off fails the run with a message asking you to enable one.
 
