@@ -8,6 +8,32 @@ Workflows can be triggered via HTTP webhooks. The standard execute endpoint retu
 
 Replace `{workflow_id}` with the workflow UUID. The base URL is your Heym instance (e.g. `https://app.heym.ai`).
 
+## Request Method
+
+Each workflow accepts one HTTP verb, chosen in the editor's cURL dialog: `GET`, `POST`, `PUT`, or `DELETE`. **`POST` is the default**, and every workflow created before this setting existed keeps it, so nothing that works today changes.
+
+Calling a workflow with a different verb returns `405 Method Not Allowed` with an `Allow` header naming the configured one:
+
+```
+$ curl -X POST "https://your-host/api/workflows/<workflow-id>/execute"
+HTTP/1.1 405 Method Not Allowed
+Allow: GET
+```
+
+One exception: requests carrying `?test_run=true` skip the check. That is what the editor's **Run** button and the debug panel send, so a workflow set to `GET` stays testable from inside the product.
+
+### Bodyless methods
+
+`GET` and `DELETE` carry no request body. Inputs come from the query string instead, and are read with `$input.query.<name>`:
+
+```
+curl -X GET "https://your-host/api/workflows/<workflow-id>/execute?name=Ada"
+```
+
+The cURL dialog hides the request-body editor and drops the `Content-Type` header for these two methods.
+
+Pair `GET` with an [HTML output mapper](../nodes/html-output-mapper-node.md) to serve a page a browser can open directly.
+
 ## Streaming Endpoint
 
 `POST /api/workflows/{workflow_id}/execute/stream`

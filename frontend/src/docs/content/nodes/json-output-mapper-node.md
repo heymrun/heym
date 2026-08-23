@@ -19,9 +19,7 @@ The **JSON output mapper** node builds a JSON object from key/value [mappings](.
 
 ## Agent tool usage
 
-When JSON output mapper is connected to an [Agent Node](./agent-node.md) as a canvas node tool, mapping values can be marked as **agent-provided** with the bot icon. Marked values become required tool parameters supplied by the agent at runtime. Unmarked values remain fixed.
-
-The bot icon appears only while the mapper is connected to an agent's tools handle.
+Not supported. This node is a terminal sink, so it cannot be attached to an [Agent Node](./agent-node.md) tools handle. Use a [Set](./set-node.md) node when an agent needs to shape values mid-conversation.
 
 ## Webhook and run behavior
 

@@ -137,7 +137,7 @@ If the node is not connected to an agent as a tool, the bot icon is hidden and t
 
 When the agent calls a canvas node tool, Heym temporarily merges the agent-provided arguments into that node's data, executes the node, returns the node output to the agent, then restores the original node configuration. Tool nodes do not run as regular workflow steps through normal scheduling; they run only when the agent calls them.
 
-Canvas node tools are useful with integration nodes such as Slack, Telegram, HTTP, Send Email, and data-shaping nodes such as [Set](./set-node.md) and [JSON output mapper](./json-output-mapper-node.md). Trigger nodes and control-flow nodes are not intended to be used as agent tools.
+Canvas node tools are useful with integration nodes such as Slack, Telegram, HTTP, Send Email, and data-shaping nodes such as [Set](./set-node.md). Trigger nodes, control-flow nodes, and terminal output mappers ([JSON output mapper](./json-output-mapper-node.md), [HTML output mapper](./html-output-mapper-node.md)) cannot be used as agent tools.
 
 ## Python Tools
 

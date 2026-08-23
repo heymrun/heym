@@ -57,13 +57,15 @@ and — for workflows with no trigger node — how its most recent run was start
 | **API** | It has no trigger nodes and was last run by an HTTP call to its execute endpoint |
 | **SubWorker** | It has no trigger nodes and was last run as a sub-workflow by a parent workflow |
 | **Portal** | It has no trigger nodes and was last run from its [portal](../reference/portal.md) |
+| **WEB** | It has no trigger nodes and its only terminal is an [HTML output mapper](../nodes/html-output-mapper-node.md), so calling it returns a rendered web page |
 | **Manual** | It has no trigger nodes and has never run, or its last run came from somewhere else |
 | **Remove Scheduled** | It is [scheduled for deletion](../reference/workflow-organization.md) |
 
 The API, SubWorker, and Portal chips read the single most recent entry in the workflow's
 [execution history](./logs-tab.md), so a workflow that is called two ways shows whichever came
-last. Trigger nodes always win: a cron workflow that someone also calls over HTTP stays
-**Scheduled**.
+last. **WEB** is decided from the graph instead, so it takes precedence over those three: a
+page-serving workflow reads WEB even after it has been called over HTTP. Trigger nodes always
+win over all of them: a cron workflow that someone also calls over HTTP stays **Scheduled**.
 
 Use the **Status** dropdown beside the search field to show only one status. The dropdown lists how many workflows currently match each one. A status filter also reaches inside folders: folders with a match are expanded automatically, and folders without one are hidden until you clear the filter.
 

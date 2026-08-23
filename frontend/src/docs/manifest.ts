@@ -86,6 +86,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "playwright-node", title: "Playwright" },
       { slug: "output-node", title: "Output" },
       { slug: "json-output-mapper-node", title: "JSON output mapper" },
+      { slug: "html-output-mapper-node", title: "HTML output mapper" },
       { slug: "chart-output-node", title: "Chart Output" },
       { slug: "wait-node", title: "Wait" },
       { slug: "sticky-note-node", title: "Sticky Note" },
