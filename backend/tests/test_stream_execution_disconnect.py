@@ -17,6 +17,7 @@ from app.db.models import ExecutionHistory
 
 class _FakeRequest:
     def __init__(self) -> None:
+        self.method = "POST"
         self.headers: dict[str, str] = {"x-simple-response": "false"}
         self.query_params: dict[str, str] = {"trigger_source": "Canvas"}
 
@@ -32,6 +33,7 @@ class StreamedRunSurvivesClientDisconnectTests(unittest.IsolatedAsyncioTestCase)
             name="wait",
             nodes=[{"id": "n1", "type": "wait", "data": {"duration": 10}}],
             edges=[],
+            http_method="POST",
             sse_enabled=False,
             sse_node_config={},
             cache_ttl_seconds=None,

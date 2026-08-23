@@ -2662,7 +2662,28 @@ async def parse_execute_body(request: Request) -> tuple[object, bool, str | None
     return raw_body, test_run, trigger_source or "API", simple_response
 
 
-@router.post("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
+def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run: bool) -> None:
+    """Reject a verb the workflow is not configured for.
+
+    ``test_run`` requests are exempt: the editor's Run button and the debug panel always POST,
+    and a workflow set to GET would otherwise be untestable from inside the product.
+    """
+    if test_run:
+        return
+    configured = (getattr(workflow, "http_method", None) or "POST").upper()
+    if request.method.upper() != configured:
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail=f"This workflow accepts {configured} requests only",
+            headers={"Allow": configured},
+        )
+
+
+@router.api_route(
+    "/{workflow_id}/execute",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    response_model=WorkflowExecuteResponse,
+)
 async def execute_workflow_endpoint(
     workflow_id: uuid.UUID,
     request: Request,
@@ -2682,6 +2703,7 @@ async def execute_workflow_endpoint(
         )
 
     await validate_workflow_auth(workflow, request, current_user, db)
+    enforce_workflow_http_method(workflow, request, test_run)
 
     enriched_inputs = {
         "headers": _sanitize_headers(dict(request.headers), _webhook_secret_names(workflow)),
@@ -3315,7 +3337,7 @@ async def clear_execution_history(
     )
 
 
-@router.post("/{workflow_id}/execute/stream")
+@router.api_route("/{workflow_id}/execute/stream", methods=["GET", "POST", "PUT", "DELETE"])
 async def execute_workflow_stream(
     workflow_id: uuid.UUID,
     request: Request,
@@ -3334,6 +3356,7 @@ async def execute_workflow_stream(
         )
 
     await validate_workflow_auth(workflow, request, current_user, db)
+    enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:
         raise HTTPException(
