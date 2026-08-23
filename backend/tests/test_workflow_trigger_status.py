@@ -239,5 +239,42 @@ class WorkflowDetailPortalFieldsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response.portal_slug)
 
 
+class WebStatusTests(unittest.TestCase):
+    HTML_NODE = {"id": "html1", "type": "htmlOutputMapper", "data": {"label": "page"}}
+
+    def test_sole_html_terminal_reads_web_instead_of_manual(self) -> None:
+        nodes = [{"id": "in1", "type": "textInput", "data": {}}, self.HTML_NODE]
+        edges = [{"source": "in1", "target": "html1"}]
+        self.assertEqual(compute_trigger_status(nodes, edges), "web")
+
+    def test_web_survives_the_api_refinement(self) -> None:
+        """A page-serving workflow reads WEB, not API, after its first HTTP call."""
+        nodes = [{"id": "in1", "type": "textInput", "data": {}}, self.HTML_NODE]
+        edges = [{"source": "in1", "target": "html1"}]
+        status = compute_trigger_status(nodes, edges)
+        self.assertEqual(refine_manual_status(status, "api"), "web")
+
+    def test_a_cron_trigger_still_wins(self) -> None:
+        nodes = [
+            {"id": "c1", "type": "cron", "data": {"cronExpression": "* * * * *"}},
+            self.HTML_NODE,
+        ]
+        edges = [{"source": "c1", "target": "html1"}]
+        self.assertEqual(compute_trigger_status(nodes, edges), "scheduled")
+
+    def test_a_second_terminal_keeps_manual(self) -> None:
+        nodes = [
+            {"id": "in1", "type": "textInput", "data": {}},
+            self.HTML_NODE,
+            {"id": "out1", "type": "output", "data": {}},
+        ]
+        edges = [{"source": "in1", "target": "html1"}, {"source": "in1", "target": "out1"}]
+        self.assertEqual(compute_trigger_status(nodes, edges), "manual")
+
+    def test_edges_omitted_keeps_the_old_manual_behaviour(self) -> None:
+        nodes = [{"id": "in1", "type": "textInput", "data": {}}]
+        self.assertEqual(compute_trigger_status(nodes), "manual")
+
+
 if __name__ == "__main__":
     unittest.main()

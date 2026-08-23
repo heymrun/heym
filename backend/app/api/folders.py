@@ -149,7 +149,7 @@ def _workflow_list_response(
         folder_id=folder_id,
         first_node_type=_get_first_node_type(workflow),
         trigger_status=refine_manual_status(
-            compute_trigger_status(workflow.nodes), last_trigger_source
+            compute_trigger_status(workflow.nodes, workflow.edges), last_trigger_source
         ),
         scheduled_for_deletion=scheduled_for_deletion,
         created_at=workflow.created_at,

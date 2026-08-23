@@ -757,7 +757,7 @@ async def list_workflows(
             folder_id=folder_id,
             first_node_type=get_first_node_type(w),
             trigger_status=refine_manual_status(
-                compute_trigger_status(w.nodes), last_trigger_sources.get(w.id)
+                compute_trigger_status(w.nodes, w.edges), last_trigger_sources.get(w.id)
             ),
             scheduled_for_deletion=scheduled_for_deletion,
             created_at=w.created_at,
@@ -1768,7 +1768,7 @@ async def schedule_workflow_for_deletion(
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
         trigger_status=refine_manual_status(
-            compute_trigger_status(workflow.nodes),
+            compute_trigger_status(workflow.nodes, workflow.edges),
             await fetch_last_trigger_source(db, workflow.id),
         ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
@@ -1808,7 +1808,7 @@ async def unschedule_workflow_for_deletion(
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
         trigger_status=refine_manual_status(
-            compute_trigger_status(workflow.nodes),
+            compute_trigger_status(workflow.nodes, workflow.edges),
             await fetch_last_trigger_source(db, workflow.id),
         ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
