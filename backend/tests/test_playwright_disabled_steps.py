@@ -3,7 +3,11 @@
 import unittest
 from unittest.mock import patch
 
-from app.services.playwright_code_generator import active_steps, generate_playwright_code
+from app.services.playwright_code_generator import (
+    active_steps,
+    generate_playwright_code,
+    indexed_active_steps,
+)
 from app.services.workflow_executor import WorkflowExecutor
 
 
@@ -25,6 +29,16 @@ class ActiveStepsTests(unittest.TestCase):
 
     def test_none_is_empty(self) -> None:
         self.assertEqual(active_steps(None), [])
+
+
+class IndexedActiveStepsTests(unittest.TestCase):
+    def test_stored_indexes_survive_a_disabled_step(self) -> None:
+        steps = [
+            {"action": "navigate", "url": "https://example.com"},
+            {"action": "wait", "timeout": 1, "disabled": True},
+            {"action": "refresh"},
+        ]
+        self.assertEqual([index for index, _ in indexed_active_steps(steps)], [0, 2])
 
 
 class DisabledStepCodegenTests(unittest.TestCase):
@@ -71,6 +85,44 @@ class DisabledStepCodegenTests(unittest.TestCase):
         compile(code, "<generated>", "exec")
         self.assertIn("#user", code)
         self.assertNotIn("#skipme", code)
+
+
+class SavedStepIndexTests(unittest.TestCase):
+    """`output["saveSteps"]` keys are written back into the stored step list by index."""
+
+    def _ai_step(self, instructions: str) -> dict:
+        return {
+            "action": "aiStep",
+            "instructions": instructions,
+            "credentialId": "cred-1",
+            "model": "gpt-4o-mini",
+            "saveStepsForFuture": True,
+        }
+
+    def test_saved_steps_key_is_the_stored_index_not_the_run_index(self) -> None:
+        code = generate_playwright_code(
+            [
+                {"action": "navigate", "url": "https://example.com", "disabled": True},
+                self._ai_step("click login"),
+            ]
+        )
+        compile(code, "<generated>", "exec")
+        self.assertIn("_ai_saved_steps[1] = _effective_steps", code)
+        self.assertNotIn("_ai_saved_steps[0] = _effective_steps", code)
+
+    def test_fallback_saved_steps_key_is_the_stored_index(self) -> None:
+        code = generate_playwright_code(
+            [{"action": "navigate", "url": "https://example.com"}],
+            auth_enabled=True,
+            auth_check_selector="#profile",
+            auth_fallback_steps=[
+                {"action": "click", "selector": "#skipme", "disabled": True},
+                self._ai_step("log in"),
+            ],
+        )
+        compile(code, "<generated>", "exec")
+        self.assertIn("_ai_saved_fallback_steps[1] = _effective_steps", code)
+        self.assertNotIn("_ai_saved_fallback_steps[0] = _effective_steps", code)
 
 
 class DisabledStepExecutionTests(unittest.TestCase):

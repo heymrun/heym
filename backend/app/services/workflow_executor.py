@@ -7165,7 +7165,7 @@ class WorkflowExecutor:
         auth_state: dict[str, object] | None = None
         auth_check_selector = ""
         auth_check_timeout = 5000
-        auth_fallback_steps = active_steps(node_data.get("playwrightAuthFallbackSteps"))
+        configured_fallback_steps = node_data.get("playwrightAuthFallbackSteps") or []
 
         # Mode "code" forces the custom playwrightCode path. Legacy nodes without
         # playwrightMode still use custom code when steps are empty and code is set.
@@ -7233,14 +7233,16 @@ class WorkflowExecutor:
                     "to enable it (only on trusted, isolated deployments)."
                 )
         elif steps:
+            # The generator drops disabled steps itself and keeps the stored index,
+            # which is the key a run reports back in output["saveSteps"].
             playwright_code = generate_playwright_code(
-                steps,
+                configured_steps,
                 capture_network=capture_network,
                 auth_enabled=auth_enabled,
                 auth_state=auth_state,
                 auth_check_selector=auth_check_selector,
                 auth_check_timeout=auth_check_timeout,
-                auth_fallback_steps=auth_fallback_steps,
+                auth_fallback_steps=configured_fallback_steps,
                 stealth=node_data.get("playwrightStealth", False),
             )
         elif configured_steps:

@@ -764,6 +764,16 @@ def active_steps(steps: list[dict] | None) -> list[dict]:
     return [step for step in (steps or []) if not is_step_disabled(step)]
 
 
+def indexed_active_steps(steps: list[dict] | None) -> list[tuple[int, dict]]:
+    """Enabled steps paired with their position in the stored list.
+
+    The stored index is what a run reports back in ``output["saveSteps"]``, and
+    ``persist`` writes cached AI steps into the node by that index. Renumbering
+    around a disabled step would file them under the wrong step.
+    """
+    return [(index, step) for index, step in enumerate(steps or []) if not is_step_disabled(step)]
+
+
 def generate_playwright_code(
     steps: list[dict],
     capture_network: bool = False,
@@ -775,10 +785,10 @@ def generate_playwright_code(
     stealth: object = False,
 ) -> str:
     """Convert PlaywrightStep list to executable Python code."""
-    fallback_steps = active_steps(auth_fallback_steps)
-    main_steps = active_steps(steps)
-    has_main_ai_steps = any(step.get("action") == "aiStep" for step in main_steps)
-    has_fallback_ai_steps = any(step.get("action") == "aiStep" for step in fallback_steps)
+    fallback_steps = indexed_active_steps(auth_fallback_steps)
+    main_steps = indexed_active_steps(steps)
+    has_main_ai_steps = any(step.get("action") == "aiStep" for _, step in main_steps)
+    has_fallback_ai_steps = any(step.get("action") == "aiStep" for _, step in fallback_steps)
     has_ai_steps = has_main_ai_steps or has_fallback_ai_steps
     collect_cookies = capture_network or auth_enabled
     stealth_enabled = _as_py_bool_literal(stealth) == "True"
@@ -890,7 +900,10 @@ def generate_playwright_code(
         )
 
     if auth_enabled and main_steps:
-        lines.extend(_indent_lines(_generate_step_lines(main_steps[0], 0, "_ai_saved_steps"), 4))
+        first_index, first_step = main_steps[0]
+        lines.extend(
+            _indent_lines(_generate_step_lines(first_step, first_index, "_ai_saved_steps"), 4)
+        )
         lines.extend(
             [
                 "    _auth_ok = False",
@@ -905,7 +918,7 @@ def generate_playwright_code(
 
         if fallback_steps:
             lines.append("    if not _auth_ok:")
-            for step_idx, step in enumerate(fallback_steps):
+            for step_idx, step in fallback_steps:
                 lines.extend(
                     _indent_lines(
                         _generate_step_lines(step, step_idx, "_ai_saved_fallback_steps"),
@@ -933,10 +946,10 @@ def generate_playwright_code(
             ]
         )
 
-        for step_idx, step in enumerate(main_steps[1:], start=1):
+        for step_idx, step in main_steps[1:]:
             lines.extend(_indent_lines(_generate_step_lines(step, step_idx, "_ai_saved_steps"), 4))
     else:
-        for step_idx, step in enumerate(main_steps):
+        for step_idx, step in main_steps:
             lines.extend(_indent_lines(_generate_step_lines(step, step_idx, "_ai_saved_steps"), 4))
 
     if collect_cookies:
