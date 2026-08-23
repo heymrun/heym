@@ -1,7 +1,7 @@
 # htmlOutputMapper node, HTTP method selection, and the WEB chip
 
 Date: 2026-08-23
-Baseline: `e4a9cf20` (clean tree)
+Baseline: `c7af349a` (PR #486, which added the `api` / `subWorkflow` / `portal` chips)
 
 ## Problem
 
@@ -135,9 +135,16 @@ change the way `sse_enabled` is. Both generators — `EditorView.curlCommand` an
 otherwise return is `manual`, and the sole active terminal is an `htmlOutputMapper`, return
 `web` instead.
 
-`manual` is the only status it can displace. A cron- or Slack-triggered workflow keeps
-`Scheduled` / `Listening`, because how a workflow *starts* is more useful on a list row than
-what it returns, and a scheduled workflow's HTML body is a side effect rather than its point.
+Since PR #486, `manual` is further narrowed by `refine_manual_status` into `api`,
+`subWorkflow`, or `portal` based on the last run's trigger source. `web` is decided from the
+graph, so it is applied **before** that refinement and short-circuits it: a page-serving
+workflow reads `WEB` rather than `API`, which is what it would otherwise show after its first
+HTTP call. Concretely, `compute_trigger_status` returns `web` and `refine_manual_status`
+leaves any status that is not `manual` alone, which it already does.
+
+Trigger-derived statuses still win. A cron- or Slack-triggered workflow keeps `Scheduled` /
+`Listening`, because how a workflow *starts* is more useful on a list row than what it
+returns, and a scheduled workflow's HTML body is a side effect rather than its point.
 
 Frontend: `WorkflowTriggerStatus` gains `"web"`, `WorkflowStatusBadge` gains a `web` style
 (label `WEB`), and `WorkflowStatusFilter` gains the matching option.
@@ -182,7 +189,8 @@ Backend tests:
   returns the JSON envelope; a non-sole terminal returns JSON.
 - `test_workflow_http_method.py` — 405 on mismatch with `Allow`, 200 on match, legacy rows
   default to POST, `test_run` bypasses.
-- `test_workflow_status.py` — `web` beats `manual`, loses to `cron`.
+- `test_workflow_trigger_status.py` — `web` beats `manual` and pre-empts the `api`
+  refinement, loses to `cron`.
 - Agent tool blocking — a `jsonOutputMapper` on a `tool-input` edge yields no schema.
 
 heymweb (the six files from the node rollout checklist, plus the seven hardcoded node counts):
