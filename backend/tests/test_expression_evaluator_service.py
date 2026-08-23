@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -25,6 +26,7 @@ from app.services.expression_evaluator import (
 from app.services.workflow_executor import (
     WorkflowExecutor,
     _normalize_js_logical_ops_for_eval,
+    alias_reserved_context_names,
 )
 
 
@@ -156,17 +158,18 @@ class TestShouldEvaluateAsSingleSpanConditionTail(unittest.TestCase):
         ex = self._executor()
         self.assertFalse(should_evaluate_as_single_span_condition_tail("$execute.x != null", ex))
 
-    def test_true_for_arithmetic_subtraction_after_global_ref(self) -> None:
+    def test_false_for_arithmetic_after_global_ref_like_any_other_root(self) -> None:
+        # `global` used to break the `ast.parse` probe, so these needed the tail workaround.
+        # With the keyword aliased they parse as one span, exactly like `$a.btcBalance - 10`.
         ex = self._executor()
-        self.assertTrue(
-            should_evaluate_as_single_span_condition_tail("$global.btcBalance - 10", ex),
-        )
-
-    def test_true_for_arithmetic_multiplication_after_global_ref(self) -> None:
-        ex = self._executor()
-        self.assertTrue(
-            should_evaluate_as_single_span_condition_tail("$global.btcBalance * 3", ex),
-        )
+        for expression in ("$global.btcBalance - 10", "$global.btcBalance * 3"):
+            with self.subTest(expression=expression):
+                self.assertFalse(should_evaluate_as_single_span_condition_tail(expression, ex))
+                self.assertFalse(
+                    should_evaluate_as_single_span_condition_tail(
+                        expression.replace("global", "a"), ex
+                    )
+                )
 
 
 class TestShouldEvaluateAsMultiSpanComparisonCondition(unittest.TestCase):
@@ -1776,6 +1779,90 @@ class TestPreviewCallableAllowlist(unittest.TestCase):
         executor = WorkflowExecutor(nodes=[], edges=[])
         self.assertFalse(is_expression_callable(executor.execute))
         self.assertFalse(is_expression_callable(executor.resolve_expression))
+
+
+class TestGlobalScopeReservedKeyword(unittest.TestCase):
+    """`global` is a Python keyword, so `$global.x.method()` used to fail `ast.parse`.
+
+    The parse failure dropped the whole expression into the string-only fallback resolver,
+    where every method taking arguments (and every DotStr-only method) silently returned
+    null. Preview and run must now behave like any other context root.
+    """
+
+    GLOBALS = {"link": "https://x.com/heym/status/1", "count": 10, "tags": ["a", "b"]}
+
+    def _service(self) -> ExpressionEvaluatorService:
+        return ExpressionEvaluatorService(global_variables_context=dict(self.GLOBALS))
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[], global_variables_context=dict(self.GLOBALS))
+
+    def test_alias_helper_leaves_string_literals_and_attributes_alone(self) -> None:
+        self.assertEqual(
+            alias_reserved_context_names("global.link"),
+            "heymGlobalContext.link",
+        )
+        self.assertEqual(
+            alias_reserved_context_names("a.link.replace('global', 'x')"),
+            "a.link.replace('global', 'x')",
+        )
+        self.assertEqual(alias_reserved_context_names("a.global"), "a.global")
+        self.assertEqual(alias_reserved_context_names("a.b.upper()"), "a.b.upper()")
+
+    def test_dotstr_methods_resolve_on_global_scope(self) -> None:
+        executor = self._executor()
+        service = self._service()
+        link = self.GLOBALS["link"]
+        cases = {
+            "$global.link.hash()": hashlib.md5(link.encode("utf-8")).hexdigest(),
+            "$global.link.substring(0, 5)": "https",
+            "$global.link.substr(0, 5)": "https",
+            "$global.link.indexOf('x')": link.index("x"),
+            "$global.link.reverse()": link[::-1],
+            "$global.link.split('/').length": len(link.split("/")),
+            "$global.count + 5": 15,
+            "$global.tags.join('-')": "a-b",
+        }
+        for expression, expected in cases.items():
+            with self.subTest(expression=expression):
+                self.assertEqual(
+                    executor.resolve_expression(expression, {}, preserve_type=True), expected
+                )
+                self.assertEqual(service.evaluate(expression, {}).result, expected)
+
+    def test_global_scope_matches_a_plain_context_root(self) -> None:
+        executor = self._executor()
+        plain = WorkflowExecutor(nodes=[], edges=[])
+        inputs = {"src": dict(self.GLOBALS)}
+        for tail in ("link.hash()", "link.substring(0, 5)", "link.split('/').length", "count + 5"):
+            with self.subTest(tail=tail):
+                self.assertEqual(
+                    executor.resolve_expression(f"$global.{tail}", {}, preserve_type=True),
+                    plain.resolve_expression(f"$src.{tail}", inputs, preserve_type=True),
+                )
+
+    def test_global_scope_in_templates_and_conditions(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.evaluate_message_template("id=$global.link.substring(0, 5)!", {}),
+            "id=https!",
+        )
+        self.assertTrue(executor.evaluate_condition("$global.link.contains('x.com')", {}))
+        self.assertEqual(
+            executor.resolve_arithmetic_expression(
+                "$global.link.length + 1", {}, preserve_type=True
+            ),
+            len(self.GLOBALS["link"]) + 1,
+        )
+
+    def test_string_literal_named_global_is_not_rewritten(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                "$global.link.replace('https', 'global')", {}, preserve_type=True
+            ),
+            self.GLOBALS["link"].replace("https", "global"),
+        )
 
 
 class TestWorkflowMetadataVariables(unittest.TestCase):

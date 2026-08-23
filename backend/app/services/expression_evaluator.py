@@ -245,7 +245,9 @@ def is_single_dollar_expression(
         if start == 0 and end == len(trimmed):
             return True
 
-    transformed = transform(expr_body)
+    from app.services.workflow_executor import alias_reserved_context_names
+
+    transformed = alias_reserved_context_names(transform(expr_body))
     try:
         ast.parse(transformed, mode="eval")
     except SyntaxError:

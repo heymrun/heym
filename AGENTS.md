@@ -114,6 +114,17 @@ The canvas **expression evaluate** dialog (`/expressions/evaluate`, `ExpressionE
 - **When changing any of the above:** extend or add cases in `backend/tests/test_expression_evaluator_service.py` (and related executor tests if behavior crosses modules). Prefer one shared helper over node-specific string eval.
 - **Anti-pattern:** Resolving user expressions with ad-hoc `eval` / string concat outside these paths — causes preview vs run mismatches.
 
+### Adding a new expression (operator, method, or function)
+An expression is only shipped when every one of these is done in the same change:
+
+1. **Implement it on the Dot wrapper or in the function registry** in `backend/app/services/workflow_executor.py`. Add both the camelCase name and the `snake_case` alias, matching the neighbours.
+2. **Add a row to `OPERATOR_CASES`** in `backend/tests/test_expression_operator_smoke.py`. `TestExpressionOperatorCoverage` fails the build when a wrapper method or a registered function has no case, so this is not optional. The matrix asserts the value three ways: through a real `set` node run, through `ExpressionEvaluatorService` (the dialog), and through `$sample` / `$vars` / `$global` so no context root can lose an operator.
+3. **Add a row to `OPERATOR_CASES`** in `frontend/e2e/expression-operators.spec.ts` when the expression belongs to a new family or is likely to behave differently on the canvas. That spec runs one `set` node from the editor and replays every expression through `/api/expressions/evaluate`.
+4. **Update the DSL prompt and the expression metadata** (`workflow_dsl_prompt.py`, the expression dialog's method list and autocomplete previews) so the AI assistant and the dialog can offer it.
+5. **Update the docs** — the expression reference under `frontend/src/docs/content/` — plus a release tour entry if the expression is user-visible.
+
+**Names Python reserves are a trap.** `$global` was silently broken for months because `global.x` cannot be parsed by `ast.parse`: every `$global…` expression fell through to the fallback resolver, which only knows a handful of no-argument string helpers, and returned `null` for everything else. `alias_reserved_context_names()` in `workflow_executor.py` rewrites such names before parsing, and every parse must go through `_parse_expression_tree` / `HeymExpressionEval.eval` so the rewrite is applied. If you add a context root, check it is not a Python keyword.
+
 ### OpenTelemetry tracing (keep span seams aligned)
 OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstrapped in `backend/app/observability/tracing.py` from `app/main.py`'s `setup_tracing(app)`. Spans are added at three seams only:
 - `WorkflowExecutor.execute` wraps a `heym.workflow.execute` root span and stores the active OTel context in `self._otel_root_context`.
