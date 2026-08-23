@@ -1087,6 +1087,12 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       label: "jsonResponse",
       mappings: [{ key: "message", value: "$input.text" }],
     },
+    htmlOutputMapper: {
+      label: "htmlResponse",
+      html: "<!doctype html>\n<html>\n  <body>\n    <h1>$input.text</h1>\n  </body>\n</html>",
+      statusCode: 200,
+      contentType: "text/html; charset=utf-8",
+    },
     telegramTrigger: { label: "telegramTrigger", credentialId: "" },
     slack: { label: "slack", credentialId: "", message: "$input.text" },
     discord: { label: "discord", credentialId: "", message: "$input.text", username: "", avatarUrl: "" },

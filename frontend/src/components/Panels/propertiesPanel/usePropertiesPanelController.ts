@@ -116,6 +116,7 @@ export function usePropertiesPanelController() {
     converter: "node-set",
     code: "node-set",
     jsonOutputMapper: "node-output",
+    htmlOutputMapper: "node-output",
     telegramTrigger: "node-telegram",
     telegram: "node-telegram",
     slack: "node-slack",
@@ -179,6 +180,7 @@ export function usePropertiesPanelController() {
     converter: "converter-node",
     code: "code-node",
     jsonOutputMapper: "json-output-mapper-node",
+    htmlOutputMapper: "html-output-mapper-node",
     telegramTrigger: "telegram-trigger-node",
     telegram: "telegram-node",
     slack: "slack-node",
@@ -471,6 +473,7 @@ export function usePropertiesPanelController() {
   const isEditingPinnedData = ref(false);
   const editedPinnedData = ref("");
   const outputMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const htmlBodyInputRef = ref<ExpandableFieldRef | null>(null);
   const outputSchemaValueInputRefs = ref<Map<number, ExpandableFieldRef>>(new Map());
   const currentOutputExpressionFieldIndex = ref(0);
   const httpCurlInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2445,6 +2448,18 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "htmlOutputMapper") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) {
+          return;
+        }
+        if (htmlBodyInputRef.value) {
+          nextTick(() => htmlBodyInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "chartOutput") {
       currentChartOutputExpressionFieldIndex.value = 0;
       const tryOpenDialog = (attempts = 0): void => {
@@ -3097,6 +3112,7 @@ export function usePropertiesPanelController() {
     switch (n.type) {
       case "set":
       case "jsonOutputMapper":
+      case "htmlOutputMapper":
         return true;
       case "output":
       case "chartOutput":
@@ -9028,6 +9044,7 @@ export function usePropertiesPanelController() {
     isEditingPinnedData,
     editedPinnedData,
     outputMessageInputRef,
+    htmlBodyInputRef,
     httpCurlInputRef,
     websocketSendUrlInputRef,
     websocketSendHeadersInputRef,

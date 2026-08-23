@@ -25,6 +25,7 @@ import TelegramNodeProperties from "./TelegramNodeProperties.vue";
 import SendEmailNodeProperties from "./SendEmailNodeProperties.vue";
 import ErrorHandlerNodeProperties from "./ErrorHandlerNodeProperties.vue";
 import MergeNodeProperties from "./MergeNodeProperties.vue";
+import HtmlOutputMapperNodeProperties from "./HtmlOutputMapperNodeProperties.vue";
 import SetJsonOutputMapperNodeProperties from "./SetJsonOutputMapperNodeProperties.vue";
 import CodeNodeProperties from "./CodeNodeProperties.vue";
 import ConverterNodeProperties from "./ConverterNodeProperties.vue";
@@ -92,6 +93,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <ErrorHandlerNodeProperties v-else-if="selectedNode?.type === 'errorHandler'" />
   <MergeNodeProperties v-else-if="selectedNode?.type === 'merge'" />
   <SetJsonOutputMapperNodeProperties v-else-if="selectedNode?.type === 'set' || selectedNode?.type === 'jsonOutputMapper'" />
+  <HtmlOutputMapperNodeProperties v-else-if="selectedNode?.type === 'htmlOutputMapper'" />
   <ConverterNodeProperties v-else-if="selectedNode?.type === 'converter'" />
   <CodeNodeProperties v-else-if="selectedNode?.type === 'code'" />
   <WaitNodeProperties v-else-if="selectedNode?.type === 'wait'" />

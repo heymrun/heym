@@ -178,6 +178,7 @@ export type NodeType =
   | "converter"
   | "code"
   | "jsonOutputMapper"
+  | "htmlOutputMapper"
   | "telegram"
   | "slack"
   | "discord"
@@ -458,6 +459,10 @@ export interface NodeData {
   outputSchema?: OutputSchemaField[];
   inputCount?: number;
   mappings?: MappingField[];
+  /** htmlOutputMapper: the page template, with $node.field spans interpolated in place. */
+  html?: string;
+  statusCode?: number;
+  contentType?: string;
   conversion?: string;
   source?: string;
   delimiter?: string;

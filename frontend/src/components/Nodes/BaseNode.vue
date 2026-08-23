@@ -46,6 +46,7 @@ const nodeColorMap = {
   converter: "node-set",
   code: "node-set",
   jsonOutputMapper: "node-output",
+  htmlOutputMapper: "node-output",
   telegram: "node-telegram",
   slack: "node-slack",
   slackTrigger: "node-slack",
@@ -124,6 +125,7 @@ const hasOutput = computed(() => {
     && props.type !== "loop"
     && props.type !== "throwError"
     && props.type !== "jsonOutputMapper"
+    && props.type !== "htmlOutputMapper"
   );
 });
 const hasSecondOutput = computed(() => props.type === "condition");

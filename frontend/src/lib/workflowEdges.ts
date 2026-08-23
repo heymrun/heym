@@ -8,6 +8,7 @@ const PRIMARY_OUTPUT_EXCLUDED_TYPES = new Set<NodeType>([
   "sticky",
   "throwError",
   "jsonOutputMapper",
+  "htmlOutputMapper",
 ]);
 
 function stringValue(value: unknown): string | null {

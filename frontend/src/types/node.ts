@@ -402,6 +402,22 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       mappings: [{ key: "message", value: "$input.text" }],
     },
   },
+  htmlOutputMapper: {
+    type: "htmlOutputMapper",
+    label: "HTML output mapper",
+    description:
+      "Render an HTML page from a template; as the only terminal, the webhook responds with text/html instead of JSON",
+    color: "node-output",
+    icon: "FileCode2",
+    inputs: 1,
+    outputs: 0,
+    defaultData: {
+      label: "htmlResponse",
+      html: "<!doctype html>\n<html>\n  <body>\n    <h1>$input.text</h1>\n  </body>\n</html>",
+      statusCode: 200,
+      contentType: "text/html; charset=utf-8",
+    },
+  },
   slack: {
     type: "slack",
     label: "Slack",

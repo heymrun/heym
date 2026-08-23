@@ -233,6 +233,7 @@ const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "errorHandler",
   "output",
   "jsonOutputMapper",
+  "htmlOutputMapper",
   "plugin",
   "pluginTrigger",
 ]);
