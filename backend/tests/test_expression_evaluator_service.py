@@ -23,10 +23,10 @@ from app.services.expression_evaluator import (
     should_evaluate_as_single_span_condition_tail,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
+from app.services.expression_syntax import alias_reserved_context_names
 from app.services.workflow_executor import (
     WorkflowExecutor,
     _normalize_js_logical_ops_for_eval,
-    alias_reserved_context_names,
 )
 
 

@@ -5,7 +5,6 @@ import binascii
 import copy
 import gc
 import hashlib
-import io
 import ipaddress
 import json
 import logging
@@ -17,7 +16,6 @@ import shlex
 import signal
 import socket
 import time
-import tokenize
 import uuid
 from collections import deque
 from collections.abc import Callable
@@ -37,6 +35,7 @@ from app.api.data_tables import (
 )
 from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
+from app.services import expression_syntax
 from app.services.agent_tool_policy import is_blocked_as_tool
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
@@ -717,55 +716,10 @@ HTTP_KEEPALIVE_CONNECTIONS = 20
 HTTP_TIMEOUT = 300.0
 
 
-# `$global` reads as a Python keyword, so `ast.parse` rejects `global.x` outright and the
-# whole expression silently degrades to the string-only fallback resolver.
-_GLOBAL_CONTEXT_ALIAS = "heymGlobalContext"
-_RESERVED_CONTEXT_ALIASES = {"global": _GLOBAL_CONTEXT_ALIAS}
-_ALIAS_TO_CONTEXT_NAME = {alias: name for name, alias in _RESERVED_CONTEXT_ALIASES.items()}
-_TOKEN_TYPES_WITHOUT_DOT_STATE = frozenset(
-    {tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT}
-)
-
-
-def alias_reserved_context_names(expr: str) -> str:
-    """Rewrite context names Python reserves (`global`) so `ast.parse` accepts them.
-
-    Tokenizing instead of regex-replacing keeps the rewrite out of string literals such as
-    `$a.text.replace('global', 'x')`, and skipping names preceded by `.` leaves attribute
-    reads like `$a.global` untouched.
-    """
-    if not any(name in expr for name in _RESERVED_CONTEXT_ALIASES):
-        return expr
-    try:
-        tokens = list(tokenize.generate_tokens(io.StringIO(expr).readline))
-    except Exception:  # noqa: BLE001 - unparseable input keeps its original form
-        return expr
-
-    replacements: list[tuple[int, int, int, str]] = []
-    after_dot = False
-    for token in tokens:
-        if token.type == tokenize.NAME and not after_dot:
-            alias = _RESERVED_CONTEXT_ALIASES.get(token.string)
-            if alias:
-                replacements.append((token.start[0] - 1, token.start[1], token.end[1], alias))
-        if token.type not in _TOKEN_TYPES_WITHOUT_DOT_STATE:
-            after_dot = token.type == tokenize.OP and token.string == "."
-    if not replacements:
-        return expr
-
-    lines = expr.splitlines(keepends=True)
-    for line_index, col_start, col_end, alias in reversed(replacements):
-        if line_index >= len(lines):
-            return expr
-        line = lines[line_index]
-        lines[line_index] = line[:col_start] + alias + line[col_end:]
-    return "".join(lines)
-
-
 @lru_cache(maxsize=2048)
 def _parse_expression_tree(expr: str) -> ast.AST:
     """Cache parsed ASTs for repeated workflow expressions."""
-    return SimpleEval.parse(alias_reserved_context_names(expr))
+    return SimpleEval.parse(expression_syntax.alias_reserved_context_names(expr))
 
 
 def _is_valid_expression_syntax(expr: str) -> bool:
@@ -1664,7 +1618,7 @@ class HeymExpressionEval(EvalWithCompoundTypes):
             stack.pop()
 
     def _eval_name(self, node: ast.Name):
-        source = _ALIAS_TO_CONTEXT_NAME.get(node.id)
+        source = expression_syntax.RESERVED_CONTEXT_NAMES_BY_ALIAS.get(node.id)
         if source is not None and isinstance(self.names, dict) and source in self.names:
             return self.names[source]
         return super()._eval_name(node)

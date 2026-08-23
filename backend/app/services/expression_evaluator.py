@@ -11,6 +11,8 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
 
+from app.services.expression_syntax import alias_reserved_context_names
+
 EXPRESSION_MAX_LENGTH = 10_000
 
 ExpressionResultType = Literal["string", "number", "boolean", "array", "object", "null"]
@@ -244,8 +246,6 @@ def is_single_dollar_expression(
         start, end, _expr = found[0]
         if start == 0 and end == len(trimmed):
             return True
-
-    from app.services.workflow_executor import alias_reserved_context_names
 
     transformed = alias_reserved_context_names(transform(expr_body))
     try:
