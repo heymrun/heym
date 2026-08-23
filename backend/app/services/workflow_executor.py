@@ -35,6 +35,7 @@ from app.api.data_tables import (
 )
 from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
+from app.services.agent_tool_policy import is_blocked_as_tool
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
@@ -4858,6 +4859,8 @@ class WorkflowExecutor:
         for node_id in tool_node_ids:
             node = self.nodes.get(node_id)
             if node is None:
+                continue
+            if is_blocked_as_tool(node.get("type")):
                 continue
             node_data = node.get("data", {})
             label = node_data.get("label") or node_id
