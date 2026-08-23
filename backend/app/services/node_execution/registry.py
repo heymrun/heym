@@ -34,6 +34,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "grist": "grist_node",
     "heym": "heym_node",
     "heymTrigger": "heym_trigger_node",
+    "htmlOutputMapper": "html_output_mapper_node",
     "http": "http_node",
     "imapTrigger": "imap_trigger_node",
     "jsonOutputMapper": "json_output_mapper_node",
