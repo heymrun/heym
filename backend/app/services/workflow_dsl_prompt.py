@@ -31,7 +31,7 @@ Prefer the clearest readable form for the expression you are generating.
 
 **OUTPUT AND JSON OUTPUT MAPPER NODES ARE STRICTLY FORBIDDEN INSIDE LOOP BODIES!**
 
-NEVER place an `output` or `jsonOutputMapper` node anywhere in the loop's iteration path (connected via `sourceHandle: "loop"`). This is a HARD RULE - the workflow validator will REJECT it!
+NEVER place an `output`, `jsonOutputMapper`, or `htmlOutputMapper` node anywhere in the loop's iteration path (connected via `sourceHandle: "loop"`). This is a HARD RULE - the workflow validator will REJECT it!
 
 ```
 ⛔ FORBIDDEN (will be REJECTED):
@@ -48,7 +48,7 @@ loop --sourceHandle:done--> jsonOutputMapper  ← CORRECT! mapper after loop com
 
 **WHY?** Terminal nodes return the final workflow response. Using them in a loop would attempt to return multiple responses, which breaks the workflow execution model!
 
-**INSTEAD**: Use `set` or `variable` nodes for intermediate processing inside loops. `output` and `jsonOutputMapper` belong ONLY on the `done` branch!
+**INSTEAD**: Use `set` or `variable` nodes for intermediate processing inside loops. `output`, `jsonOutputMapper`, and `htmlOutputMapper` belong ONLY on the `done` branch!
 
 ---
 
@@ -1235,6 +1235,37 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
 **Rules**:
 - If multiple terminal nodes produce outputs (e.g. `output` + `jsonOutputMapper`, or two mappers), the runtime uses the normal per-label map — **unwrapping applies only when the sole terminal is one `jsonOutputMapper`**.
 - Same loop restriction as `output`: **never** place `jsonOutputMapper` inside a loop iteration branch (only after `done`).
+
+### 8c. htmlOutputMapper (HTML response body)
+- **Purpose**: Render an HTML page from a single template string. When this node is the **only** terminal output of the workflow, Heym responds to the webhook/run with `text/html` and the configured status code instead of a JSON body.
+- **Inputs**: 1 | **Outputs**: 0 (sink; do not connect downstream)
+- **Data fields**:
+  - `label`: Node identifier (camelCase)
+  - `html`: The page template. `$nodeLabel.field` expressions are interpolated in place.
+  - `statusCode`: HTTP status for the response (default `200`)
+  - `contentType`: Response content type (default `text/html; charset=utf-8`)
+
+**When to use**: Serving a page straight to a browser - a status dashboard, a generated report, a confirmation screen. Use `jsonOutputMapper` instead when the caller is an API client.
+
+**Example**:
+```json
+{
+  "id": "node_html_out",
+  "type": "htmlOutputMapper",
+  "position": { "x": 600, "y": 100 },
+  "data": {
+    "label": "reportPage",
+    "html": "<!doctype html><html><body><h1>$llmNode.text</h1></body></html>",
+    "statusCode": 200,
+    "contentType": "text/html; charset=utf-8"
+  }
+}
+```
+
+**Rules**:
+- Unwrapping applies **only when the sole terminal is one `htmlOutputMapper`**. With a second terminal the runtime falls back to the normal per-label JSON map.
+- Same loop restriction as `output`: **never** place `htmlOutputMapper` inside a loop iteration branch (only after `done`).
+- **Never** connect `htmlOutputMapper` to an agent's `tool-input` handle. It is a terminal sink, not a callable tool. The same applies to `jsonOutputMapper`.
 
 ### 10. wait (Delay)
 - **Purpose**: Pause execution for specified time
