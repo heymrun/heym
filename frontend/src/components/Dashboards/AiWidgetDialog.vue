@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Loader2, Sparkles, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi } from "@/services/api";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
@@ -150,16 +150,23 @@ onMounted(async () => {
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-1">
               <label class="text-sm font-medium">Credential</label>
-              <Select
+              <SearchableSelect
                 v-model="selectedCredentialId"
                 :options="credentialOptions"
+                placeholder="Select credential..."
+                search-placeholder="Search credentials..."
+                empty-text="No credentials found."
               />
             </div>
             <div class="space-y-1">
               <label class="text-sm font-medium">Model</label>
-              <Select
+              <SearchableSelect
                 v-model="selectedModel"
                 :options="modelOptions"
+                :disabled="!selectedCredentialId"
+                :placeholder="selectedCredentialId ? 'Select model...' : 'Select credential first...'"
+                search-placeholder="Search models..."
+                :empty-text="selectedCredentialId ? 'No models found.' : 'Select a credential first.'"
               />
             </div>
           </div>
