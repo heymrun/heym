@@ -24,12 +24,14 @@ import {
 
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
+import ImageLightbox from "@/components/ui/ImageLightbox.vue";
 import Select from "@/components/ui/Select.vue";
 import AutoRefreshControl from "@/components/ui/AutoRefreshControl.vue";
 import {
   AUTO_REFRESH_MAX_SECONDS,
   HISTORY_AUTO_REFRESH_MIN_SECONDS,
 } from "@/composables/useAutoRefresh";
+import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
 import {
   buildDisplayNodeResults,
   formatExecutionLogToolCallTitle,
@@ -96,6 +98,25 @@ const nodeResults = computed<NodeResult[]>(() => {
 const displayNodeResults = computed<DisplayNodeResult[]>(() =>
   buildDisplayNodeResults(nodeResults.value),
 );
+
+const runScreenshots = computed<string[]>(() => collectRunImageSrcs(nodeResults.value));
+
+const imageLightboxSrc = ref<string | null>(null);
+const imageLightboxSrcs = ref<string[]>([]);
+
+function openImageLightbox(src: string, gallery: readonly string[]): void {
+  const unique = [...new Set(gallery.length > 0 ? gallery : [src])];
+  if (!unique.includes(src)) {
+    unique.unshift(src);
+  }
+  imageLightboxSrcs.value = unique;
+  imageLightboxSrc.value = src;
+}
+
+function closeImageLightbox(): void {
+  imageLightboxSrc.value = null;
+  imageLightboxSrcs.value = [];
+}
 
 const triggerSourceOptions = computed<Array<{ value: string | undefined; label: string }>>(() => {
   const sourceSet = new Set<string>();
@@ -340,6 +361,12 @@ function onListScroll(event: Event): void {
 }
 
 function handleDialogEscape(event: KeyboardEvent): void {
+  // The lightbox closes itself on Escape; keep the history dialog open behind it.
+  if (imageLightboxSrc.value) {
+    event.preventDefault();
+    return;
+  }
+
   if (!searchActive.value || !searchQuery.value) {
     return;
   }
@@ -939,6 +966,26 @@ function bringToCanvas(): void {
           </div>
           <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.result?.outputs ?? {}, null, 2) }}</pre>
 
+          <!-- Screenshots -->
+          <div
+            v-if="runScreenshots.length > 0"
+            class="space-y-2"
+          >
+            <div class="text-sm font-semibold">
+              Screenshots ({{ runScreenshots.length }})
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <img
+                v-for="(src, idx) in runScreenshots"
+                :key="idx"
+                :src="src"
+                :alt="`Screenshot ${idx + 1}`"
+                class="w-20 h-20 rounded-md border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
+                @click="openImageLightbox(src, runScreenshots)"
+              >
+            </div>
+          </div>
+
           <!-- Node Execution Logs -->
           <div
             v-if="nodeResults.length > 0"
@@ -1152,6 +1199,19 @@ function bringToCanvas(): void {
                       </div>
                     </div>
                     <pre class="text-xs bg-muted/30 p-2 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ formatOutput(node.output) }}</pre>
+                    <div
+                      v-if="getOutputImageSrcs(node.output).length > 0"
+                      class="mt-2 flex flex-wrap gap-1.5"
+                    >
+                      <img
+                        v-for="(src, idx) in getOutputImageSrcs(node.output)"
+                        :key="idx"
+                        :src="src"
+                        :alt="`Screenshot ${idx + 1}`"
+                        class="w-16 h-16 rounded border object-cover cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
+                        @click="openImageLightbox(src, runScreenshots)"
+                      >
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1160,5 +1220,13 @@ function bringToCanvas(): void {
         </div>
       </div>
     </div>
+
+    <ImageLightbox
+      :src="imageLightboxSrc"
+      :srcs="imageLightboxSrcs"
+      alt="Execution screenshot"
+      @update:src="imageLightboxSrc = $event"
+      @close="closeImageLightbox"
+    />
   </Dialog>
 </template>

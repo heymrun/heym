@@ -35,6 +35,7 @@ import {
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isHitlWaitNodeResult, isRetryAttemptNodeResult } from "@/lib/executionLog";
+import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
 import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
@@ -1259,42 +1260,6 @@ function getTimingBreakdown(output: unknown): TimingBreakdown | undefined {
   return undefined;
 }
 
-/** All image srcs from output: image gen (output.image) or Playwright screenshots (output.results, output.screenshot). */
-function getOutputImageSrcs(output: unknown): string[] {
-  const out = output as Record<string, unknown> | undefined;
-  if (!out) return [];
-  const srcs: string[] = [];
-  const img = out.image;
-  if (typeof img === "string" && (img.startsWith("data:image/") || img.startsWith("http"))) {
-    srcs.push(img);
-  }
-  const base64 = out.file_base64;
-  const mimeType = out.mime_type;
-  if (
-    typeof base64 === "string" &&
-    base64.length > 0 &&
-    typeof mimeType === "string" &&
-    mimeType.startsWith("image/")
-  ) {
-    const dataUrl = `data:${mimeType};base64,${base64}`;
-    if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-  }
-  const shot = out.screenshot;
-  if (typeof shot === "string" && shot.length > 100) {
-    const dataUrl = `data:image/png;base64,${shot}`;
-    if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-  }
-  const results = out.results as Record<string, unknown> | undefined;
-  if (results && typeof results === "object") {
-    for (const v of Object.values(results)) {
-      if (typeof v === "string" && v.length > 100 && /^[A-Za-z0-9+/=]+$/.test(v)) {
-        const dataUrl = `data:image/png;base64,${v}`;
-        if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-      }
-    }
-  }
-  return srcs;
-}
 
 const imageLightboxSrc = ref<string | null>(null);
 const imageLightboxSrcs = ref<string[]>([]);
@@ -1334,15 +1299,11 @@ function handleDebugPanelWindowKeyDown(e: KeyboardEvent): void {
 }
 
 /** All screenshots from the run, in execution order. The strip lightbox cycles this full list. */
-const allScreenshotsFromRun = computed((): string[] => {
-  const results = executionResult.value ? executionResult.value.node_results : nodeResults.value;
-  const srcs: string[] = [];
-  for (const r of results) {
-    if (r.node_type === "condition" || r.node_type === "sticky" || r.status === "skipped") continue;
-    srcs.push(...getOutputImageSrcs(r.output));
-  }
-  return srcs;
-});
+const allScreenshotsFromRun = computed((): string[] =>
+  collectRunImageSrcs(
+    executionResult.value ? executionResult.value.node_results : nodeResults.value,
+  ),
+);
 
 interface SkillGeneratedFile {
   filename: string;
