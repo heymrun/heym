@@ -120,6 +120,72 @@ class WorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class UpdateWorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
+    """Persisting the choice. Enforcement is worthless if the dropdown never saves."""
+
+    async def _update(self, value: str) -> SimpleNamespace:
+        from app.api.workflows import update_workflow
+        from app.models.schemas import WorkflowUpdate
+
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="wf",
+            nodes=[],
+            edges=[],
+            http_method="POST",
+            sse_node_config=None,
+            updated_at=None,
+            auth_type=None,
+            auth_header_key=None,
+            auth_header_value=None,
+            webhook_body_mode=None,
+            description=None,
+            folder_id=None,
+            cache_ttl_seconds=None,
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            sse_enabled=False,
+            auto_recover_runs=True,
+            error_workflow_id=None,
+            minutes_saved_per_run=None,
+            workflow_timeout_seconds=None,
+            kind="workflow",
+            portal_enabled=False,
+            portal_slug=None,
+            mcp_enabled=False,
+            owner_id_=None,
+        )
+        db = AsyncMock()
+        current_user = SimpleNamespace(id=workflow.owner_id)
+
+        with (
+            patch("app.api.workflows.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch("app.api.workflows.publish_event", AsyncMock()),
+            patch("app.api.workflows._build_workflow_response", lambda wf, uid: wf),
+        ):
+            await update_workflow(
+                workflow_id=workflow.id,
+                workflow_data=WorkflowUpdate(http_method=value),
+                current_user=current_user,
+                db=db,
+            )
+        return workflow
+
+    async def test_a_valid_method_is_persisted(self) -> None:
+        workflow = await self._update("GET")
+        self.assertEqual(workflow.http_method, "GET")
+
+    async def test_lowercase_is_normalised(self) -> None:
+        workflow = await self._update("delete")
+        self.assertEqual(workflow.http_method, "DELETE")
+
+    async def test_an_unsupported_verb_is_rejected(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            await self._update("PATCH")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 class ExecuteRouteMethodsTests(unittest.TestCase):
     """The tests above call the endpoint directly, so they never touch the router.
 

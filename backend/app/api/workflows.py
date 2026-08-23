@@ -1539,6 +1539,14 @@ async def update_workflow(
             if workflow_data.rate_limit_window_seconds > 0
             else None
         )
+    if workflow_data.http_method is not None:
+        method = workflow_data.http_method.strip().upper()
+        if method not in ALLOWED_WORKFLOW_HTTP_METHODS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"http_method must be one of {sorted(ALLOWED_WORKFLOW_HTTP_METHODS)}",
+            )
+        workflow.http_method = method
     if workflow_data.sse_enabled is not None:
         workflow.sse_enabled = workflow_data.sse_enabled
     if workflow_data.sse_node_config is not None:
@@ -2660,6 +2668,10 @@ async def parse_execute_body(request: Request) -> tuple[object, bool, str | None
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
     return raw_body, test_run, trigger_source or "API", simple_response
+
+
+#: The verbs a workflow's execute endpoint can be configured to accept.
+ALLOWED_WORKFLOW_HTTP_METHODS: frozenset[str] = frozenset({"GET", "POST", "PUT", "DELETE"})
 
 
 def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run: bool) -> None:
