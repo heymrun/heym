@@ -432,7 +432,21 @@ const timelineResults = computed((): TimelineEntry[] =>
 );
 
 function toggleTimeline(): void {
-  showTimeline.value = !showTimeline.value;
+  if (isCollapsed.value) {
+    // Panel is collapsed: opening the timeline must first expand the panel, so a
+    // Timer click from the collapsed header always reveals the timeline area.
+    isCollapsed.value = false;
+    showTimeline.value = true;
+    panelHeight.value = maxHeight;
+    workflowStore.setDebugPanelHeight(panelHeight.value);
+    return;
+  }
+  const next = !showTimeline.value;
+  showTimeline.value = next;
+  if (next && panelHeight.value < 400) {
+    panelHeight.value = maxHeight;
+    workflowStore.setDebugPanelHeight(panelHeight.value);
+  }
 }
 
 function selectCanvasNodeFromTimeline(payload: TimelineSelectPayload): void {
@@ -2824,7 +2838,7 @@ function renderContent(content: string): string {
     </div>
 
     <div
-      v-if="!isCollapsed"
+      v-if="!isCollapsed && !showTimeline"
       ref="scrollContainer"
       class="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 min-w-0"
     >
@@ -3635,6 +3649,7 @@ function renderContent(content: string): string {
     </div>
     <ExecutionTimeline
       v-if="!isCollapsed && showTimeline && timelineResults.length > 0"
+      class="flex-1 min-h-0"
       :node-results="timelineResults"
       :total-time-ms="executionResult?.execution_time_ms ?? 0"
       :sub-agent-label-to-parent-id="subAgentLabelToParentId"
