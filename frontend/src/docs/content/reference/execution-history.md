@@ -147,6 +147,10 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 
 ## Related
 
+## Execution timeline details
+
+When the editor's **Execution Log** is open, click the timer button to show the execution timeline. Select a span to open an inline details inspector below the rows. It shows the selected step's status, duration, attempt count, retry information, HITL wait state, errors, trace ID, and a compact output preview. Object and array outputs use the same `JsonTree` viewer as the rest of the Debug panel; scalar values use a text preview. Use **Open trace** for LLM and Agent spans when a trace ID is available.
+
 - [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pending review URLs and resume behavior
 - [Edit History](./edit-history.md) – Version control for workflow saves (revert, diff)

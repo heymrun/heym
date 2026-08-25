@@ -157,7 +157,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introTitle: "A closer look at every execution span",
       introDescription:
         "See the timing, retries, traces, errors, and outputs behind the selected step.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["span-details-inspector"],
     },
     sections: [
@@ -180,7 +180,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             "Connect a trace ID to the output that caused a failure",
           ],
           tourVisual: "span-details-inspector",
-          docTarget: { categoryId: "tabs", slug: "workflows-tab", title: "Workflows Tab" },
+          docTarget: { categoryId: "reference", slug: "execution-history", title: "Execution History" },
         },
       },
     ],
