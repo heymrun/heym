@@ -391,7 +391,13 @@ function showAllRows(): void {
           Output
         </div>
         <div
-          v-if="selectedSpan.output !== null && typeof selectedSpan.output === 'object'"
+          v-if="selectedSpan.isHitlWait"
+          class="text-[10px] text-muted-foreground"
+        >
+          Output is available after this wait completes.
+        </div>
+        <div
+          v-else-if="selectedSpan.output !== null && typeof selectedSpan.output === 'object'"
           class="text-[10px] font-mono"
         >
           <JsonTree
@@ -399,12 +405,6 @@ function showAllRows(): void {
             :root-expanded="true"
             :auto-expand-depth="1"
           />
-        </div>
-        <div
-          v-if="selectedSpan.isHitlWait"
-          class="text-[10px] text-muted-foreground"
-        >
-          Output is available after this wait completes.
         </div>
         <pre
           v-else
