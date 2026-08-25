@@ -58,7 +58,12 @@ async function copyTraceId(): Promise<void> {
         </div>
       </div>
       <div><span class="text-muted-foreground">Attempts</span><div>{{ span.retryFinalAttempt ?? 1 }}<span v-if="span.retryMaxAttempts"> / {{ span.retryMaxAttempts }}</span></div></div>
-      <div><span class="text-muted-foreground">Wait</span><div>{{ span.isHitlWait ? 'Waiting for input' : 'None' }}</div></div>
+      <div>
+        <span class="text-muted-foreground">Wait</span>
+        <div data-testid="execution-span-wait-state">
+          {{ span.isHitlWait ? 'Waiting for input' : 'None' }}
+        </div>
+      </div>
     </div>
     <div
       v-if="span.error"
