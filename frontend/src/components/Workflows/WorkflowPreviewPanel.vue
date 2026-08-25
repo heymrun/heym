@@ -316,17 +316,17 @@ onUnmounted(() => {
                 />
                 Last Run Details
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary md:h-7 md:w-7"
+              <!-- Negative margin keeps the 28px control from growing the 16px header row. -->
+              <button
+                type="button"
+                class="-my-1.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                 title="Execution history"
                 aria-label="Execution history"
                 data-testid="workflow-preview-history"
                 @click="emit('openHistory', summary.id)"
               >
                 <History class="h-3.5 w-3.5" />
-              </Button>
+              </button>
             </div>
             <div class="flex flex-1 flex-col justify-start">
               <p

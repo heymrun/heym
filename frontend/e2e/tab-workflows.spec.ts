@@ -1009,9 +1009,9 @@ test("selects a workflow into the preview panel and runs it from the quick drawe
     );
     await page.getByTestId("workflow-preview-history").click();
     await scopedHistoryResponse;
-    await expect(page.getByRole("heading", { name: "All Execution History" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Execution History" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("heading", { name: "All Execution History" })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Execution History" })).toBeHidden();
 
     // Run Now hands the workflow to the quick drawer instead of navigating away.
     await page.getByTestId("workflow-preview-run").click();

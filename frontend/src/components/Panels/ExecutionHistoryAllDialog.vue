@@ -796,7 +796,7 @@ function bringToCanvas(): void {
 <template>
   <Dialog
     :open="open"
-    title="All Execution History"
+    title="Execution History"
     size="4xl"
     :close-on-escape="!searchActive || !searchQuery"
     @close="emit('close')"

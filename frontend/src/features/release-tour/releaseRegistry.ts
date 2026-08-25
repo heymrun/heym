@@ -13,43 +13,6 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
-    releaseId: "2026.09",
-    publishedAt: new Date("2026-08-25T00:00:00Z"),
-    headline: "Open workflow run history directly from the workflow list",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "A faster way to inspect workflow runs",
-      introDescription:
-        "A quick look at the latest workflow-listing improvement.",
-      tourEnabled: false,
-      sectionOrder: ["workflow-preview-history"],
-    },
-    sections: [
-      {
-        id: "workflow-preview-history",
-        title: "Open a workflow's run history from its preview",
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The workflow preview's **Last Run Details** card now has a history button. Use it to inspect earlier runs for that workflow without leaving the Workflows tab.",
-          },
-        ],
-        tour: {
-          description:
-            "Select a workflow, then use the clock in Last Run Details to review only that workflow's past runs.",
-          useCases: [
-            "Compare the latest outcome with an earlier workflow run",
-            "Inspect run inputs and outputs without opening the canvas",
-            "Find a failed or recovered run while staying in the workflow list",
-          ],
-          tourVisual: "workflow-preview-history",
-          docTarget: { categoryId: "tabs", slug: "workflows-tab", title: "Workflows Tab" },
-        },
-      },
-    ],
-  },
-  {
     releaseId: "2026.08",
     publishedAt: new Date("2026-08-18T00:00:00Z"),
     headline:

@@ -236,16 +236,9 @@ function closeExecutionHistory(): void {
   historyInitialStatus.value = undefined;
 }
 
-function openAllExecutionHistory(): void {
-  historyWorkflowId.value = undefined;
-  historyInitialStatus.value = undefined;
-  historyOpen.value = true;
-  pushOverlayState();
-}
-
-function openWorkflowExecutionHistory(workflowId: string): void {
+function openExecutionHistory(workflowId?: string, status?: string): void {
   historyWorkflowId.value = workflowId;
-  historyInitialStatus.value = undefined;
+  historyInitialStatus.value = status;
   historyOpen.value = true;
   pushOverlayState();
 }
@@ -1674,7 +1667,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
             variant="ghost"
             size="sm"
             class="gap-2 min-h-[44px] min-w-[44px] sm:min-w-auto text-foreground"
-            @click="openAllExecutionHistory"
+            @click="openExecutionHistory()"
           >
             <History class="w-4 h-4" />
             <span class="hidden sm:inline">History</span>
@@ -2130,7 +2123,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   :running="isSelectedWorkflowRunning"
                   @go-to-workflow="openWorkflowFromPreview"
                   @run="runWorkflowInQuickDrawer"
-                  @open-history="openWorkflowExecutionHistory"
+                  @open-history="openExecutionHistory"
                   @open-step="openSelectedWorkflowFromStep"
                 />
               </aside>
@@ -2166,7 +2159,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
           <AnalyticsDashboard
             v-else-if="activeTab === 'analytics'"
-            @open-error-history="(wfId) => { historyWorkflowId = wfId; historyInitialStatus = 'error'; historyOpen = true; pushOverlayState(); }"
+            @open-error-history="(wfId) => openExecutionHistory(wfId, 'error')"
           />
 
           <DashboardsPanel v-else-if="activeTab === 'dashboard'" />
@@ -2503,7 +2496,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 :running="isSelectedWorkflowRunning"
                 @go-to-workflow="openWorkflowFromPreview"
                 @run="runWorkflowInQuickDrawer"
-                @open-history="openWorkflowExecutionHistory"
+                @open-history="openExecutionHistory"
                 @open-step="openSelectedWorkflowFromStep"
               />
             </div>
