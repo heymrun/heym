@@ -386,6 +386,7 @@ const timelineResults = computed((): TimelineEntry[] =>
       let retryFailedAttempts = 0;
       let retryFinalAttempt: number | null = null;
       let retryMaxAttempts: number | null = null;
+      let retryLastError: string | null = null;
       let highestRetryAttempt = 0;
 
       for (let previousIndex = rowIndex - 1; previousIndex >= 0; previousIndex -= 1) {
@@ -398,6 +399,9 @@ const timelineResults = computed((): TimelineEntry[] =>
         }
 
         retryFailedAttempts += 1;
+        if (retryLastError === null && typeof previousRow.error === "string") {
+          retryLastError = previousRow.error;
+        }
         const attempt = previousRow.metadata?.retry_attempt;
         if (typeof attempt === "number" && Number.isInteger(attempt)) {
           highestRetryAttempt = Math.max(highestRetryAttempt, attempt);
@@ -422,6 +426,7 @@ const timelineResults = computed((): TimelineEntry[] =>
         retryFailedAttempts,
         retryFinalAttempt,
         retryMaxAttempts,
+        retryLastError,
       };
     }),
 );

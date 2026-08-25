@@ -148,4 +148,41 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       },
     ],
   },
+  {
+    releaseId: "2026.08-unreleased",
+    publishedAt: new Date("2026-08-25T00:00:00Z"),
+    headline: "Inspect an execution span without leaving its timeline",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "A closer look at every execution span",
+      introDescription:
+        "See the timing, retries, traces, errors, and outputs behind the selected step.",
+      tourEnabled: false,
+      sectionOrder: ["span-details-inspector"],
+    },
+    sections: [
+      {
+        id: "span-details-inspector",
+        title: "Diagnose a run from the timeline",
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Select a span in the execution timeline to inspect its status, timing, retries, trace, error, and output in one place.",
+          },
+        ],
+        tour: {
+          description:
+            "Click a timeline span to open its details below the chart. Follow a trace or inspect the node output without losing your place in the run.",
+          useCases: [
+            "Find the slow or failed step in a long workflow run",
+            "See the last error and retry attempts without reopening the node",
+            "Connect a trace ID to the output that caused a failure",
+          ],
+          tourVisual: "span-details-inspector",
+          docTarget: { categoryId: "tabs", slug: "workflows-tab", title: "Workflows Tab" },
+        },
+      },
+    ],
+  },
 ];

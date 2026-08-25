@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ExternalLink, Eye, EyeOff } from "lucide-vue-next";
+import { Copy, ExternalLink, Eye, EyeOff, X } from "lucide-vue-next";
 
 import type {
   SpanItem,
@@ -15,6 +15,7 @@ import {
   getTimelineRowKey,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
+import JsonTree from "@/components/ui/JsonTree.vue";
 
 interface Props {
   nodeResults: TimelineEntry[];
@@ -29,13 +30,46 @@ const emit = defineEmits<{
   selectNode: [payload: TimelineSelectPayload];
 }>();
 
+const selectedSpan = ref<SpanItem | null>(null);
+const detailsOpen = ref(false);
+const traceIdCopied = ref(false);
+
 function emitSelectNode(payload: TimelineSelectPayload, event: MouseEvent): void {
   event.stopPropagation();
   emit("selectNode", payload);
 }
 
 function onSpanClick(span: SpanItem, event: MouseEvent): void {
+  selectedSpan.value = span;
+  detailsOpen.value = true;
   emitSelectNode({ nodeId: span.nodeId, resultListIndex: span.resultListIndex }, event);
+}
+
+function closeDetails(): void {
+  detailsOpen.value = false;
+  selectedSpan.value = null;
+}
+
+function formatOutput(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+async function copyTraceId(): Promise<void> {
+  if (!selectedSpan.value?.traceId) return;
+  try {
+    await navigator.clipboard.writeText(selectedSpan.value.traceId);
+    traceIdCopied.value = true;
+    window.setTimeout(() => {
+      traceIdCopied.value = false;
+    }, 1500);
+  } catch {
+    traceIdCopied.value = false;
+  }
 }
 
 function isTraceableSpan(span: SpanItem): boolean {
@@ -153,6 +187,22 @@ watch(
   { flush: "sync" },
 );
 
+watch(
+  rows,
+  (nextRows) => {
+    if (!selectedSpan.value) return;
+    const replacement = nextRows
+      .flatMap((row) => row.spans)
+      .find((span) => span.key === selectedSpan.value?.key);
+    if (replacement) {
+      selectedSpan.value = replacement;
+    } else {
+      closeDetails();
+    }
+  },
+  { flush: "sync" },
+);
+
 const timeMarkers = computed(() => {
   const totalMs = timelineModel.value.timeWindow.totalMs;
   if (totalMs <= 0) return [];
@@ -222,7 +272,7 @@ function showAllRows(): void {
 </script>
 
 <template>
-  <div class="border-t bg-muted/5 select-none overflow-hidden">
+  <div class="flex flex-col border-t bg-muted/5 select-none overflow-hidden">
     <div class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground">
       <span class="font-medium text-foreground/80">Execution summary</span>
       <span>{{ formatTimelineMs(timelineSummary.totalDurationMs) }}</span>
@@ -269,6 +319,97 @@ function showAllRows(): void {
             :style="{ left: `${marker.pct}%` }"
           />
         </template>
+      </div>
+    </div>
+
+    <div
+      v-if="detailsOpen && selectedSpan"
+      class="order-10 border-t border-border/30 bg-background/60"
+      data-testid="execution-span-details"
+    >
+      <div class="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border/20">
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="truncate text-xs font-medium text-foreground">{{ selectedSpan.nodeLabel }}</span>
+          <span class="text-[10px] text-muted-foreground">{{ selectedSpan.nodeType }}</span>
+        </div>
+        <button
+          type="button"
+          class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Close span details"
+          aria-label="Close span details"
+          @click="closeDetails"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1 px-2 py-2 text-[10px] sm:grid-cols-4">
+        <div>
+          <span class="text-muted-foreground">Status</span><div class="font-medium capitalize">
+            {{ selectedSpan.status }}
+          </div>
+        </div>
+        <div>
+          <span class="text-muted-foreground">Duration</span><div class="font-mono">
+            {{ formatTimelineMs(selectedSpan.durationMs) }}
+          </div>
+        </div>
+        <div><span class="text-muted-foreground">Attempts</span><div>{{ selectedSpan.retryFinalAttempt ?? 1 }}<span v-if="selectedSpan.retryFailedAttempts > 0"> ({{ selectedSpan.retryFailedAttempts }} retries)</span></div></div>
+        <div><span class="text-muted-foreground">Wait</span><div>{{ selectedSpan.isHitlWait ? 'Waiting for input' : 'None' }}</div></div>
+      </div>
+      <div
+        v-if="selectedSpan.error ?? selectedSpan.retryLastError"
+        class="mx-2 mb-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[10px] text-destructive break-words"
+      >
+        <span class="font-medium">Last error:</span> {{ selectedSpan.error ?? selectedSpan.retryLastError }}
+      </div>
+      <div
+        v-if="selectedSpan.traceId"
+        class="flex items-center gap-1 px-2 pb-2 text-[10px]"
+      >
+        <span class="text-muted-foreground">Trace</span>
+        <code class="min-w-0 truncate font-mono">{{ selectedSpan.traceId }}</code>
+        <button
+          type="button"
+          class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          :title="traceIdCopied ? 'Copied' : 'Copy trace ID'"
+          :aria-label="traceIdCopied ? 'Copied' : 'Copy trace ID'"
+          @click="copyTraceId"
+        >
+          <Copy class="h-3 w-3" />
+        </button>
+        <button
+          v-if="isTraceableSpan(selectedSpan)"
+          type="button"
+          class="shrink-0 text-primary hover:underline"
+          @click="openTraceInNewTab(selectedSpan, $event)"
+        >
+          Open trace
+        </button>
+      </div>
+      <div class="max-h-44 overflow-auto border-t border-border/20 px-2 py-2">
+        <div class="mb-1 text-[10px] font-medium text-muted-foreground">
+          Output
+        </div>
+        <div
+          v-if="selectedSpan.output !== null && typeof selectedSpan.output === 'object'"
+          class="text-[10px] font-mono"
+        >
+          <JsonTree
+            :data="selectedSpan.output"
+            :root-expanded="true"
+            :auto-expand-depth="1"
+          />
+        </div>
+        <div
+          v-if="selectedSpan.isHitlWait"
+          class="text-[10px] text-muted-foreground"
+        >
+          Output is available after this wait completes.
+        </div>
+        <pre
+          v-else
+          class="whitespace-pre-wrap break-words text-[10px] font-mono text-foreground"
+        >{{ formatOutput(selectedSpan.output) }}</pre>
       </div>
     </div>
 
@@ -348,6 +489,7 @@ function showAllRows(): void {
           >
             <div
               class="trace-span absolute rounded-sm border cursor-pointer transition-opacity overflow-hidden"
+              :data-testid="`execution-timeline-span-${span.nodeId}-${span.resultListIndex}${span.isHitlWait ? '-wait' : ''}`"
               :class="[
                 span.isHitlWait
                   ? 'opacity-80 group-hover:opacity-95 hitl-wait-span'

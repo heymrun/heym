@@ -6,6 +6,7 @@ import FolderIconsTourVisual from "@/features/release-tour/components/visuals/Fo
 import HtmlOutputMapperTourVisual from "@/features/release-tour/components/visuals/HtmlOutputMapperTourVisual.vue";
 import PlaywrightAiStepsTourVisual from "@/features/release-tour/components/visuals/PlaywrightAiStepsTourVisual.vue";
 import WorkflowListingTourVisual from "@/features/release-tour/components/visuals/WorkflowListingTourVisual.vue";
+import SpanDetailsInspectorTourVisual from "@/features/release-tour/components/visuals/SpanDetailsInspectorTourVisual.vue";
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
@@ -14,6 +15,7 @@ export const TOUR_VISUALS: Record<string, Component> = {
   "html-output-mapper": HtmlOutputMapperTourVisual,
   "playwright-ai-steps": PlaywrightAiStepsTourVisual,
   "workflow-listing": WorkflowListingTourVisual,
+  "span-details-inspector": SpanDetailsInspectorTourVisual,
 };
 
 export function resolveTourVisual(key: string): Component {

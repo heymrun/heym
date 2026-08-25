@@ -8,6 +8,7 @@ export interface TimelineEntry extends NodeResult {
   retryFailedAttempts?: number;
   retryFinalAttempt?: number | null;
   retryMaxAttempts?: number | null;
+  retryLastError?: string | null;
 }
 
 export interface TimeWindow {
@@ -49,11 +50,13 @@ export interface SpanItem {
   retryFailedAttempts: number;
   retryFinalAttempt: number | null;
   retryMaxAttempts: number | null;
+  retryLastError: string | null;
   gcPauseMs: number;
   gcPauseCount: number;
   gcPauseSegments: GcPauseSegment[];
   /** True when this span represents human-in-the-loop / Codex follow-up waiting. */
   isHitlWait: boolean;
+  output: unknown;
 }
 
 export interface SpanRow {
@@ -87,10 +90,12 @@ interface RawSpanItem {
   retryFailedAttempts: number;
   retryFinalAttempt: number | null;
   retryMaxAttempts: number | null;
+  retryLastError: string | null;
   gcPauseMs: number;
   gcPauseCount: number;
   gcPauseIntervals: RawGcPauseInterval[];
   isHitlWait: boolean;
+  output: unknown;
 }
 
 interface SpanAccumulator extends SpanRow {
@@ -301,10 +306,12 @@ export function buildTimelineModel(
       retryFailedAttempts: isHitlWait ? 0 : (result.retryFailedAttempts ?? 0),
       retryFinalAttempt: isHitlWait ? null : (result.retryFinalAttempt ?? null),
       retryMaxAttempts: isHitlWait ? null : (result.retryMaxAttempts ?? null),
+      retryLastError: isHitlWait ? null : (result.retryLastError ?? null),
       gcPauseMs,
       gcPauseCount,
       gcPauseIntervals,
       isHitlWait,
+      output: isHitlWait ? null : result.output,
     });
   };
 
@@ -457,10 +464,12 @@ export function buildTimelineModel(
             retryFailedAttempts: span.retryFailedAttempts,
             retryFinalAttempt: span.retryFinalAttempt,
             retryMaxAttempts: span.retryMaxAttempts,
+            retryLastError: span.retryLastError,
             gcPauseMs: showGcPause ? span.gcPauseMs : 0,
             gcPauseCount: showGcPause ? span.gcPauseCount : 0,
             gcPauseSegments,
             isHitlWait: span.isHitlWait,
+            output: span.output,
           };
         }),
       };

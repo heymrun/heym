@@ -72,6 +72,8 @@ describe("buildTimelineModel HITL wait spans", () => {
     expect(rows[0].spans[1].startOffsetMs).toBe(1000);
     expect(rows[0].spans[0].isHitlWait).toBe(false);
     expect(rows[0].spans[2].isHitlWait).toBe(false);
+    expect(rows[0].spans[0].output).toEqual({});
+    expect(rows[0].spans[1].output).toBe(null);
   });
 
   it("synthesizes a live HITL wait span while an agent node is still pending", () => {
@@ -165,6 +167,7 @@ describe("summarizeTimelineModel", () => {
         status: "error",
         execution_time_ms: 120,
         retryFailedAttempts: 2,
+        retryLastError: "Rate limit exceeded",
         metadata: { started_at_ms: 100, ended_at_ms: 220 },
       }),
       entry({
@@ -185,5 +188,6 @@ describe("summarizeTimelineModel", () => {
       failedSpanCount: 1,
       retryCount: 3,
     });
+    expect(model.rows[0].spans[0].retryLastError).toBe("Rate limit exceeded");
   });
 });
