@@ -173,7 +173,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         ],
         tour: {
           description:
-            "Click a timeline span to open its details below the chart. Follow a trace or inspect the node output without losing your place in the run.",
+            "Click a timeline span to open its details in place of the rows. Follow a trace or inspect the node output without losing your place in the run.",
           useCases: [
             "Find the slow or failed step in a long workflow run",
             "See the last error and retry attempts without reopening the node",

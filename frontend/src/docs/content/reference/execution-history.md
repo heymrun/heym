@@ -145,11 +145,11 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 - **Per-workflow**: In the Editor history dialog, click **Clear history** to remove runs for the current workflow.
 - **All History**: In the Dashboard/Evals history dialog, click **Clear all history** to remove all execution records. This action cannot be undone.
 
-## Related
-
 ## Execution timeline details
 
-When the editor's **Execution Log** is open, click the timer button to show the execution timeline. Select a span to open an inline details inspector below the rows. It shows the selected step's status, duration, attempt count, retry information, HITL wait state, errors, trace ID, and a compact output preview. Object and array outputs use the same `JsonTree` viewer as the rest of the Debug panel; scalar values use a text preview. Use **Open trace** for LLM and Agent spans when a trace ID is available.
+When the editor's **Execution Log** is open, click the timer button to show the execution timeline. Select a span to open an inline details inspector that takes over the rows area. It shows the selected step's status, duration, attempt count, retry information, errors, trace ID, and a compact output preview. Object and array outputs use the same `JsonTree` viewer as the rest of the Debug panel; scalar values use a text preview. Use **Open trace** for LLM and Agent spans when a trace ID is available.
+
+## Related
 
 - [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pending review URLs and resume behavior

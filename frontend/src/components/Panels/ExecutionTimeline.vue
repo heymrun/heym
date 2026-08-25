@@ -256,7 +256,10 @@ function showAllRows(): void {
 
 <template>
   <div class="flex flex-col border-t bg-muted/5 select-none overflow-hidden">
-    <div class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground">
+    <div
+      v-show="!detailsOpen"
+      class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground"
+    >
       <span class="font-medium text-foreground/80">Execution summary</span>
       <span>{{ formatTimelineMs(timelineSummary.totalDurationMs) }}</span>
       <span>{{ timelineSummary.spanCount }} spans</span>
@@ -279,7 +282,10 @@ function showAllRows(): void {
         Healthy
       </span>
     </div>
-    <div class="flex h-5 border-b border-border/30 overflow-hidden">
+    <div
+      v-show="!detailsOpen"
+      class="flex h-5 border-b border-border/30 overflow-hidden"
+    >
       <div class="w-[176px] shrink-0 border-r border-border/20" />
       <div class="flex-1 relative overflow-hidden">
         <template
@@ -307,6 +313,7 @@ function showAllRows(): void {
 
     <div
       v-if="hiddenRows.length > 0"
+      v-show="!detailsOpen"
       class="flex items-center gap-2 px-2 py-1.5 border-b border-border/20 bg-muted/10 overflow-x-auto"
     >
       <span class="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
@@ -332,9 +339,17 @@ function showAllRows(): void {
       </button>
     </div>
 
+    <template v-if="detailsOpen && selectedSpan">
+      <ExecutionSpanDetails
+        class="flex-1 min-h-0 overflow-y-auto"
+        :span="selectedSpan"
+        @close="closeDetails"
+        @open-trace="openTraceInNewTab(selectedSpan, $event)"
+      />
+    </template>
     <div
-      class="overflow-y-auto"
-      style="max-height: 220px;"
+      v-else
+      class="flex-1 min-h-0 overflow-y-auto"
     >
       <div
         v-for="row in visibleRows"
@@ -465,13 +480,6 @@ function showAllRows(): void {
           Show all rows
         </button>
       </div>
-
-      <ExecutionSpanDetails
-        v-if="detailsOpen && selectedSpan"
-        :span="selectedSpan"
-        @close="closeDetails"
-        @open-trace="openTraceInNewTab(selectedSpan, $event)"
-      />
     </div>
   </div>
 

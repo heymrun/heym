@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Copy, X } from "lucide-vue-next";
-import JsonTree from "@/components/ui/JsonTree.vue";
 import type { SpanItem } from "@/components/Panels/executionTimeline";
+import { formatTimelineMs } from "@/components/Panels/executionTimeline";
+import JsonTree from "@/components/ui/JsonTree.vue";
 
 const props = defineProps<{ span: SpanItem }>();
 const emit = defineEmits<{ close: []; openTrace: [event: MouseEvent] }>();
@@ -29,7 +30,7 @@ async function copyTraceId(): Promise<void> {
 
 <template>
   <div
-    class="order-10 border-t border-border/30 bg-background/60"
+    class="border-t border-border/30 bg-background/60"
     data-testid="execution-span-details"
   >
     <div class="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border/20">
@@ -46,7 +47,7 @@ async function copyTraceId(): Promise<void> {
         <X class="h-3.5 w-3.5" />
       </button>
     </div>
-    <div class="grid grid-cols-2 gap-x-4 gap-y-1 px-2 py-2 text-[10px] sm:grid-cols-4">
+    <div class="grid grid-cols-2 gap-x-4 gap-y-1 px-2 py-2 text-[10px] sm:grid-cols-3">
       <div>
         <span class="text-muted-foreground">Status</span><div class="font-medium capitalize">
           {{ span.status }}
@@ -54,16 +55,10 @@ async function copyTraceId(): Promise<void> {
       </div>
       <div>
         <span class="text-muted-foreground">Duration</span><div class="font-mono">
-          {{ span.durationMs >= 1000 ? `${(span.durationMs / 1000).toFixed(1)}s` : `${Math.round(span.durationMs)}ms` }}
+          {{ formatTimelineMs(span.durationMs) }}
         </div>
       </div>
       <div><span class="text-muted-foreground">Attempts</span><div>{{ span.retryFinalAttempt ?? 1 }}<span v-if="span.retryMaxAttempts"> / {{ span.retryMaxAttempts }}</span></div></div>
-      <div>
-        <span class="text-muted-foreground">Wait</span>
-        <div data-testid="execution-span-wait-state">
-          {{ span.isHitlWait ? 'Waiting for input' : 'None' }}
-        </div>
-      </div>
     </div>
     <div
       v-if="span.error"

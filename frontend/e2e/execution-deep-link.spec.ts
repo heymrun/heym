@@ -265,7 +265,7 @@ test("opens one running execution live from both history dialogs", async ({ page
       "waitLiveTwo",
     );
     await page.getByTestId(/execution-timeline-span-wait_live_two-\d+$/).click();
-    await expect(page.getByTestId("execution-span-wait-state")).toHaveText("None");
+    await expect(page.getByTestId("execution-span-details")).toContainText("waitLiveTwo");
   } finally {
     if (executionId) {
       await page.request.post(
