@@ -246,9 +246,9 @@ describe("selectPendingReleaseTour", () => {
   });
 });
 
-describe("shipped release registry", () => {
+describe("release registry", () => {
   it("resolves every registry slide to a registered visual", () => {
-    const slides = buildReleaseTours(RELEASE_REGISTRY).flatMap((tour) => tour.slides);
+    const slides = RELEASE_REGISTRY.flatMap(buildTourSlides);
 
     expect(slides.length).toBeGreaterThan(0);
     for (const slide of slides) {
