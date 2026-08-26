@@ -5,6 +5,7 @@ import { Check, Copy, X } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SettingsToggle from "@/components/Layout/settings/SettingsToggle.vue";
 import { getAdminSsoConfig, saveAdminSsoConfig, testSsoConnection } from "@/services/sso";
 import type { SsoSettings, SsoTestResult } from "@/types/sso";
 
@@ -96,20 +97,11 @@ onMounted(load);
     </p>
 
     <template v-if="config">
-      <div class="flex items-center gap-2">
-        <input
-          id="sso-enabled"
-          v-model="config.enabled"
-          type="checkbox"
-          class="h-4 w-4 rounded border-input bg-background"
-        >
-        <Label
-          for="sso-enabled"
-          class="text-sm font-normal"
-        >
-          Enable single sign-on
-        </Label>
-      </div>
+      <SettingsToggle
+        id="sso-enabled"
+        v-model="config.enabled"
+        label="Enable single sign-on"
+      />
 
       <div class="space-y-2">
         <Label for="sso-issuer">Issuer URL</Label>
@@ -188,20 +180,11 @@ onMounted(load);
         />
       </div>
 
-      <div class="flex items-center gap-2">
-        <input
-          id="sso-auto-provision"
-          v-model="config.auto_provision_users"
-          type="checkbox"
-          class="h-4 w-4 rounded border-input bg-background"
-        >
-        <Label
-          for="sso-auto-provision"
-          class="text-sm font-normal"
-        >
-          Create an account on first sign-in
-        </Label>
-      </div>
+      <SettingsToggle
+        id="sso-auto-provision"
+        v-model="config.auto_provision_users"
+        label="Create an account on first sign-in"
+      />
 
       <div class="space-y-2">
         <Label for="sso-domains">Allowed email domains</Label>
@@ -242,21 +225,12 @@ onMounted(load);
       </div>
 
       <div class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-2">
-        <div class="flex items-center gap-2">
-          <input
-            id="sso-disable-password"
-            v-model="config.password_login_disabled"
-            type="checkbox"
-            class="h-4 w-4 rounded border-input bg-background"
-            :disabled="!config.enabled || !config.last_test_ok"
-          >
-          <Label
-            for="sso-disable-password"
-            class="text-sm font-normal"
-          >
-            Disable password sign-in
-          </Label>
-        </div>
+        <SettingsToggle
+          id="sso-disable-password"
+          v-model="config.password_login_disabled"
+          label="Disable password sign-in"
+          :disabled="!config.enabled || !config.last_test_ok"
+        />
         <p class="text-xs text-muted-foreground">
           <span v-if="!config.enabled || !config.last_test_ok">
             Available once SSO is enabled and a connection test has passed.

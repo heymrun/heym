@@ -864,15 +864,6 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
 
       <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
         <SsoSettingsTab />
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Close
-          </Button>
-        </div>
       </div>
     </div>
   </Dialog>
