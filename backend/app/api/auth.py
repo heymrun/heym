@@ -121,6 +121,21 @@ async def register(
             detail="Registration is disabled",
         )
 
+    # Registration mints a password, so it is a password surface too. Leaving it open would
+    # make "disable password sign-in" bypassable by anyone who can reach /register.
+    sso_row = await get_sso_settings(db)
+    if password_login_blocked(sso_row, user_data.email):
+        audit(
+            action="auth.register",
+            outcome=OUTCOME_DENIED,
+            actor_email=user_data.email,
+            reason="password_login_disabled",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password sign-in is disabled on this instance. Use SSO.",
+        )
+
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing_user = result.scalar_one_or_none()
 

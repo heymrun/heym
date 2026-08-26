@@ -1845,9 +1845,14 @@ class SsoSettingsResponse(BaseModel):
     last_test_ok: bool
     last_test_at: datetime | None
     redirect_uri: str
+    # Whether at least one instance admin could still sign in with a password if the
+    # identity provider became unreachable.
+    break_glass_ready: bool = False
 
     @classmethod
-    def from_row(cls, row: Any, *, redirect_uri: str) -> "SsoSettingsResponse":
+    def from_row(
+        cls, row: Any, *, redirect_uri: str, break_glass_ready: bool = False
+    ) -> "SsoSettingsResponse":
         """Build the admin payload. The client secret is reported, never returned."""
         return cls(
             enabled=row.enabled,
@@ -1862,7 +1867,15 @@ class SsoSettingsResponse(BaseModel):
             last_test_ok=row.last_test_ok,
             last_test_at=row.last_test_at,
             redirect_uri=redirect_uri,
+            break_glass_ready=break_glass_ready,
         )
+
+
+class SsoTestRequest(BaseModel):
+    # Lets an administrator test a connection before saving it. When this differs from the
+    # stored issuer the result is reported but not recorded, because `last_test_ok` licenses
+    # the stored configuration, not a draft one.
+    issuer: str | None = None
 
 
 class SsoTestResponse(BaseModel):

@@ -51,7 +51,9 @@ Open **Settings → SSO**. The tab only appears for accounts in `HEYM_ADMIN_EMAI
 
 ### Test the connection first
 
-**Test connection** fetches the discovery document and the provider's signing keys, then reports the token endpoint it found. Run it before enabling SSO. Changing the issuer, client ID, scopes, or secret clears the recorded result, because a passing test belongs to the settings it was run against.
+**Test connection** fetches the discovery document and the provider's signing keys, then reports the token endpoint it found. You can run it on an issuer you have typed but not saved yet, so a wrong URL costs a click rather than a save.
+
+A test only *records* a passing result when the issuer tested is the one already stored. A draft test tells you whether the URL resolves; it does not license a configuration that is not saved. Changing the issuer, client ID, scopes, or secret clears the recorded result for the same reason.
 
 ## How Sign-In Works
 
@@ -78,11 +80,35 @@ Accounts created this way have no password. They sign in through the provider on
 
 ## Disabling Password Sign-In
 
-The **Disable password sign-in** switch stays unavailable until SSO is enabled **and** a connection test has passed, so a wrong issuer cannot lock the door behind itself.
+The **Disable password sign-in** switch stays unavailable until three things are true:
 
-When it is on, password authentication is refused on both surfaces that accept one: the normal login form and the MCP OAuth consent page.
+1. SSO is enabled.
+2. A connection test has passed, so a wrong issuer cannot lock the door behind itself.
+3. At least one account in `HEYM_ADMIN_EMAILS` actually has a password.
 
-Accounts listed in `HEYM_ADMIN_EMAILS` are always exempt. Whoever can edit the environment file can already recover the instance, so this guarantee lives in code rather than in an operator's memory. Keep at least one such account with a working password.
+When it is on, password authentication is refused on all three surfaces that mint or accept one: the login form, **registration**, and the MCP OAuth consent page. Registration counts because it issues a password; leaving it open would make the setting bypassable by anyone who can reach `/register`.
+
+Accounts listed in `HEYM_ADMIN_EMAILS` are exempt from all three. Whoever can edit the environment file can already recover the instance, so this guarantee lives in code rather than in an operator's memory.
+
+### Why the third condition exists
+
+An administrator whose Heym account was created *through* SSO has no password at all. The exemption would let them past the gate, but there is nothing for them to sign in with — so the instance would have no way back if the provider went down. Heym refuses to enter that state and says so.
+
+If you hit that message, sign in through SSO and register a password account on one of your admin addresses (registration is still open to admin addresses for exactly this reason), or add an address that already has a password to `HEYM_ADMIN_EMAILS`.
+
+### Recovering when the provider is down
+
+In order of preference:
+
+1. **Sign in with a break-glass admin password.** This is what the third condition guarantees exists.
+2. **Add yourself to `HEYM_ADMIN_EMAILS`** in the environment file and restart the backend. An account that already has a password can then sign in.
+3. **Re-open password sign-in directly in the database**, if no admin has a password at all:
+
+   ```sql
+   UPDATE sso_settings SET password_login_disabled = false;
+   ```
+
+   No restart is needed; the setting is read per request.
 
 Portal end-users are unaffected. They authenticate against a separate directory — see [Portal](./portal.md).
 

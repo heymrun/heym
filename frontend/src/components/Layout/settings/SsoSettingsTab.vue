@@ -59,10 +59,10 @@ async function handleTest(): Promise<void> {
   testing.value = true;
   error.value = null;
   try {
-    testResult.value = await testSsoConnection();
+    testResult.value = await testSsoConnection(config.value?.issuer);
     if (config.value) config.value.last_test_ok = testResult.value.ok;
   } catch {
-    error.value = "Connection test could not run. Save the issuer first.";
+    error.value = "Connection test could not run.";
   } finally {
     testing.value = false;
   }
@@ -198,7 +198,7 @@ onMounted(load);
         />
       </div>
 
-      <div class="flex items-center gap-3 pt-2">
+      <div class="space-y-2 pt-2">
         <Button
           variant="outline"
           type="button"
@@ -207,21 +207,23 @@ onMounted(load);
         >
           Test connection
         </Button>
-        <span
+        <div
           v-if="testResult"
-          class="text-sm flex items-center gap-1.5"
+          class="flex items-start gap-1.5 text-sm min-w-0"
           :class="testResult.ok ? 'text-primary' : 'text-destructive'"
         >
           <Check
             v-if="testResult.ok"
-            class="w-4 h-4"
+            class="w-4 h-4 mt-0.5 shrink-0"
           />
           <X
             v-else
-            class="w-4 h-4"
+            class="w-4 h-4 mt-0.5 shrink-0"
           />
-          {{ testResult.ok ? testResult.token_endpoint : testResult.error }}
-        </span>
+          <span class="min-w-0 break-all">
+            {{ testResult.ok ? testResult.token_endpoint : testResult.error }}
+          </span>
+        </div>
       </div>
 
       <div class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-2">
@@ -229,11 +231,15 @@ onMounted(load);
           id="sso-disable-password"
           v-model="config.password_login_disabled"
           label="Disable password sign-in"
-          :disabled="!config.enabled || !config.last_test_ok"
+          :disabled="!config.enabled || !config.last_test_ok || !config.break_glass_ready"
         />
         <p class="text-xs text-muted-foreground">
           <span v-if="!config.enabled || !config.last_test_ok">
             Available once SSO is enabled and a connection test has passed.
+          </span>
+          <span v-else-if="!config.break_glass_ready">
+            Unavailable: no account in HEYM_ADMIN_EMAILS has a password, so nobody could get
+            back in if the provider became unreachable. Give one of them a password first.
           </span>
           <span v-else>
             Accounts listed in HEYM_ADMIN_EMAILS keep password access, so the instance stays

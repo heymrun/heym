@@ -168,3 +168,51 @@ class SettingsResponseTests(unittest.TestCase):
         payload = SsoSettingsResponse.from_row(_row(), redirect_uri="http://localhost:4017/cb")
 
         self.assertFalse(payload.client_secret_set)
+
+
+class BreakGlassGuardTests(unittest.TestCase):
+    """An exemption nobody can use is not an exemption."""
+
+    def test_disabling_is_refused_when_no_admin_has_a_password(self) -> None:
+        row = _row(enabled=True, last_test_ok=True)
+
+        with self.assertRaises(HTTPException) as ctx:
+            apply_settings_update(
+                row, SsoSettingsUpdate(password_login_disabled=True), break_glass_ready=False
+            )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("HEYM_ADMIN_EMAILS", ctx.exception.detail)
+        self.assertFalse(row.password_login_disabled)
+
+    def test_disabling_is_allowed_once_an_admin_has_a_password(self) -> None:
+        row = _row(enabled=True, last_test_ok=True)
+
+        apply_settings_update(
+            row, SsoSettingsUpdate(password_login_disabled=True), break_glass_ready=True
+        )
+
+        self.assertTrue(row.password_login_disabled)
+
+    def test_re_enabling_password_login_is_never_blocked(self) -> None:
+        """Recovering must not need the very thing that is missing."""
+        row = _row(enabled=True, last_test_ok=True, password_login_disabled=True)
+
+        apply_settings_update(
+            row, SsoSettingsUpdate(password_login_disabled=False), break_glass_ready=False
+        )
+
+        self.assertFalse(row.password_login_disabled)
+
+
+class TestConnectionRecordingTests(unittest.TestCase):
+    def test_response_reports_break_glass_readiness(self) -> None:
+        ready = SsoSettingsResponse.from_row(
+            _row(), redirect_uri="http://localhost:4017/cb", break_glass_ready=True
+        )
+        blocked = SsoSettingsResponse.from_row(
+            _row(), redirect_uri="http://localhost:4017/cb", break_glass_ready=False
+        )
+
+        self.assertTrue(ready.break_glass_ready)
+        self.assertFalse(blocked.break_glass_ready)

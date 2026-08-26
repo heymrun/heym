@@ -190,16 +190,32 @@ onMounted(async () => {
           </div>
         </div>
 
-        <Button
-          v-if="sso.enabled"
-          type="button"
-          variant="outline"
-          class="w-full h-12 min-h-[44px] text-base"
-          @click="startSso"
-        >
-          <KeyRound class="w-4 h-4 mr-1" />
-          {{ sso.button_label }}
-        </Button>
+        <div :class="sso.password_login_enabled ? '' : 'py-6 space-y-4'">
+          <p
+            v-if="!sso.password_login_enabled"
+            class="text-sm text-muted-foreground text-center"
+          >
+            This workspace signs in through your identity provider.
+          </p>
+
+          <Button
+            v-if="sso.enabled"
+            type="button"
+            variant="outline"
+            class="w-full h-12 min-h-[44px] text-base"
+            @click="startSso"
+          >
+            <KeyRound class="w-4 h-4 mr-1" />
+            {{ sso.button_label }}
+          </Button>
+
+          <p
+            v-if="!sso.password_login_enabled"
+            class="text-xs text-muted-foreground text-center"
+          >
+            Trouble signing in? Ask an instance administrator.
+          </p>
+        </div>
 
         <div
           v-if="sso.password_login_enabled"

@@ -17,6 +17,7 @@ export interface SsoSettings {
   last_test_ok: boolean;
   last_test_at: string | null;
   redirect_uri: string;
+  break_glass_ready: boolean;
 }
 
 export interface SsoSettingsUpdate {

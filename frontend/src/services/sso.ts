@@ -17,7 +17,7 @@ export async function saveAdminSsoConfig(update: SsoSettingsUpdate): Promise<Sso
   return data;
 }
 
-export async function testSsoConnection(): Promise<SsoTestResult> {
-  const { data } = await api.post<SsoTestResult>("/admin/sso/test");
+export async function testSsoConnection(issuer?: string): Promise<SsoTestResult> {
+  const { data } = await api.post<SsoTestResult>("/admin/sso/test", { issuer: issuer ?? null });
   return data;
 }

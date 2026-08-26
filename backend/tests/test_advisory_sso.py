@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app.api.auth import login
-from app.models.schemas import UserLogin
+from app.api.auth import login, register
+from app.models.schemas import UserCreate, UserLogin
 from app.services.auth import hash_password, verify_password
 from app.services.sso_settings import encrypt_client_secret, password_login_blocked
 
@@ -125,3 +125,44 @@ class ClientSecretAtRestTests(unittest.TestCase):
 
         self.assertNotIn("heym-local-secret-change-me", stored)
         self.assertNotIn("heym-local-secret", stored)
+
+
+class RegisterEndpointGateTests(unittest.IsolatedAsyncioTestCase):
+    """Registration mints a password, so the same gate has to cover it."""
+
+    async def _register(self, email: str, sso_row: SimpleNamespace) -> object:
+        db = AsyncMock()
+        db.execute.return_value = _ScalarResult(None)
+        with (
+            patch("app.api.auth.get_sso_settings", AsyncMock(return_value=sso_row)),
+            patch("app.api.auth.register_limiter") as limiter,
+            patch("app.api.auth.store_refresh_token", AsyncMock()),
+        ):
+            limiter.is_allowed.return_value = (True, 0)
+            return await register(
+                UserCreate(email=email, password="Passw0rd!x", name="Test"),
+                _Request(),
+                SimpleNamespace(set_cookie=lambda **_: None),
+                db=db,
+            )
+
+    async def test_registration_is_refused_when_password_login_is_disabled(self) -> None:
+        with patch(_ADMINS, "grace@heym.example"):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._register("newcomer@heym.example", _row())
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_an_admin_may_still_bootstrap_a_break_glass_account(self) -> None:
+        with patch(_ADMINS, "grace@heym.example"):
+            result = await self._register("grace@heym.example", _row())
+
+        self.assertTrue(result.access_token)
+
+    async def test_registration_is_open_when_the_toggle_is_off(self) -> None:
+        with patch(_ADMINS, ""):
+            result = await self._register(
+                "newcomer@heym.example", _row(password_login_disabled=False)
+            )
+
+        self.assertTrue(result.access_token)
