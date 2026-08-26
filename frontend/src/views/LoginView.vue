@@ -115,8 +115,12 @@ onMounted(async () => {
           <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-center">
             Welcome back
           </h1>
-          <p class="text-muted-foreground text-sm mt-2 text-center max-w-[280px]">
-            Sign in to continue building powerful AI workflows
+          <p class="text-muted-foreground text-sm mt-2 text-center max-w-[300px]">
+            {{
+              passwordFormVisible
+                ? "Sign in to continue building powerful AI workflows"
+                : "This workspace signs in through your identity provider"
+            }}
           </p>
         </div>
 
@@ -204,14 +208,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div :class="passwordFormVisible ? '' : 'py-4 space-y-5'">
-          <p
-            v-if="!passwordFormVisible"
-            class="text-sm text-muted-foreground text-center"
-          >
-            This workspace signs in through your identity provider.
-          </p>
-
+        <div :class="passwordFormVisible ? '' : 'space-y-4 py-2'">
           <Button
             v-if="sso.enabled"
             type="button"
@@ -229,15 +226,14 @@ onMounted(async () => {
             class="w-full text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
             @click="showAdminSignIn = true"
           >
-            Administrator sign-in
+            Sign in with a password instead
           </button>
 
           <p
             v-if="!sso.password_login_enabled && showAdminSignIn"
             class="text-xs text-muted-foreground text-center"
           >
-            Password sign-in is off for this workspace. Only accounts listed in
-            <code>HEYM_ADMIN_EMAILS</code> can use this form.
+            Password sign-in is off here. Only instance administrators can use this form.
           </p>
         </div>
 
