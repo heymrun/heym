@@ -58,6 +58,9 @@ Every state change is logged. Reads are logged only where reading is itself the 
 | `auth.logout` | The actor is resolved from the refresh cookie, so a logout without one is logged with no identity. |
 | `auth.token_refresh` | `outcome=denied` with `reason=refresh_token_replayed_or_revoked` — a token-theft signal worth alerting on. |
 | `auth.password_change` | `outcome=failure` when the current password was wrong. |
+| `auth.sso_login` | Single sign-on. `outcome=failure` carries the reason the provider response was rejected; `denied` carries `email_not_verified`, `domain_not_allowed`, or `provisioning_disabled`. |
+| `sso_settings.update` | An administrator changed the [SSO](./sso.md) configuration. Records `enabled` and `password_login_disabled`, never the client secret. |
+| `sso_settings.test` | An administrator ran the SSO connection test. |
 
 ### Workflows
 
