@@ -21,8 +21,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      // Still in progress. Flipped on in the release commit.
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["oidc-sso"],
     },
     sections: [
