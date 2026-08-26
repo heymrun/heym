@@ -4,9 +4,10 @@ from decimal import Decimal
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator
 
 from app.config import settings
+from app.services.instance_admin import is_admin_email
 
 
 def _validate_password_strength(value: str) -> str:
@@ -67,6 +68,12 @@ class UserResponse(BaseModel):
     preferred_credential_id: uuid.UUID | None = None
     preferred_model: str | None = None
     created_at: datetime
+
+    @computed_field
+    @property
+    def is_admin(self) -> bool:
+        """Whether this account administers the instance. Derived, never stored."""
+        return is_admin_email(self.email)
 
     class Config:
         from_attributes = True

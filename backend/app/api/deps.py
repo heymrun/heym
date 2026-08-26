@@ -9,6 +9,7 @@ from app.config import settings
 from app.db.models import User
 from app.db.session import get_db
 from app.services.auth import verify_access_token
+from app.services.instance_admin import is_instance_admin
 
 
 def get_client_ip(request: Request) -> str:
@@ -127,3 +128,12 @@ async def get_current_user_optional(
     user = result.scalar_one_or_none()
 
     return user
+
+
+def require_instance_admin(current_user: User) -> None:
+    """Raise 403 unless the caller is an instance administrator."""
+    if not is_instance_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not allowed to manage instance settings.",
+        )
