@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  is_admin: boolean;
   user_rules: string | null;
   tts_credential_id: string | null;
   tts_voice_id: string | null;
