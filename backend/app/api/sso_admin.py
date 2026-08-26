@@ -76,7 +76,7 @@ async def update_sso_config(
     await db.refresh(row)
 
     audit(
-        action="sso.settings.update",
+        action="sso_settings.update",
         actor=current_user,
         target_type="sso_settings",
         enabled=row.enabled,
@@ -104,7 +104,7 @@ async def test_sso_connection(
         row.last_test_at = datetime.now(timezone.utc)
         await db.flush()
         audit(
-            action="sso.settings.test",
+            action="sso_settings.test",
             actor=current_user,
             outcome=OUTCOME_FAILURE,
             reason=str(exc),
@@ -114,7 +114,7 @@ async def test_sso_connection(
     row.last_test_ok = True
     row.last_test_at = datetime.now(timezone.utc)
     await db.flush()
-    audit(action="sso.settings.test", actor=current_user)
+    audit(action="sso_settings.test", actor=current_user)
     return SsoTestResponse(
         ok=True,
         issuer=discovery.issuer,
