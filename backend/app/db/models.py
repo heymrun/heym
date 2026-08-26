@@ -75,10 +75,15 @@ class WebhookBodyMode(str, PyEnum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (Index("ix_users_sso_identity", "sso_issuer", "sso_subject", unique=True),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Identity as asserted by the external OIDC provider. (issuer, subject) is the
+    # authoritative account key; it survives an email change at the provider.
+    sso_issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    sso_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     user_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     mcp_api_key: Mapped[str | None] = mapped_column(
@@ -2276,3 +2281,37 @@ class AlertTeamShare(Base):
 
     alert: Mapped["Alert"] = relationship("Alert")
     team: Mapped["Team"] = relationship("Team")
+
+
+# The SSO configuration is instance-wide, so the table holds exactly one row addressed
+# by this constant. Upserting a fixed key removes the read-then-insert race.
+SSO_SETTINGS_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+class SsoSettings(Base):
+    __tablename__ = "sso_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=lambda: SSO_SETTINGS_ID
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    issuer: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    client_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    encrypted_client_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scopes: Mapped[str] = mapped_column(String(255), default="openid email profile", nullable=False)
+    # The provider's name lives in data, never in code.
+    button_label: Mapped[str] = mapped_column(
+        String(64), default="Sign in with SSO", nullable=False
+    )
+    auto_provision_users: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allowed_email_domains: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    password_login_disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_test_ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

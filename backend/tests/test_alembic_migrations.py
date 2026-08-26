@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["114_add_workflow_http_method"])
+        self.assertEqual(self.script.get_heads(), ["115_add_sso_settings"])
 
     def test_folder_icon_revision_follows_oauth_token_hashes(self) -> None:
         folder_icon_revision = self.script.get_revision("112_add_folder_icon")
