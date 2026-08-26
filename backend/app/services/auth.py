@@ -18,7 +18,11 @@ def hash_password(password: str) -> str:
     return hashed.decode("utf-8")
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str | None) -> bool:
+    # SSO-provisioned accounts store no hash. bcrypt raises on an empty salt, so the
+    # absence of a password must be answered here rather than at each call site.
+    if not hashed_password:
+        return False
     password_bytes = plain_password.encode("utf-8")
     hashed_bytes = hashed_password.encode("utf-8")
     return bcrypt.checkpw(password_bytes, hashed_bytes)
