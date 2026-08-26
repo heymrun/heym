@@ -76,29 +76,29 @@ const statusLabel = computed(() => {
       >
         <div
           v-if="atProvider || signedIn"
-          class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-surface-sunken px-2"
+          class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-surface-sunken px-2"
         >
           <template v-if="atProvider">
             <div class="flex items-center gap-1.5">
-              <span class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground">
+              <span class="rounded border border-border bg-background px-2 py-1 text-[11px] font-medium leading-none text-muted-foreground">
                 Heym
               </span>
-              <ArrowRight class="h-2.5 w-2.5 text-primary" />
-              <span class="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium leading-none text-foreground">
+              <ArrowRight class="h-3 w-3 text-primary" />
+              <span class="rounded border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium leading-none text-foreground">
                 Your provider
               </span>
             </div>
-            <div class="h-1 w-20 overflow-hidden rounded-full bg-border">
+            <div class="h-1 w-24 overflow-hidden rounded-full bg-border">
               <div class="h-full w-1/2 animate-pulse rounded-full bg-primary" />
             </div>
           </template>
 
           <template v-else>
-            <div class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/15">
-              <Check class="h-3.5 w-3.5 text-emerald-500" />
+            <div class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15">
+              <Check class="h-4 w-4 text-emerald-500" />
             </div>
-            <span class="text-[10px] font-medium leading-none text-foreground">ada@heym.run</span>
-            <span class="text-[9px] leading-none text-muted-foreground">Account created on first sign-in</span>
+            <span class="text-[12px] font-medium leading-none text-foreground">ada@heym.run</span>
+            <span class="text-[10.5px] leading-none text-muted-foreground">Account created on first sign-in</span>
           </template>
         </div>
       </Transition>

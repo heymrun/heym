@@ -100,22 +100,22 @@ onMounted(async () => {
     <WorkflowHeroBackground />
 
     <div class="relative z-10 w-full max-w-full sm:max-w-lg pt-14 sm:pt-16">
-      <div class="auth-badge absolute top-0 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium whitespace-nowrap">
-        <Sparkles class="w-4 h-4" />
-        AI Workflow Automation
+      <div class="auth-badge absolute top-0 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-2.5 rounded-full bg-card border border-primary/25 text-primary text-sm font-medium whitespace-nowrap before:absolute before:inset-0 before:rounded-full before:bg-primary/10 before:content-['']">
+        <Sparkles class="relative w-4 h-4" />
+        <span class="relative">AI Workflow Automation</span>
       </div>
 
       <Card class="auth-card relative w-full p-7 md:p-9 lg:p-11 animate-scale-in-bounce gradient-border-hover">
-        <div class="flex flex-col items-center mb-8">
+        <div class="flex flex-col items-center mb-10">
           <img
             src="/fav.svg"
             alt="Heym"
-            class="w-16 h-16 mb-6"
+            class="w-20 h-20 mb-7"
           >
-          <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-center">
+          <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-center">
             Welcome back
           </h1>
-          <p class="text-muted-foreground text-sm mt-2 text-center max-w-[300px]">
+          <p class="text-muted-foreground text-base mt-3 text-center max-w-[340px]">
             {{
               passwordFormVisible
                 ? "Sign in to continue building powerful AI workflows"
@@ -208,12 +208,12 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div :class="passwordFormVisible ? '' : 'space-y-4 py-2'">
+        <div :class="passwordFormVisible ? '' : 'space-y-5 py-3'">
           <Button
             v-if="sso.enabled"
             type="button"
             variant="outline"
-            class="w-full h-12 min-h-[44px] text-base"
+            class="w-full h-14 min-h-[44px] text-base"
             @click="startSso"
           >
             <KeyRound class="w-4 h-4 mr-1" />
@@ -223,7 +223,7 @@ onMounted(async () => {
           <button
             v-if="!sso.password_login_enabled && !showAdminSignIn"
             type="button"
-            class="w-full text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+            class="w-full text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
             @click="showAdminSignIn = true"
           >
             Sign in with a password instead

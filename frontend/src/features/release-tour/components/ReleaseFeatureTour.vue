@@ -101,6 +101,20 @@ function openDocs(): void {
   void router.push(getDocPath(target.categoryId, target.slug));
 }
 
+/** Clicking anywhere else dismisses the panel. It has no backdrop to catch the click. */
+function handlePointerDown(event: MouseEvent): void {
+  if (!isVisible.value) return;
+
+  const node = event.target;
+  const element = node instanceof Element ? node : (node as Node | null)?.parentElement;
+  if (!element) return;
+  if (panelRef.value?.contains(element)) return;
+  // The launcher toggles the panel itself; closing here too would fight that.
+  if (element.closest("#release-tour-launcher-slot")) return;
+
+  complete();
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   if (!isVisible.value) return;
 
@@ -132,6 +146,7 @@ watch(isVisible, (visible, wasVisible) => {
 
 onMounted(() => {
   document.addEventListener("keydown", handleKeydown);
+  document.addEventListener("mousedown", handlePointerDown);
   unsubscribeDismissOverlays = onDismissOverlays(() => {
     if (isVisible.value) complete();
   });
@@ -139,6 +154,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener("keydown", handleKeydown);
+  document.removeEventListener("mousedown", handlePointerDown);
   unsubscribeDismissOverlays?.();
   unsubscribeDismissOverlays = null;
 });
