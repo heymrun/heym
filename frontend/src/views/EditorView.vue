@@ -80,6 +80,17 @@ const webhookBodyMode = ref<WebhookBodyMode>("legacy");
 const authType = ref<WorkflowAuthType>("jwt");
 const authHeaderKey = ref("");
 const authHeaderValue = ref("");
+// Execution auth is the owner's boundary: anonymous makes the workflow runnable by
+// unauthenticated callers with the owner's credentials, so the backend rejects a
+// collaborator's write. Render it read-only rather than letting the save 403.
+// Fail closed: until both the workflow and the signed-in user are known we cannot tell
+// ownership, and guessing "owner" would briefly hand a collaborator writable controls.
+const isWorkflowOwner = computed(
+  () =>
+    !!workflowStore.currentWorkflow &&
+    !!authStore.user &&
+    workflowStore.currentWorkflow.owner_id === authStore.user.id,
+);
 // The backend masks this secret for collaborators, reporting only that one
 // exists. Hidden means read-only here: the field must never autosave back.
 const isAuthHeaderValueHidden = computed(
@@ -824,6 +835,7 @@ watch(
 
 watch(authType, async (value) => {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   if (workflowStore.currentWorkflow.auth_type === value) return;
   await workflowApi.update(workflowId.value, { auth_type: value });
   workflowStore.currentWorkflow.auth_type = value;
@@ -831,6 +843,7 @@ watch(authType, async (value) => {
 
 watch(authHeaderKey, async (value) => {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   if (workflowStore.currentWorkflow.auth_header_key === value) return;
   await workflowApi.update(workflowId.value, { auth_header_key: value });
   workflowStore.currentWorkflow.auth_header_key = value;
@@ -838,6 +851,9 @@ watch(authHeaderKey, async (value) => {
 
 watch(authHeaderValue, async (value) => {
   if (!workflowStore.currentWorkflow) return;
+  // Owner-only even before a secret exists: with none set the field is not masked, so
+  // without this a collaborator could still type into it and fire a silently-ignored save.
+  if (!isWorkflowOwner.value) return;
   if (isAuthHeaderValueHidden.value) return;
   if (workflowStore.currentWorkflow.auth_header_value === value) return;
   await workflowApi.update(workflowId.value, { auth_header_value: value });
@@ -846,6 +862,7 @@ watch(authHeaderValue, async (value) => {
 
 watch(webhookBodyMode, async (value) => {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   if (workflowStore.currentWorkflow.webhook_body_mode === value) return;
   await workflowApi.update(workflowId.value, { webhook_body_mode: value });
   workflowStore.currentWorkflow.webhook_body_mode = value;
@@ -929,6 +946,7 @@ function syncCurlInputFromWorkflow(): void {
 
 async function saveCacheSettings(): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   const ttlSeconds = cacheTtlMinutes.value > 0 ? cacheTtlMinutes.value * 60 : 0;
   await workflowApi.update(workflowId.value, { cache_ttl_seconds: ttlSeconds });
   workflowStore.currentWorkflow.cache_ttl_seconds = ttlSeconds > 0 ? ttlSeconds : null;
@@ -952,6 +970,7 @@ async function evictResponseCache(): Promise<void> {
 
 async function saveRateLimitSettings(): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   await workflowApi.update(workflowId.value, {
     rate_limit_requests: rateLimitRequests.value > 0 ? rateLimitRequests.value : 0,
     rate_limit_window_seconds: rateLimitWindowSeconds.value > 0 ? rateLimitWindowSeconds.value : 0,
@@ -962,6 +981,7 @@ async function saveRateLimitSettings(): Promise<void> {
 
 async function saveSseEnabled(): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   await workflowApi.update(workflowId.value, { sse_enabled: sseEnabled.value });
   workflowStore.currentWorkflow.sse_enabled = sseEnabled.value;
 }
@@ -970,12 +990,14 @@ async function saveHttpMethod(value: string | undefined): Promise<void> {
   if (!value) return;
   httpMethod.value = value;
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   await workflowApi.update(workflowId.value, { http_method: value });
   workflowStore.currentWorkflow.http_method = value;
 }
 
 async function saveSseNodeConfig(): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
+  if (!isWorkflowOwner.value) return;
   await workflowApi.update(workflowId.value, { sse_node_config: sseNodeConfig.value });
   workflowStore.currentWorkflow.sse_node_config = { ...sseNodeConfig.value };
 }
@@ -989,6 +1011,7 @@ function getNodeStartMessagePlaceholder(nodeLabel: string): string {
 }
 
 async function toggleNodeSendStart(nodeId: string): Promise<void> {
+  if (!isWorkflowOwner.value) return;
   const current = getNodeSseConfig(nodeId);
   sseNodeConfig.value = {
     ...sseNodeConfig.value,
@@ -1001,6 +1024,7 @@ async function toggleNodeSendStart(nodeId: string): Promise<void> {
 }
 
 function startEditingNodeMessage(nodeId: string): void {
+  if (!isWorkflowOwner.value) return;
   const current = getNodeSseConfig(nodeId);
   editingNodeId.value = nodeId;
   editingNodeMessage.value = current.start_message ?? "";
@@ -1013,6 +1037,7 @@ function cancelEditingNodeMessage(): void {
 
 async function commitNodeMessage(nodeId: string): Promise<void> {
   if (editingNodeId.value !== nodeId) return;
+  if (!isWorkflowOwner.value) return;
   const current = getNodeSseConfig(nodeId);
   const trimmed = editingNodeMessage.value.trim();
   sseNodeConfig.value = {
@@ -1840,6 +1865,13 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       @close="curlOpen = false"
     >
       <div class="space-y-4">
+        <div
+          v-if="!isWorkflowOwner"
+          class="flex w-full items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-muted-foreground"
+        >
+          <AlertTriangle class="mt-px h-4 w-4 shrink-0 text-amber-500" />
+          <span>Only the workflow owner can change these settings. You can still copy and run the command below.</span>
+        </div>
         <div class="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3">
           <Label class="whitespace-nowrap text-sm">Request Body</Label>
           <div class="min-w-0">
@@ -1849,6 +1881,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 { value: 'legacy', label: 'Defined' },
                 { value: 'generic', label: 'Generic' }
               ]"
+              :disabled="!isWorkflowOwner"
               class="min-w-0"
             />
           </div>
@@ -1861,6 +1894,8 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 { value: 'jwt', label: 'JWT Token' },
                 { value: 'header_auth', label: 'Header Auth' }
               ]"
+              :disabled="!isWorkflowOwner"
+              :title="isWorkflowOwner ? undefined : 'Only the workflow owner can change authentication'"
               class="min-w-0"
             />
           </div>
@@ -1885,6 +1920,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <Label>Header Key</Label>
             <Input
               v-model="authHeaderKey"
+              :readonly="!isWorkflowOwner"
               placeholder="X-API-Key"
             />
           </div>
@@ -1892,7 +1928,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <Label>Header Value</Label>
             <Input
               v-model="authHeaderValue"
-              :readonly="isAuthHeaderValueHidden"
+              :readonly="isAuthHeaderValueHidden || !isWorkflowOwner"
               :placeholder="isAuthHeaderValueHidden ? 'Set by the owner and hidden' : 'your-secret-value'"
             />
           </div>
@@ -2088,6 +2124,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <div class="flex flex-wrap items-center gap-2">
               <Input
                 v-model.number="cacheTtlMinutes"
+                :readonly="!isWorkflowOwner"
                 type="number"
                 min="0"
                 class="w-24"
@@ -2125,6 +2162,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <div class="flex items-center gap-2">
               <Input
                 v-model.number="rateLimitRequests"
+                :readonly="!isWorkflowOwner"
                 type="number"
                 min="0"
                 class="w-20"
@@ -2134,6 +2172,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               <span class="text-sm text-muted-foreground">requests per</span>
               <Input
                 v-model.number="rateLimitWindowSeconds"
+                :readonly="!isWorkflowOwner"
                 type="number"
                 min="1"
                 class="w-20"
@@ -2162,6 +2201,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-input bg-background"
               :checked="sseEnabled"
+              :disabled="!isWorkflowOwner"
               @change="sseEnabled = ($event.target as HTMLInputElement).checked; saveSseEnabled()"
             >
           </div>
@@ -2183,6 +2223,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                   type="checkbox"
                   class="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-input bg-background"
                   :checked="getNodeSseConfig(node.id).send_start"
+                  :disabled="!isWorkflowOwner"
                   @change="toggleNodeSendStart(node.id)"
                 >
                 <span class="min-w-[96px] truncate text-sm font-medium">
@@ -2209,7 +2250,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                     variant="ghost"
                     size="icon"
                     class="h-6 w-6 shrink-0"
-                    :disabled="!getNodeSseConfig(node.id).send_start"
+                    :disabled="!getNodeSseConfig(node.id).send_start || !isWorkflowOwner"
                     @click="startEditingNodeMessage(node.id)"
                   >
                     <Pencil class="h-3 w-3" />
@@ -2232,6 +2273,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               :model-value="httpMethod"
               :options="HTTP_METHOD_OPTIONS"
               placeholder=""
+              :disabled="!isWorkflowOwner"
               class="w-32 shrink-0"
               @update:model-value="saveHttpMethod"
             />

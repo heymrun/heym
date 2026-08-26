@@ -1469,6 +1469,68 @@ def _reject_stale_update(workflow: Workflow, base_updated_at: datetime | None) -
         )
 
 
+# The "Run with cURL" configuration: everything that decides how an outside caller
+# reaches this workflow and what it costs the owner. An anonymous run borrows the
+# owner's credential and global-variable context, so this whole block is the owner's
+# boundary to set rather than shared canvas state (GHSA-5939-m9jm-7gf5).
+OWNER_ONLY_EXECUTION_FIELDS = (
+    "auth_type",
+    "auth_header_key",
+    "webhook_body_mode",
+    "http_method",
+    "cache_ttl_seconds",
+    "rate_limit_requests",
+    "rate_limit_window_seconds",
+    "sse_enabled",
+    "sse_node_config",
+)
+
+
+def _normalized_execution_value(field: str, value: Any) -> Any:
+    """Coerce a requested value the way ``update_workflow`` would before storing it.
+
+    The comparison has to be against the effective value, or a collaborator echoing
+    ``http_method="post"`` or a cleared ``cache_ttl_seconds=0`` would be rejected as a
+    change when storing it would have been a no-op.
+    """
+    if field == "http_method":
+        return value.strip().upper()
+    if field in ("cache_ttl_seconds", "rate_limit_requests", "rate_limit_window_seconds"):
+        return value if value > 0 else None
+    # An unset key/config reads back as "" or {} through the API, so a client echoing
+    # what it was given must not look like a change against the stored NULL.
+    if field in ("auth_header_key", "sse_node_config"):
+        return value or None
+    return value
+
+
+def _reject_non_owner_auth_change(
+    workflow: Workflow,
+    workflow_data: WorkflowUpdate,
+    user_id: uuid.UUID,
+) -> None:
+    """Refuse a collaborator's change to the public execution configuration.
+
+    A shared collaborator reaches this workflow through ``get_workflow_for_user``, which
+    accepts direct and team shares alike. Downgrading ``auth_type`` to ``anonymous`` would
+    publish it to unauthenticated callers running as the owner, so the owner keeps the whole
+    boundary. A write matching the stored value is allowed, so a client echoing the current
+    config still saves.
+    """
+    if workflow.owner_id == user_id:
+        return
+
+    for field in OWNER_ONLY_EXECUTION_FIELDS:
+        requested = getattr(workflow_data, field)
+        if requested is None:
+            continue
+        if _normalized_execution_value(field, requested) != getattr(workflow, field):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the workflow owner can change execution settings",
+            )
+
+
 @router.put("/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(
     workflow_id: uuid.UUID,
@@ -1485,6 +1547,7 @@ async def update_workflow(
         )
 
     _reject_stale_update(workflow, workflow_data.base_updated_at)
+    _reject_non_owner_auth_change(workflow, workflow_data, current_user.id)
 
     should_create_version = False
     old_nodes = workflow.nodes
@@ -2564,14 +2627,47 @@ async def revoke_execution_token_endpoint(
     )
 
 
+async def _resolve_execution_token_actor(db: AsyncSession, payload: dict) -> User:
+    """Return the user a scoped execution token was minted by.
+
+    A collaborator can mint a token for a workflow shared with them, so the run has to be
+    attributed to them. Falling through to ``None`` here would hand the run the owner's
+    credentials. A token whose user no longer exists is rejected rather than downgraded.
+    """
+    sub = payload.get("sub")
+    actor = None
+    if sub:
+        try:
+            actor_id = uuid.UUID(sub)
+        except ValueError:
+            actor = None
+        else:
+            actor_result = await db.execute(select(User).where(User.id == actor_id))
+            actor = actor_result.scalar_one_or_none()
+    if actor is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Execution token subject is no longer valid",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return actor
+
+
 async def validate_workflow_auth(
     workflow: Workflow,
     request: Request,
     current_user: User | None,
     db: AsyncSession,
-) -> None:
+) -> User | None:
+    """Authorize the request and return the user the run should execute as.
+
+    Returning the actor matters: a caller with no session falls back to the workflow
+    owner's credential and global-variable context. A scoped execution token names its
+    minter in ``sub``, so the run must be attributed to that user rather than silently
+    borrowing the owner's context (GHSA-5939-m9jm-7gf5).
+    """
     if workflow.auth_type == WorkflowAuthType.anonymous:
-        return
+        return current_user
 
     if workflow.auth_type == WorkflowAuthType.jwt:
         if current_user is None:
@@ -2595,7 +2691,7 @@ async def validate_workflow_auth(
                                 )
                             )
                             if token_result.scalar_one_or_none() is not None:
-                                return
+                                return await _resolve_execution_token_actor(db, payload)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="JWT authentication required",
@@ -2606,13 +2702,13 @@ async def validate_workflow_auth(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workflow not found",
             )
-        return
+        return current_user
 
     if workflow.auth_type == WorkflowAuthType.header_auth:
         if current_user is not None and await user_has_workflow_access(
             db, workflow, current_user.id
         ):
-            return
+            return current_user
 
         if not workflow.auth_header_key or not workflow.auth_header_value:
             raise HTTPException(
@@ -2626,7 +2722,9 @@ async def validate_workflow_auth(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or missing authentication header",
             )
-        return
+        return current_user
+
+    return current_user
 
 
 async def _add_referenced_workflow_to_cache(
@@ -2810,7 +2908,7 @@ async def execute_workflow_endpoint(
             detail="Workflow not found",
         )
 
-    await validate_workflow_auth(workflow, request, current_user, db)
+    current_user = await validate_workflow_auth(workflow, request, current_user, db)
     enforce_workflow_http_method(workflow, request, test_run)
 
     enriched_inputs = {
@@ -3480,7 +3578,7 @@ async def execute_workflow_stream(
             detail="Workflow not found",
         )
 
-    await validate_workflow_auth(workflow, request, current_user, db)
+    current_user = await validate_workflow_auth(workflow, request, current_user, db)
     enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:

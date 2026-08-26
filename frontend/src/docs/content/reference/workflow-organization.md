@@ -39,6 +39,27 @@ Sharing a workflow grants access to the canvas, execution history, and analysis 
 
 Recipients need those credentials and child workflows shared with them separately (same users or teams). Share credentials from the [Credentials tab](../tabs/credentials-tab.md); see [Credentials Sharing](./credentials-sharing.md). Share each sub-workflow from its own editor share dialog.
 
+### Owner-only settings
+
+The whole **Run with cURL** configuration stays with the owner after sharing. Collaborators still open the dialog and copy the generated command, but the controls are read-only.
+
+Changing any of these as a non-owner is rejected with `403`:
+
+- **Authentication** (`auth_type`) and **Header Key** (`auth_header_key`)
+- **Request Body** mode (`webhook_body_mode`) and **Request Method** (`http_method`)
+- **Response Cache** (`cache_ttl_seconds`) and **Rate Limit** (`rate_limit_requests`, `rate_limit_window_seconds`)
+- **SSE Streaming** (`sse_enabled`, `sse_node_config`)
+
+**Header Value** (`auth_header_value`) behaves differently: it is hidden from collaborators entirely, and a collaborator's write is ignored rather than rejected. The editor renders the field masked, so a `403` there would break an ordinary save rather than signal an attack.
+
+Authentication is the reason the block is owner-only: `Anonymous` lets unauthenticated callers run the workflow, and a run with no signed-in caller resolves credentials and global variables as the **owner**, not the caller. The rest of the block is the published request contract and the owner's cost controls, so it moves with it.
+
+Editing the canvas, name, and description is unaffected.
+
+### Execution tokens
+
+A collaborator can mint an execution token for a workflow shared with them. The run is attributed to **whoever minted the token**, so it uses that user's credentials and global variables, not the owner's. Only a genuinely anonymous call — `auth_type: anonymous` with no caller — runs in the owner's context.
+
 ## Scheduled for Deletion
 
 Workflows can be scheduled for deletion instead of being removed immediately.
