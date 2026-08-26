@@ -1,22 +1,46 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { useRouter } from "vue-router";
-import { ArrowRight, Sparkles, Zap } from "lucide-vue-next";
+import { computed, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ArrowRight, KeyRound, Sparkles, Zap } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import WorkflowHeroBackground from "@/components/Layout/WorkflowHeroBackground.vue";
+import { getSsoStatus } from "@/services/sso";
 import { useAuthStore } from "@/stores/auth";
+import type { SsoStatus } from "@/types/sso";
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 
 const email = ref("");
 const password = ref("");
 const error = ref("");
 const loading = ref(false);
+const sso = ref<SsoStatus>({
+  enabled: false,
+  button_label: "Sign in with SSO",
+  password_login_enabled: true,
+});
+
+const SSO_ERRORS: Record<string, string> = {
+  state_mismatch: "That sign-in attempt expired. Please try again.",
+  token_exchange_failed: "Could not reach the identity provider. Try again shortly.",
+  invalid_token: "The identity provider's response could not be verified.",
+  email_missing: "The identity provider did not return an email address.",
+  email_not_verified: "Your email address is not verified with the identity provider.",
+  domain_not_allowed: "Your email domain is not allowed on this instance.",
+  provisioning_disabled: "No Heym account exists for you. Ask an administrator to create one.",
+  sso_disabled: "Single sign-on is not configured on this instance.",
+};
+
+const ssoError = computed<string>(() => {
+  const code = route.query.sso_error;
+  return typeof code === "string" ? (SSO_ERRORS[code] ?? SSO_ERRORS.invalid_token) : "";
+});
 
 async function handleSubmit(): Promise<void> {
   error.value = "";
@@ -31,6 +55,21 @@ async function handleSubmit(): Promise<void> {
     loading.value = false;
   }
 }
+
+function startSso(): void {
+  // A full navigation, not an XHR: the browser must follow the redirect chain into the
+  // provider's own login UI.
+  window.location.href = "/api/auth/sso/login";
+}
+
+onMounted(async () => {
+  try {
+    sso.value = await getSsoStatus();
+  } catch {
+    // A status failure must never hide the password form.
+    sso.value = { enabled: false, button_label: "Sign in with SSO", password_login_enabled: true };
+  }
+});
 </script>
 
 <template>
@@ -67,7 +106,15 @@ async function handleSubmit(): Promise<void> {
           </p>
         </div>
 
+        <div
+          v-if="ssoError"
+          class="mb-5 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+        >
+          {{ ssoError }}
+        </div>
+
         <form
+          v-if="sso.password_login_enabled"
           class="space-y-5"
           @submit.prevent="handleSubmit"
         >
@@ -131,7 +178,33 @@ async function handleSubmit(): Promise<void> {
           </Button>
         </form>
 
-        <div class="divider relative my-8">
+        <div
+          v-if="sso.enabled && sso.password_login_enabled"
+          class="divider relative my-8"
+        >
+          <div class="absolute inset-0 flex items-center">
+            <div class="w-full border-t border-border" />
+          </div>
+          <div class="relative flex justify-center text-xs uppercase">
+            <span class="bg-card px-3 text-muted-foreground">or</span>
+          </div>
+        </div>
+
+        <Button
+          v-if="sso.enabled"
+          type="button"
+          variant="outline"
+          class="w-full h-12 min-h-[44px] text-base"
+          @click="startSso"
+        >
+          <KeyRound class="w-4 h-4 mr-1" />
+          {{ sso.button_label }}
+        </Button>
+
+        <div
+          v-if="sso.password_login_enabled"
+          class="divider relative my-8"
+        >
           <div class="absolute inset-0 flex items-center">
             <div class="w-full border-t border-border" />
           </div>
@@ -141,6 +214,7 @@ async function handleSubmit(): Promise<void> {
         </div>
 
         <router-link
+          v-if="sso.password_login_enabled"
           to="/register"
           class="register-link flex items-center justify-center gap-3 w-full h-12 min-h-[44px] rounded-xl border border-border bg-muted/30 text-sm font-medium text-foreground hover:bg-muted/50 hover:border-primary/30 transition-all duration-300"
         >
