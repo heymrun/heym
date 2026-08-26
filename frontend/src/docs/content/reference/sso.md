@@ -100,7 +100,7 @@ If you hit that message, sign in through SSO and register a password account on 
 
 In order of preference:
 
-1. **Sign in with a break-glass admin password.** This is what the third condition guarantees exists.
+1. **Sign in with a break-glass admin password.** The login screen hides the password form when password sign-in is off, so click **Administrator sign-in** underneath the SSO button to reveal it. The form is not a bypass: every address outside `HEYM_ADMIN_EMAILS` is still refused, and told why.
 2. **Add yourself to `HEYM_ADMIN_EMAILS`** in the environment file and restart the backend. An account that already has a password can then sign in.
 3. **Re-open password sign-in directly in the database**, if no admin has a password at all:
 

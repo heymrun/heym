@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import axios from "axios";
 import { ArrowRight, KeyRound, Sparkles, Zap } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
@@ -25,6 +26,14 @@ const sso = ref<SsoStatus>({
   button_label: "Sign in with SSO",
   password_login_enabled: true,
 });
+// When password sign-in is disabled instance-wide the form is hidden, but accounts in
+// HEYM_ADMIN_EMAILS are still allowed through. Without a way to reveal the form, that
+// break-glass exemption would be unreachable and a provider outage would strand everyone.
+const showAdminSignIn = ref(false);
+
+const passwordFormVisible = computed(
+  () => sso.value.password_login_enabled || showAdminSignIn.value,
+);
 
 const SSO_ERRORS: Record<string, string> = {
   state_mismatch: "That sign-in attempt expired. Please try again.",
@@ -49,8 +58,13 @@ async function handleSubmit(): Promise<void> {
   try {
     await authStore.login({ email: email.value, password: password.value });
     router.push("/");
-  } catch {
-    error.value = "Invalid email or password";
+  } catch (err) {
+    const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
+    error.value =
+      typeof detail === "string" && err instanceof Error && axios.isAxiosError(err)
+      && err.response?.status === 403
+        ? detail
+        : "Invalid email or password";
   } finally {
     loading.value = false;
   }
@@ -85,13 +99,13 @@ onMounted(async () => {
     <!-- Workflow graph background (above blur, below card) -->
     <WorkflowHeroBackground />
 
-    <div class="relative z-10 w-full max-w-full sm:max-w-md pt-14 sm:pt-16">
+    <div class="relative z-10 w-full max-w-full sm:max-w-lg pt-14 sm:pt-16">
       <div class="auth-badge absolute top-0 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium whitespace-nowrap">
         <Sparkles class="w-4 h-4" />
         AI Workflow Automation
       </div>
 
-      <Card class="auth-card relative w-full p-6 md:p-8 lg:p-10 animate-scale-in-bounce gradient-border-hover">
+      <Card class="auth-card relative w-full p-7 md:p-9 lg:p-11 animate-scale-in-bounce gradient-border-hover">
         <div class="flex flex-col items-center mb-8">
           <img
             src="/fav.svg"
@@ -114,7 +128,7 @@ onMounted(async () => {
         </div>
 
         <form
-          v-if="sso.password_login_enabled"
+          v-if="passwordFormVisible"
           class="space-y-5"
           @submit.prevent="handleSubmit"
         >
@@ -179,7 +193,7 @@ onMounted(async () => {
         </form>
 
         <div
-          v-if="sso.enabled && sso.password_login_enabled"
+          v-if="sso.enabled && passwordFormVisible"
           class="divider relative my-8"
         >
           <div class="absolute inset-0 flex items-center">
@@ -190,9 +204,9 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div :class="sso.password_login_enabled ? '' : 'py-6 space-y-4'">
+        <div :class="passwordFormVisible ? '' : 'py-4 space-y-5'">
           <p
-            v-if="!sso.password_login_enabled"
+            v-if="!passwordFormVisible"
             class="text-sm text-muted-foreground text-center"
           >
             This workspace signs in through your identity provider.
@@ -209,11 +223,21 @@ onMounted(async () => {
             {{ sso.button_label }}
           </Button>
 
+          <button
+            v-if="!sso.password_login_enabled && !showAdminSignIn"
+            type="button"
+            class="w-full text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+            @click="showAdminSignIn = true"
+          >
+            Administrator sign-in
+          </button>
+
           <p
-            v-if="!sso.password_login_enabled"
+            v-if="!sso.password_login_enabled && showAdminSignIn"
             class="text-xs text-muted-foreground text-center"
           >
-            Trouble signing in? Ask an instance administrator.
+            Password sign-in is off for this workspace. Only accounts listed in
+            <code>HEYM_ADMIN_EMAILS</code> can use this form.
           </p>
         </div>
 
