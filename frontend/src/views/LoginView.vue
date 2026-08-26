@@ -99,14 +99,14 @@ onMounted(async () => {
     <!-- Workflow graph background (above blur, below card) -->
     <WorkflowHeroBackground />
 
-    <div class="relative z-10 w-full max-w-full sm:max-w-lg pt-14 sm:pt-16">
+    <div class="relative z-10 w-full max-w-full sm:max-w-md pt-14 sm:pt-16">
       <div class="auth-badge absolute top-0 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-2.5 rounded-full bg-card border border-primary/25 text-primary text-sm font-medium whitespace-nowrap before:absolute before:inset-0 before:rounded-full before:bg-primary/10 before:content-['']">
         <Sparkles class="relative w-4 h-4" />
         <span class="relative">AI Workflow Automation</span>
       </div>
 
-      <Card class="auth-card relative w-full p-7 md:p-9 lg:p-11 animate-scale-in-bounce gradient-border-hover">
-        <div class="flex flex-col items-center mb-10">
+      <Card class="auth-card relative w-full px-6 py-10 md:px-8 md:py-12 lg:px-9 lg:py-14 animate-scale-in-bounce gradient-border-hover">
+        <div class="flex flex-col items-center mb-12">
           <img
             src="/fav.svg"
             alt="Heym"
@@ -208,7 +208,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div :class="passwordFormVisible ? '' : 'space-y-5 py-3'">
+        <div :class="passwordFormVisible ? '' : 'space-y-12 py-4'">
           <Button
             v-if="sso.enabled"
             type="button"
