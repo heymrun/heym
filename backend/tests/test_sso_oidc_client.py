@@ -1,15 +1,20 @@
 """OIDC mechanics: discovery, PKCE, authorization URL, token exchange, ID token checks."""
 
 import base64
+import datetime
 import hashlib
 import unittest
 from urllib.parse import parse_qs, urlparse
+
+import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.services.oidc_client import (
     OidcError,
     build_authorization_url,
     make_pkce_pair,
     parse_discovery_document,
+    verify_id_token,
 )
 
 _DISCOVERY = {
@@ -125,3 +130,79 @@ class AuthorizationUrlTests(unittest.TestCase):
         )
 
         self.assertNotIn(verifier, url)
+
+
+_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _issue(key: object = _PRIVATE_KEY, **overrides: object) -> str:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    claims: dict[str, object] = {
+        "iss": "https://idp.example/realms/heym",
+        "aud": "heym",
+        "sub": "ada-subject",
+        "email": "ada@heym.local",
+        "email_verified": True,
+        "nonce": "nonce-value",
+        "iat": now,
+        "exp": now + datetime.timedelta(minutes=5),
+    }
+    claims.update(overrides)
+    return jwt.encode(claims, key, algorithm="RS256")
+
+
+class IdTokenVerificationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.discovery = parse_discovery_document(_DISCOVERY)
+        self.key = _PRIVATE_KEY.public_key()
+
+    def _verify(self, token: str, nonce: str = "nonce-value") -> dict:
+        return verify_id_token(
+            token,
+            signing_key=self.key,
+            discovery=self.discovery,
+            client_id="heym",
+            expected_nonce=nonce,
+        )
+
+    def test_valid_token_returns_its_claims(self) -> None:
+        claims = self._verify(_issue())
+
+        self.assertEqual(claims["sub"], "ada-subject")
+        self.assertEqual(claims["email"], "ada@heym.local")
+
+    def test_wrong_audience_is_rejected(self) -> None:
+        with self.assertRaises(OidcError):
+            self._verify(_issue(aud="someone-else"))
+
+    def test_wrong_issuer_is_rejected(self) -> None:
+        with self.assertRaises(OidcError):
+            self._verify(_issue(iss="https://evil.example"))
+
+    def test_expired_token_is_rejected(self) -> None:
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+        with self.assertRaises(OidcError):
+            self._verify(_issue(exp=past, iat=past))
+
+    def test_token_signed_by_another_key_is_rejected(self) -> None:
+        with self.assertRaises(OidcError):
+            self._verify(_issue(key=_OTHER_KEY))
+
+    def test_nonce_mismatch_is_rejected(self) -> None:
+        """Without this check a replayed token from another login would be accepted."""
+        with self.assertRaises(OidcError):
+            self._verify(_issue(nonce="someone-elses-nonce"))
+
+    def test_missing_nonce_is_rejected(self) -> None:
+        token = _issue()
+        payload = jwt.decode(token, options={"verify_signature": False})
+        payload.pop("nonce")
+        unsigned = jwt.encode(payload, _PRIVATE_KEY, algorithm="RS256")
+
+        with self.assertRaises(OidcError):
+            self._verify(unsigned)
+
+    def test_token_without_a_subject_is_rejected(self) -> None:
+        with self.assertRaises(OidcError):
+            self._verify(_issue(sub=""))

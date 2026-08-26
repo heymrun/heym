@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+import jwt
+from jwt import PyJWKClient
 
 # Asymmetric signatures only. A symmetric algorithm would let anyone holding the client
 # secret mint an ID token, and `none` would let anyone at all.
@@ -124,3 +126,89 @@ def build_authorization_url(
     }
     separator = "&" if "?" in discovery.authorization_endpoint else "?"
     return f"{discovery.authorization_endpoint}{separator}{urlencode(params)}"
+
+
+async def exchange_code(
+    discovery: OidcDiscovery,
+    *,
+    client_id: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
+    code_verifier: str,
+) -> dict[str, Any]:
+    """Trade an authorization code for tokens, using the provider's advertised auth method."""
+    form = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier,
+        "client_id": client_id,
+    }
+    auth: tuple[str, str] | None = None
+    if discovery.token_auth_method == "client_secret_basic":
+        auth = (client_id, client_secret)
+    else:
+        form["client_secret"] = client_secret
+
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
+        response = await client.post(discovery.token_endpoint, data=form, auth=auth)
+
+    if response.status_code != 200:
+        raise OidcError(f"Token exchange failed with HTTP {response.status_code}")
+    payload = response.json()
+    if not payload.get("id_token"):
+        raise OidcError("Token response contained no id_token")
+    return dict(payload)
+
+
+def get_signing_key(discovery: OidcDiscovery, id_token: str) -> Any:
+    """Resolve the provider's signing key for this token. PyJWKClient caches the key set."""
+    try:
+        return PyJWKClient(discovery.jwks_uri).get_signing_key_from_jwt(id_token).key
+    except Exception as exc:  # noqa: BLE001 - any JWKS failure is one failure to the caller
+        raise OidcError(f"Could not resolve the provider signing key: {exc}") from exc
+
+
+def verify_id_token(
+    id_token: str,
+    *,
+    signing_key: Any,
+    discovery: OidcDiscovery,
+    client_id: str,
+    expected_nonce: str,
+) -> dict[str, Any]:
+    """Verify signature, audience, issuer, expiry, and nonce, then return the claims."""
+    try:
+        claims = jwt.decode(
+            id_token,
+            signing_key,
+            algorithms=discovery.signing_algorithms,
+            audience=client_id,
+            issuer=discovery.issuer,
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise OidcError(f"ID token rejected: {exc}") from exc
+
+    if not claims.get("sub"):
+        raise OidcError("ID token carries no subject")
+    # The nonce ties this token to the login this browser started; without it a token
+    # captured from another session would be replayable here.
+    if claims.get("nonce") != expected_nonce:
+        raise OidcError("ID token nonce does not match this login attempt")
+    return dict(claims)
+
+
+async def fetch_userinfo(discovery: OidcDiscovery, access_token: str) -> dict[str, Any]:
+    """Fetch userinfo claims. Used only when the ID token carries no email."""
+    if not discovery.userinfo_endpoint:
+        return {}
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
+        response = await client.get(
+            discovery.userinfo_endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if response.status_code != 200:
+        return {}
+    return dict(response.json())
