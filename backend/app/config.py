@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # may always sign in with a password, which is the break-glass path when SSO is
     # misconfigured. An empty value grants nobody.
     admin_emails: str = Field(default="", validation_alias="HEYM_ADMIN_EMAILS")
+    # Load distribution across instances sharing this database. The role defaults to
+    # "main" so an existing single-instance deployment keeps behaving as main with no
+    # configuration change.
+    instance_id: str = Field(default="", validation_alias="HEYM_INSTANCE_ID")
+    instance_name: str = Field(default="", validation_alias="HEYM_INSTANCE_NAME")
+    instance_role: str = Field(default="main", validation_alias="HEYM_INSTANCE_ROLE")
+    cluster_enabled: bool = Field(default=False, validation_alias="HEYM_CLUSTER_ENABLED")
     plugins_dir: str = Field(default="data/plugins", validation_alias="HEYM_PLUGINS_DIR")
     # Custom Playwright code runs arbitrary Python in the backend process. It is OFF by
     # default; an operator must opt in explicitly. Step-based Playwright nodes are unaffected.
