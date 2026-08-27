@@ -19,6 +19,7 @@ from app.models.schemas import (
     FolderWithContentsResponse,
     WorkflowListResponse,
 )
+from app.services.audit_log import audit
 from app.services.workflow_last_trigger import (
     fetch_last_trigger_source,
     fetch_last_trigger_sources,
@@ -361,6 +362,14 @@ async def create_folder(
     db.add(folder)
     await db.commit()
     await db.refresh(folder)
+    audit(
+        action="folder.create",
+        actor=current_user,
+        target_type="folder",
+        target_id=folder.id,
+        target_name=folder.name,
+        parent_id=folder.parent_id,
+    )
     return folder
 
 
@@ -418,6 +427,14 @@ async def update_folder(
 
     await db.commit()
     await db.refresh(folder)
+    audit(
+        action="folder.update",
+        actor=current_user,
+        target_type="folder",
+        target_id=folder.id,
+        target_name=folder.name,
+        fields=",".join(sorted(data.model_fields_set)) or None,
+    )
     return folder
 
 
@@ -456,6 +473,13 @@ async def delete_folder(
     if not folder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 
+    audit(
+        action="folder.delete",
+        actor=current_user,
+        target_type="folder",
+        target_id=folder.id,
+        target_name=folder.name,
+    )
     await db.delete(folder)
     await db.commit()
 
@@ -484,6 +508,15 @@ async def move_workflow_to_folder(
     if not workflow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
 
+    audit(
+        action="folder.workflow_move",
+        actor=current_user,
+        target_type="folder",
+        target_id=folder_id,
+        target_name=folder.name,
+        workflow_id=workflow_id,
+        workflow_name=workflow.name,
+    )
     if workflow.owner_id == current_user.id:
         workflow.folder_id = folder_id
         await db.commit()

@@ -4,7 +4,7 @@ The Settings dialog lets you manage your profile, set persistent AI instructions
 
 ## Opening the Dialog
 
-Click the **gear (Settings) badge** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**.
+Click the **gear (Settings) badge** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**. Instance administrators also see an **SSO** tab.
 
 ## Profile Tab
 
@@ -92,6 +92,10 @@ For each **OpenCode** credential the tab shows the OpenCode Go subscription wind
 
 The Observability tab shows the read-only status of [OpenTelemetry Tracing](./opentelemetry.md) for this instance: whether tracing is enabled, the OTLP endpoint, service name, sampler ratio, and which spans are emitted. Tracing is configured through `HEYM_OTEL_*` environment variables on the backend, so this tab does not edit anything. When tracing is disabled, the tab lists the environment variables needed to turn it on. Secrets such as OTLP auth headers are never shown here. See [Environment Variables](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md) for the full configuration reference.
 
+## SSO Tab
+
+Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_EMAILS`. This tab connects Heym to an external OpenID Connect provider so people sign in with the accounts they already have. Enter an issuer URL and client credentials, copy the read-only redirect URI into your provider, and run **Test connection** before enabling it. Password sign-in can be switched off from here once the test passes. See [Single Sign-On](./sso.md) for the full setup.
+
 ## What Is Not in This Dialog
 
 | Feature | Where to Find It |
@@ -108,4 +112,5 @@ The Observability tab shows the read-only status of [OpenTelemetry Tracing](./op
 - [MCP Tab](../tabs/mcp-tab.md) – MCP server API key and workflow tool exposure
 - [Credentials Tab](../tabs/credentials-tab.md) – API keys for AI nodes and integrations
 - [Security](./security.md) – Session management, rate limiting, credential encryption
+- [Single Sign-On](./sso.md) – Connect an external OpenID Connect provider
 - [OpenTelemetry Tracing](./opentelemetry.md) – Distributed tracing for workflow and node executions

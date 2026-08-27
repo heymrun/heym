@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  History,
   LoaderCircle,
   MousePointerClick,
   Play,
@@ -40,6 +41,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   goToWorkflow: [id: string, event: MouseEvent];
   run: [id: string];
+  openHistory: [id: string];
   openStep: [nodeId: string];
 }>();
 
@@ -306,12 +308,25 @@ onUnmounted(() => {
           </div>
 
           <div class="flex h-full flex-col rounded-xl border border-border/60 bg-muted/25 px-4 pb-2.5 pt-3.5">
-            <div class="mb-2.5 flex items-center gap-2 text-xs font-semibold">
-              <CheckCircle2
-                class="h-3.5 w-3.5"
-                :class="lastRunSucceeded ? 'text-emerald-500' : 'text-muted-foreground'"
-              />
-              Last Run Details
+            <div class="mb-2.5 flex items-center justify-between gap-2 text-xs font-semibold">
+              <div class="flex items-center gap-2">
+                <CheckCircle2
+                  class="h-3.5 w-3.5"
+                  :class="lastRunSucceeded ? 'text-emerald-500' : 'text-muted-foreground'"
+                />
+                Last Run Details
+              </div>
+              <!-- Negative margin keeps the 28px control from growing the 16px header row. -->
+              <button
+                type="button"
+                class="-my-1.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                title="Execution history"
+                aria-label="Execution history"
+                data-testid="workflow-preview-history"
+                @click="emit('openHistory', summary.id)"
+              >
+                <History class="h-3.5 w-3.5" />
+              </button>
             </div>
             <div class="flex flex-1 flex-col justify-start">
               <p

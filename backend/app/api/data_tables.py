@@ -40,6 +40,7 @@ from app.models.schemas import (
     DataTableTeamShareResponse,
     DataTableUpdate,
 )
+from app.services.audit_log import audit
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -485,6 +486,14 @@ async def create_data_table(
     await db.flush()
     await db.refresh(table)
 
+    audit(
+        action="data_table.create",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table.id,
+        target_name=table.name,
+        columns=len(columns_json),
+    )
     return DataTableResponse(
         id=table.id,
         name=table.name,
@@ -562,6 +571,14 @@ async def update_data_table(
     await db.refresh(table)
     count = await _row_count(table.id, db)
 
+    audit(
+        action="data_table.update",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table.id,
+        target_name=table.name,
+        columns_changed=data.columns is not None,
+    )
     return DataTableResponse(
         id=table.id,
         name=table.name,
@@ -586,6 +603,13 @@ async def delete_data_table(
     table = result.scalar_one_or_none()
     if table is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    audit(
+        action="data_table.delete",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table.id,
+        target_name=table.name,
+    )
     await db.delete(table)
 
 
@@ -639,6 +663,16 @@ async def clone_data_table(
     await db.flush()
     await db.refresh(new_table)
 
+    audit(
+        action="data_table.clone",
+        actor=current_user,
+        target_type="data_table",
+        target_id=new_table.id,
+        target_name=new_table.name,
+        source_id=source.id,
+        source_name=source.name,
+        rows_copied=row_count,
+    )
     return DataTableResponse(
         id=new_table.id,
         name=new_table.name,
@@ -717,6 +751,14 @@ async def create_row(
     await db.flush()
     await db.refresh(row)
 
+    audit(
+        action="data_table.row_create",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        row_id=row.id,
+    )
     return DataTableRowResponse(
         id=row.id,
         table_id=row.table_id,
@@ -761,6 +803,15 @@ async def update_row(
     await db.flush()
     await db.refresh(row)
 
+    audit(
+        action="data_table.row_update",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        row_id=row.id,
+        fields=",".join(sorted(row_data.data)) or None,
+    )
     return DataTableRowResponse(
         id=row.id,
         table_id=row.table_id,
@@ -779,13 +830,21 @@ async def delete_row(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await _get_data_table_with_access(table_id, current_user.id, db, require_write=True)
+    table = await _get_data_table_with_access(table_id, current_user.id, db, require_write=True)
     result = await db.execute(
         select(DataTableRow).where(DataTableRow.id == row_id, DataTableRow.table_id == table_id)
     )
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Row not found")
+    audit(
+        action="data_table.row_delete",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        row_id=row_id,
+    )
     await db.delete(row)
 
 
@@ -796,7 +855,14 @@ async def clear_rows(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete all rows from a data table."""
-    await _get_data_table_with_access(table_id, current_user.id, db, require_write=True)
+    table = await _get_data_table_with_access(table_id, current_user.id, db, require_write=True)
+    audit(
+        action="data_table.rows_clear",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+    )
     await db.execute(sa_delete(DataTableRow).where(DataTableRow.table_id == table_id))
 
 
@@ -830,6 +896,16 @@ async def bulk_create_rows(
         await db.flush()
         imported += 1
 
+    audit(
+        action="data_table.rows_bulk_create",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        imported=imported,
+        rejected=len(errors),
+        total=len(rows),
+    )
     return DataTableImportResponse(imported=imported, errors=errors, total=len(rows))
 
 
@@ -881,6 +957,17 @@ async def import_csv(
         await db.flush()
         imported += 1
 
+    audit(
+        action="data_table.import_csv",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        file_name=file.filename,
+        imported=imported,
+        rejected=len(errors),
+        total=total,
+    )
     return DataTableImportResponse(imported=imported, errors=errors, total=total)
 
 
@@ -909,6 +996,14 @@ async def export_csv(
 
     output.seek(0)
     filename = f"{table.name}.csv".replace(" ", "_")
+    audit(
+        action="data_table.export_csv",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        target_name=table.name,
+        rows=len(rows),
+    )
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -997,6 +1092,15 @@ async def create_share(
     await db.flush()
     await db.refresh(share)
 
+    audit(
+        action="data_table.share_add",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        grantee_id=target_user.id,
+        grantee_email=target_user.email,
+        permission=share.permission,
+    )
     return DataTableShareResponse(
         id=share.id,
         user_id=target_user.id,
@@ -1028,6 +1132,13 @@ async def delete_share(
     share = share_result.scalar_one_or_none()
     if share is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    audit(
+        action="data_table.share_remove",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -1111,6 +1222,15 @@ async def create_team_share(
     await db.flush()
     await db.refresh(share)
     await db.commit()
+    audit(
+        action="data_table.team_share_add",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        team_id=team.id,
+        team_name=team.name,
+        permission=share.permission,
+    )
     return DataTableTeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -1141,6 +1261,13 @@ async def delete_team_share(
     share = share_result.scalar_one_or_none()
     if share is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team share not found")
+    audit(
+        action="data_table.team_share_remove",
+        actor=current_user,
+        target_type="data_table",
+        target_id=table_id,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()
 

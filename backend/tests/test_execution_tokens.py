@@ -75,7 +75,9 @@ class ExecutionTokenEndpointTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(id=uuid.uuid4())
 
     def _workflow(self, owner_id: uuid.UUID | None = None) -> SimpleNamespace:
-        return SimpleNamespace(id=uuid.uuid4(), owner_id=owner_id or uuid.uuid4())
+        return SimpleNamespace(
+            id=uuid.uuid4(), owner_id=owner_id or uuid.uuid4(), name="Nightly sync"
+        )
 
     async def test_create_inserts_row_and_returns_token(self) -> None:
         user = self._user()
@@ -175,7 +177,7 @@ class ExecutionTokenEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_revoke_sets_revoked_true(self) -> None:
         user = self._user()
-        token_row = SimpleNamespace(id=uuid.uuid4(), revoked=False)
+        token_row = SimpleNamespace(id=uuid.uuid4(), jti=uuid.uuid4(), revoked=False)
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_ScalarResult(token_row))
         db.commit = AsyncMock()

@@ -38,6 +38,7 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
 )
+from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.codex_usage_service import fetch_codex_usage
 from app.services.embedding import (
     EMBEDDING_DIMENSIONS,
@@ -866,6 +867,14 @@ async def create_credential(
     masked = get_masked_value(credential.type, credential_data.config)
     header_key = get_header_key(credential.type, credential_data.config)
 
+    audit(
+        action="credential.create",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential.id,
+        target_name=credential.name,
+        credential_type=credential.type.value,
+    )
     return CredentialResponse(
         id=credential.id,
         name=credential.name,
@@ -1250,6 +1259,13 @@ async def get_credential(
         credential = team_result.scalar_one_or_none()
 
     if credential is None:
+        audit(
+            action="credential.detail_view",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="credential",
+            target_id=credential_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
@@ -1259,6 +1275,14 @@ async def get_credential(
     masked = get_masked_value(credential.type, config)
     header_key = get_header_key(credential.type, config)
 
+    audit(
+        action="credential.detail_view",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential.id,
+        target_name=credential.name,
+        owned=credential.owner_id == current_user.id,
+    )
     return CredentialResponse(
         id=credential.id,
         name=credential.name,
@@ -1331,6 +1355,14 @@ async def update_credential(
     masked = get_masked_value(credential.type, config)
     header_key = get_header_key(credential.type, config)
 
+    audit(
+        action="credential.update",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential.id,
+        target_name=credential.name,
+        config_changed=credential_data.config is not None,
+    )
     return CredentialResponse(
         id=credential.id,
         name=credential.name,
@@ -1357,11 +1389,26 @@ async def delete_credential(
     credential = result.scalar_one_or_none()
 
     if credential is None:
+        audit(
+            action="credential.delete",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="credential",
+            target_id=credential_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
 
+    audit(
+        action="credential.delete",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential.id,
+        target_name=credential.name,
+        credential_type=credential.type.value,
+    )
     await db.delete(credential)
 
 
@@ -1960,6 +2007,15 @@ async def create_credential_share(
     await db.flush()
     await db.refresh(share)
 
+    audit(
+        action="credential.share_add",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential_id,
+        target_name=credential.name,
+        grantee_id=target_user.id,
+        grantee_email=target_user.email,
+    )
     return CredentialShareResponse(
         id=share.id,
         user_id=target_user.id,
@@ -2003,6 +2059,14 @@ async def delete_credential_share(
             detail="Share not found",
         )
 
+    audit(
+        action="credential.share_remove",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential_id,
+        target_name=credential.name,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -2089,6 +2153,15 @@ async def create_credential_team_share(
     await db.flush()
     await db.refresh(share)
     await db.commit()
+    audit(
+        action="credential.team_share_add",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential_id,
+        target_name=credential.name,
+        team_id=team.id,
+        team_name=team.name,
+    )
     return TeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -2127,5 +2200,13 @@ async def delete_credential_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team share not found",
         )
+    audit(
+        action="credential.team_share_remove",
+        actor=current_user,
+        target_type="credential",
+        target_id=credential_id,
+        target_name=credential.name,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()

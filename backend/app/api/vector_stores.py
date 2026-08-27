@@ -37,6 +37,7 @@ from app.models.schemas import (
     VectorStoreUpdate,
     VectorStoreUploadResponse,
 )
+from app.services.audit_log import audit
 from app.services.encryption import decrypt_config
 from app.services.file_processor import create_file_processor
 from app.services.upload_limits import read_upload_file_limited
@@ -336,6 +337,14 @@ async def create_vector_store(
     await db.flush()
     await db.refresh(store)
 
+    audit(
+        action="vector_store.create",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+        collection=store.collection_name,
+    )
     return VectorStoreResponse(
         id=store.id,
         name=store.name,
@@ -415,6 +424,14 @@ async def update_vector_store(
     await db.flush()
     await db.refresh(store)
 
+    audit(
+        action="vector_store.update",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+    )
+
     stats = await _get_store_stats(store, db)
 
     return VectorStoreResponse(
@@ -465,6 +482,14 @@ async def delete_vector_store(
         except Exception:
             pass
 
+    audit(
+        action="vector_store.delete",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+        collection_dropped=delete_collection,
+    )
     await db.delete(store)
 
 
@@ -515,6 +540,16 @@ async def clone_vector_store(
     db.add(new_store)
     await db.flush()
     await db.refresh(new_store)
+
+    audit(
+        action="vector_store.clone",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=new_store.id,
+        target_name=new_store.name,
+        source_id=store.id,
+        source_name=store.name,
+    )
 
     stats = await _get_store_stats(new_store, db)
 
@@ -625,6 +660,17 @@ async def upload_file_to_vector_store(
             detail=f"Failed to insert vectors: {e!s}",
         )
 
+    audit(
+        action="vector_store.upload",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+        file_name=filename,
+        file_size=file_size,
+        points_inserted=len(point_ids),
+        replaced_duplicates=override_duplicates,
+    )
     return VectorStoreUploadResponse(
         chunks_processed=len(chunks),
         points_inserted=len(point_ids),
@@ -728,6 +774,15 @@ async def create_vector_store_share(
     await db.flush()
     await db.refresh(share)
 
+    audit(
+        action="vector_store.share_add",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=vector_store_id,
+        target_name=store.name,
+        grantee_id=target_user.id,
+        grantee_email=target_user.email,
+    )
     return VectorStoreShareResponse(
         id=share.id,
         user_id=target_user.id,
@@ -775,6 +830,14 @@ async def delete_vector_store_share(
             detail="Share not found",
         )
 
+    audit(
+        action="vector_store.share_remove",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=vector_store_id,
+        target_name=store.name,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -863,6 +926,15 @@ async def create_vector_store_team_share(
     await db.flush()
     await db.refresh(share)
     await db.commit()
+    audit(
+        action="vector_store.team_share_add",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=vector_store_id,
+        target_name=store.name,
+        team_id=team.id,
+        team_name=team.name,
+    )
     return TeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -905,6 +977,14 @@ async def delete_vector_store_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team share not found",
         )
+    audit(
+        action="vector_store.team_share_remove",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=vector_store_id,
+        target_name=store.name,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -990,6 +1070,14 @@ async def delete_items_by_source(
 
     config = decrypt_config(credential.encrypted_config)
     service = get_vector_store_service_from_config(config, credential.type)
+    audit(
+        action="vector_store.items_delete_by_source",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+        source=source,
+    )
     service.delete_by_source(store.collection_name, source)
 
 
@@ -1027,6 +1115,14 @@ async def delete_item(
 
     config = decrypt_config(credential.encrypted_config)
     service = get_vector_store_service_from_config(config, credential.type)
+    audit(
+        action="vector_store.item_delete",
+        actor=current_user,
+        target_type="vector_store",
+        target_id=store.id,
+        target_name=store.name,
+        point_id=point_id,
+    )
     service.delete_point(store.collection_name, point_id)
 
 

@@ -13,6 +13,48 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.09",
+    publishedAt: new Date("2026-08-26T00:00:00Z"),
+    headline: "Sign in with your own identity provider",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["oidc-sso"],
+    },
+    sections: [
+      {
+        id: "oidc-sso",
+        title: "Sign in with your identity provider",
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Heym can now authenticate people against any **OpenID Connect** provider. An instance administrator pastes an issuer URL under **Settings → SSO**, and Heym reads the authorization, token, and key endpoints from the provider's own discovery document. No provider is hardcoded, so Keycloak, Okta, Entra ID, Auth0 and Google all connect the same way.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "People who have never signed in get an account on first sign-in, optionally limited to your own email domains. Password sign-in stays available beside SSO, and can be switched off once a connection test has passed - accounts listed in `HEYM_ADMIN_EMAILS` keep password access so a misconfigured provider can never lock you out.",
+          },
+        ],
+        tour: {
+          description:
+            "Configure single sign-on against any OIDC provider from the settings panel. Paste an issuer URL, copy the redirect URI into your provider, and test the connection before you turn it on.",
+          useCases: [
+            "Let your team sign in with the accounts they already have",
+            "Restrict new accounts to your own email domains",
+            "Turn off password sign-in once SSO is verified",
+          ],
+          tourVisual: "sso-login",
+          docTarget: { categoryId: "reference", slug: "sso", title: "Single Sign-On" },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.08",
     publishedAt: new Date("2026-08-18T00:00:00Z"),
     headline:

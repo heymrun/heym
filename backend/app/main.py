@@ -52,6 +52,8 @@ from app.api import (
     schedules,
     skill_builder,
     slack,
+    sso_admin,
+    sso_auth,
     teams,
     telegram,
     templates,
@@ -308,6 +310,8 @@ app.add_middleware(HeymIdentityMiddleware)
 
 app.include_router(oauth.router, tags=["OAuth"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(sso_auth.router, prefix="/api/auth/sso", tags=["SSO"])
+app.include_router(sso_admin.router, prefix="/api/admin/sso", tags=["SSO Admin"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Memory"])
 app.include_router(playwright.router, prefix="/api/playwright", tags=["Playwright"])

@@ -230,6 +230,19 @@ const toastMessage = ref("");
 const toastVisible = ref(false);
 const toastType = ref<"error" | "success">("error");
 
+function closeExecutionHistory(): void {
+  historyOpen.value = false;
+  historyWorkflowId.value = undefined;
+  historyInitialStatus.value = undefined;
+}
+
+function openExecutionHistory(workflowId?: string, status?: string): void {
+  historyWorkflowId.value = workflowId;
+  historyInitialStatus.value = status;
+  historyOpen.value = true;
+  pushOverlayState();
+}
+
 const showFolderDialog = ref(false);
 const newFolderName = ref("");
 const newFolderDescription = ref("");
@@ -716,7 +729,7 @@ onMounted(async () => {
   removeOverlayDismiss = onDismissOverlays(() => {
     showCreateDialog.value = false;
     showEditDialog.value = false;
-    historyOpen.value = false;
+    closeExecutionHistory();
     showFolderDialog.value = false;
     showRenameFolderDialog.value = false;
     showContextMenu.value = false;
@@ -1654,7 +1667,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
             variant="ghost"
             size="sm"
             class="gap-2 min-h-[44px] min-w-[44px] sm:min-w-auto text-foreground"
-            @click="historyOpen = true; pushOverlayState()"
+            @click="openExecutionHistory()"
           >
             <History class="w-4 h-4" />
             <span class="hidden sm:inline">History</span>
@@ -2110,6 +2123,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   :running="isSelectedWorkflowRunning"
                   @go-to-workflow="openWorkflowFromPreview"
                   @run="runWorkflowInQuickDrawer"
+                  @open-history="openExecutionHistory"
                   @open-step="openSelectedWorkflowFromStep"
                 />
               </aside>
@@ -2145,7 +2159,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
           <AnalyticsDashboard
             v-else-if="activeTab === 'analytics'"
-            @open-error-history="(wfId) => { historyWorkflowId = wfId; historyInitialStatus = 'error'; historyOpen = true; pushOverlayState(); }"
+            @open-error-history="(wfId) => openExecutionHistory(wfId, 'error')"
           />
 
           <DashboardsPanel v-else-if="activeTab === 'dashboard'" />
@@ -2415,7 +2429,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         :open="historyOpen"
         :workflow-id="historyWorkflowId"
         :initial-status="historyInitialStatus"
-        @close="historyOpen = false; historyWorkflowId = undefined; historyInitialStatus = undefined"
+        @close="closeExecutionHistory"
       />
 
       <WorkflowCommandPalette
@@ -2482,6 +2496,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 :running="isSelectedWorkflowRunning"
                 @go-to-workflow="openWorkflowFromPreview"
                 @run="runWorkflowInQuickDrawer"
+                @open-history="openExecutionHistory"
                 @open-step="openSelectedWorkflowFromStep"
               />
             </div>

@@ -25,6 +25,11 @@ from app.db.models import OAuthAccessToken, OAuthAuthorizationCode
 from app.services.oauth_tokens import hash_oauth_token
 
 
+def _sso_settings_row() -> SimpleNamespace:
+    """An instance with SSO switched off, so password sign-in stays open."""
+    return SimpleNamespace(enabled=False, issuer="", client_id="", password_login_disabled=False)
+
+
 def _pkce_challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
@@ -152,6 +157,8 @@ class OAuthEndpointFlowTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 _query_result(client),
                 _query_result(user),
+                # The consent form now consults the SSO settings before accepting a password.
+                _query_result(_sso_settings_row()),
             ]
         )
 

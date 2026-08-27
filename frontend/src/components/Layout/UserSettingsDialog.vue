@@ -23,6 +23,7 @@ import {
   setPluginEnabled,
   uninstallPlugin,
 } from "@/services/plugins";
+import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
 import { useAuthStore } from "@/stores/auth";
 
 import AiDefaultsTab from "@/components/Layout/aiDefaults/AiDefaultsTab.vue";
@@ -30,7 +31,14 @@ import { clearPluginIconCache } from "@/components/Panels/PluginIcon.vue";
 
 import type { PluginSummary } from "@/types/workflow";
 
-type SettingsTab = "profile" | "security" | "voice" | "ai-defaults" | "observability" | "plugins";
+type SettingsTab =
+  | "profile"
+  | "security"
+  | "voice"
+  | "ai-defaults"
+  | "observability"
+  | "plugins"
+  | "sso";
 
 const props = defineProps<{
   open: boolean;
@@ -431,6 +439,15 @@ async function handleChangePassword(): Promise<void> {
             @click="activeTab = 'plugins'"
           >
             Plugins
+          </button>
+          <button
+            v-if="authStore.user?.is_admin"
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'sso' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'sso'"
+          >
+            SSO
           </button>
         </div>
       </div>
@@ -843,6 +860,10 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
             Close
           </Button>
         </div>
+      </div>
+
+      <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
+        <SsoSettingsTab />
       </div>
     </div>
   </Dialog>

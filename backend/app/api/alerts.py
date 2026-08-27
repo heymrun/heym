@@ -47,6 +47,7 @@ from app.services.alert_access import (
 from app.services.alerts.context import AlertEvaluationContext, AlertObservation
 from app.services.alerts.evaluator import observe
 from app.services.alerts.registry import get_alert_handler
+from app.services.audit_log import audit
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 
 router = APIRouter()
@@ -283,6 +284,17 @@ async def create_alert(
     await db.commit()
     await db.refresh(alert)
 
+    audit(
+        action="alert.create",
+        actor=current_user,
+        target_type="alert",
+        target_id=alert.id,
+        target_name=alert.name,
+        alert_type=alert.alert_type,
+        scope=alert.scope,
+        enabled=alert.enabled,
+    )
+
     names = await _workflow_names(db, [alert.workflow_id, alert.notify_workflow_id])
     return _to_response(
         alert,
@@ -360,6 +372,14 @@ async def acknowledge_alert_event(
     event.acknowledged_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(event)
+    audit(
+        action="alert.event_acknowledge",
+        actor=current_user,
+        target_type="alert_event",
+        target_id=event.id,
+        target_name=row[1],
+        alert_id=event.alert_id,
+    )
     return _event_to_response(event, row[1], row[2])
 
 
@@ -604,6 +624,16 @@ async def update_alert(
     await db.commit()
     await db.refresh(alert)
 
+    audit(
+        action="alert.update",
+        actor=current_user,
+        target_type="alert",
+        target_id=alert.id,
+        target_name=alert.name,
+        fields=",".join(sorted(changes)) or None,
+        enabled=alert.enabled,
+    )
+
     names = await _workflow_names(db, [alert.workflow_id, alert.notify_workflow_id])
     return _to_response(
         alert,
@@ -624,6 +654,14 @@ async def delete_alert(
     alert = await get_owned_alert(db, alert_id, current_user.id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
+    audit(
+        action="alert.delete",
+        actor=current_user,
+        target_type="alert",
+        target_id=alert.id,
+        target_name=alert.name,
+        alert_type=alert.alert_type,
+    )
     await db.delete(alert)
     await db.commit()
 
@@ -737,6 +775,15 @@ async def create_alert_share(
         db.add(share)
         await db.commit()
         await db.refresh(share)
+        audit(
+            action="alert.share_add",
+            actor=current_user,
+            target_type="alert",
+            target_id=alert_id,
+            target_name=alert.name,
+            grantee_id=target.id,
+            grantee_email=target.email,
+        )
 
     return AlertShareEntry(id=share.id, user_id=share.user_id, user_email=target.email)
 
@@ -756,6 +803,14 @@ async def delete_alert_share(
     )
     share = result.scalar_one_or_none()
     if share is not None:
+        audit(
+            action="alert.share_remove",
+            actor=current_user,
+            target_type="alert",
+            target_id=alert_id,
+            target_name=alert.name,
+            grantee_id=user_id,
+        )
         await db.delete(share)
         await db.commit()
 
@@ -807,6 +862,15 @@ async def create_alert_team_share(
         db.add(share)
         await db.commit()
         await db.refresh(share)
+        audit(
+            action="alert.team_share_add",
+            actor=current_user,
+            target_type="alert",
+            target_id=alert_id,
+            target_name=alert.name,
+            team_id=team.id,
+            team_name=team.name,
+        )
 
     return AlertTeamShareEntry(id=share.id, team_id=share.team_id, team_name=team.name)
 
@@ -828,6 +892,14 @@ async def delete_alert_team_share(
     )
     share = result.scalar_one_or_none()
     if share is not None:
+        audit(
+            action="alert.team_share_remove",
+            actor=current_user,
+            target_type="alert",
+            target_id=alert_id,
+            target_name=alert.name,
+            team_id=team_id,
+        )
         await db.delete(share)
         await db.commit()
 

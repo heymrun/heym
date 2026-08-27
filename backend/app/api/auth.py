@@ -17,6 +17,7 @@ from app.models.schemas import (
     UserResponse,
     UserUpdate,
 )
+from app.services.audit_log import OUTCOME_DENIED, OUTCOME_FAILURE, audit
 from app.services.auth import (
     create_access_token,
     create_refresh_token,
@@ -29,6 +30,7 @@ from app.services.auth import (
 )
 from app.services.auth_rate_limiter import login_limiter, register_limiter
 from app.services.credential_access import get_accessible_credential
+from app.services.sso_settings import get_sso_settings, password_login_blocked
 
 router = APIRouter()
 
@@ -108,15 +110,42 @@ async def register(
         )
 
     if not settings.allow_register:
+        audit(
+            action="auth.register",
+            outcome=OUTCOME_DENIED,
+            actor_email=user_data.email,
+            reason="registration_disabled",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Registration is disabled",
+        )
+
+    # Registration mints a password, so it is a password surface too. Leaving it open would
+    # make "disable password sign-in" bypassable by anyone who can reach /register.
+    sso_row = await get_sso_settings(db)
+    if password_login_blocked(sso_row, user_data.email):
+        audit(
+            action="auth.register",
+            outcome=OUTCOME_DENIED,
+            actor_email=user_data.email,
+            reason="password_login_disabled",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password sign-in is disabled on this instance. Use SSO.",
         )
 
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
+        audit(
+            action="auth.register",
+            outcome=OUTCOME_FAILURE,
+            actor_email=user_data.email,
+            reason="email_already_registered",
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
@@ -136,6 +165,7 @@ async def register(
     await store_refresh_token(db, refresh_token, user.id)
     _set_auth_cookies(response, access_token, refresh_token)
 
+    audit(action="auth.register", actor=user)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -155,10 +185,29 @@ async def login(
             headers={"Retry-After": str(retry_after)},
         )
 
+    sso_row = await get_sso_settings(db)
+    if password_login_blocked(sso_row, user_data.email):
+        audit(
+            action="auth.login",
+            outcome=OUTCOME_DENIED,
+            actor_email=user_data.email,
+            reason="password_login_disabled",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password sign-in is disabled on this instance. Use SSO.",
+        )
+
     result = await db.execute(select(User).where(User.email == user_data.email))
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(user_data.password, user.hashed_password):
+        audit(
+            action="auth.login",
+            outcome=OUTCOME_FAILURE,
+            actor_email=user_data.email,
+            reason="unknown_email" if user is None else "bad_password",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -169,6 +218,7 @@ async def login(
     await store_refresh_token(db, refresh_token, user.id)
     _set_auth_cookies(response, access_token, refresh_token)
 
+    audit(action="auth.login", actor=user)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -209,12 +259,19 @@ async def refresh_tokens(
 
     rotated = await rotate_refresh_token(db, token_data.refresh_token, new_refresh_token, user.id)
     if not rotated:
+        audit(
+            action="auth.token_refresh",
+            outcome=OUTCOME_DENIED,
+            actor=user,
+            reason="refresh_token_replayed_or_revoked",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token already used or revoked",
         )
 
     _set_auth_cookies(response, new_access_token, new_refresh_token)
+    audit(action="auth.token_refresh", actor=user)
     return TokenResponse(access_token=new_access_token, refresh_token=new_refresh_token)
 
 
@@ -226,9 +283,11 @@ async def logout(
 ) -> None:
     """Clear auth cookies and revoke the refresh token in the database."""
     raw_refresh = request.cookies.get("refresh_token", "")
+    actor_id = verify_refresh_token(raw_refresh) if raw_refresh else None
     if raw_refresh:
         await revoke_refresh_token(db, raw_refresh)
     _clear_auth_cookies(response)
+    audit(action="auth.logout", actor_id=actor_id)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -289,6 +348,12 @@ async def change_password(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     if not verify_password(password_data.current_password, current_user.hashed_password):
+        audit(
+            action="auth.password_change",
+            outcome=OUTCOME_FAILURE,
+            actor=current_user,
+            reason="current_password_incorrect",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect",
@@ -296,3 +361,4 @@ async def change_password(
 
     current_user.hashed_password = hash_password(password_data.new_password)
     await db.flush()
+    audit(action="auth.password_change", actor=current_user)

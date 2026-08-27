@@ -34,6 +34,7 @@ from app.models.schemas import (
     TeamSharedEntityItem,
     TeamUpdate,
 )
+from app.services.audit_log import OUTCOME_DENIED, audit
 
 router = APIRouter(tags=["teams"])
 
@@ -75,6 +76,14 @@ async def create_team(
     await _ensure_team_member(db, team, current_user.id)
     await db.commit()
     await db.refresh(team)
+
+    audit(
+        action="team.create",
+        actor=current_user,
+        target_type="team",
+        target_id=team.id,
+        target_name=team.name,
+    )
 
     members_result = await db.execute(
         select(TeamMember, User)
@@ -349,6 +358,14 @@ async def update_team(
     await db.commit()
     await db.refresh(team)
 
+    audit(
+        action="team.update",
+        actor=current_user,
+        target_type="team",
+        target_id=team.id,
+        target_name=team.name,
+    )
+
     count_result = await db.execute(
         select(func.count(TeamMember.id)).where(TeamMember.team_id == team.id)
     )
@@ -380,8 +397,24 @@ async def delete_team(
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
     if team.creator_id != current_user.id:
+        audit(
+            action="team.delete",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="team",
+            target_id=team.id,
+            target_name=team.name,
+            reason="not_creator",
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator can delete")
 
+    audit(
+        action="team.delete",
+        actor=current_user,
+        target_type="team",
+        target_id=team.id,
+        target_name=team.name,
+    )
     await db.delete(team)
     await db.commit()
 
@@ -421,6 +454,15 @@ async def add_team_member(
         )
         db.add(member)
         await db.flush()
+        audit(
+            action="team.member_add",
+            actor=current_user,
+            target_type="team",
+            target_id=team.id,
+            target_name=team.name,
+            member_id=user.id,
+            member_email=user.email,
+        )
 
     await db.commit()
     return await get_team(team.id, db, current_user)
@@ -454,6 +496,14 @@ async def remove_team_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
+    audit(
+        action="team.member_remove",
+        actor=current_user,
+        target_type="team",
+        target_id=team.id,
+        target_name=team.name,
+        member_id=user_id,
+    )
     await db.delete(member)
     await db.commit()
     return await get_team(team.id, db, current_user)

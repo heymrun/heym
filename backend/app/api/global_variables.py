@@ -27,6 +27,7 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
 )
+from app.services.audit_log import audit
 
 router = APIRouter()
 
@@ -192,6 +193,14 @@ async def create_global_variable(
     await db.flush()
     await db.refresh(variable)
 
+    audit(
+        action="variable.create",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable.id,
+        target_name=variable.name,
+        value_type=variable.value_type,
+    )
     return GlobalVariableResponse(
         id=variable.id,
         name=variable.name,
@@ -353,6 +362,14 @@ async def update_global_variable(
     await db.flush()
     await db.refresh(variable)
 
+    audit(
+        action="variable.update",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable.id,
+        target_name=variable.name,
+        value_changed=data.value is not None,
+    )
     return GlobalVariableResponse(
         id=variable.id,
         name=variable.name,
@@ -381,6 +398,13 @@ async def delete_global_variable(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Variable not found",
         )
+    audit(
+        action="variable.delete",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable.id,
+        target_name=variable.name,
+    )
     await db.delete(variable)
     await db.flush()
 
@@ -398,6 +422,13 @@ async def bulk_delete_global_variables(
         )
     )
     variables = result.scalars().all()
+    audit(
+        action="variable.bulk_delete",
+        actor=current_user,
+        target_type="variable",
+        count=len(variables),
+        requested=len(body.ids),
+    )
     for v in variables:
         await db.delete(v)
     await db.flush()
@@ -498,6 +529,15 @@ async def create_global_variable_share(
     await db.flush()
     await db.refresh(share)
 
+    audit(
+        action="variable.share_add",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable_id,
+        grantee_id=target_user.id,
+        grantee_email=target_user.email,
+    )
+
     return GlobalVariableShareResponse(
         id=share.id,
         user_id=target_user.id,
@@ -540,6 +580,14 @@ async def delete_global_variable_share(
             detail="Share not found",
         )
 
+    audit(
+        action="variable.share_remove",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable_id,
+        target_name=variable.name,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -628,6 +676,14 @@ async def create_global_variable_team_share(
     await db.flush()
     await db.refresh(share)
     await db.commit()
+    audit(
+        action="variable.team_share_add",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable_id,
+        team_id=team.id,
+        team_name=team.name,
+    )
     return TeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -667,5 +723,13 @@ async def delete_global_variable_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team share not found",
         )
+    audit(
+        action="variable.team_share_remove",
+        actor=current_user,
+        target_type="variable",
+        target_id=variable_id,
+        target_name=variable.name,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()

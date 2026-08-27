@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Build, visualize, and run intelligent AI workflows without writing code.</strong><br/>
-  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support
+  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support · OIDC SSO login
 </p>
 
 <p align="center">
@@ -190,6 +190,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Guardrails** — Content filtering, NSFW protection, and multilingual safety checks on LLM and Agent nodes
 - **Built-In RAG** — Insert documents and run semantic search against managed vector stores (Qdrant or built-in Postgres/pgvector) in two nodes
 - **MCP Support** — Connect Agent nodes to any MCP server as a client; expose your workflows as an MCP server for Claude, Cursor, and other clients
+- **OIDC SSO Login**: Let teams sign in through Keycloak, Okta, Entra ID, Auth0, Google, or any OpenID Connect provider
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
 - **Live Execution Canvas** — Open any running production execution from History or a Kanban card and watch the existing run continue node by node on the animated canvas with incremental Debug logs
@@ -631,7 +632,7 @@ Input ──→ HTTP ──→ Output
 | **State Management** | Pinia |
 | **Backend** | Python 3.11+ + FastAPI + UV |
 | **Database** | PG 16 + SQLAlchemy 2.0 (async) |
-| **Auth** | JWT (access + refresh) + bcrypt |
+| **Auth** | JWT (access + refresh), bcrypt, optional OpenID Connect SSO login |
 
 ---
 
@@ -780,7 +781,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.96" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.97" />
 </a>
 
 </div>

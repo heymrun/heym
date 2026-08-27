@@ -274,6 +274,24 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
 
         return WorkflowExecutor.__new__(WorkflowExecutor)
 
+    def _execute(self, executor, node_data: dict):
+        from app.services.node_execution.base import NodeExecutionContext
+        from app.services.node_execution.nodes import clickhouse_node
+
+        return clickhouse_node.execute(
+            NodeExecutionContext(
+                executor=executor,
+                node_id="node-1",
+                inputs={},
+                allow_branch_skip=False,
+                start_time=0,
+                node={"id": "node-1", "type": "clickhouse", "data": node_data},
+                node_type="clickhouse",
+                node_data=node_data,
+                node_label="clickhouseNode",
+            )
+        )
+
     def test_find_dispatch(self) -> None:
         from app.services.workflow_executor import WorkflowExecutor
 
@@ -305,7 +323,7 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
                 return_value=fake_service,
             ),
         ):
-            output = executor._run_clickhouse_node(node_data, {}, "node-1")
+            output = self._execute(executor, node_data)
         fake_service.find.assert_called_once()
         self.assertTrue(output["success"])
 
@@ -339,7 +357,7 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
                 return_value=fake_service,
             ),
         ):
-            output = executor._run_clickhouse_node(node_data, {}, "node-1")
+            output = self._execute(executor, node_data)
         fake_service.insert.assert_called_once_with("events", [{"name": "Alice"}])
         self.assertTrue(output["success"])
 
@@ -369,7 +387,7 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
             ),
         ):
             with self.assertRaises(ValueError):
-                executor._run_clickhouse_node(node_data, {}, "node-1")
+                self._execute(executor, node_data)
 
 
 class TestClickHousePool(unittest.TestCase):

@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     docker_logs_allowed_emails: str = ""
     plugins_enabled: bool = Field(default=False, validation_alias="HEYM_PLUGINS_ENABLED")
     plugin_admin_emails: str = Field(default="", validation_alias="HEYM_PLUGIN_ADMIN_EMAILS")
+    # Instance administrators. Comma-separated emails. These accounts configure SSO and
+    # may always sign in with a password, which is the break-glass path when SSO is
+    # misconfigured. An empty value grants nobody.
+    admin_emails: str = Field(default="", validation_alias="HEYM_ADMIN_EMAILS")
     plugins_dir: str = Field(default="data/plugins", validation_alias="HEYM_PLUGINS_DIR")
     # Custom Playwright code runs arbitrary Python in the backend process. It is OFF by
     # default; an operator must opt in explicitly. Step-based Playwright nodes are unaffected.

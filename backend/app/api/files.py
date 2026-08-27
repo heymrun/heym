@@ -26,6 +26,7 @@ from app.models.schemas import (
     FileTeamSharingResponse,
     GeneratedFileResponse,
 )
+from app.services.audit_log import audit
 from app.services.file_storage import (
     build_download_url,
     create_access_token,
@@ -282,6 +283,13 @@ async def delete_file_endpoint(
     row = await _get_owned_file(db, file_id, user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    audit(
+        action="drive.delete",
+        actor=user,
+        target_type="file",
+        target_id=row.id,
+        target_name=row.filename,
+    )
     await delete_file(db, row)
     await db.commit()
 
@@ -295,6 +303,7 @@ async def delete_all_files_endpoint(
 
     query = select(GeneratedFile).where(GeneratedFile.owner_id == user.id)
     rows = (await db.execute(query)).scalars().all()
+    audit(action="drive.delete_all", actor=user, target_type="file", count=len(rows))
     for row in rows:
         await delete_file(db, row)
     await db.commit()
@@ -317,6 +326,13 @@ async def bulk_delete_files(
         await delete_file(db, row)
         succeeded.append(file_id)
     await db.commit()
+    audit(
+        action="drive.bulk_delete",
+        actor=user,
+        target_type="file",
+        deleted=len(succeeded),
+        failed=len(failed),
+    )
     return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
 
 
@@ -346,6 +362,16 @@ async def upload_file(
     if share_with_my_teams:
         await _set_file_team_sharing(db, file_id=row.id, owner_id=user.id, enabled=True)
     await db.commit()
+    audit(
+        action="drive.upload",
+        actor=user,
+        target_type="file",
+        target_id=row.id,
+        target_name=row.filename,
+        file_size=len(file_bytes),
+        mime=row.mime_type,
+        team_shared=share_with_my_teams,
+    )
     await _refresh_file_response_relations(db, row)
     return _file_to_response(row, base_url)
 
@@ -368,6 +394,15 @@ async def update_file_team_sharing(
         enabled=payload.enabled,
     )
     await db.commit()
+    audit(
+        action="drive.team_sharing_update",
+        actor=user,
+        target_type="file",
+        target_id=file_id,
+        target_name=row.filename,
+        enabled=payload.enabled,
+        shared_team_count=shared_team_count,
+    )
     return FileTeamSharingResponse(
         enabled=shared_team_count > 0,
         shared_team_count=shared_team_count,
@@ -396,6 +431,14 @@ async def bulk_update_file_team_sharing(
         )
         succeeded.append(file_id)
     await db.commit()
+    audit(
+        action="drive.bulk_team_sharing_update",
+        actor=user,
+        target_type="file",
+        enabled=payload.enabled,
+        updated=len(succeeded),
+        failed=len(failed),
+    )
     return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
 
 
@@ -421,6 +464,17 @@ async def create_share(
         max_downloads=payload.max_downloads,
     )
     await db.commit()
+    audit(
+        action="drive.share_create",
+        actor=user,
+        target_type="file",
+        target_id=file_id,
+        target_name=row.filename,
+        share_id=token.id,
+        expires_hours=payload.expires_hours,
+        max_downloads=payload.max_downloads,
+        password_protected=payload.basic_auth_password is not None,
+    )
     return _token_to_response(token, base_url)
 
 
@@ -543,6 +597,14 @@ async def revoke_share(
     if not token:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share token not found")
 
+    audit(
+        action="drive.share_revoke",
+        actor=user,
+        target_type="file",
+        target_id=file_id,
+        target_name=row.filename,
+        share_id=token_id,
+    )
     await db.delete(token)
     await db.commit()
 
@@ -564,6 +626,14 @@ async def download_authenticated_file(
             status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage"
         )
 
+    audit(
+        action="drive.download",
+        actor=user,
+        target_type="file",
+        target_id=file_row.id,
+        target_name=file_row.filename,
+        owned=file_row.owner_id == user.id,
+    )
     return FileResponse(
         path=str(disk_path),
         media_type=file_row.mime_type,

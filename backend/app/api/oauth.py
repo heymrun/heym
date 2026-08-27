@@ -19,6 +19,7 @@ from app.db.session import get_db
 from app.services.auth import verify_password
 from app.services.auth_rate_limiter import oauth_register_limiter
 from app.services.oauth_tokens import hash_oauth_token
+from app.services.sso_settings import get_sso_settings, password_login_blocked
 
 router = APIRouter()
 
@@ -540,7 +541,13 @@ async def authorize_post(
     user_result = await db.execute(select(User).where(User.email == email))
     user = user_result.scalar_one_or_none()
 
-    if user is None or not verify_password(password, user.hashed_password):
+    # The same gate as /api/auth/login. Closing only that one would make the setting a lie.
+    sso_row = await get_sso_settings(db)
+    if (
+        password_login_blocked(sso_row, email)
+        or user is None
+        or not verify_password(password, user.hashed_password)
+    ):
         new_csrf = _generate_csrf_token(client_id)
         return HTMLResponse(
             _render_consent_page(

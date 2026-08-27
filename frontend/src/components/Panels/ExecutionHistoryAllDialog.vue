@@ -88,6 +88,11 @@ const isCancellingId = ref<string | null>(null);
 const loadingMore = ref(false);
 const listRef = ref<HTMLDivElement | null>(null);
 
+const scopedActiveExecutions = computed<ActiveExecutionItem[]>(() => {
+  if (!props.workflowId) return activeExecutions.value;
+  return activeExecutions.value.filter((entry) => entry.workflow_id === props.workflowId);
+});
+
 const selectedEntry = computed<AllExecutionHistoryEntry | null>(() => {
   if (!selectedId.value) return null;
   return entryDetailsCache.value.get(selectedId.value) ?? null;
@@ -791,7 +796,7 @@ function bringToCanvas(): void {
 <template>
   <Dialog
     :open="open"
-    title="All Execution History"
+    title="Execution History"
     size="4xl"
     :close-on-escape="!searchActive || !searchQuery"
     @close="emit('close')"
@@ -899,7 +904,7 @@ function bringToCanvas(): void {
       </div>
 
       <div
-        v-else-if="totalCount === 0 && activeExecutions.length === 0 && !hasActiveFilters && !isRefreshing"
+        v-else-if="totalCount === 0 && scopedActiveExecutions.length === 0 && !hasActiveFilters && !isRefreshing"
         class="text-sm text-muted-foreground text-center py-8"
       >
         No executions yet.
@@ -912,11 +917,11 @@ function bringToCanvas(): void {
       >
         <!-- Running executions -->
         <div
-          v-if="activeExecutions.length > 0"
+          v-if="scopedActiveExecutions.length > 0"
           class="space-y-1"
         >
           <div
-            v-for="active in activeExecutions"
+            v-for="active in scopedActiveExecutions"
             :key="active.execution_id"
             class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 p-2.5 rounded-md border border-blue-500/30 bg-blue-500/10"
           >

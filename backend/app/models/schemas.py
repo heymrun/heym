@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator
 
 from app.config import settings
+from app.services.instance_admin import is_admin_email
 
 
 def _validate_password_strength(value: str) -> str:
@@ -67,6 +68,12 @@ class UserResponse(BaseModel):
     preferred_credential_id: uuid.UUID | None = None
     preferred_model: str | None = None
     created_at: datetime
+
+    @computed_field
+    @property
+    def is_admin(self) -> bool:
+        """Whether this account administers the instance. Derived, never stored."""
+        return is_admin_email(self.email)
 
     class Config:
         from_attributes = True
@@ -1809,3 +1816,79 @@ class AnalysisNoteResponse(BaseModel):
 class AnalysisNoteSaveRequest(BaseModel):
     content: str
     base_revision: int
+
+
+class SsoSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    issuer: str | None = None
+    client_id: str | None = None
+    # Empty string means "leave the stored secret alone", which is what the masked
+    # editor field posts back when the admin does not retype it.
+    client_secret: str | None = None
+    scopes: str | None = None
+    button_label: str | None = None
+    auto_provision_users: bool | None = None
+    allowed_email_domains: str | None = None
+    password_login_disabled: bool | None = None
+
+
+class SsoSettingsResponse(BaseModel):
+    enabled: bool
+    issuer: str
+    client_id: str
+    client_secret_set: bool
+    scopes: str
+    button_label: str
+    auto_provision_users: bool
+    allowed_email_domains: str
+    password_login_disabled: bool
+    last_test_ok: bool
+    last_test_at: datetime | None
+    redirect_uri: str
+    # Whether at least one instance admin could still sign in with a password if the
+    # identity provider became unreachable.
+    break_glass_ready: bool = False
+
+    @classmethod
+    def from_row(
+        cls, row: Any, *, redirect_uri: str, break_glass_ready: bool = False
+    ) -> "SsoSettingsResponse":
+        """Build the admin payload. The client secret is reported, never returned."""
+        return cls(
+            enabled=row.enabled,
+            issuer=row.issuer,
+            client_id=row.client_id,
+            client_secret_set=bool(row.encrypted_client_secret),
+            scopes=row.scopes,
+            button_label=row.button_label,
+            auto_provision_users=row.auto_provision_users,
+            allowed_email_domains=row.allowed_email_domains,
+            password_login_disabled=row.password_login_disabled,
+            last_test_ok=row.last_test_ok,
+            last_test_at=row.last_test_at,
+            redirect_uri=redirect_uri,
+            break_glass_ready=break_glass_ready,
+        )
+
+
+class SsoTestRequest(BaseModel):
+    # Lets an administrator test a connection before saving it. When this differs from the
+    # stored issuer the result is reported but not recorded, because `last_test_ok` licenses
+    # the stored configuration, not a draft one.
+    issuer: str | None = None
+
+
+class SsoTestResponse(BaseModel):
+    ok: bool
+    issuer: str | None = None
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    jwks_uri: str | None = None
+    userinfo_endpoint: str | None = None
+    error: str | None = None
+
+
+class SsoStatusResponse(BaseModel):
+    enabled: bool
+    button_label: str
+    password_login_enabled: bool

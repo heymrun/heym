@@ -58,6 +58,7 @@ from app.models.board_schemas import (
     CommentCreateRequest,
 )
 from app.services import board_run_service
+from app.services.audit_log import audit
 from app.services.credential_access import get_accessible_credential
 from app.services.execution_cancellation import ACTIVE_EXECUTION_STALE_AFTER_SECONDS
 from app.services.file_storage import (
@@ -379,6 +380,13 @@ async def create_board(
         )
     await db.commit()
     await db.refresh(board)
+    audit(
+        action="board.create",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+    )
     cred_name = await _mapper_credential_name(db, board)
     return _board_summary(
         board, column_count=len(DEFAULT_COLUMNS), card_count=0, cred_name=cred_name
@@ -455,6 +463,14 @@ async def update_board(
         board.mapper_credential_id = request.mapper_credential_id
     await db.commit()
     await db.refresh(board)
+    audit(
+        action="board.update",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        fields=",".join(sorted(fields_set)) or None,
+    )
     cred_name = await _mapper_credential_name(db, board)
     return _board_summary(board, column_count=0, card_count=0, cred_name=cred_name)
 
@@ -466,6 +482,13 @@ async def delete_board(
     current_user: User = Depends(get_current_user),
 ) -> None:
     board = await _get_owned_board(db, board_id, current_user)
+    audit(
+        action="board.delete",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+    )
     await db.delete(board)
     await db.commit()
 
@@ -492,6 +515,15 @@ async def create_column(
     db.add(column)
     await db.commit()
     await db.refresh(column)
+    audit(
+        action="board.column_create",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        column_id=column.id,
+        column_name=column.name,
+    )
     return BoardColumnResponse(
         id=column.id,
         board_id=column.board_id,
@@ -548,6 +580,16 @@ async def update_column(
             )
     await db.commit()
     await db.refresh(column)
+    audit(
+        action="board.column_update",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        column_id=column.id,
+        column_name=column.name,
+        fields=",".join(sorted(fields_set)) or None,
+    )
     workflows_by_column = await _column_workflow_responses(db, [column.id])
     return BoardColumnResponse(
         id=column.id,
@@ -592,6 +634,15 @@ async def delete_column(
     )
     for position, item in enumerate(remaining):
         item.position = position
+    audit(
+        action="board.column_delete",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        column_id=column_id,
+        column_name=column.name,
+    )
     await db.commit()
 
 
@@ -605,6 +656,15 @@ async def empty_column(
     """Delete every card in a board column."""
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     column = await _get_board_column(db, board, column_id)
+    audit(
+        action="board.column_empty",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        column_id=column.id,
+        column_name=column.name,
+    )
     await db.execute(delete(BoardCard).where(BoardCard.column_id == column.id))
     await db.commit()
 
@@ -662,6 +722,16 @@ async def create_card(
     )
     await db.commit()
     await db.refresh(card)
+    audit(
+        action="board.card_create",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        card_id=card.id,
+        card_title=card.title,
+        column_id=column.id,
+    )
     return _card_response(card)
 
 
@@ -750,6 +820,15 @@ async def update_card(
         await _reindex_cards(db, card.column_id)
     await db.commit()
     await db.refresh(card)
+    audit(
+        action="board.card_update",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        card_id=card.id,
+        card_title=card.title,
+    )
     return _card_response(card)
 
 
@@ -762,6 +841,15 @@ async def delete_card(
 ) -> None:
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
+    audit(
+        action="board.card_delete",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        card_id=card.id,
+        card_title=card.title,
+    )
     await db.delete(card)
     await db.commit()
 
@@ -883,6 +971,17 @@ async def move_card(
             rerun=False,
             allow_advance=forward,
         )
+    audit(
+        action="board.card_move",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        card_id=card.id,
+        card_title=card.title,
+        from_column=source.name,
+        to_column=target.name,
+    )
     await db.refresh(card)
     return _card_response(card)
 
@@ -927,6 +1026,17 @@ async def run_card_chain(
             status_code=status.HTTP_409_CONFLICT,
             detail="A run is already active or the column has no workflows",
         )
+    audit(
+        action="board.card_run",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        card_id=card.id,
+        card_title=card.title,
+        column_name=column.name,
+        auto_advance=allow_advance,
+    )
     await db.refresh(card)
     return _card_response(card)
 
@@ -1087,6 +1197,16 @@ async def create_board_share(
         share.permission = permission
     await db.commit()
     await db.refresh(share)
+    audit(
+        action="board.share_add",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        grantee_id=target.id,
+        grantee_email=target.email,
+        permission=permission,
+    )
     return BoardShareResponse(
         id=share.id,
         user_id=target.id,
@@ -1112,6 +1232,14 @@ async def delete_board_share(
     ).scalar_one_or_none()
     if share is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    audit(
+        action="board.share_remove",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -1172,6 +1300,16 @@ async def create_board_team_share(
         share.permission = permission
     await db.commit()
     await db.refresh(share)
+    audit(
+        action="board.team_share_add",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        team_id=team.id,
+        team_name=team.name,
+        permission=permission,
+    )
     return BoardTeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -1198,5 +1336,13 @@ async def delete_board_team_share(
     ).scalar_one_or_none()
     if share is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    audit(
+        action="board.team_share_remove",
+        actor=current_user,
+        target_type="board",
+        target_id=board.id,
+        target_name=board.name,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()

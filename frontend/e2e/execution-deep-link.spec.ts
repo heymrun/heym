@@ -108,7 +108,7 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
 
     await page.goto("/evals");
     await page.getByRole("button", { name: "History", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "All Execution History" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Execution History" })).toBeVisible();
     await page.keyboard.press("s");
     const allHistorySearch = page.getByPlaceholder(
       "Search by workflow name, trigger, status...",
@@ -235,7 +235,7 @@ test("opens one running execution live from both history dialogs", async ({ page
 
     await allHistoryPage.getByRole("button", { name: "History", exact: true }).click();
     await expect(
-      allHistoryPage.getByRole("heading", { name: "All Execution History" }),
+      allHistoryPage.getByRole("heading", { name: "Execution History" }),
     ).toBeVisible();
     await allHistoryPage.getByTestId(`open-live-execution-${executionId}`).click();
     await expectExecutionPath(allHistoryPage, workflow.id, executionId);
