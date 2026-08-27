@@ -2338,3 +2338,45 @@ class ClusterInstance(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class WorkflowRunQueue(Base):
+    """A background run waiting for, or claimed by, one instance."""
+
+    __tablename__ = "workflow_run_queue"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    placement: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    credentials_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by_process: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ClusterDispatchState(Base):
+    """A single row holding per-instance assignment counters, locked on assignment."""
+
+    __tablename__ = "cluster_dispatch_state"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="singleton")
+    counters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
