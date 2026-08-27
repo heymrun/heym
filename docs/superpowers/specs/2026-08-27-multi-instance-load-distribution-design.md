@@ -3,8 +3,7 @@
 Date: 2026-08-27
 Status: Awaiting approval
 
-Working notes with the full decision trail, alternatives considered, and the load
-matrices live in `2026-08-27-multi-instance-kapsam-notu.md`.
+Implementation plan: `docs/superpowers/plans/2026-08-27-multi-instance-load-distribution.md`.
 
 ## Goal
 
@@ -85,9 +84,10 @@ same image with its own Docker socket, so `code` and `playwright` — the two mo
 CPU-hungry nodes — are exactly the work worth moving off main.
 
 Placement is computed once per run over the whole graph, recursing through
-`executeWorkflow` nodes and through an agent's `call_sub_workflow` tools. A
-workflow id that is only resolvable at runtime (an expression) makes the run
-MAIN_ONLY. One MAIN_ONLY node anywhere in the reachable graph makes the whole
+`execute` nodes (the Execute Workflow node's registry type) and through an
+agent's `call_sub_workflow` tools. A workflow id that is only resolvable at
+runtime — an expression — makes the run MAIN_ONLY, because its contents cannot
+be inspected. One MAIN_ONLY node anywhere in the reachable graph makes the whole
 run MAIN_ONLY.
 
 ### No silent default
@@ -365,7 +365,7 @@ and downloads to another. No code guard enforces this.
 ## Testing
 
 - `test_cluster_node_placement.py` — every registered node type has a placement
-  entry (build-failing); recursion through `executeWorkflow` and agent
+  entry (build-failing); recursion through `execute` nodes and agent
   sub-workflow tools; a dynamic workflow id degrades to MAIN_ONLY.
 - `test_cluster_dispatch.py` — renormalization across live instances; a MAIN_ONLY
   run spending main's quota; overflow flooring at zero; dead, disabled, and
