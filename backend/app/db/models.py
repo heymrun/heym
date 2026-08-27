@@ -2315,3 +2315,26 @@ class SsoSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ClusterInstance(Base):
+    """One Heym deployment sharing this database. Upserted by all its processes."""
+
+    __tablename__ = "cluster_instances"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="worker")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    schema_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    keys_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    docker_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    db_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
