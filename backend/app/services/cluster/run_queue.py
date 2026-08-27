@@ -210,3 +210,33 @@ async def notify_queue(target_instance_id: str) -> None:
             {"payload": target_instance_id},
         )
         await db.commit()
+
+
+async def read_terminal_result(execution_id: uuid.UUID) -> tuple[str, dict | None, str | None]:
+    """Status, result and error for one queued run, or ("missing", None, None)."""
+    async with async_session_maker() as db:
+        row = (
+            await db.execute(
+                select(
+                    WorkflowRunQueue.status,
+                    WorkflowRunQueue.result,
+                    WorkflowRunQueue.error,
+                ).where(WorkflowRunQueue.execution_id == execution_id)
+            )
+        ).first()
+    if row is None:
+        return "missing", None, None
+    return row[0], row[1], row[2]
+
+
+def is_terminal(status: str) -> bool:
+    return status in {STATUS_DONE, STATUS_FAILED, STATUS_SKIPPED_LATE}
+
+
+async def notify_done(execution_id: uuid.UUID) -> None:
+    async with async_session_maker() as db:
+        await db.execute(
+            text("SELECT pg_notify('heym_run_done', :payload)"),
+            {"payload": str(execution_id)},
+        )
+        await db.commit()
