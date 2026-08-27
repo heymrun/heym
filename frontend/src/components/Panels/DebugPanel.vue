@@ -435,9 +435,10 @@ function toggleTimeline(): void {
   if (isCollapsed.value) {
     // Panel is collapsed: opening the timeline must first expand the panel, so a
     // Timer click from the collapsed header always reveals the timeline area.
+    // Cap the expansion so a small monitor isn't forced to full height.
     isCollapsed.value = false;
     showTimeline.value = true;
-    panelHeight.value = maxHeight;
+    panelHeight.value = Math.min(maxHeight, 400);
     workflowStore.setDebugPanelHeight(panelHeight.value);
     return;
   }
@@ -2838,7 +2839,7 @@ function renderContent(content: string): string {
     </div>
 
     <div
-      v-if="!isCollapsed && !showTimeline"
+      v-show="!isCollapsed && !showTimeline"
       ref="scrollContainer"
       class="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 min-w-0"
     >

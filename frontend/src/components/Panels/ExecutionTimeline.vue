@@ -39,6 +39,9 @@ function emitSelectNode(payload: TimelineSelectPayload, event: MouseEvent): void
 }
 
 function onSpanClick(span: SpanItem, event: MouseEvent): void {
+  // Clicking swaps the rows out for the details panel, so the span unmounts and
+  // mouseleave never fires — clear the hover state or the tooltip stays stuck.
+  hoveredSpan.value = null;
   selectedSpan.value = span;
   detailsOpen.value = true;
   emitSelectNode({ nodeId: span.nodeId, resultListIndex: span.resultListIndex }, event);
@@ -170,6 +173,9 @@ watch(
   { flush: "sync" },
 );
 
+// selectedSpan is a snapshot of a span from the previous rows computation. When
+// rows recomputes (new results arrive, rows hidden/shown), the old object is stale,
+// so re-resolve it by key against the fresh rows — or close if it no longer exists.
 watch(
   rows,
   (nextRows) => {

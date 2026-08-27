@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { Copy, X } from "lucide-vue-next";
 import type { SpanItem } from "@/components/Panels/executionTimeline";
 import { formatTimelineMs } from "@/components/Panels/executionTimeline";
@@ -8,24 +8,26 @@ import JsonTree from "@/components/ui/JsonTree.vue";
 const props = defineProps<{ span: SpanItem }>();
 const emit = defineEmits<{ close: []; openTrace: [event: MouseEvent] }>();
 const traceIdCopied = ref(false);
-const outputText = computed(() => {
-  const value = props.span.output;
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-});
+// Objects/arrays render through JsonTree below; this is only the scalar fallback.
+const outputText = computed(() => String(props.span.output));
+let traceIdCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function copyTraceId(): Promise<void> {
   if (!props.span.traceId) return;
   try {
     await navigator.clipboard.writeText(props.span.traceId);
     traceIdCopied.value = true;
-    window.setTimeout(() => { traceIdCopied.value = false; }, 1500);
+    if (traceIdCopiedTimer !== null) clearTimeout(traceIdCopiedTimer);
+    traceIdCopiedTimer = setTimeout(() => { traceIdCopied.value = false; }, 1500);
   } catch { traceIdCopied.value = false; }
 }
+
+onBeforeUnmount(() => {
+  if (traceIdCopiedTimer !== null) {
+    clearTimeout(traceIdCopiedTimer);
+    traceIdCopiedTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -92,7 +94,7 @@ async function copyTraceId(): Promise<void> {
         Open trace
       </button>
     </div>
-    <div class="max-h-44 overflow-auto border-t border-border/20 px-2 py-2">
+    <div class="flex-1 min-h-0 overflow-auto border-t border-border/20 px-2 py-2">
       <div class="mb-1 text-[10px] font-medium text-muted-foreground">
         Output
       </div><div
