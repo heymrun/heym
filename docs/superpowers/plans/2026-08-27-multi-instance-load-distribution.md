@@ -50,7 +50,7 @@ SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv ru
 
 **Frontend — new:** `src/services/cluster.ts`, `src/types/cluster.ts`, `src/components/Layout/settings/ClusterSettingsTab.vue`, `src/components/Layout/settings/ClusterInstanceRow.vue`, `src/features/release-tour/components/visuals/ClusterInstancesTourVisual.vue`.
 
-**Frontend — modified:** `src/components/Layout/UserSettingsDialog.vue`, `src/components/Panels/ExecutionHistoryDialog.vue`, `src/components/Panels/ExecutionHistoryAllDialog.vue`, `src/features/release-tour/releaseRegistry.ts`, `src/features/release-tour/tourVisuals.ts`.
+**Frontend — modified:** `src/components/Layout/UserSettingsDialog.vue`, `src/components/Panels/ExecutionHistoryDialog.vue`, `src/components/Panels/ExecutionHistoryAllDialog.vue`, `src/services/api.ts`, `src/stores/workflow.ts`, `src/features/release-tour/releaseRegistry.ts`, `src/features/release-tour/tourVisuals.ts`.
 
 Placement lives apart from the queue on purpose: it is pure, it is the thing a new node type must update, and its coverage test must be runnable without a database.
 
@@ -2829,57 +2829,334 @@ git commit -m "feat(cluster): Settings tab for instances and weights"
 
 ---
 
-## Task 11: Instance name in the execution dialogs
+## Task 11: Instance name and instance filter in the execution dialogs
+
+Both history dialogs already filter by trigger source, and they do it
+differently: the canvas dialog sends the filter to the server and refetches
+(`ExecutionHistoryDialog.vue:170`, `:241`, `:357`), while the home dialog
+filters the loaded page in memory (`ExecutionHistoryAllDialog.vue:180-189`).
+Mirror each dialog's own approach. Making the instance filter behave differently
+from the trigger-source filter sitting next to it in the same dialog would be
+worse than either choice on its own.
+
+Both dropdowns build their options from the entries already loaded rather than
+from a separate endpoint. Do the same for instances: an instance that has left
+the cluster still appears while its runs are on screen, and no extra request is
+needed. The option's **value is the instance id** and its **label is the name**,
+because two instances can be renamed to the same label but their ids never
+collide.
 
 **Files:**
+- Modify: `backend/alembic/versions/118_add_execution_instance_attribution.py`
+- Modify: `backend/app/api/workflows.py:3455`
+- Modify: `frontend/src/services/api.ts` (the `getHistory` client)
+- Modify: `frontend/src/stores/workflow.ts:437`, `:472`
 - Modify: `frontend/src/components/Panels/ExecutionHistoryDialog.vue`
 - Modify: `frontend/src/components/Panels/ExecutionHistoryAllDialog.vue`
-- Modify: the execution history TypeScript type (find it with the grep below)
+- Modify: the execution history TypeScript types
+- Test: `backend/tests/test_cluster_history_filter.py`
 
-- [ ] **Step 1: Find the type**
+- [ ] **Step 1: Write the failing test**
+
+```python
+"""The instance filter on the per-workflow history endpoint."""
+
+import unittest
+import uuid
+
+from sqlalchemy import select
+
+from app.db.models import ExecutionHistory
+from app.api.workflows import apply_instance_filter
+
+
+class InstanceFilterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.base = select(ExecutionHistory).where(
+            ExecutionHistory.workflow_id == uuid.uuid4()
+        )
+
+    def test_no_instance_leaves_the_query_untouched(self) -> None:
+        self.assertIs(apply_instance_filter(self.base, None), self.base)
+
+    def test_an_empty_instance_leaves_the_query_untouched(self) -> None:
+        self.assertIs(apply_instance_filter(self.base, "   "), self.base)
+
+    def test_an_instance_id_adds_a_where_clause(self) -> None:
+        filtered = apply_instance_filter(self.base, "worker-a")
+        self.assertIn("executed_by_instance_id", str(filtered))
+
+    def test_the_filter_matches_on_id_not_name(self) -> None:
+        """Names are snapshots and can repeat; ids cannot."""
+        filtered = str(apply_instance_filter(self.base, "worker-a"))
+        self.assertNotIn("executed_by_instance_name", filtered)
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_history_filter.py -v`
+
+Expected: FAIL with `ImportError: cannot import name 'apply_instance_filter'`.
+
+- [ ] **Step 3: Index the column**
+
+The filter runs against `execution_history`, which grows without bound, so it
+needs an index. In `backend/alembic/versions/118_add_execution_instance_attribution.py`,
+add to `upgrade()` after the `add_column` loop:
+
+```python
+    op.create_index(
+        "ix_execution_history_executed_by_instance_id",
+        "execution_history",
+        ["executed_by_instance_id"],
+    )
+```
+
+and to `downgrade()`, before the `drop_column` loop:
+
+```python
+    op.drop_index(
+        "ix_execution_history_executed_by_instance_id", table_name="execution_history"
+    )
+```
+
+Add `index=True` to the `executed_by_instance_id` column on `ExecutionHistory`
+in `backend/app/db/models.py` so the model matches the migration. Leave the
+`ActiveWorkflowExecution` copy unindexed — that table holds only in-flight runs
+and is small.
+
+If migration 118 has already been applied, re-run it:
+
+```bash
+cd backend && uv run alembic downgrade 117_add_workflow_run_queue && uv run alembic upgrade head
+```
+
+- [ ] **Step 4: Add the filter helper and the query parameter**
+
+In `backend/app/api/workflows.py`, beside the other history helpers:
+
+```python
+def apply_instance_filter(query: Select, instance_id: str | None) -> Select:
+    """Narrow a history query to one executing instance.
+
+    Filters on the id rather than the stored name: the name is a snapshot taken
+    when the run finished, so two rows can carry different names for the same
+    instance after a rename, and different instances can share a name.
+    """
+    cleaned = (instance_id or "").strip()
+    if not cleaned:
+        return query
+    return query.where(ExecutionHistory.executed_by_instance_id == cleaned)
+```
+
+Import `Select` from `sqlalchemy.sql` if it is not already imported.
+
+Then extend `get_execution_history` at line 3455:
+
+```python
+    instance_id: str | None = Query(default=None),
+```
+
+and apply it to both the count query and the page query, next to the existing
+`trigger_source` filter at line 3494:
+
+```python
+    total_query = apply_instance_filter(total_query, instance_id)
+    history_query = apply_instance_filter(history_query, instance_id)
+```
+
+Applying it to the count query as well is what keeps pagination honest — a
+filtered list with an unfiltered total shows a "load more" button that loads
+nothing.
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_history_filter.py -v`
+
+Expected: PASS, 4 tests.
+
+- [ ] **Step 6: Format, lint, commit the backend half**
+
+```bash
+cd backend && uv run ruff format . && uv run ruff check .
+git add backend/app/api/workflows.py backend/app/db/models.py backend/alembic/versions/118_add_execution_instance_attribution.py backend/tests/test_cluster_history_filter.py
+git commit -m "feat(cluster): filter workflow history by executing instance"
+```
+
+- [ ] **Step 7: Extend the TypeScript types**
 
 ```bash
 cd frontend && grep -rn "trigger_source" src/types/ | head
 ```
 
-The execution history interface that already carries `trigger_source` is the one to extend.
-
-- [ ] **Step 2: Extend the type**
+Add to every execution-history interface that already carries `trigger_source`
+— both the per-workflow entry and the all-history entry:
 
 ```typescript
   executed_by_instance_id?: string | null;
   executed_by_instance_name?: string | null;
 ```
 
-- [ ] **Step 3: Render the name**
+- [ ] **Step 8: Pass the filter through the API client and the store**
 
-In each dialog, beside the existing trigger-source chip:
+In `frontend/src/services/api.ts`, add an optional `instanceId` argument to
+`getHistory` and send it as the `instance_id` query parameter, following how the
+existing `trigger_source` parameter is sent.
+
+In `frontend/src/stores/workflow.ts`, extend both options objects — line 437 and
+line 472 — so the filter survives pagination:
+
+```typescript
+  async function fetchExecutionHistory(
+    triggerSource?: string,
+    {
+      keepDetails = false,
+      search,
+      instanceId,
+    }: { keepDetails?: boolean; search?: string; instanceId?: string } = {},
+  ): Promise<void> {
+```
+
+```typescript
+  async function fetchMoreExecutionHistory(
+    triggerSource?: string,
+    { search, instanceId }: { search?: string; instanceId?: string } = {},
+  ): Promise<void> {
+```
+
+Pass `instanceId` into both `workflowApi.getHistory(...)` calls. Forgetting the
+second one gives a filtered first page and an unfiltered second page.
+
+- [ ] **Step 9: Add the filter to the canvas dialog**
+
+In `frontend/src/components/Panels/ExecutionHistoryDialog.vue`, beside
+`selectedTriggerSource` at line 60:
+
+```typescript
+const selectedInstanceId = ref<string | undefined>(undefined);
+```
+
+Add the options computed, mirroring `triggerSourceOptions` at line 121 but
+keyed by id and labelled by name:
+
+```typescript
+const instanceOptions = computed<Array<{ value: string | undefined; label: string }>>(() => {
+  const names = new Map<string, string>();
+
+  for (const entry of executionHistoryList.value) {
+    const id = entry.executed_by_instance_id?.trim();
+    if (!id || names.has(id)) continue;
+    // History is newest first, so the first name seen for an id is the latest one.
+    names.set(id, entry.executed_by_instance_name?.trim() || id);
+  }
+
+  const selectedId = selectedInstanceId.value?.trim();
+  if (selectedId && !names.has(selectedId)) {
+    names.set(selectedId, selectedId);
+  }
+
+  return [
+    { value: undefined, label: "All Instances" },
+    ...Array.from(names.entries())
+      .sort(([, left], [, right]) => left.localeCompare(right))
+      .map(([id, name]) => ({ value: id, label: name })),
+  ];
+});
+```
+
+Include it in `hasActiveFilters` at line 146, clear it wherever
+`selectedTriggerSource` is cleared (lines 232 and 321), pass
+`{ instanceId: selectedInstanceId.value }` in the fetch calls at lines 170 and
+357, and add a watcher beside the one at line 241:
+
+```typescript
+watch(selectedInstanceId, async () => {
+  await workflowStore.fetchExecutionHistory(selectedTriggerSource.value, {
+    search: searchQuery.value.trim() || undefined,
+    instanceId: selectedInstanceId.value,
+  });
+});
+```
+
+Render the select beside the trigger-source one at line 668, using the same
+component and the same visibility rule so it stays hidden on a single-instance
+install:
 
 ```vue
-        <span
-          v-if="execution.executed_by_instance_name"
-          :title="execution.executed_by_instance_id ?? ''"
-          class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-        >
-          {{ execution.executed_by_instance_name }}
-        </span>
+        <Select
+          v-if="instanceOptions.length > 1 || selectedInstanceId"
+          v-model="selectedInstanceId"
+          :options="instanceOptions"
+        />
 ```
 
-The `v-if` is what keeps a single-instance install visually unchanged: the fields are null and nothing renders.
+Match the surrounding `Select` usage — copy the props actually used on the
+trigger-source select on line 668, since it may take more than `options`.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 10: Add the filter to the home dialog**
 
-```bash
-cd frontend && bun run lint && bun run typecheck
+In `frontend/src/components/Panels/ExecutionHistoryAllDialog.vue`, add the same
+`selectedInstanceId` ref and the same `instanceOptions` computed, but built over
+`executionHistory.value` rather than `executionHistoryList.value`.
+
+This dialog filters in memory, so extend `filteredExecutionHistory` at line 180
+instead of refetching:
+
+```typescript
+const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() => {
+  let entries = executionHistory.value;
+
+  if (selectedTriggerSource.value) {
+    entries = entries.filter((entry) => entry.trigger_source === selectedTriggerSource.value);
+  }
+
+  if (selectedInstanceId.value) {
+    entries = entries.filter(
+      (entry) => entry.executed_by_instance_id === selectedInstanceId.value,
+    );
+  }
+
+  return entries;
+});
 ```
 
-Expected: PASS.
+Add it to `hasActiveFilters` at line 191 and render the select beside the
+trigger-source one at line 812 with the same visibility rule.
 
-- [ ] **Step 5: Commit**
+Like the trigger-source filter it sits next to, this one applies to the entries
+already loaded, not to the whole table.
+
+- [ ] **Step 11: Render the instance chip in both dialogs**
+
+Beside the existing trigger-source chip (`ExecutionHistoryDialog.vue:859`,
+`ExecutionHistoryAllDialog.vue:1006`):
+
+```vue
+                <span
+                  v-if="entry.executed_by_instance_name"
+                  :title="entry.executed_by_instance_id ?? ''"
+                  class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                >
+                  {{ entry.executed_by_instance_name }}
+                </span>
+```
+
+The `v-if` is what keeps a single-instance install visually unchanged: the
+fields are null, no chip renders, and the select stays hidden.
+
+- [ ] **Step 12: Verify**
 
 ```bash
-git add frontend/src/components/Panels frontend/src/types
-git commit -m "feat(cluster): show the executing instance in run history"
+cd frontend && bun run lint && bun run typecheck && bun run test
+```
+
+Expected: all PASS.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add frontend/src/components/Panels frontend/src/types frontend/src/services/api.ts frontend/src/stores/workflow.ts
+git commit -m "feat(cluster): filter and label run history by executing instance"
 ```
 
 ---
@@ -2917,7 +3194,20 @@ test.describe("Cluster settings", () => {
     await expect(page.getByText(/could only\s+execute on the main instance/)).toBeVisible();
   });
 });
+
+test.describe("Run history instance filter", () => {
+  test("the instance filter is hidden on a single-instance install", async ({ page }) => {
+    await prepareAuthenticatedPage(page);
+    await page.getByRole("button", { name: "History" }).click();
+
+    // No run carries an instance, so neither the chip nor the select renders.
+    await expect(page.getByRole("combobox", { name: /instance/i })).toHaveCount(0);
+  });
+});
 ```
+
+The second spec is the one that protects existing users: it fails if the new
+select ever renders on an install that has no cluster.
 
 Open `frontend/e2e/support.ts` first and match how other specs open the settings dialog — the selectors above assume accessible names that may differ.
 
@@ -3002,8 +3292,11 @@ roles and the four environment variables; that leader election is separate from
 the main role; the placement rule with the MAIN_ONLY table from the design doc;
 how to choose percentages, including that main's percentage is a ceiling and
 that MAIN_ONLY work spends its quota; the 24-hour placement ratio and what a high
-value means; the key-alignment requirement; the egress-IP warning for
-IP-allowlisted APIs; and the constraint that ingress points only at main.
+value means; that both history dialogs name and can filter by the executing
+instance, and that the home dialog's filter applies to the loaded page while the
+canvas dialog's is applied by the server; the key-alignment requirement; the
+egress-IP warning for IP-allowlisted APIs; and the constraint that ingress
+points only at main.
 
 Do not describe how to build a highly available deployment.
 
@@ -3074,7 +3367,7 @@ starts a new entry at the top of `RELEASE_REGISTRY` in
           {
             type: "prose",
             markdown:
-              "Work that touches local files, a coding-agent workspace, or an installed plugin always runs on the main instance, and the settings panel shows how much of your last 24 hours that was. Every run in History now names the instance that executed it.",
+              "Work that touches local files, a coding-agent workspace, or an installed plugin always runs on the main instance, and the settings panel shows how much of your last 24 hours that was. Every run in History now names the instance that executed it, and both history dialogs let you filter down to one instance.",
           },
         ],
         tour: {
@@ -3083,7 +3376,7 @@ starts a new entry at the top of `RELEASE_REGISTRY` in
           useCases: [
             "Keep heavy agent and crawler runs off the machine serving the UI",
             "Take an instance out of rotation for maintenance without stopping work",
-            "See which instance executed any run from its history entry",
+            "See which instance executed any run, and filter history down to one",
           ],
           tourVisual: "cluster-instances",
           docTarget: {

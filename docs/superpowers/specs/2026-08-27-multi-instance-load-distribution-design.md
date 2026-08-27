@@ -335,9 +335,25 @@ behavior. Per-instance enable/disable is the UI control.
 
 ## Execution history attribution
 
-`ExecutionHistoryDialog.vue` and `ExecutionHistoryAllDialog.vue` show the
-executing instance's name, with its id in the tooltip. Nothing renders when the
-value is `NULL`, so a single-instance install sees no change.
+`ExecutionHistoryDialog.vue` (canvas) and `ExecutionHistoryAllDialog.vue` (home)
+show the executing instance's name, with its id in the tooltip, and both gain a
+filter beside the existing trigger-source filter. The filter's value is the
+instance **id** and its label is the **name**: names are snapshots and two
+instances can end up sharing one, while ids never collide.
+
+Options are derived from the entries already loaded, exactly as the
+trigger-source options are, so an instance that has left the cluster still
+appears while its runs are on screen and no extra request is needed.
+
+Each dialog keeps its own filtering mechanism rather than gaining a second,
+differently-behaving one: the canvas dialog sends `instance_id` to
+`GET /api/workflows/{id}/history` and refetches, so the filter survives
+pagination; the home dialog filters the loaded page in memory, the same scope
+its trigger-source filter already has. `execution_history.executed_by_instance_id`
+is indexed for the server-side path.
+
+Nothing renders and no filter appears when the values are `NULL`, so a
+single-instance install sees no change.
 
 ## Security
 
