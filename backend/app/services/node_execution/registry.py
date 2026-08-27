@@ -94,3 +94,8 @@ def execute_node_handler(ctx: NodeExecutionContext) -> object:
     if handler is None:
         return {"passthrough": ctx.inputs}
     return handler(ctx)
+
+
+def handler_module_names() -> tuple[str, ...]:
+    """Every node type that has an execution handler."""
+    return tuple(_HANDLER_MODULES)
