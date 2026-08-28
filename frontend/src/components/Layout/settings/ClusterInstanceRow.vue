@@ -11,7 +11,7 @@ const props = defineProps<{ instance: ClusterInstance }>();
 const emit = defineEmits<{ update: [value: ClusterInstanceUpdate] }>();
 
 const statusLabel = computed<string>(() => {
-  if (!props.instance.compatible) return "Incompatible";
+  if (!props.instance.compatible) return "Miss";
   if (!props.instance.live) return "Off";
   return "Live";
 });

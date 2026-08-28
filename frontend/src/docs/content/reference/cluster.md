@@ -81,7 +81,7 @@ The example compose file sets those and `max_connections = 300`. That takes a tw
 
 ## Requirements the cluster cannot enforce for you
 
-**Every instance must use the same `SECRET_KEY` and `ENCRYPTION_KEY`.** A worker with a different `ENCRYPTION_KEY` cannot decrypt credentials, and every credential-using run would fail with an error naming nothing useful. Heym compares a digest of both keys on each heartbeat, along with the app version and the database revision, and marks a mismatched instance **Incompatible** so it receives no work at all. Load falls back to main until you fix it.
+**Every instance must use the same `SECRET_KEY` and `ENCRYPTION_KEY`.** A worker with a different `ENCRYPTION_KEY` cannot decrypt credentials, and every credential-using run would fail with an error naming nothing useful. Heym compares a digest of both keys on each heartbeat, along with the app version and the database revision, and marks a mismatched instance **Mismatch** so it receives no work at all. Load falls back to main until you fix it.
 
 That also defines the upgrade order. Upgrading main first marks every worker incompatible; work returns to main, and each worker rejoins as it is upgraded. Slower, visible, and reversible.
 
@@ -95,7 +95,7 @@ That also defines the upgrade order. Upgrading main first marks every worker inc
 
 Fill in a `.env` beside it - image tag, database host and credentials, both keys, and an instance id - and start it. Compose refuses to start until every required value is set, rather than coming up with a placeholder that fails later in a way that is hard to read.
 
-The image tag must be the version main runs, and both keys must be copied exactly. A difference in either shows the worker as Incompatible and it receives no work.
+The image tag must be the version main runs, and both keys must be copied exactly. A difference in either shows the worker as Mismatch and it receives no work.
 
 ## Reading the Instances table
 
@@ -103,7 +103,7 @@ The image tag must be the version main runs, and both keys must be copied exactl
 |---|---|
 | Name | Editable label; it is stamped onto every run this instance executes |
 | Role | `main` or `worker`, from the environment |
-| Status | **Live** with a fresh heartbeat, **Offline** after 30 seconds of silence, **Incompatible** when the version, database revision or keys differ from main's |
+| Status | **Live** with a fresh heartbeat, **Offline** after 30 seconds of silence, **Mismatch** when the version, database revision or keys differ from main's |
 | ms | Round trip from that instance to the database, measured by the instance itself |
 | On | Take a worker out of rotation without stopping it — running executions finish, no new ones are assigned. Locked on for the main instance: file, plugin and coding-agent work runs there whatever the toggle says |
 | Weight | Its share of distributable runs |
