@@ -1,0 +1,145 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { RefreshCw } from "lucide-vue-next";
+
+import Button from "@/components/ui/Button.vue";
+import ClusterInstanceRow from "@/components/Layout/settings/ClusterInstanceRow.vue";
+import { getClusterSettings, saveClusterInstances } from "@/services/cluster";
+
+import type { ClusterInstance, ClusterInstanceUpdate, ClusterSettings } from "@/types/cluster";
+
+const config = ref<ClusterSettings | null>(null);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref<string | null>(null);
+
+const enabledTotal = computed<number>(() =>
+  (config.value?.instances ?? [])
+    .filter((instance: ClusterInstance) => instance.enabled)
+    .reduce((sum: number, instance: ClusterInstance) => sum + instance.weight, 0),
+);
+
+const canSave = computed<boolean>(() => enabledTotal.value === 100);
+
+async function load(): Promise<void> {
+  loading.value = true;
+  error.value = null;
+  try {
+    config.value = await getClusterSettings();
+  } catch {
+    error.value = "Failed to load load distribution settings.";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function applyUpdate(instanceId: string, patch: ClusterInstanceUpdate): void {
+  const target = config.value?.instances.find(
+    (instance: ClusterInstance) => instance.id === instanceId,
+  );
+  if (!target) return;
+  target.name = patch.name;
+  target.enabled = patch.enabled;
+  target.weight = patch.weight;
+}
+
+async function handleSave(): Promise<void> {
+  if (!config.value || !canSave.value) return;
+  saving.value = true;
+  error.value = null;
+  try {
+    const updates: Record<string, ClusterInstanceUpdate> = {};
+    for (const instance of config.value.instances) {
+      updates[instance.id] = {
+        name: instance.name,
+        enabled: instance.enabled,
+        weight: instance.weight,
+      };
+    }
+    config.value = await saveClusterInstances(updates);
+  } catch {
+    error.value = "Failed to save load distribution settings.";
+  } finally {
+    saving.value = false;
+  }
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div class="flex items-start justify-between gap-4">
+      <p class="text-sm text-muted-foreground">
+        Share background workflow execution across the instances connected to this database. Work
+        that touches files, coding-agent workspaces or plugins always runs on the main instance.
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="loading"
+        @click="load"
+      >
+        <RefreshCw class="mr-2 h-4 w-4" />
+        Refresh
+      </Button>
+    </div>
+
+    <p
+      v-if="config && !config.cluster_enabled"
+      class="text-sm text-muted-foreground"
+    >
+      Load distribution is off. Set <code>HEYM_CLUSTER_ENABLED=true</code> on the main instance to
+      turn it on.
+    </p>
+
+    <p
+      v-if="config"
+      class="text-sm text-muted-foreground"
+    >
+      Over the last 24 hours, {{ config.placement_ratio.mainOnlyPercent }}% of runs could only
+      execute on the main instance. Percentages cannot move that work.
+    </p>
+
+    <div
+      v-if="config"
+      class="rounded-md border border-border p-3"
+    >
+      <div
+        class="grid grid-cols-12 gap-3 border-b border-border pb-2 text-xs uppercase text-muted-foreground"
+      >
+        <span class="col-span-4">Name</span>
+        <span class="col-span-2">Role</span>
+        <span class="col-span-3">Status</span>
+        <span class="col-span-1">On</span>
+        <span class="col-span-2">Weight</span>
+      </div>
+      <ClusterInstanceRow
+        v-for="instance in config.instances"
+        :key="instance.id"
+        :instance="instance"
+        @update="(patch: ClusterInstanceUpdate) => applyUpdate(instance.id, patch)"
+      />
+    </div>
+
+    <p
+      v-if="config && !canSave"
+      class="text-sm text-destructive"
+    >
+      Enabled weights total {{ enabledTotal }}. They must total 100 before you can save.
+    </p>
+    <p
+      v-if="error"
+      class="text-sm text-destructive"
+    >
+      {{ error }}
+    </p>
+
+    <Button
+      :disabled="!canSave || saving"
+      @click="handleSave"
+    >
+      Save
+    </Button>
+  </div>
+</template>

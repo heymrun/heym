@@ -23,6 +23,7 @@ import {
   setPluginEnabled,
   uninstallPlugin,
 } from "@/services/plugins";
+import ClusterSettingsTab from "@/components/Layout/settings/ClusterSettingsTab.vue";
 import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
 import { useAuthStore } from "@/stores/auth";
 
@@ -38,7 +39,8 @@ type SettingsTab =
   | "ai-defaults"
   | "observability"
   | "plugins"
-  | "sso";
+  | "sso"
+  | "instances";
 
 const props = defineProps<{
   open: boolean;
@@ -448,6 +450,15 @@ async function handleChangePassword(): Promise<void> {
             @click="activeTab = 'sso'"
           >
             SSO
+          </button>
+          <button
+            v-if="authStore.user?.is_admin"
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'instances' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'instances'"
+          >
+            Instances
           </button>
         </div>
       </div>
@@ -860,6 +871,10 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
             Close
           </Button>
         </div>
+      </div>
+
+      <div v-else-if="activeTab === 'instances' && authStore.user?.is_admin">
+        <ClusterSettingsTab />
       </div>
 
       <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
