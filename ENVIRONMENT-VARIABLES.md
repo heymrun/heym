@@ -231,6 +231,36 @@ The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs
 | `HEYM_OTEL_TRACES_SAMPLER_RATIO` | Parent-based head sampling ratio (`0.0`–`1.0`). | `1.0` |
 | `HEYM_OTEL_CAPTURE_NODE_IO` | Attach truncated node input/output to node spans (may contain user data). | `false` |
 
+## Load distribution (multi-instance)
+
+Point a second Heym instance at the same database and it joins as a worker.
+Background runs are shared between the instances by a percentage set under
+**Settings → Instances**. Postgres is the only channel between them: a worker
+needs no open port and no route back to the main instance.
+
+Two rules the cluster cannot enforce for you:
+
+- **`SECRET_KEY` and `ENCRYPTION_KEY` must be identical on every instance.** A
+  worker with a different `ENCRYPTION_KEY` cannot decrypt credentials. Heym
+  compares digests of both keys on each heartbeat and marks a mismatched
+  instance incompatible so it receives no work, rather than letting it fail
+  every credential-using run.
+- **Point ingress at the main instance only.** Round-robining user traffic
+  across instances would send a file upload to one machine and its download to
+  another.
+
+Worker instances also have a different outbound IP than main. Any API that
+allowlists source addresses sees the new one. `sendEmail` runs on main for
+exactly this reason; for the HTTP node, give the cluster one NAT egress address
+or allowlist every instance.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_CLUSTER_ENABLED` | Turn load distribution on. Off means every run executes in-process exactly as before. | `false` |
+| `HEYM_INSTANCE_ROLE` | `main` or `worker`. Main owns file storage, plugins and ingress. | `main` |
+| `HEYM_INSTANCE_NAME` | Display label for this instance; the admin UI can rename it later. | — |
+| `HEYM_INSTANCE_ID` | Stable id shared by all of this instance's processes. Derived from the name when empty. | — |
+
 ## Miscellaneous
 
 | Variable | Description | Default |

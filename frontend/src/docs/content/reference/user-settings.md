@@ -96,6 +96,12 @@ The Observability tab shows the read-only status of [OpenTelemetry Tracing](./op
 
 Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_EMAILS`. This tab connects Heym to an external OpenID Connect provider so people sign in with the accounts they already have. Enter an issuer URL and client credentials, copy the read-only redirect URI into your provider, and run **Test connection** before enabling it. Password sign-in can be switched off from here once the test passes. See [Single Sign-On](./sso.md) for the full setup.
 
+## Instances Tab
+
+Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_EMAILS`. This tab lists the Heym instances connected to this database and sets how background runs are split between them. Each row shows the instance's editable name, its role, whether it is live, its measured latency to the database, an on/off switch, and its weight. Weights are integers that must total 100 across the enabled instances before the panel will save, so the cluster is never left in a half-applied split.
+
+The panel also reports how many of the last 24 hours' runs could only execute on the main instance. When that share is high, the weights below it cannot move that work. See [Load Distribution](./cluster.md) for what stays on main and how to choose the numbers.
+
 ## What Is Not in This Dialog
 
 | Feature | Where to Find It |

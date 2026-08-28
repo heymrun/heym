@@ -13,6 +13,52 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.10",
+    publishedAt: new Date("2026-08-27T00:00:00Z"),
+    headline: "Share the load across more than one instance",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["cluster-load-distribution"],
+    },
+    sections: [
+      {
+        id: "cluster-load-distribution",
+        title: "Split execution across instances",
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Point a second Heym instance at the same database and it joins as a worker. Background runs - cron, webhooks, MCP tool calls, chat triggers - are shared between the instances by a percentage you set under **Settings \u2192 Instances**. The instances never talk to each other: Postgres carries the work, so a worker needs no open port and no route back to the main instance.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Work that touches local files, a coding-agent workspace or an installed plugin always runs on the main instance, and the settings panel shows how much of your last 24 hours that was - so you can tell when percentages cannot help. Every run in History now names the instance that executed it, and both history dialogs let you filter down to one.",
+          },
+        ],
+        tour: {
+          description:
+            "Add worker instances against the same database and split background execution between them by percentage, with each instance's status, latency and version in one table.",
+          useCases: [
+            "Keep heavy agent and crawler runs off the machine serving the UI",
+            "Take an instance out of rotation for maintenance without stopping work",
+            "See which instance executed any run, and filter history down to one",
+          ],
+          tourVisual: "cluster-instances",
+          docTarget: {
+            categoryId: "reference",
+            slug: "cluster",
+            title: "Load Distribution",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.09",
     publishedAt: new Date("2026-08-26T00:00:00Z"),
     headline: "Sign in with your own identity provider",

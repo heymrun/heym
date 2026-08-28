@@ -1,5 +1,6 @@
 import type { Component } from "vue";
 
+import ClusterInstancesTourVisual from "@/features/release-tour/components/visuals/ClusterInstancesTourVisual.vue";
 import CodeNodeTourVisual from "@/features/release-tour/components/visuals/CodeNodeTourVisual.vue";
 import FallbackTourVisual from "@/features/release-tour/components/visuals/FallbackTourVisual.vue";
 import FolderIconsTourVisual from "@/features/release-tour/components/visuals/FolderIconsTourVisual.vue";
@@ -11,6 +12,7 @@ import SpanDetailsInspectorTourVisual from "@/features/release-tour/components/v
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
+  "cluster-instances": ClusterInstancesTourVisual,
   "code-node": CodeNodeTourVisual,
   "folder-icons": FolderIconsTourVisual,
   "html-output-mapper": HtmlOutputMapperTourVisual,

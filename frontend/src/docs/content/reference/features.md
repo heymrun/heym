@@ -643,6 +643,12 @@ Heym authenticates people against any external OpenID Connect provider - Keycloa
 
 See also [Settings](./user-settings.md), [Security](./security.md), and [Audit Logging](./audit.md).
 
+### [Load Distribution](./cluster.md)
+
+Point a second Heym instance at the same database and it joins as a worker. Background runs - cron, webhooks, MCP tool calls, chat triggers - are shared between the instances by a percentage an instance administrator sets under **Settings → Instances**, with each instance's status, database latency and version in one table. The instances never talk to each other: Postgres carries the work, so a worker needs no open port and no route back to the main instance. Work that touches local files, a coding-agent workspace or an installed plugin always runs on the main instance, and the panel reports how much of the last 24 hours that was, so an operator can see when percentages cannot help. Every run in history names the instance that executed it, and both history dialogs can filter by it.
+
+See also [Settings](./user-settings.md), [Traces](../tabs/traces-tab.md), and [Analytics](../tabs/analytics-tab.md).
+
 ### [Third-Party Integrations](./integrations.md)
 
 Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Jira for the [Jira node](../nodes/jira-node.md), Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.

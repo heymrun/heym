@@ -191,6 +191,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Built-In RAG** — Insert documents and run semantic search against managed vector stores (Qdrant or built-in Postgres/pgvector) in two nodes
 - **MCP Support** — Connect Agent nodes to any MCP server as a client; expose your workflows as an MCP server for Claude, Cursor, and other clients
 - **OIDC SSO Login**: Let teams sign in through Keycloak, Okta, Entra ID, Auth0, Google, or any OpenID Connect provider
+- **Load Distribution** — Run two or more Heym instances against one database and split background workflow execution between them by percentage, configured from **Settings → Instances**. Postgres is the only channel between the instances; no broker, and no direct connection between them, is required
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
 - **Live Execution Canvas** — Open any running production execution from History or a Kanban card and watch the existing run continue node by node on the animated canvas with incremental Debug logs
@@ -378,6 +379,8 @@ Heym workflows are not limited to the editor. Run them from the canvas, call the
 ## Production Readiness
 
 Heym is built to be inspected and operated in your own infrastructure. Docker deployment, JWT auth, team controls, shared credentials, `SECURITY.md`, execution history, logs, LLM traces, OpenTelemetry export, evals, and per-model USD cost tracking all live in the core self-hostable product.
+
+When one machine is not enough, a second instance pointed at the same database joins as a worker and takes a configurable share of background runs — see [Load Distribution](frontend/src/docs/content/reference/cluster.md) for the roles, the environment variables, and the two deployment rules the cluster cannot enforce for you.
 
 Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck, frontend Vitest unit tests, production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
 
