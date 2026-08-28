@@ -210,6 +210,7 @@ docker pull ghcr.io/heymrun/heym:latest
 docker run --rm \
   --env-file .env \
   -p 4017:4017 \
+  --shm-size 2g \
   -e FILE_STORAGE_DIR=/app/data/files \
   -e HEYM_PLUGINS_DIR=/app/data/plugins \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -229,6 +230,8 @@ docker run --rm \
 > **OpenCode Go runner.** The OpenCode Go node uses the same image as a hardened sibling runner (`--entrypoint opencode`) sharing `heym-opencode-workspaces`. Keep that volume mount if you want OpenCode workflows in the direct image setup; the runner does not receive the Docker socket or the GitHub token.
 
 > **Skill sandbox.** Python skills on the Agent node run in a hardened sibling container that shares the `heym-codex-workspaces` volume, so keep that volume mount for skills too — not just Codex. Each run gets an isolated per-run subpath, and the sibling receives neither the Docker socket nor backend secrets. This needs **Docker Engine 25.0+**; on older engines, or without the volume, `HEYM_PYTHON_TOOL_SANDBOX=auto` fails closed — set `HEYM_PYTHON_TOOL_SANDBOX=subprocess` only for trusted single-user setups. See [Security](../reference/security.md#skill-sandbox).
+
+> **`--shm-size 2g` is required for Playwright.** Docker gives a container 64 MB of `/dev/shm` and Chromium crashes its renderer under that. Step-based Playwright nodes run Chromium as a subprocess inside this container, so the limit is this container's; custom `playwrightCode` runs in a sibling container that sets its own. `docker-compose.yml` already declares `shm_size: "2gb"`, so `run.sh` and `deploy.sh` are unaffected — only a plain `docker run` needs the flag.
 
 > **Playwright Run Code.** Custom Playwright Python needs `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true` and the Docker socket mount above. The release image sets `HEYM_PLAYWRIGHT_SANDBOX_IMAGE` / `HEYM_PLAYWRIGHT_SANDBOX_PYTHON` for the GHCR layout (`/app/backend/.venv`). Compose `./deploy.sh` defaults the sandbox image to `heym-backend:local`. Keep `--no-sandbox` in Chromium launch args inside sandbox containers.
 
@@ -309,6 +312,28 @@ Your original data directory is untouched by this procedure, so it remains your 
 
 ---
 
+## Running More Than One Instance
+
+Everything above deploys a single Heym instance. When one machine is no longer
+enough, point a second instance at the same PostgreSQL database and it joins as
+a worker: background runs — cron, webhooks, MCP tool calls, chat triggers — are
+then shared between the instances by a percentage you set under
+**Settings → Instances**.
+
+The instances never talk to each other. Postgres carries the work, so a worker
+needs no open port and no route back to the main instance, and no message broker
+is involved. Work that touches local disk — Drive files, coding-agent
+workspaces, installed plugins — always runs on the main instance, so nothing has
+to be shared over a filesystem.
+
+Two rules the cluster cannot enforce for you: every instance must use the same
+`SECRET_KEY` and `ENCRYPTION_KEY`, and ingress must point at the main instance
+only. Both are explained, along with the placement rules and how to choose the
+percentages, in [Load Distribution](../reference/cluster.md).
+
+> This is load distribution, not high availability. The main instance remains a
+> single point of failure for ingress, file storage and the editor.
+
 ## Common Workflows
 
 **First-time setup:**
@@ -348,3 +373,4 @@ git pull
 - [Quick Start](./quick-start.md) – Build your first workflow
 - [Environment Variables](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md) – Full configuration reference
 - [Security](../reference/security.md) – JWT, encryption, and CORS settings
+- [Load Distribution](../reference/cluster.md) – Run several instances against one database

@@ -342,6 +342,7 @@ ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 sed -i.bak "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|; s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env && rm -f .env.bak
 docker run --env-file .env \
   -p 4017:4017 \
+  --shm-size 2g \
   -e FILE_STORAGE_DIR=/app/data/files \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
@@ -356,6 +357,7 @@ docker run \
   -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:6543/heym \
   -e FILE_STORAGE_DIR=/app/data/files \
   -p 4017:4017 \
+  --shm-size 2g \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
@@ -367,6 +369,7 @@ Open the editor on port `4017`. See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIA
 
 Three things about the `docker run` setup are worth knowing:
 
+- **`--shm-size 2g` keeps Playwright working.** Docker gives a container 64 MB of `/dev/shm` by default, and Chromium crashes its renderer under that. Step-based Playwright nodes run Chromium as a subprocess inside this container, so the limit is this container's. (Custom `playwrightCode` runs in a sibling container that sets its own.) `docker-compose.yml` already sets it; a plain `docker run` does not.
 - **`FILE_STORAGE_DIR=/app/data/files` is load-bearing.** The release image runs the backend from `/app/backend`, so the default relative path would land inside the container instead of your mount and Drive uploads would vanish on restart. `./run.sh` and `./deploy.sh` are unaffected.
 - **Keep `heym-codex-workspaces` mounted.** Python skills and the Codex node run there in a hardened sibling container; without it, skill execution fails closed. Per-run isolation needs Docker Engine 25.0+.
 - **Keep `heym-opencode-workspaces` mounted** if you use the OpenCode Go node. The sibling runner shares that volume; without it the wrapper fails closed.

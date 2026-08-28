@@ -125,6 +125,26 @@ When placement depends on configuration rather than node type — `agent` with a
 skill tool attached — express it as a predicate over the node's own data in the
 same module. Never branch on node type in the scheduler.
 
+### Audit logging stays on the main instance
+`audit()` writes a line to stdout and nothing to the database — see
+`backend/app/services/audit_log.py`. In a cluster that line lands on the stdout
+of whichever instance ran the code, so where it is called from decides whether
+the audit trail stays in one place.
+
+Call `audit()` from `backend/app/api/` routers only. Ingress points at the main
+instance, so a router call keeps the whole trail on one machine, where a log
+shipper can collect it. All 128 call sites are routers today; keep it that way.
+
+Never call `audit()` from `workflow_executor.py`, a node handler, or anything
+else reachable from the run queue. Those run on whichever instance claimed the
+run, and the trail would split across machines without any error to notice.
+
+When an audited action genuinely originates during execution, record it in the
+run's own history instead. `execution_history` already carries
+`executed_by_instance_id` and `executed_by_instance_name`, so it answers "who
+did what, where" from one query. `file_intake_service.write_audit` is the
+pattern: a helper that writes to a table, called from a router.
+
 ### PropertiesPanel modularity
 `frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
 

@@ -84,3 +84,10 @@ Nothing about this appears on a single-instance install: the fields are empty, n
 **If main goes down**, cron keeps firing from a worker and distributable runs keep executing. Runs that need main queue up and wait, and drain when it returns — but only within the misfire grace window (`HEYM_CRON_MISFIRE_GRACE_SECONDS`, 600 seconds by default). Anything older is closed as skipped, with the reason recorded, rather than replaying hours of backlog at once.
 
 The UI, the API, MCP and the editor are unavailable while main is down, because ingress points there.
+
+## Related
+
+- [Running & Deployment](../getting-started/running-and-deployment.md) – Deploy a single instance first; the environment variables and key setup live there
+- [Settings](./user-settings.md) – The Instances tab, and who can see it
+- [Traces](../tabs/traces-tab.md) – Compare real run durations between instances before changing the split
+- [Security](./security.md) – Why every instance must share `SECRET_KEY` and `ENCRYPTION_KEY`
