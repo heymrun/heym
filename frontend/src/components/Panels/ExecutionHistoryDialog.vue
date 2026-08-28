@@ -58,6 +58,7 @@ const expandedNodes = ref<Set<string>>(new Set());
 const activeExecutions = ref<ActiveExecutionItem[]>([]);
 const isCancellingId = ref<string | null>(null);
 const selectedTriggerSource = ref<string | undefined>(undefined);
+const selectedInstanceId = ref<string | undefined>(undefined);
 const searchActive = ref(false);
 const searchQuery = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -141,9 +142,38 @@ const triggerSourceOptions = computed<Array<{ value: string | undefined; label: 
   ];
 });
 
+/** Options are derived from the loaded entries, so an instance that has left the
+ * cluster still appears while its runs are on screen. The value is the id and
+ * the label is the name: names are snapshots and two instances can share one. */
+const instanceOptions = computed<Array<{ value: string | undefined; label: string }>>(() => {
+  const names = new Map<string, string>();
+
+  for (const entry of executionHistoryList.value) {
+    const id = entry.executed_by_instance_id?.trim();
+    if (!id || names.has(id)) continue;
+    // History is newest first, so the first name seen for an id is the latest.
+    names.set(id, entry.executed_by_instance_name?.trim() || id);
+  }
+
+  const selectedId = selectedInstanceId.value?.trim();
+  if (selectedId && !names.has(selectedId)) {
+    names.set(selectedId, selectedId);
+  }
+
+  return [
+    { value: undefined, label: "All Instances" },
+    ...Array.from(names.entries())
+      .sort(([, left], [, right]) => left.localeCompare(right))
+      .map(([id, name]) => ({ value: id, label: name })),
+  ];
+});
+
 const filteredExecutionHistoryList = computed(() => executionHistoryList.value);
 const hasActiveFilters = computed<boolean>(
-  () => Boolean(searchQuery.value.trim()) || Boolean(selectedTriggerSource.value),
+  () =>
+    Boolean(searchQuery.value.trim()) ||
+    Boolean(selectedTriggerSource.value) ||
+    Boolean(selectedInstanceId.value),
 );
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -170,6 +200,7 @@ async function loadHistory(keepDetails = false): Promise<void> {
     workflowStore.fetchExecutionHistory(selectedTriggerSource.value, {
       keepDetails,
       search: getSearchValue(),
+      instanceId: selectedInstanceId.value,
     }),
     workflowApi.getActiveExecutions(),
   ]);
@@ -230,6 +261,7 @@ watch(
     } else {
       document.removeEventListener("keydown", handleKeyDown);
       selectedTriggerSource.value = undefined;
+      selectedInstanceId.value = undefined;
       searchActive.value = false;
       searchQuery.value = "";
       cancelScheduledSearchReload();
@@ -239,6 +271,12 @@ watch(
 );
 
 watch(selectedTriggerSource, async () => {
+  if (!props.open) return;
+  cancelScheduledSearchReload();
+  await reloadHistoryWithFilters();
+});
+
+watch(selectedInstanceId, async () => {
   if (!props.open) return;
   cancelScheduledSearchReload();
   await reloadHistoryWithFilters();
@@ -319,6 +357,7 @@ function clearHistory(): void {
   void workflowStore.clearExecutionHistory();
   selectedId.value = null;
   selectedTriggerSource.value = undefined;
+  selectedInstanceId.value = undefined;
   searchActive.value = false;
   searchQuery.value = "";
   cancelScheduledSearchReload();
@@ -356,6 +395,7 @@ function onListScroll(event: Event): void {
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 60) {
     void workflowStore.fetchMoreExecutionHistory(selectedTriggerSource.value, {
       search: getSearchValue(),
+      instanceId: selectedInstanceId.value,
     });
   }
 }
@@ -673,6 +713,15 @@ function bringToCanvas(): void {
           clearable
           clear-aria-label="Clear tag filter"
         />
+        <Select
+          v-if="instanceOptions.length > 1 || selectedInstanceId"
+          v-model="selectedInstanceId"
+          :options="instanceOptions"
+          placeholder=""
+          class="w-full sm:w-56"
+          clearable
+          clear-aria-label="Clear instance filter"
+        />
       </div>
       <div class="flex items-center gap-0.5 sm:gap-1 shrink-0 flex-wrap justify-end">
         <AutoRefreshControl
@@ -860,6 +909,13 @@ function bringToCanvas(): void {
                 class="px-1 py-0 text-[9px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase"
               >
                 {{ entry.trigger_source }}
+              </span>
+              <span
+                v-if="entry.executed_by_instance_name"
+                :title="entry.executed_by_instance_id ?? ''"
+                class="px-1 py-0 text-[9px] font-semibold rounded bg-sky-500/20 text-sky-400"
+              >
+                {{ entry.executed_by_instance_name }}
               </span>
               <span
                 v-if="entry.recovered"

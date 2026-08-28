@@ -1076,6 +1076,8 @@ export interface ExecutionHistoryEntry {
   result: ExecutionResult | null;
   trigger_source?: string | null;
   recovered?: boolean;
+  executed_by_instance_id?: string | null;
+  executed_by_instance_name?: string | null;
 }
 
 export interface AllExecutionHistoryEntry {
@@ -1091,6 +1093,8 @@ export interface AllExecutionHistoryEntry {
   started_at: string;
   trigger_source?: string | null;
   recovered?: boolean;
+  executed_by_instance_id?: string | null;
+  executed_by_instance_name?: string | null;
   highlight?: HighlightPayload | null;
 }
 
@@ -1105,6 +1109,8 @@ export interface AllExecutionHistoryEntryLight {
   execution_time_ms: number;
   trigger_source?: string | null;
   recovered?: boolean;
+  executed_by_instance_id?: string | null;
+  executed_by_instance_name?: string | null;
 }
 
 export interface HistoryListResponse<T = AllExecutionHistoryEntryLight> {

@@ -73,6 +73,7 @@ const capturedMinHeight = ref<number | null>(null);
 const searchActive = ref(false);
 const searchQuery = ref("");
 const selectedTriggerSource = ref<string | undefined>(undefined);
+const selectedInstanceId = ref<string | undefined>(undefined);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_MS = 500;
@@ -178,18 +179,55 @@ function closeImageLightbox(): void {
   imageLightboxSrcs.value = [];
 }
 
-const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() => {
-  if (!selectedTriggerSource.value) {
-    return executionHistory.value;
+/** Options are derived from the loaded entries, so an instance that has left the
+ * cluster still appears while its runs are on screen. The value is the id and
+ * the label is the name: names are snapshots and two instances can share one. */
+const instanceOptions = computed<Array<{ value: string | undefined; label: string }>>(() => {
+  const names = new Map<string, string>();
+
+  for (const entry of executionHistory.value) {
+    const id = entry.executed_by_instance_id?.trim();
+    if (!id || names.has(id)) continue;
+    // History is newest first, so the first name seen for an id is the latest.
+    names.set(id, entry.executed_by_instance_name?.trim() || id);
   }
 
-  return executionHistory.value.filter(
-    (entry) => entry.trigger_source === selectedTriggerSource.value,
-  );
+  const selectedId = selectedInstanceId.value?.trim();
+  if (selectedId && !names.has(selectedId)) {
+    names.set(selectedId, selectedId);
+  }
+
+  return [
+    { value: undefined, label: "All Instances" },
+    ...Array.from(names.entries())
+      .sort(([, left], [, right]) => left.localeCompare(right))
+      .map(([id, name]) => ({ value: id, label: name })),
+  ];
+});
+
+// Like the trigger-source filter beside it, this applies to the entries already
+// loaded rather than to the whole table.
+const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() => {
+  let entries = executionHistory.value;
+
+  if (selectedTriggerSource.value) {
+    entries = entries.filter((entry) => entry.trigger_source === selectedTriggerSource.value);
+  }
+
+  if (selectedInstanceId.value) {
+    entries = entries.filter(
+      (entry) => entry.executed_by_instance_id === selectedInstanceId.value,
+    );
+  }
+
+  return entries;
 });
 
 const hasActiveFilters = computed<boolean>(
-  () => Boolean(searchQuery.value.trim()) || Boolean(selectedTriggerSource.value),
+  () =>
+    Boolean(searchQuery.value.trim()) ||
+    Boolean(selectedTriggerSource.value) ||
+    Boolean(selectedInstanceId.value),
 );
 
 async function ensureEntryLoaded(entryId: string): Promise<void> {
@@ -817,6 +855,15 @@ function bringToCanvas(): void {
             clearable
             clear-aria-label="Clear tag filter"
           />
+          <Select
+            v-if="instanceOptions.length > 1 || selectedInstanceId"
+            v-model="selectedInstanceId"
+            :options="instanceOptions"
+            placeholder=""
+            class="w-full sm:w-56"
+            clearable
+            clear-aria-label="Clear instance filter"
+          />
         </div>
         <div class="flex items-center gap-2 flex-wrap justify-end">
           <AutoRefreshControl
@@ -1007,6 +1054,13 @@ function bringToCanvas(): void {
                   class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase shrink-0 hidden sm:inline"
                 >
                   {{ entry.trigger_source }}
+                </span>
+                <span
+                  v-if="entry.executed_by_instance_name"
+                  :title="entry.executed_by_instance_id ?? ''"
+                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400 shrink-0 hidden sm:inline"
+                >
+                  {{ entry.executed_by_instance_name }}
                 </span>
                 <span
                   v-if="entry.recovered"
