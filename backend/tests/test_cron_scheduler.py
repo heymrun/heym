@@ -72,7 +72,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cron_scheduler.get_global_variables_context",
                 AsyncMock(return_value={}),
             ),
-            patch("app.services.cron_scheduler.execute_workflow", return_value=execution_result),
+            patch("app.services.cluster.dispatch.execute_workflow", return_value=execution_result),
             patch(
                 "app.services.cron_scheduler.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
@@ -158,7 +158,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cron_scheduler.get_global_variables_context",
                 AsyncMock(return_value={}),
             ),
-            patch("app.services.cron_scheduler.execute_workflow", return_value=execution_result),
+            patch("app.services.cluster.dispatch.execute_workflow", return_value=execution_result),
             patch(
                 "app.services.cron_scheduler.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
@@ -250,7 +250,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cron_scheduler.get_global_variables_context",
                 AsyncMock(return_value={}),
             ),
-            patch("app.services.cron_scheduler.execute_workflow", return_value=execution_result),
+            patch("app.services.cluster.dispatch.execute_workflow", return_value=execution_result),
             patch(
                 "app.services.cron_scheduler.persist_pending_hitl_execution",
                 persist_pending_hitl_execution,
@@ -438,7 +438,7 @@ class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cron_scheduler.get_global_variables_context",
                 AsyncMock(return_value={}),
             ),
-            patch("app.services.cron_scheduler.execute_workflow", fake_execute),
+            patch("app.services.cluster.dispatch.execute_workflow", fake_execute),
             patch("app.services.cron_scheduler.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch(
                 "app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()

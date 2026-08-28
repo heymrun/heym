@@ -212,9 +212,9 @@ class HeymEventDispatcher:
             get_credentials_context,
         )
         from app.db.models import ExecutionHistory
+        from app.services.cluster.dispatch import dispatch_workflow
         from app.services.execution_cancellation import clear_execution, register_execution
         from app.services.global_variables_service import get_global_variables_context
-        from app.services.workflow_executor import execute_workflow
 
         async with async_session_maker() as db:
             workflow_result = await db.execute(select(Workflow).where(Workflow.id == workflow.id))
@@ -240,21 +240,32 @@ class HeymEventDispatcher:
                 actor_user_id=fresh_workflow.owner_id,
             )
             try:
-                result = execute_workflow(
+                result = await dispatch_workflow(
                     workflow_id=fresh_workflow.id,
                     nodes=fresh_workflow.nodes,
                     edges=fresh_workflow.edges,
                     inputs=inputs,
                     workflow_cache=workflow_cache,
+                    trigger_source="heym_event",
+                    credentials_owner_id=fresh_workflow.owner_id,
+                    execution_id=execution_id,
                     credentials_context=credentials_context,
                     global_variables_context=global_variables_context,
                     trace_user_id=fresh_workflow.owner_id,
                     actor_user_id=fresh_workflow.owner_id,
                     cancel_event=cancel_event,
-                    execution_id=str(execution_id),
                 )
             finally:
                 clear_execution(execution_id)
+
+            # An offloaded run wrote its own history on the instance that ran it.
+            if getattr(result, "history_written", False):
+                logger.info(
+                    "Workflow %s executed via Heym event trigger on another instance, status: %s",
+                    fresh_workflow.id,
+                    result.status,
+                )
+                return
 
             db.add(
                 ExecutionHistory(

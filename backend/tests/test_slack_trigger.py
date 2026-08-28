@@ -142,7 +142,7 @@ class TestSlackValidSignature(unittest.IsolatedAsyncioTestCase):
             patch("app.api.slack.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.slack.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.slack.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.api.slack.execute_workflow", return_value=execution_result),
+            patch("app.api.slack.dispatch_workflow", AsyncMock(return_value=execution_result)),
             patch("app.api.slack.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch("app.api.slack._persist_global_variables_from_execution", AsyncMock()),
         ):

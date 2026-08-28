@@ -108,6 +108,7 @@ async def dispatch_workflow(
     test_run: bool = False,
     timeout_seconds: float | None = None,
     wait_for_completion: bool = True,
+    run_in_thread: bool = False,
     execution_id: uuid.UUID | None = None,
     **executor_kwargs: Any,
 ) -> Any:
@@ -125,7 +126,7 @@ async def dispatch_workflow(
         # Charge the counter even here: forced main work must spend main's quota.
         if settings.cluster_enabled:
             await run_queue.choose_target(placement)
-        return execute_workflow(
+        call_kwargs = dict(
             workflow_id=workflow_id,
             nodes=nodes,
             edges=edges,
@@ -137,6 +138,11 @@ async def dispatch_workflow(
             execution_id=str(execution_id) if execution_id else "",
             **executor_kwargs,
         )
+        # Each call site keeps the blocking behaviour it already had: cron
+        # deliberately runs off the event loop, the webhook triggers do not.
+        if run_in_thread:
+            return await asyncio.to_thread(lambda: execute_workflow(**call_kwargs))
+        return execute_workflow(**call_kwargs)
 
     run_id = execution_id or uuid.uuid4()
     # Register before enqueueing so a run that finishes first still wakes us.

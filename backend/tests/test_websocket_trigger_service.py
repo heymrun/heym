@@ -306,8 +306,8 @@ class WebSocketTriggerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value={}),
             ),
             patch(
-                "app.services.websocket_trigger_service.execute_workflow",
-                return_value=execution_result,
+                "app.services.websocket_trigger_service.dispatch_workflow",
+                AsyncMock(return_value=execution_result),
             ),
             patch(
                 "app.services.websocket_trigger_service.upsert_workflow_analytics_snapshot",

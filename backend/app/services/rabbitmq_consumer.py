@@ -17,10 +17,10 @@ from app.api.workflows import (
 )
 from app.db.models import Credential, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.distributed_lock import lock_service
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
-from app.services.workflow_executor import execute_workflow
 
 logger = logging.getLogger("rabbitmq_consumer")
 
@@ -347,21 +347,32 @@ class RabbitMQConsumerManager:
                     actor_user_id=workflow.owner_id,
                 )
                 try:
-                    result = execute_workflow(
+                    result = await dispatch_workflow(
                         workflow_id=workflow.id,
                         nodes=workflow.nodes,
                         edges=workflow.edges,
                         inputs=inputs,
                         workflow_cache=workflow_cache,
+                        trigger_source="rabbitmq",
+                        credentials_owner_id=workflow.owner_id,
+                        execution_id=execution_id,
                         credentials_context=credentials_context,
                         global_variables_context=global_variables_context,
                         trace_user_id=workflow.owner_id,
                         actor_user_id=workflow.owner_id,
                         cancel_event=cancel_event,
-                        execution_id=str(execution_id),
                     )
                 finally:
                     clear_execution(execution_id)
+
+                # An offloaded run wrote its own history on the instance that ran it.
+                if getattr(result, "history_written", False):
+                    logger.info(
+                        "Workflow %s executed via RabbitMQ trigger on another instance, status: %s",
+                        workflow.id,
+                        result.status,
+                    )
+                    return
 
                 history_entry = ExecutionHistory(
                     id=execution_id,

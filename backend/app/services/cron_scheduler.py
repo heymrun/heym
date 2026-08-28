@@ -18,12 +18,13 @@ from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVer
 from app.db.session import async_session_maker
 from app.services.alerts.cleanup import cleanup_old_alert_events
 from app.services.alerts.evaluator import evaluate_due_alerts
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.timezone_utils import get_configured_timezone
-from app.services.workflow_executor import _to_json_compatible, execute_workflow
+from app.services.workflow_executor import _to_json_compatible
 
 logger = logging.getLogger("cron_scheduler")
 
@@ -203,23 +204,34 @@ class CronScheduler:
             try:
                 # Off the event loop: a cron run can block for minutes, and this
                 # worker still has to serve HTTP and keep its leader lock alive.
-                result = await asyncio.to_thread(
-                    execute_workflow,
+                result = await dispatch_workflow(
                     workflow_id=workflow.id,
                     nodes=workflow.nodes,
                     edges=workflow.edges,
                     inputs=enriched_inputs,
                     workflow_cache=workflow_cache,
+                    trigger_source="schedule",
+                    credentials_owner_id=workflow.owner_id,
+                    execution_id=execution_id,
+                    run_in_thread=True,
                     credentials_context=credentials_context,
                     global_variables_context=global_variables_context,
                     trace_user_id=workflow.owner_id,
                     actor_user_id=workflow.owner_id,
                     public_base_url=public_base_url,
                     cancel_event=cancel_event,
-                    execution_id=str(execution_id),
                 )
             finally:
                 clear_execution(execution_id)
+
+            # An offloaded run wrote its own history on the instance that ran it.
+            if getattr(result, "history_written", False):
+                logger.info(
+                    "Workflow %s executed via cron on another instance, status: %s",
+                    workflow.id,
+                    result.status,
+                )
+                return
             if result.allow_downstream_pending:
                 result.join_allow_downstream()
 

@@ -100,6 +100,11 @@ class OffloadedRun:
     node_results: list = field(default_factory=list)
     sub_workflow_executions: list = field(default_factory=list)
     history_written: bool = True
+    # The executing instance already joined any allow-downstream work locally.
+    allow_downstream_pending: bool = False
+
+    def join_allow_downstream(self) -> None:
+        return None
 
 
 def from_summary(summary: dict[str, Any]) -> OffloadedRun:
