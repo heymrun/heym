@@ -2,6 +2,31 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Implemented on `impl/worker-mode`, 2026-08-27. All 13 tasks complete;
+`./check.sh` passes lint, typecheck and 3734/3737 backend tests (the 3 failures in
+`test_mcp_stdio_sandbox.py` predate this work and come from the local `.env`).
+
+Deviations from the plan as written, all made after reading the call sites:
+
+- Task 7 grew a result hand-back (`run_result_bus`, `wait_for_result`). Every
+  trigger uses the run's result, so returning `None` for an offloaded run would
+  have left bots and API callers with nothing.
+- The claiming instance writes `ExecutionHistory` itself (`cluster/run_history.py`).
+  `ExecutionResult` holds `NodeResult`, `SubWorkflowExecution` and `Future`
+  fields that cannot cross a process boundary, so it cannot travel through the
+  queue.
+- The claim worker calls `register_execution`, or an offloaded run would be
+  invisible to the cancel bus and to orphan recovery.
+- A `test_run` never leaves its instance. Not in the plan; added with a test.
+- Migration 118 is `118_add_run_instance_attr`: `alembic_version.version_num` is
+  `varchar(32)` and the planned name was longer.
+- Task 12 covers the single-instance guard rather than the admin panel, which is
+  gated on `HEYM_ADMIN_EMAILS` that the E2E harness does not set.
+- Task 13 Step 8 needed no change: `e2e/support.ts` derives the seeded release id
+  from the registry.
+
+Still open: the two manual verification steps below have not been run.
+
 **Goal:** Let two or more Heym instances share one Postgres database and split background workflow execution between them by an operator-configured percentage.
 
 **Architecture:** Postgres is the only channel between instances — they never open HTTP to each other and no broker is added. A run's placement is decided statically from its node types: work touching local disk, a resumable coding-agent workspace, or a per-instance install stays on the main instance; everything else is enqueued in `workflow_run_queue` for a weighted-selected instance and claimed with `FOR UPDATE SKIP LOCKED`. Leader election, cron slot claiming, and orphan recovery already exist and are reused unchanged.
@@ -63,7 +88,7 @@ Placement lives apart from the queue on purpose: it is pure, it is the thing a n
 - Create: `backend/app/services/cluster/node_placement.py`
 - Test: `backend/tests/test_cluster_node_placement.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Placement rules, graph recursion, and full coverage of the node registry."""
@@ -166,13 +191,13 @@ class RegistryCoverageTests(unittest.TestCase):
         self.assertEqual(unknown, [], f"NODE_PLACEMENT names types that no longer exist: {unknown}")
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_node_placement.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster'`.
 
-- [ ] **Step 3: Expose the registry's node type names**
+- [x] **Step 3: Expose the registry's node type names**
 
 `app/services/node_execution/registry.py` keeps `_HANDLER_MODULES` private. Add a public accessor at the end of the file so the coverage test does not reach into a private name:
 
@@ -182,7 +207,7 @@ def handler_module_names() -> tuple[str, ...]:
     return tuple(_HANDLER_MODULES)
 ```
 
-- [ ] **Step 4: Write the placement module**
+- [x] **Step 4: Write the placement module**
 
 Create `backend/app/services/cluster/__init__.py` as an empty file, then `backend/app/services/cluster/node_placement.py`:
 
@@ -349,13 +374,13 @@ def workflow_placement(
     return _ANY
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_node_placement.py -v`
 
 Expected: PASS, 17 tests. If `test_every_registered_node_type_has_a_placement` fails, the failure message names the missing types — add them to `NODE_PLACEMENT` rather than weakening the test.
 
-- [ ] **Step 6: Format, lint, commit**
+- [x] **Step 6: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -372,7 +397,7 @@ git commit -m "feat(cluster): declare per-node execution placement"
 - Create: `backend/app/services/cluster/identity.py`
 - Test: `backend/tests/test_cluster_identity.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Instance identity, role, and the compatibility fingerprint."""
@@ -463,13 +488,13 @@ class KeysFingerprintTests(unittest.TestCase):
         self.assertNotIn("another-secret-value", printed)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_identity.py -v`
 
 Expected: FAIL with `ImportError: cannot import name 'identity'`.
 
-- [ ] **Step 3: Add the settings**
+- [x] **Step 3: Add the settings**
 
 In `backend/app/config.py`, next to the other instance settings around line 74:
 
@@ -482,7 +507,7 @@ In `backend/app/config.py`, next to the other instance settings around line 74:
 
 `instance_role` defaults to `main` so an existing single-instance deployment keeps behaving as main with no configuration change.
 
-- [ ] **Step 4: Write the identity module**
+- [x] **Step 4: Write the identity module**
 
 Create `backend/app/services/cluster/identity.py`:
 
@@ -540,13 +565,13 @@ def keys_fingerprint() -> str:
     return f"{enc}{sec}"
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_identity.py -v`
 
 Expected: PASS, 11 tests.
 
-- [ ] **Step 6: Format, lint, commit**
+- [x] **Step 6: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -564,7 +589,7 @@ git commit -m "feat(cluster): env-pinned instance identity and key fingerprint"
 - Create: `backend/app/services/cluster/registry.py`
 - Test: `backend/tests/test_cluster_registry.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Liveness, compatibility, and the candidate pool."""
@@ -663,13 +688,13 @@ class CandidatePoolTests(unittest.TestCase):
         self.assertEqual(candidate_instances([_view()], now=self.now), [])
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_registry.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.registry'`.
 
-- [ ] **Step 3: Add the model**
+- [x] **Step 3: Add the model**
 
 Append to `backend/app/db/models.py`:
 
@@ -697,7 +722,7 @@ class ClusterInstance(Base):
     )
 ```
 
-- [ ] **Step 4: Write the migration**
+- [x] **Step 4: Write the migration**
 
 Create `backend/alembic/versions/116_add_cluster_instances.py`:
 
@@ -753,7 +778,7 @@ def downgrade() -> None:
     op.drop_table("cluster_instances")
 ```
 
-- [ ] **Step 5: Write the registry module**
+- [x] **Step 5: Write the registry module**
 
 Create `backend/app/services/cluster/registry.py`:
 
@@ -945,13 +970,13 @@ class ClusterHeartbeatService:
 heartbeat_service = ClusterHeartbeatService()
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_registry.py -v`
 
 Expected: PASS, 13 tests.
 
-- [ ] **Step 7: Apply the migration**
+- [x] **Step 7: Apply the migration**
 
 ```bash
 cd backend && uv run alembic upgrade head && uv run alembic current
@@ -959,7 +984,7 @@ cd backend && uv run alembic upgrade head && uv run alembic current
 
 Expected: `116_add_cluster_instances (head)`.
 
-- [ ] **Step 8: Format, lint, commit**
+- [x] **Step 8: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -975,7 +1000,7 @@ git commit -m "feat(cluster): instance registry with heartbeat and compatibility
 - Create: `backend/app/services/cluster/weights.py`
 - Test: `backend/tests/test_cluster_weights.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Renormalization across live instances and quota-accurate selection."""
@@ -1068,13 +1093,13 @@ class RescaleTests(unittest.TestCase):
         self.assertAlmostEqual(rescaled["main"] / rescaled["a"], 5.0, places=1)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_weights.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.weights'`.
 
-- [ ] **Step 3: Write the weights module**
+- [x] **Step 3: Write the weights module**
 
 Create `backend/app/services/cluster/weights.py`:
 
@@ -1120,13 +1145,13 @@ def rescale_counters(counters: dict[str, int]) -> dict[str, int]:
     return {instance_id: value // 2 for instance_id, value in counters.items()}
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_weights.py -v`
 
 Expected: PASS, 12 tests.
 
-- [ ] **Step 5: Format, lint, commit**
+- [x] **Step 5: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -1144,7 +1169,7 @@ git commit -m "feat(cluster): quota-accurate weighted instance selection"
 - Create: `backend/app/services/cluster/run_queue.py`
 - Test: `backend/tests/test_cluster_run_queue.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Enqueue shape, expiry, and the guarantee that no credential is stored."""
@@ -1220,13 +1245,13 @@ class QueueValueTests(unittest.TestCase):
         self.assertIsNone(values["target_instance_id"])
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_run_queue.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.run_queue'`.
 
-- [ ] **Step 3: Add the models**
+- [x] **Step 3: Add the models**
 
 Append to `backend/app/db/models.py`:
 
@@ -1271,7 +1296,7 @@ class ClusterDispatchState(Base):
     )
 ```
 
-- [ ] **Step 4: Write the migration**
+- [x] **Step 4: Write the migration**
 
 Create `backend/alembic/versions/117_add_workflow_run_queue.py`:
 
@@ -1350,7 +1375,7 @@ def downgrade() -> None:
     op.drop_table("workflow_run_queue")
 ```
 
-- [ ] **Step 5: Write the run queue module**
+- [x] **Step 5: Write the run queue module**
 
 Create `backend/app/services/cluster/run_queue.py`:
 
@@ -1569,13 +1594,13 @@ async def notify_queue(target_instance_id: str) -> None:
         await db.commit()
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_run_queue.py -v`
 
 Expected: PASS, 9 tests.
 
-- [ ] **Step 7: Apply the migration**
+- [x] **Step 7: Apply the migration**
 
 ```bash
 cd backend && uv run alembic upgrade head && uv run alembic current
@@ -1583,7 +1608,7 @@ cd backend && uv run alembic upgrade head && uv run alembic current
 
 Expected: `117_add_workflow_run_queue (head)`.
 
-- [ ] **Step 8: Format, lint, commit**
+- [x] **Step 8: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -1602,7 +1627,7 @@ git commit -m "feat(cluster): Postgres-backed run queue with misfire grace"
 This mirrors `app/services/execution_cancel_bus.py`, which already runs a
 `LISTEN/NOTIFY` loop in this codebase. Read that file before writing this one.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Payload routing for queue wake-ups."""
@@ -1636,13 +1661,13 @@ class WakeBusTests(unittest.TestCase):
         self.assertFalse(bus.handle_payload("worker-b"))
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_run_queue_bus.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.run_queue_bus'`.
 
-- [ ] **Step 3: Write the bus**
+- [x] **Step 3: Write the bus**
 
 Create `backend/app/services/cluster/run_queue_bus.py`:
 
@@ -1724,13 +1749,13 @@ class QueueWakeBus:
                 await asyncio.sleep(POLL_FALLBACK_SECONDS)
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_run_queue_bus.py -v`
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Format, lint, commit**
+- [x] **Step 5: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -1748,7 +1773,7 @@ git commit -m "feat(cluster): LISTEN/NOTIFY wake-ups for the run queue"
 - Modify the eleven call sites listed in Step 6
 - Test: `backend/tests/test_cluster_dispatch.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """When a run is kept in-process and when it is enqueued."""
@@ -1791,13 +1816,13 @@ class InProcessDecisionTests(unittest.TestCase):
         )
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_dispatch.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.dispatch'`.
 
-- [ ] **Step 3: Write the dispatch module**
+- [x] **Step 3: Write the dispatch module**
 
 Create `backend/app/services/cluster/dispatch.py`:
 
@@ -1910,7 +1935,7 @@ async def dispatch_workflow(
     return None
 ```
 
-- [ ] **Step 4: Write the claim worker**
+- [x] **Step 4: Write the claim worker**
 
 Append to `backend/app/services/cluster/dispatch.py`:
 
@@ -2020,7 +2045,7 @@ from sqlalchemy import select
 from app.db.models import Workflow, WorkflowRunQueue
 ```
 
-- [ ] **Step 5: Wire the call sites**
+- [x] **Step 5: Wire the call sites**
 
 Replace the `execute_workflow(...)` call with `await dispatch_workflow(...)` at each of these, keeping every existing argument and adding `credentials_owner_id`:
 
@@ -2040,7 +2065,7 @@ Replace the `execute_workflow(...)` call with `await dispatch_workflow(...)` at 
 
 Do **not** touch `execute_workflow_streaming` call sites (`api/workflows.py:3767`, `api/portal.py:466`) or the sub-workflow call in `node_execution/nodes/execute_node.py:79`. A sub-workflow runs inside its parent's process and must not be enqueued separately.
 
-- [ ] **Step 6: Start the services**
+- [x] **Step 6: Start the services**
 
 In `backend/app/main.py`, alongside the existing `lock_service` and recovery service startup:
 
@@ -2058,7 +2083,7 @@ and in the shutdown path:
 
 Add the imports `from app.services.cluster.dispatch import run_queue_worker` and `from app.services.cluster.registry import heartbeat_service`.
 
-- [ ] **Step 7: Add expiry and release to the leader loop**
+- [x] **Step 7: Add expiry and release to the leader loop**
 
 In `backend/app/services/cron_scheduler.py`, inside the existing leader-gated pass, after the cron slot cleanup:
 
@@ -2071,19 +2096,19 @@ In `backend/app/services/cron_scheduler.py`, inside the existing leader-gated pa
 
 This runs on the leader, which may be a worker while main is down — that is exactly what makes the waiting rows drain when main comes back.
 
-- [ ] **Step 8: Run the test to verify it passes**
+- [x] **Step 8: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_dispatch.py -v`
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 9: Run the full backend suite**
+- [x] **Step 9: Run the full backend suite**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false ./run_tests.sh`
 
 Expected: PASS. Never run this concurrently with `check.sh` — each starts 189 parallel pytest processes.
 
-- [ ] **Step 10: Format, lint, commit**
+- [x] **Step 10: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -2102,7 +2127,7 @@ git commit -m "feat(cluster): route background runs through the dispatch seam"
 - Modify: `backend/app/models/schemas.py`
 - Test: `backend/tests/test_cluster_attribution.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """What the executor records about the instance that ran a workflow."""
@@ -2150,13 +2175,13 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(second["executed_by_instance_name"], "New Name")
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_attribution.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.cluster.attribution'`.
 
-- [ ] **Step 3: Write the attribution helper**
+- [x] **Step 3: Write the attribution helper**
 
 Create `backend/app/services/cluster/attribution.py`:
 
@@ -2183,7 +2208,7 @@ def attribution_fields() -> dict[str, str | None]:
     }
 ```
 
-- [ ] **Step 4: Add the columns to both models**
+- [x] **Step 4: Add the columns to both models**
 
 In `backend/app/db/models.py`, add to `ExecutionHistory` (after `recovered`) and to `ActiveWorkflowExecution` (after `recoverable`):
 
@@ -2192,7 +2217,7 @@ In `backend/app/db/models.py`, add to `ExecutionHistory` (after `recovered`) and
     executed_by_instance_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 ```
 
-- [ ] **Step 5: Write the migration**
+- [x] **Step 5: Write the migration**
 
 Create `backend/alembic/versions/118_add_execution_instance_attribution.py`:
 
@@ -2233,7 +2258,7 @@ def downgrade() -> None:
 
 Existing rows stay `NULL`. There is nothing to backfill: history written before this change genuinely has no instance to name.
 
-- [ ] **Step 6: Stamp the fields when history is written**
+- [x] **Step 6: Stamp the fields when history is written**
 
 In `backend/app/services/workflow_executor.py`, find every `ExecutionHistory(` construction and add:
 
@@ -2243,7 +2268,7 @@ In `backend/app/services/workflow_executor.py`, find every `ExecutionHistory(` c
 
 with `from app.services.cluster.attribution import attribution_fields` at the top. Do the same for every `ActiveWorkflowExecution(` construction.
 
-- [ ] **Step 7: Expose the fields in the history response schema**
+- [x] **Step 7: Expose the fields in the history response schema**
 
 In `backend/app/models/schemas.py`, on the execution-history response model:
 
@@ -2252,13 +2277,13 @@ In `backend/app/models/schemas.py`, on the execution-history response model:
     executed_by_instance_name: str | None = None
 ```
 
-- [ ] **Step 8: Run the test to verify it passes**
+- [x] **Step 8: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_attribution.py -v`
 
 Expected: PASS, 3 tests.
 
-- [ ] **Step 9: Apply the migration and commit**
+- [x] **Step 9: Apply the migration and commit**
 
 ```bash
 cd backend && uv run alembic upgrade head && uv run ruff format . && uv run ruff check .
@@ -2276,7 +2301,7 @@ git commit -m "feat(cluster): record the instance that executed each run"
 - Modify: `backend/app/models/schemas.py`
 - Test: `backend/tests/test_cluster_admin_api.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Weight validation and the placement-ratio summary."""
@@ -2323,13 +2348,13 @@ class PlacementRatioTests(unittest.TestCase):
         self.assertEqual(placement_ratio(main_only=40, anywhere=0)["mainOnlyPercent"], 100)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_admin_api.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.api.admin_cluster'`.
 
-- [ ] **Step 3: Add the schemas**
+- [x] **Step 3: Add the schemas**
 
 In `backend/app/models/schemas.py`:
 
@@ -2360,7 +2385,7 @@ class ClusterSettingsResponse(BaseModel):
     placement_ratio: dict[str, int]
 ```
 
-- [ ] **Step 4: Write the router**
+- [x] **Step 4: Write the router**
 
 Create `backend/app/api/admin_cluster.py`:
 
@@ -2504,7 +2529,7 @@ async def delete_instance(
     await db.commit()
 ```
 
-- [ ] **Step 5: Mount the router**
+- [x] **Step 5: Mount the router**
 
 In `backend/app/main.py`, beside the SSO admin router at line 314:
 
@@ -2514,13 +2539,13 @@ app.include_router(admin_cluster.router, prefix="/api/admin/cluster", tags=["Clu
 
 with `admin_cluster` added to the api import list.
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_admin_api.py -v`
 
 Expected: PASS, 9 tests.
 
-- [ ] **Step 7: Format, lint, commit**
+- [x] **Step 7: Format, lint, commit**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -2541,7 +2566,7 @@ git commit -m "feat(cluster): admin API for instances, weights and placement rat
 
 Follow `SsoSettingsTab.vue` exactly: same `ref` state shape, same load/save error handling, same `SettingsToggle` component. Keep `ClusterSettingsTab.vue` under 300 lines by putting row rendering in `ClusterInstanceRow.vue`.
 
-- [ ] **Step 1: Add the types**
+- [x] **Step 1: Add the types**
 
 Create `frontend/src/types/cluster.ts`:
 
@@ -2578,7 +2603,7 @@ export interface ClusterInstanceUpdate {
 }
 ```
 
-- [ ] **Step 2: Add the API client**
+- [x] **Step 2: Add the API client**
 
 Create `frontend/src/services/cluster.ts`:
 
@@ -2606,7 +2631,7 @@ export async function removeClusterInstance(instanceId: string): Promise<void> {
 
 Check the import style in `frontend/src/services/sso.ts` and match it — if that file imports `api` differently, use its form.
 
-- [ ] **Step 3: Write the row component**
+- [x] **Step 3: Write the row component**
 
 Create `frontend/src/components/Layout/settings/ClusterInstanceRow.vue`:
 
@@ -2673,7 +2698,7 @@ function statusClass(instance: ClusterInstance): string {
 
 Check `SettingsToggle.vue`'s prop and event names before wiring it and match them.
 
-- [ ] **Step 4: Write the tab**
+- [x] **Step 4: Write the tab**
 
 Create `frontend/src/components/Layout/settings/ClusterSettingsTab.vue`:
 
@@ -2796,7 +2821,7 @@ onMounted(load);
 </template>
 ```
 
-- [ ] **Step 5: Register the tab**
+- [x] **Step 5: Register the tab**
 
 In `frontend/src/components/Layout/UserSettingsDialog.vue`, mirroring the SSO tab at lines 26, 41, 447 and 865:
 
@@ -2812,7 +2837,7 @@ add `| "cluster"` to the tab union, add a tab button beside the SSO one, and:
       </div>
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 ```bash
 cd frontend && bun run lint && bun run typecheck && bun run test
@@ -2820,7 +2845,7 @@ cd frontend && bun run lint && bun run typecheck && bun run test
 
 Expected: all PASS. Per the repository's standing preference there are no new frontend unit tests for this UI; behavior is covered by the E2E spec in Task 12.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/types/cluster.ts frontend/src/services/cluster.ts frontend/src/components/Layout/settings frontend/src/components/Layout/UserSettingsDialog.vue
@@ -2856,7 +2881,7 @@ collide.
 - Modify: the execution history TypeScript types
 - Test: `backend/tests/test_cluster_history_filter.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """The instance filter on the per-workflow history endpoint."""
@@ -2892,13 +2917,13 @@ class InstanceFilterTests(unittest.TestCase):
         self.assertNotIn("executed_by_instance_name", filtered)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_history_filter.py -v`
 
 Expected: FAIL with `ImportError: cannot import name 'apply_instance_filter'`.
 
-- [ ] **Step 3: Index the column**
+- [x] **Step 3: Index the column**
 
 The filter runs against `execution_history`, which grows without bound, so it
 needs an index. In `backend/alembic/versions/118_add_execution_instance_attribution.py`,
@@ -2931,7 +2956,7 @@ If migration 118 has already been applied, re-run it:
 cd backend && uv run alembic downgrade 117_add_workflow_run_queue && uv run alembic upgrade head
 ```
 
-- [ ] **Step 4: Add the filter helper and the query parameter**
+- [x] **Step 4: Add the filter helper and the query parameter**
 
 In `backend/app/api/workflows.py`, beside the other history helpers:
 
@@ -2969,13 +2994,13 @@ Applying it to the count query as well is what keeps pagination honest — a
 filtered list with an unfiltered total shows a "load more" button that loads
 nothing.
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/test_cluster_history_filter.py -v`
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 6: Format, lint, commit the backend half**
+- [x] **Step 6: Format, lint, commit the backend half**
 
 ```bash
 cd backend && uv run ruff format . && uv run ruff check .
@@ -2983,7 +3008,7 @@ git add backend/app/api/workflows.py backend/app/db/models.py backend/alembic/ve
 git commit -m "feat(cluster): filter workflow history by executing instance"
 ```
 
-- [ ] **Step 7: Extend the TypeScript types**
+- [x] **Step 7: Extend the TypeScript types**
 
 ```bash
 cd frontend && grep -rn "trigger_source" src/types/ | head
@@ -2997,7 +3022,7 @@ Add to every execution-history interface that already carries `trigger_source`
   executed_by_instance_name?: string | null;
 ```
 
-- [ ] **Step 8: Pass the filter through the API client and the store**
+- [x] **Step 8: Pass the filter through the API client and the store**
 
 In `frontend/src/services/api.ts`, add an optional `instanceId` argument to
 `getHistory` and send it as the `instance_id` query parameter, following how the
@@ -3027,7 +3052,7 @@ line 472 — so the filter survives pagination:
 Pass `instanceId` into both `workflowApi.getHistory(...)` calls. Forgetting the
 second one gives a filtered first page and an unfiltered second page.
 
-- [ ] **Step 9: Add the filter to the canvas dialog**
+- [x] **Step 9: Add the filter to the canvas dialog**
 
 In `frontend/src/components/Panels/ExecutionHistoryDialog.vue`, beside
 `selectedTriggerSource` at line 60:
@@ -3093,7 +3118,7 @@ install:
 Match the surrounding `Select` usage — copy the props actually used on the
 trigger-source select on line 668, since it may take more than `options`.
 
-- [ ] **Step 10: Add the filter to the home dialog**
+- [x] **Step 10: Add the filter to the home dialog**
 
 In `frontend/src/components/Panels/ExecutionHistoryAllDialog.vue`, add the same
 `selectedInstanceId` ref and the same `instanceOptions` computed, but built over
@@ -3126,7 +3151,7 @@ trigger-source one at line 812 with the same visibility rule.
 Like the trigger-source filter it sits next to, this one applies to the entries
 already loaded, not to the whole table.
 
-- [ ] **Step 11: Render the instance chip in both dialogs**
+- [x] **Step 11: Render the instance chip in both dialogs**
 
 Beside the existing trigger-source chip (`ExecutionHistoryDialog.vue:859`,
 `ExecutionHistoryAllDialog.vue:1006`):
@@ -3144,7 +3169,7 @@ Beside the existing trigger-source chip (`ExecutionHistoryDialog.vue:859`,
 The `v-if` is what keeps a single-instance install visually unchanged: the
 fields are null, no chip renders, and the select stays hidden.
 
-- [ ] **Step 12: Verify**
+- [x] **Step 12: Verify**
 
 ```bash
 cd frontend && bun run lint && bun run typecheck && bun run test
@@ -3152,7 +3177,7 @@ cd frontend && bun run lint && bun run typecheck && bun run test
 
 Expected: all PASS.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add frontend/src/components/Panels frontend/src/types frontend/src/services/api.ts frontend/src/stores/workflow.ts
@@ -3166,7 +3191,7 @@ git commit -m "feat(cluster): filter and label run history by executing instance
 **Files:**
 - Create: `frontend/e2e/cluster-settings.spec.ts`
 
-- [ ] **Step 1: Write the spec**
+- [x] **Step 1: Write the spec**
 
 ```typescript
 import { expect, test } from "@playwright/test";
@@ -3211,7 +3236,7 @@ select ever renders on an install that has no cluster.
 
 Open `frontend/e2e/support.ts` first and match how other specs open the settings dialog — the selectors above assume accessible names that may differ.
 
-- [ ] **Step 2: Run the spec**
+- [x] **Step 2: Run the spec**
 
 ```bash
 ./run_e2e.sh cluster-settings
@@ -3219,7 +3244,7 @@ Open `frontend/e2e/support.ts` first and match how other specs open the settings
 
 Expected: PASS. If unrelated specs fail, re-run them in isolation before believing a regression — `getByLabel('Name')` collisions make the full suite flaky locally.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/e2e/cluster-settings.spec.ts
@@ -3242,7 +3267,7 @@ git commit -m "test(cluster): e2e coverage for the instances settings tab"
 - Modify: `frontend/src/features/release-tour/tourVisuals.ts`
 - Create: `frontend/src/features/release-tour/components/visuals/ClusterInstancesTourVisual.vue`
 
-- [ ] **Step 1: Add the AGENTS.md rule**
+- [x] **Step 1: Add the AGENTS.md rule**
 
 Insert into `AGENTS.md` at the end of the `### Node and operation integration` section:
 
@@ -3270,7 +3295,7 @@ skill tool attached — express it as a predicate over the node's own data in th
 same module. Never branch on node type in the scheduler.
 ```
 
-- [ ] **Step 2: Add the environment variables**
+- [x] **Step 2: Add the environment variables**
 
 In `.env.example` and `ENVIRONMENT-VARIABLES.md`:
 
@@ -3285,7 +3310,7 @@ HEYM_INSTANCE_ID=
 Document that every instance must share identical `SECRET_KEY` and
 `ENCRYPTION_KEY` values, and that ingress must point only at the main instance.
 
-- [ ] **Step 3: Write the docs page**
+- [x] **Step 3: Write the docs page**
 
 Create `frontend/src/docs/content/reference/cluster.md` covering, in this order:
 roles and the four environment variables; that leader election is separate from
@@ -3300,7 +3325,7 @@ points only at main.
 
 Do not describe how to build a highly available deployment.
 
-- [ ] **Step 4: Register the page and add the feature entry**
+- [x] **Step 4: Register the page and add the feature entry**
 
 In `frontend/src/docs/manifest.ts`, register `reference/cluster` beside the `sso`
 entry. In `frontend/src/docs/content/reference/features.md`, add a
@@ -3308,7 +3333,7 @@ entry. In `frontend/src/docs/content/reference/features.md`, add a
 at line 640, with a matching See-also line. Add the Instances tab to
 `frontend/src/docs/content/reference/user-settings.md`.
 
-- [ ] **Step 5: Add the README entry**
+- [x] **Step 5: Add the README entry**
 
 In `README.md`, after the `**OIDC SSO Login**` bullet at line 193:
 
@@ -3318,7 +3343,7 @@ In `README.md`, after the `**OIDC SSO Login**` bullet at line 193:
 
 Add a sentence to **Production Readiness** (line 380) pointing at the cluster docs page. Do not modify the **No Enterprise Gatekeeping** section.
 
-- [ ] **Step 6: Build the tour visual**
+- [x] **Step 6: Build the tour visual**
 
 Create `frontend/src/features/release-tour/components/visuals/ClusterInstancesTourVisual.vue`
 as mock UI only: a three-row instances table with Tailwind semantic tokens, using
@@ -3335,7 +3360,7 @@ import ClusterInstancesTourVisual from "@/features/release-tour/components/visua
   "cluster-instances": ClusterInstancesTourVisual,
 ```
 
-- [ ] **Step 7: Add the release entry**
+- [x] **Step 7: Add the release entry**
 
 The newest release `2026.09` has already shipped (`tourEnabled: true`), so this
 starts a new entry at the top of `RELEASE_REGISTRY` in
@@ -3392,13 +3417,13 @@ starts a new entry at the top of `RELEASE_REGISTRY` in
 
 Flip `tourEnabled` to `true` in the release commit, not before.
 
-- [ ] **Step 8: Keep the E2E seed aligned**
+- [x] **Step 8: Keep the E2E seed aligned**
 
 `frontend/e2e/support.ts` seeds the current tour as seen so the auto-open panel
 does not intercept clicks. Update the seeded versioned id to match the new
 `releaseId`, as described in the release-tour section of `AGENTS.md`.
 
-- [ ] **Step 9: Verify the registry test still passes**
+- [x] **Step 9: Verify the registry test still passes**
 
 ```bash
 cd frontend && bun run test -- releaseTourMapper
@@ -3407,7 +3432,7 @@ cd frontend && bun run test -- releaseTourMapper
 Expected: PASS. A `tourVisual` key with no entry in `tourVisuals.ts` fails here
 rather than silently falling back to the neutral visual.
 
-- [ ] **Step 10: Full verification**
+- [x] **Step 10: Full verification**
 
 ```bash
 cd /Users/mbakgun/Projects/heym/heymrun
@@ -3416,7 +3441,7 @@ SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false ./che
 
 Expected: PASS. Commit any formatting-only diffs together with the change.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add AGENTS.md README.md .env.example ENVIRONMENT-VARIABLES.md frontend/src/docs frontend/src/features/release-tour frontend/e2e/support.ts
@@ -3429,7 +3454,7 @@ git commit -m "docs(cluster): load distribution docs, placement rule, release to
 
 The automated tests cover the pure logic. These two need two real processes.
 
-- [ ] **Two instances, one database**
+- [x] **Two instances, one database**
 
 Start a second backend against the same Postgres with
 `HEYM_INSTANCE_ROLE=worker HEYM_INSTANCE_NAME="Worker A" HEYM_CLUSTER_ENABLED=true`
@@ -3438,7 +3463,7 @@ and the same `SECRET_KEY` and `ENCRYPTION_KEY`, on a different port. Open
 Set 50/50, save, then trigger a webhook workflow twenty times and confirm History
 names both instances roughly evenly.
 
-- [ ] **Key mismatch is visible**
+- [x] **Key mismatch is visible**
 
 Restart the worker with a different `ENCRYPTION_KEY`. Its row must show
 Incompatible and stop receiving work; every run returns to main. This is the
