@@ -70,6 +70,7 @@ from app.services.active_execution_overview import collect_active_executions_for
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
@@ -117,7 +118,6 @@ from app.services.workflow_executor import (
     WorkflowTimeoutError,
     _serialize_sub_workflow_executions,
     _to_json_compatible,
-    execute_workflow,
     execute_workflow_streaming,
 )
 from app.services.workflow_last_trigger import (
@@ -3061,21 +3061,23 @@ async def execute_workflow_endpoint(
         actor_user_id=credentials_owner_id,
     )
     try:
-        execution_result = await asyncio.to_thread(
-            execute_workflow,
+        execution_result = await dispatch_workflow(
             workflow_id=workflow.id,
             nodes=workflow.nodes,
             edges=workflow.edges,
             inputs=enriched_inputs,
             workflow_cache=workflow_cache,
             test_run=test_run,
+            trigger_source=trigger_source,
+            credentials_owner_id=credentials_owner_id,
+            execution_id=execution_id,
+            run_in_thread=True,
             credentials_context=credentials_context,
             global_variables_context=global_variables_context,
             trace_user_id=trace_user_id,
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
-            execution_id=str(execution_id),
         )
     except WorkflowCancelledError:
         if not test_run:
@@ -3170,7 +3172,10 @@ async def execute_workflow_endpoint(
         )
 
     history_entry: ExecutionHistory | None = None
-    if not test_run:
+    # An offloaded run wrote its history on the instance that executed it;
+    # writing it again here would collide on the execution id.
+    already_written = getattr(execution_result, "history_written", False)
+    if not test_run and not already_written:
         history_entry = ExecutionHistory(
             id=execution_id,
             workflow_id=workflow.id,

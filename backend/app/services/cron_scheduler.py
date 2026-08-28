@@ -18,6 +18,7 @@ from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVer
 from app.db.session import async_session_maker
 from app.services.alerts.cleanup import cleanup_old_alert_events
 from app.services.alerts.evaluator import evaluate_due_alerts
+from app.services.cluster import registry, run_queue
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
@@ -68,6 +69,7 @@ class CronScheduler:
                     continue
 
                 await self._check_and_execute()
+                await self._maintain_run_queue()
                 await self._check_alerts()
                 await self._check_alert_event_cleanup()
                 await self._check_scheduled_deletion_cleanup()
@@ -594,6 +596,29 @@ class CronScheduler:
                     self._last_cron_slot_claim_cleanup_date = current_date
                 else:
                     logger.debug("Cron slot claim cleanup already handled by another worker")
+
+    async def _maintain_run_queue(self) -> None:
+        """Retire stale queued runs and hand waiting ones back to a returning main.
+
+        Runs on the leader, which may be a worker while main is down - that is
+        exactly what makes waiting_for_main rows drain when main comes back.
+        Expiring first is what stops a long outage from replaying its whole
+        backlog at once.
+        """
+        if not settings.cluster_enabled:
+            return
+        try:
+            expired = await run_queue.expire_late_rows()
+            if expired:
+                logger.info("Retired %d run queue rows past the misfire grace window", expired)
+            instances = await registry.list_instances()
+            main = registry.find_main(instances)
+            if main is not None and registry.is_live(main, now=datetime.now(timezone.utc)):
+                released = await run_queue.release_waiting_for_main(main.id)
+                if released:
+                    logger.info("Released %d runs waiting for the main instance", released)
+        except Exception:
+            logger.exception("Run queue maintenance failed")
 
     async def _cleanup_old_cron_slot_claims(self) -> None:
         async with async_session_maker() as db:

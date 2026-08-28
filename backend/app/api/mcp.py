@@ -50,6 +50,7 @@ from app.models.schemas import (
     MCPWorkflowItem,
 )
 from app.services import file_intake_service, mcp_chat_service
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -63,7 +64,6 @@ from app.services.hitl_service import build_public_base_url
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
 from app.services.secret_tokens import hash_secret
-from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
 T = TypeVar("T")
@@ -1053,81 +1053,87 @@ async def call_mcp_tool(
         actor_user_id=mcp_user.id,
     )
     try:
-        execution_result = await asyncio.to_thread(
-            execute_workflow,
+        execution_result = await dispatch_workflow(
             workflow_id=target_workflow.id,
             nodes=target_workflow.nodes,
             edges=target_workflow.edges,
             inputs=enriched_inputs,
             workflow_cache=workflow_cache,
             test_run=False,
+            trigger_source="MCP",
+            credentials_owner_id=mcp_user.id,
+            execution_id=execution_id,
+            run_in_thread=True,
             credentials_context=credentials_context,
             global_variables_context=global_variables_context,
             trace_user_id=mcp_user.id,
             actor_user_id=mcp_user.id,
             cancel_event=cancel_event,
-            execution_id=str(execution_id),
         )
 
-        # Save execution history with MCP trigger source
-        history_entry = ExecutionHistory(
-            id=execution_id,
-            workflow_id=target_workflow.id,
-            inputs=enriched_inputs,
-            outputs=execution_result.outputs,
-            node_results=execution_result.node_results,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-            trigger_source="MCP",
-        )
-        db.add(history_entry)
-        await upsert_workflow_analytics_snapshot(
-            db,
-            workflow_id=target_workflow.id,
-            owner_id=target_workflow.owner_id,
-            workflow_name_snapshot=target_workflow.name,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-        )
-
-        for sub_exec in execution_result.sub_workflow_executions:
-            sub_history = ExecutionHistory(
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                inputs=sub_exec.inputs,
-                outputs=sub_exec.outputs,
-                node_results=sub_exec.node_results,
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
-                trigger_source=sub_exec.trigger_source,
+        # An offloaded run already wrote its history, traces and analytics on
+        # the instance that executed it; writing them again would collide on
+        # the execution id.
+        if not getattr(execution_result, "history_written", False):
+            # Save execution history with MCP trigger source
+            history_entry = ExecutionHistory(
+                id=execution_id,
+                workflow_id=target_workflow.id,
+                inputs=enriched_inputs,
+                outputs=execution_result.outputs,
+                node_results=execution_result.node_results,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+                trigger_source="MCP",
             )
-            db.add(sub_history)
+            db.add(history_entry)
             await upsert_workflow_analytics_snapshot(
                 db,
-                workflow_id=uuid.UUID(sub_exec.workflow_id),
-                owner_id=None,
-                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                status=sub_exec.status,
-                execution_time_ms=sub_exec.execution_time_ms,
+                workflow_id=target_workflow.id,
+                owner_id=target_workflow.owner_id,
+                workflow_name_snapshot=target_workflow.name,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
             )
 
-        await _persist_global_variables_from_execution(
-            db,
-            mcp_user.id,
-            target_workflow.nodes,
-            workflow_cache,
-            execution_result.node_results,
-            execution_result.sub_workflow_executions,
-        )
+            for sub_exec in execution_result.sub_workflow_executions:
+                sub_history = ExecutionHistory(
+                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    inputs=sub_exec.inputs,
+                    outputs=sub_exec.outputs,
+                    node_results=sub_exec.node_results,
+                    status=sub_exec.status,
+                    execution_time_ms=sub_exec.execution_time_ms,
+                    trigger_source=sub_exec.trigger_source,
+                )
+                db.add(sub_history)
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    owner_id=None,
+                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                    status=sub_exec.status,
+                    execution_time_ms=sub_exec.execution_time_ms,
+                )
 
-        _add_mcp_workflow_trace(
-            db,
-            user_id=mcp_user.id,
-            workflow=target_workflow,
-            tool_name=tool_name,
-            arguments=arguments,
-            execution_result=execution_result,
-        )
-        await db.flush()
+            await _persist_global_variables_from_execution(
+                db,
+                mcp_user.id,
+                target_workflow.nodes,
+                workflow_cache,
+                execution_result.node_results,
+                execution_result.sub_workflow_executions,
+            )
+
+            _add_mcp_workflow_trace(
+                db,
+                user_id=mcp_user.id,
+                workflow=target_workflow,
+                tool_name=tool_name,
+                arguments=arguments,
+                execution_result=execution_result,
+            )
+            await db.flush()
 
         output_text = json.dumps(execution_result.outputs, indent=2, ensure_ascii=False)
 
@@ -1258,71 +1264,77 @@ async def _dispatch_mcp_jsonrpc(
             actor_user_id=mcp_user.id,
         )
         try:
-            execution_result = await asyncio.to_thread(
-                execute_workflow,
+            execution_result = await dispatch_workflow(
                 workflow_id=target_workflow.id,
                 nodes=target_workflow.nodes,
                 edges=target_workflow.edges,
                 inputs=enriched_inputs,
                 workflow_cache=workflow_cache,
                 test_run=False,
+                trigger_source="MCP",
+                credentials_owner_id=mcp_user.id,
+                execution_id=execution_id,
+                run_in_thread=True,
                 credentials_context=credentials_context,
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 cancel_event=cancel_event,
-                execution_id=str(execution_id),
             )
 
-            # Save execution history with MCP trigger source
-            history_entry = ExecutionHistory(
-                id=execution_id,
-                workflow_id=target_workflow.id,
-                inputs=enriched_inputs,
-                outputs=execution_result.outputs,
-                node_results=execution_result.node_results,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-                trigger_source="MCP",
-            )
-            db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=target_workflow.id,
-                owner_id=target_workflow.owner_id,
-                workflow_name_snapshot=target_workflow.name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-            )
-
-            for sub_exec in execution_result.sub_workflow_executions:
-                sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
+            # An offloaded run already wrote its history, traces and analytics on
+            # the instance that executed it; writing them again would collide on
+            # the execution id.
+            if not getattr(execution_result, "history_written", False):
+                # Save execution history with MCP trigger source
+                history_entry = ExecutionHistory(
+                    id=execution_id,
+                    workflow_id=target_workflow.id,
+                    inputs=enriched_inputs,
+                    outputs=execution_result.outputs,
+                    node_results=execution_result.node_results,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                    trigger_source="MCP",
                 )
-                db.add(sub_history)
+                db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(
                     db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
+                    workflow_id=target_workflow.id,
+                    owner_id=target_workflow.owner_id,
+                    workflow_name_snapshot=target_workflow.name,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
                 )
 
-            _add_mcp_workflow_trace(
-                db,
-                user_id=mcp_user.id,
-                workflow=target_workflow,
-                tool_name=tool_name,
-                arguments=arguments,
-                execution_result=execution_result,
-            )
-            await db.flush()
+                for sub_exec in execution_result.sub_workflow_executions:
+                    sub_history = ExecutionHistory(
+                        workflow_id=uuid.UUID(sub_exec.workflow_id),
+                        inputs=sub_exec.inputs,
+                        outputs=sub_exec.outputs,
+                        node_results=sub_exec.node_results,
+                        status=sub_exec.status,
+                        execution_time_ms=sub_exec.execution_time_ms,
+                        trigger_source=sub_exec.trigger_source,
+                    )
+                    db.add(sub_history)
+                    await upsert_workflow_analytics_snapshot(
+                        db,
+                        workflow_id=uuid.UUID(sub_exec.workflow_id),
+                        owner_id=None,
+                        workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                        status=sub_exec.status,
+                        execution_time_ms=sub_exec.execution_time_ms,
+                    )
+
+                _add_mcp_workflow_trace(
+                    db,
+                    user_id=mcp_user.id,
+                    workflow=target_workflow,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    execution_result=execution_result,
+                )
+                await db.flush()
 
             output_text = json.dumps(execution_result.outputs, indent=2, ensure_ascii=False)
 

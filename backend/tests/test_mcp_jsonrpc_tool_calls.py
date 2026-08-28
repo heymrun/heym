@@ -107,7 +107,7 @@ class MCPJsonRpcFileUploadTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=(_slot(), "TOK")),
             ),
             patch("app.api.mcp.file_intake_service.write_audit", AsyncMock()),
-            patch("app.api.mcp.execute_workflow") as execute_mock,
+            patch("app.services.cluster.dispatch.execute_workflow") as execute_mock,
         ):
             response = await _dispatch_mcp_jsonrpc(
                 request=_make_json_request("/api/mcp/sse", _tool_call_body()),
@@ -139,7 +139,7 @@ class MCPJsonRpcFileUploadTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=(_slot(), "TOK")),
             ),
             patch("app.api.mcp.file_intake_service.write_audit", AsyncMock()),
-            patch("app.api.mcp_servers.execute_workflow") as execute_mock,
+            patch("app.services.cluster.dispatch.execute_workflow") as execute_mock,
         ):
             response = await _dispatch_named_server_jsonrpc(
                 server_id=server.id,

@@ -151,3 +151,13 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
         ):
             await wait_for_result(execution_id, timeout_seconds=1.0)
         self.assertFalse(bus_module.run_result_bus.handle_payload(str(execution_id)))
+
+
+class TestRunTests(unittest.TestCase):
+    def test_a_test_run_never_leaves_this_instance(self) -> None:
+        """An interactive editor run's latency is being watched; queueing buys nothing."""
+        self.assertTrue(
+            should_run_in_process(
+                cluster_enabled=True, placement="anywhere", is_main=False, test_run=True
+            )
+        )

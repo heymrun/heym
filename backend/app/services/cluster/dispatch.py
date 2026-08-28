@@ -33,15 +33,20 @@ logger = logging.getLogger("cluster")
 _RESULT_POLL_SECONDS = 1.0
 
 
-def should_run_in_process(*, cluster_enabled: bool, placement: str, is_main: bool) -> bool:
+def should_run_in_process(
+    *, cluster_enabled: bool, placement: str, is_main: bool, test_run: bool = False
+) -> bool:
     """Whether to execute here rather than enqueue.
 
     With no cluster, nothing is ever enqueued and a single-instance install
     behaves exactly as before, with no added latency. With a cluster, only a
     MAIN_ONLY run already on main skips the queue - an ANYWHERE run on main goes
     through it, or main would never hand work to anyone.
+
+    A test run never leaves this instance: it is an interactive editor action
+    whose latency the user is watching, and queueing it would buy nothing.
     """
-    if not cluster_enabled:
+    if not cluster_enabled or test_run:
         return True
     return placement == Placement.MAIN_ONLY.value and is_main
 
@@ -122,6 +127,7 @@ async def dispatch_workflow(
         cluster_enabled=settings.cluster_enabled,
         placement=placement,
         is_main=identity.is_main(),
+        test_run=test_run,
     ):
         # Charge the counter even here: forced main work must spend main's quota.
         if settings.cluster_enabled:
@@ -141,7 +147,7 @@ async def dispatch_workflow(
         # Each call site keeps the blocking behaviour it already had: cron
         # deliberately runs off the event loop, the webhook triggers do not.
         if run_in_thread:
-            return await asyncio.to_thread(lambda: execute_workflow(**call_kwargs))
+            return await asyncio.to_thread(execute_workflow, **call_kwargs)
         return execute_workflow(**call_kwargs)
 
     run_id = execution_id or uuid.uuid4()

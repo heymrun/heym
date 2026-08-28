@@ -163,7 +163,7 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
-            patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=fake_execute)),
+            patch("app.services.cluster.dispatch.asyncio.to_thread", AsyncMock(side_effect=fake_execute)),
         ):
             user = MagicMock()
             user.id = uuid.uuid4()
@@ -255,7 +255,7 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
-            patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=capture_event)),
+            patch("app.services.cluster.dispatch.asyncio.to_thread", AsyncMock(side_effect=capture_event)),
         ):
             user = MagicMock()
             user.id = uuid.uuid4()

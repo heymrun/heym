@@ -71,6 +71,9 @@ from app.models.schemas import AppVersionResponse
 from app.observability.tracing import setup_tracing, shutdown_tracing
 from app.services.clickhouse_pool import close_all_clients as close_clickhouse_clients
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
+from app.services.cluster.dispatch import run_queue_worker
+from app.services.cluster.registry import heartbeat_service
+from app.services.cluster.run_result_bus import run_result_bus
 from app.services.cron_scheduler import cron_scheduler
 from app.services.distributed_lock import lock_service
 from app.services.execution_cancel_bus import execution_cancel_listener
@@ -200,6 +203,9 @@ async def lifespan(app: FastAPI):
 
     await active_execution_registry.start()
     await execution_cancel_listener.start()
+    await heartbeat_service.start()
+    await run_result_bus.start()
+    await run_queue_worker.start()
     await execution_recovery_service.start()
     await cron_scheduler.start()
 
@@ -229,6 +235,9 @@ async def lifespan(app: FastAPI):
     await RabbitMQPool.close_all()
     await cron_scheduler.stop()
     await execution_recovery_service.stop()
+    await run_queue_worker.stop()
+    await run_result_bus.stop()
+    await heartbeat_service.stop()
     await execution_cancel_listener.stop()
     await active_execution_registry.stop()
     with suppress(Exception):
