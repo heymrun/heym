@@ -13,6 +13,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api import (
+    admin_cluster,
     agent_memory,
     ai_assistant,
     alerts,
@@ -321,6 +322,7 @@ app.include_router(oauth.router, tags=["OAuth"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(sso_auth.router, prefix="/api/auth/sso", tags=["SSO"])
 app.include_router(sso_admin.router, prefix="/api/admin/sso", tags=["SSO Admin"])
+app.include_router(admin_cluster.router, prefix="/api/admin/cluster", tags=["Cluster Admin"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Memory"])
 app.include_router(playwright.router, prefix="/api/playwright", tags=["Playwright"])

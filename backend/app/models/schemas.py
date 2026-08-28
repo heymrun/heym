@@ -1892,3 +1892,29 @@ class SsoStatusResponse(BaseModel):
     enabled: bool
     button_label: str
     password_login_enabled: bool
+
+
+class ClusterInstanceResponse(BaseModel):
+    id: str
+    name: str
+    role: str
+    enabled: bool
+    weight: int
+    version: str
+    docker_ok: bool
+    db_latency_ms: float
+    live: bool
+    compatible: bool
+    heartbeat_at: datetime | None = None
+
+
+class ClusterInstanceUpdate(BaseModel):
+    name: str
+    enabled: bool
+    weight: int
+
+
+class ClusterSettingsResponse(BaseModel):
+    cluster_enabled: bool
+    instances: list[ClusterInstanceResponse]
+    placement_ratio: dict[str, int]
