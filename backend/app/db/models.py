@@ -562,6 +562,10 @@ class ExecutionHistory(Base):
         String(50), nullable=True, default=None, index=True
     )
     recovered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    executed_by_instance_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    executed_by_instance_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(
@@ -599,6 +603,8 @@ class ActiveWorkflowExecution(Base):
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     recoverable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    executed_by_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    executed_by_instance_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
