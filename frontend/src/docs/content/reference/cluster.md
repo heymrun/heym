@@ -89,6 +89,14 @@ That also defines the upgrade order. Upgrading main first marks every worker inc
 
 **Worker instances have a different outbound IP.** Any API that allowlists source addresses sees the new one. Send Email runs on main for exactly this reason; for the HTTP node, either give the cluster a single NAT egress address or allowlist every instance.
 
+## Adding a worker on another machine
+
+`docker-compose.worker.yml` in the repository root runs a worker on its own host. It has no database and no UI: it reaches the main instance's PostgreSQL and takes its share of the background runs.
+
+Fill in a `.env` beside it - image tag, database host and credentials, both keys, and an instance id - and start it. Compose refuses to start until every required value is set, rather than coming up with a placeholder that fails later in a way that is hard to read.
+
+The image tag must be the version main runs, and both keys must be copied exactly. A difference in either shows the worker as Incompatible and it receives no work.
+
 ## Reading the Instances table
 
 | Column | Meaning |

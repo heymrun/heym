@@ -1,0 +1,35 @@
+# A Heym worker on its own machine. Replace the values below, then:
+#   docker compose -f docker-compose.worker.yml up -d
+
+name: heym-worker
+
+services:
+  worker:
+    image: ghcr.io/heymrun/heym:latest
+    container_name: heym-worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@10.0.0.5:6543/heym
+      SECRET_KEY: same-as-the-main-instance
+      ENCRYPTION_KEY: same-as-the-main-instance
+      HEYM_CLUSTER_ENABLED: "true"
+      HEYM_INSTANCE_ROLE: worker
+      HEYM_INSTANCE_ID: worker-1
+      HEYM_INSTANCE_NAME: Worker 1
+      HEYM_DB_POOL_SIZE: "8"
+      HEYM_DB_MAX_OVERFLOW: "12"
+      HEYM_OTEL_ENABLED: "false"
+
+    entrypoint:
+      - bash
+      - -c
+      - cd /app/backend && exec uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2
+
+    shm_size: "2gb"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    ports:
+      - "10111:10105"
+
+    restart: always
