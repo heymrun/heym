@@ -18,6 +18,13 @@ from app.config import settings
 from app.db.models import Workflow, WorkflowRunQueue
 from app.services.cluster import identity, run_queue
 from app.services.cluster.node_placement import Placement, workflow_placement
+from app.services.cluster.run_history import (
+    OffloadedRun,
+    from_summary,
+    offloaded_error,
+    persist_run_history,
+    summarize,
+)
 from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS, run_result_bus
 from app.services.workflow_executor import execute_workflow
 
@@ -50,20 +57,16 @@ def resolve_placement(nodes: list[dict], workflow_cache: dict[str, dict] | None)
     return workflow_placement(nodes, resolve_workflow=resolve).value
 
 
-def _timeout_error(execution_id: uuid.UUID) -> dict[str, Any]:
-    return {
-        "status": "error",
-        "error": (
-            f"Run {execution_id} did not report a result in time. It may still be "
-            "executing on another instance; check the execution history."
-        ),
-        "node_results": [],
-    }
+def _timeout_error(execution_id: uuid.UUID) -> OffloadedRun:
+    return offloaded_error(
+        f"Run {execution_id} did not report a result in time. It may still be "
+        "executing on another instance; check the execution history."
+    )
 
 
 async def wait_for_result(
     execution_id: uuid.UUID, *, timeout_seconds: float | None = None
-) -> dict[str, Any]:
+) -> OffloadedRun:
     """Block until the executing instance reports this run, or give up.
 
     Giving up matters: an instance that dies mid-run never notifies, and a
@@ -77,12 +80,8 @@ async def wait_for_result(
             status, result, error = await run_queue.read_terminal_result(execution_id)
             if run_queue.is_terminal(status):
                 if error or result is None:
-                    return {
-                        "status": "error",
-                        "error": error or "Run finished without a result",
-                        "node_results": [],
-                    }
-                return result
+                    return offloaded_error(error or "Run finished without a result")
+                return from_summary(result)
 
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
@@ -111,7 +110,7 @@ async def dispatch_workflow(
     wait_for_completion: bool = True,
     execution_id: uuid.UUID | None = None,
     **executor_kwargs: Any,
-) -> dict[str, Any] | None:
+) -> Any:
     """Run here, or enqueue and wait for whichever instance takes it.
 
     Returns the run result. With `wait_for_completion=False` an offloaded run
@@ -254,6 +253,8 @@ class RunQueueWorker:
                 credentials_context = await get_credentials_context(db, row.credentials_owner_id)
                 nodes = list(workflow.nodes or [])
                 edges = list(workflow.edges or [])
+                owner_id = workflow.owner_id
+                workflow_name = workflow.name
 
             result = await asyncio.to_thread(
                 execute_workflow,
@@ -263,13 +264,26 @@ class RunQueueWorker:
                 inputs=row.inputs,
                 credentials_context=credentials_context,
                 test_run=row.test_run,
-                trace_user_id=workflow.owner_id,
+                trace_user_id=owner_id,
                 actor_user_id=row.actor_user_id,
                 cancel_event=cancel_event,
                 timeout_seconds=row.timeout_seconds,
                 execution_id=str(row.execution_id),
             )
-            await run_queue.complete(row.execution_id, result=dict(result), error=None)
+            # History is written here, on the instance that ran it, stamped with
+            # this instance's label. The caller only ever sees the summary.
+            await persist_run_history(
+                execution_id=row.execution_id,
+                workflow_id=row.workflow_id,
+                owner_id=owner_id,
+                workflow_name=workflow_name,
+                inputs=row.inputs,
+                trigger_source=row.trigger_source,
+                result=result,
+            )
+            await run_queue.complete(
+                row.execution_id, result=summarize(result, row.execution_id), error=None
+            )
         except Exception as exc:
             logger.exception("Claimed run failed")
             await run_queue.complete(row.execution_id, result=None, error=str(exc))

@@ -98,10 +98,14 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
         event.set()
         with patch(
             "app.services.cluster.dispatch.run_queue.read_terminal_result",
-            new=AsyncMock(return_value=("done", {"status": "success"}, None)),
+            new=AsyncMock(
+                return_value=("done", {"status": "success", "outputs": {"text": "hi"}}, None)
+            ),
         ):
             result = await wait_for_result(execution_id, timeout_seconds=1.0)
-        self.assertEqual(result, {"status": "success"})
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.outputs, {"text": "hi"})
+        self.assertTrue(result.history_written)
 
     async def test_a_failed_run_reports_the_error(self) -> None:
         execution_id = uuid.uuid4()
@@ -112,8 +116,8 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=("failed", None, "boom")),
         ):
             result = await wait_for_result(execution_id, timeout_seconds=1.0)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("boom", result["error"])
+        self.assertEqual(result.status, "error")
+        self.assertIn("boom", result.error)
 
     async def test_a_run_skipped_as_late_says_so(self) -> None:
         execution_id = uuid.uuid4()
@@ -124,7 +128,7 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=("skipped_late", None, "too late")),
         ):
             result = await wait_for_result(execution_id, timeout_seconds=1.0)
-        self.assertEqual(result["status"], "error")
+        self.assertEqual(result.status, "error")
 
     async def test_waiting_gives_up_rather_than_hanging_forever(self) -> None:
         """A worker that dies mid-run must not strand the request."""
@@ -134,8 +138,8 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=("claimed", None, None)),
         ):
             result = await wait_for_result(execution_id, timeout_seconds=0.05)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("still", result["error"].lower())
+        self.assertEqual(result.status, "error")
+        self.assertIn("still", result.error.lower())
 
     async def test_the_waiter_is_released_after_a_result(self) -> None:
         execution_id = uuid.uuid4()
@@ -143,7 +147,7 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
         event.set()
         with patch(
             "app.services.cluster.dispatch.run_queue.read_terminal_result",
-            new=AsyncMock(return_value=("done", {"status": "success"}, None)),
+            new=AsyncMock(return_value=("done", {"status": "success", "outputs": {}}, None)),
         ):
             await wait_for_result(execution_id, timeout_seconds=1.0)
         self.assertFalse(bus_module.run_result_bus.handle_payload(str(execution_id)))
