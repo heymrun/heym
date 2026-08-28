@@ -47,8 +47,8 @@ services:
       HEYM_INSTANCE_ID: main
       HEYM_INSTANCE_NAME: Main
       HEYM_OTEL_ENABLED: "false"
-      HEYM_DB_POOL_SIZE: "3"
-      HEYM_DB_MAX_OVERFLOW: "5"
+      HEYM_DB_POOL_SIZE: "8"
+      HEYM_DB_MAX_OVERFLOW: "12"
       HEYM_DB_SYNC_POOL_SIZE: "2"
       HEYM_DB_SYNC_MAX_OVERFLOW: "3"
     shm_size: "2gb"
@@ -78,8 +78,8 @@ services:
       HEYM_INSTANCE_ID: worker-a
       HEYM_INSTANCE_NAME: Worker A
       HEYM_OTEL_ENABLED: "false"
-      HEYM_DB_POOL_SIZE: "3"
-      HEYM_DB_MAX_OVERFLOW: "5"
+      HEYM_DB_POOL_SIZE: "8"
+      HEYM_DB_MAX_OVERFLOW: "12"
       HEYM_DB_SYNC_POOL_SIZE: "2"
       HEYM_DB_SYNC_MAX_OVERFLOW: "3"
     shm_size: "2gb"

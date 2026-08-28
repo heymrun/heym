@@ -349,7 +349,8 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(ctx.exception.detail, "Execution was cancelled")
         db.add.assert_called_once()
-        db.commit.assert_called_once()
+        # Two: one releasing the transaction before dispatch, one persisting.
+        self.assertEqual(db.commit.await_count, 2)
 
     async def test_execution_registered_before_executor_called(self) -> None:
         """register_execution must be called so the run is visible in the active list."""

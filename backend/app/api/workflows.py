@@ -3069,6 +3069,7 @@ async def execute_workflow_endpoint(
         trigger_source=trigger_source,
         actor_user_id=credentials_owner_id,
     )
+    await db.commit()
     try:
         execution_result = await dispatch_workflow(
             workflow_id=workflow.id,

@@ -2100,7 +2100,10 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         execution_history_ctor.assert_not_called()
         db.add.assert_not_called()
-        db.commit.assert_not_called()
+        # One commit only: the transaction is released before dispatch so the
+        # connection is not held open across the run. Nothing is persisted.
+        self.assertEqual(db.commit.await_count, 1)
+        db.add.assert_not_called()
 
 
 class AutoRecoverRunsSchemaTests(unittest.TestCase):

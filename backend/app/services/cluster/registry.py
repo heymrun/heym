@@ -178,10 +178,19 @@ async def write_heartbeat() -> None:
         await db.commit()
 
 
-async def list_instances() -> list[InstanceView]:
+_INSTANCE_CACHE: tuple[float, list[InstanceView]] | None = None
+_INSTANCE_CACHE_TTL_SECONDS = 1.0
+
+
+async def list_instances(*, use_cache: bool = False) -> list[InstanceView]:
+    global _INSTANCE_CACHE
+    now = time.monotonic()
+    if use_cache and _INSTANCE_CACHE and now - _INSTANCE_CACHE[0] < _INSTANCE_CACHE_TTL_SECONDS:
+        return _INSTANCE_CACHE[1]
+
     async with async_session_maker() as db:
         result = await db.execute(select(ClusterInstance))
-        return [
+        views = [
             InstanceView(
                 id=row.id,
                 name=row.name,
@@ -198,6 +207,8 @@ async def list_instances() -> list[InstanceView]:
             )
             for row in result.scalars().all()
         ]
+    _INSTANCE_CACHE = (now, views)
+    return views
 
 
 class ClusterHeartbeatService:

@@ -83,6 +83,9 @@ async def choose_target(placement: str) -> str | None:
     A MAIN_ONLY run is not selected - its target is always main - but it still
     increments main's counter, so the forced work spends main's quota.
     """
+    instances = await registry.list_instances(use_cache=True)
+    now = datetime.now(timezone.utc)
+
     async with async_session_maker() as db:
         state = (
             await db.execute(
@@ -94,8 +97,6 @@ async def choose_target(placement: str) -> str | None:
         if state is None:
             return None
 
-        instances = await registry.list_instances()
-        now = datetime.now(timezone.utc)
         counters = rescale_counters(dict(state.counters or {}))
 
         if placement == "main_only":

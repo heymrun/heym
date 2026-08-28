@@ -32,7 +32,7 @@ from app.services.workflow_executor import execute_workflow
 
 logger = logging.getLogger("cluster")
 
-_RESULT_POLL_SECONDS = 1.0
+_RESULT_POLL_SECONDS = 10.0
 
 
 def should_run_in_process(

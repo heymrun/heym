@@ -166,8 +166,14 @@ onMounted(load);
       v-if="config"
       class="text-sm text-muted-foreground"
     >
-      Over the last 24 hours, {{ config.placement_ratio.mainOnlyPercent }}% of runs could only
-      execute on the main instance. Percentages cannot move that work.
+      <template v-if="config.placement_ratio.mainOnlyPercent > 0">
+        {{ config.placement_ratio.mainOnlyPercent }}% of the last 24 hours' runs could only
+        execute on the main instance, so the weights below cannot move that work.
+      </template>
+      <template v-else>
+        Every run in the last 24 hours could execute anywhere, so the weights below govern all
+        of it.
+      </template>
     </p>
 
     <div
