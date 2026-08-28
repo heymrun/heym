@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_instance_admin
 from app.config import settings
-from app.db.models import ClusterInstance, User, WorkflowRunQueue
+from app.db.models import ClusterDispatchState, ClusterInstance, User, WorkflowRunQueue
 from app.db.session import get_db
 from app.models.schemas import (
     ClusterInstanceResponse,
     ClusterInstanceUpdate,
     ClusterSettingsResponse,
+    ClusterSettingsUpdate,
 )
 from app.services.cluster import registry
 
@@ -62,8 +63,13 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
         ).all()
     )
 
+    state = (
+        await db.execute(select(ClusterDispatchState).where(ClusterDispatchState.id == "singleton"))
+    ).scalar_one_or_none()
+
     return ClusterSettingsResponse(
         cluster_enabled=settings.cluster_enabled,
+        automatic_weighting=state.automatic_weighting if state else True,
         instances=[
             ClusterInstanceResponse(
                 id=i.id,
@@ -71,6 +77,7 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
                 role=i.role,
                 enabled=i.enabled,
                 weight=i.weight,
+                weight_configured=i.weight_configured,
                 version=i.version,
                 docker_ok=i.docker_ok,
                 db_latency_ms=i.db_latency_ms,
@@ -118,7 +125,32 @@ async def update_instances(
         row.name = update.name.strip() or row.id
         row.enabled = update.enabled
         row.weight = update.weight
+        # An operator's number is deliberate, so this instance is never seeded.
+        row.weight_configured = True
     await db.commit()
+    return await _read_cluster(db)
+
+
+@router.put("", response_model=ClusterSettingsResponse)
+async def update_cluster(
+    update: ClusterSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClusterSettingsResponse:
+    """Toggle automatic weighting. Instances are updated through /instances."""
+    require_instance_admin(current_user)
+    if update.automatic_weighting is not None:
+        state = (
+            await db.execute(
+                select(ClusterDispatchState).where(ClusterDispatchState.id == "singleton")
+            )
+        ).scalar_one_or_none()
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Cluster state row is missing."
+            )
+        state.automatic_weighting = update.automatic_weighting
+        await db.commit()
     return await _read_cluster(db)
 
 

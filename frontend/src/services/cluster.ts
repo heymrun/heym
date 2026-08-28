@@ -14,6 +14,13 @@ export async function saveClusterInstances(
   return data;
 }
 
+export async function setAutomaticWeighting(enabled: boolean): Promise<ClusterSettings> {
+  const { data } = await api.put<ClusterSettings>("/admin/cluster", {
+    automatic_weighting: enabled,
+  });
+  return data;
+}
+
 export async function removeClusterInstance(instanceId: string): Promise<void> {
   await api.delete(`/admin/cluster/instances/${instanceId}`);
 }

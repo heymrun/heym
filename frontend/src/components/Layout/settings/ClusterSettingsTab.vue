@@ -4,7 +4,12 @@ import { RefreshCw } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import ClusterInstanceRow from "@/components/Layout/settings/ClusterInstanceRow.vue";
-import { getClusterSettings, saveClusterInstances } from "@/services/cluster";
+import SettingsToggle from "@/components/Layout/settings/SettingsToggle.vue";
+import {
+  getClusterSettings,
+  saveClusterInstances,
+  setAutomaticWeighting,
+} from "@/services/cluster";
 
 import type { ClusterInstance, ClusterInstanceUpdate, ClusterSettings } from "@/types/cluster";
 
@@ -41,6 +46,19 @@ function applyUpdate(instanceId: string, patch: ClusterInstanceUpdate): void {
   target.name = patch.name;
   target.enabled = patch.enabled;
   target.weight = patch.weight;
+}
+
+async function handleAutomaticWeighting(value: boolean): Promise<void> {
+  if (!config.value) return;
+  const previous = config.value.automatic_weighting;
+  config.value.automatic_weighting = value;
+  error.value = null;
+  try {
+    config.value = await setAutomaticWeighting(value);
+  } catch {
+    if (config.value) config.value.automatic_weighting = previous;
+    error.value = "Failed to change automatic weighting.";
+  }
 }
 
 async function handleSave(): Promise<void> {
@@ -92,6 +110,23 @@ onMounted(load);
       Load distribution is off. Set <code>HEYM_CLUSTER_ENABLED=true</code> on the main instance to
       turn it on.
     </p>
+
+    <div
+      v-if="config"
+      class="rounded-md border border-border p-3"
+    >
+      <SettingsToggle
+        id="cluster-automatic-weighting"
+        :model-value="config.automatic_weighting"
+        label="Give new instances a share automatically"
+        @update:model-value="handleAutomaticWeighting"
+      />
+      <p class="mt-1.5 text-xs text-muted-foreground">
+        An instance that joins starts at 0 and would receive no work. With this on, it is given
+        an equal share once, and the existing weights are scaled down keeping their ratios. An
+        instance you set yourself is never changed.
+      </p>
+    </div>
 
     <p
       v-if="config"

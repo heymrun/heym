@@ -1902,6 +1902,7 @@ class ClusterInstanceResponse(BaseModel):
     role: str
     enabled: bool
     weight: int
+    weight_configured: bool
     version: str
     docker_ok: bool
     db_latency_ms: float
@@ -1918,5 +1919,11 @@ class ClusterInstanceUpdate(BaseModel):
 
 class ClusterSettingsResponse(BaseModel):
     cluster_enabled: bool
+    automatic_weighting: bool
     instances: list[ClusterInstanceResponse]
     placement_ratio: dict[str, int]
+
+
+class ClusterSettingsUpdate(BaseModel):
+    automatic_weighting: bool | None = None
+    instances: dict[str, ClusterInstanceUpdate] | None = None

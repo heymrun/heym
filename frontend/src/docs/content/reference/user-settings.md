@@ -100,6 +100,8 @@ Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_E
 
 Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_EMAILS`. This tab lists the Heym instances connected to this database and sets how background runs are split between them. Each row shows the instance's editable name, its role, whether it is live, its measured latency to the database, an on/off switch, and its weight. Weights are integers that must total 100 across the enabled instances before the panel will save, so the cluster is never left in a half-applied split.
 
+**Give new instances a share automatically** is on by default: an instance that joins would otherwise sit at weight 0 and receive nothing, so the leader gives it an equal share once and scales the existing weights down keeping their ratios. It never touches an instance whose weight you set yourself.
+
 The panel also reports how many of the last 24 hours' runs could only execute on the main instance. When that share is high, the weights below it cannot move that work. See [Load Distribution](./cluster.md) for what stays on main and how to choose the numbers.
 
 ## What Is Not in This Dialog

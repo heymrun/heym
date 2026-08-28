@@ -7,6 +7,7 @@ from app.services.cluster.weights import (
     normalized_weights,
     pick_instance,
     rescale_counters,
+    seed_weights,
 )
 
 
@@ -86,3 +87,62 @@ class RescaleTests(unittest.TestCase):
         counters = {"main": COUNTER_RESCALE_THRESHOLD, "a": COUNTER_RESCALE_THRESHOLD // 5}
         rescaled = rescale_counters(counters)
         self.assertAlmostEqual(rescaled["main"] / rescaled["a"], 5.0, places=1)
+
+
+class SeedWeightsTests(unittest.TestCase):
+    """Carving a share for an instance that has never been given one.
+
+    Runs once per instance, only while automatic weighting is on. Existing
+    weights keep their ratios to each other, so an operator's deliberate split
+    survives a machine joining.
+    """
+
+    def test_nothing_to_seed_returns_none(self) -> None:
+        current = {"main": (True, 70), "a": (True, 30)}
+        self.assertIsNone(seed_weights(current))
+
+    def test_a_newcomer_gets_an_equal_share(self) -> None:
+        current = {"main": (True, 70), "a": (True, 30), "b": (False, 0)}
+        seeded = seed_weights(current)
+        assert seeded is not None
+        self.assertEqual(seeded["b"], 33)
+
+    def test_existing_instances_keep_their_ratio(self) -> None:
+        """70:30 must still read as roughly 70:30 after the carve."""
+        seeded = seed_weights({"main": (True, 70), "a": (True, 30), "b": (False, 0)})
+        assert seeded is not None
+        self.assertAlmostEqual(seeded["main"] / seeded["a"], 70 / 30, delta=0.15)
+
+    def test_the_total_is_always_exactly_100(self) -> None:
+        cases = [
+            {"main": (True, 70), "a": (True, 30), "b": (False, 0)},
+            {"main": (True, 100), "b": (False, 0)},
+            {"main": (True, 100), "b": (False, 0), "c": (False, 0)},
+            {"main": (True, 55), "a": (True, 45), "b": (False, 0), "c": (False, 0)},
+            {"main": (True, 99), "a": (True, 1), "b": (False, 0)},
+        ]
+        for current in cases:
+            seeded = seed_weights(current)
+            assert seeded is not None, current
+            self.assertEqual(sum(seeded.values()), 100, current)
+
+    def test_two_newcomers_are_seeded_together(self) -> None:
+        seeded = seed_weights({"main": (True, 100), "b": (False, 0), "c": (False, 0)})
+        assert seeded is not None
+        self.assertEqual(seeded["b"], seeded["c"])
+        self.assertEqual(seeded["main"], 100 - seeded["b"] - seeded["c"])
+
+    def test_an_instance_deliberately_set_to_zero_is_left_alone(self) -> None:
+        """weight_configured=True means an operator chose it; never re-seed."""
+        self.assertIsNone(seed_weights({"main": (True, 100), "a": (True, 0)}))
+
+    def test_seeding_from_an_all_zero_pool_splits_evenly(self) -> None:
+        seeded = seed_weights({"main": (False, 0), "a": (False, 0)})
+        assert seeded is not None
+        self.assertEqual(sum(seeded.values()), 100)
+        self.assertEqual(seeded["main"], seeded["a"])
+
+    def test_a_single_newcomer_alone_takes_everything(self) -> None:
+        seeded = seed_weights({"main": (False, 0)})
+        assert seeded is not None
+        self.assertEqual(seeded, {"main": 100})

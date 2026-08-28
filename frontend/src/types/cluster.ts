@@ -4,6 +4,7 @@ export interface ClusterInstance {
   role: string;
   enabled: boolean;
   weight: number;
+  weight_configured: boolean;
   version: string;
   docker_ok: boolean;
   db_latency_ms: number;
@@ -19,6 +20,7 @@ export interface ClusterPlacementRatio {
 
 export interface ClusterSettings {
   cluster_enabled: boolean;
+  automatic_weighting: boolean;
   instances: ClusterInstance[];
   placement_ratio: ClusterPlacementRatio;
 }

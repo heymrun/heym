@@ -20,6 +20,7 @@ def _view(**overrides: object) -> InstanceView:
         role="worker",
         enabled=True,
         weight=30,
+        weight_configured=True,
         version="1.2.3",
         schema_revision="116_add_cluster_instances",
         keys_fingerprint="aaaabbbb",

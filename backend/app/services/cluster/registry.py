@@ -33,6 +33,7 @@ class InstanceView:
     role: str
     enabled: bool
     weight: int
+    weight_configured: bool
     version: str
     schema_revision: str
     keys_fingerprint: str
@@ -121,7 +122,11 @@ async def write_heartbeat() -> None:
             **values,
             name=identity.instance_name(),
             enabled=True,
+            # Main's 100 is deliberate, so it is never a candidate for seeding.
+            # A worker starts unweighted and unconfigured: automatic weighting
+            # gives it a share on the leader's next pass, once.
             weight=100 if identity.is_main() else 0,
+            weight_configured=identity.is_main(),
         )
         .on_conflict_do_update(index_elements=[ClusterInstance.id], set_=values)
     )
@@ -140,6 +145,7 @@ async def list_instances() -> list[InstanceView]:
                 role=row.role,
                 enabled=row.enabled,
                 weight=row.weight,
+                weight_configured=row.weight_configured,
                 version=row.version,
                 schema_revision=row.schema_revision,
                 keys_fingerprint=row.keys_fingerprint,

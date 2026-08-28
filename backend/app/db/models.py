@@ -2333,6 +2333,8 @@ class ClusterInstance(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="worker")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     weight: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # False means "never given a weight": eligible for one automatic seeding.
+    weight_configured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     schema_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     keys_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, default="")
@@ -2383,6 +2385,7 @@ class ClusterDispatchState(Base):
 
     id: Mapped[str] = mapped_column(String(16), primary_key=True, default="singleton")
     counters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    automatic_weighting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

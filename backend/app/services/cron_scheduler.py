@@ -19,6 +19,7 @@ from app.db.session import async_session_maker
 from app.services.alerts.cleanup import cleanup_old_alert_events
 from app.services.alerts.evaluator import evaluate_due_alerts
 from app.services.cluster import registry, run_queue
+from app.services.cluster.autoweight import apply_automatic_weighting
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
@@ -70,6 +71,7 @@ class CronScheduler:
 
                 await self._check_and_execute()
                 await self._maintain_run_queue()
+                await self._apply_automatic_weighting()
                 await self._check_alerts()
                 await self._check_alert_event_cleanup()
                 await self._check_scheduled_deletion_cleanup()
@@ -619,6 +621,15 @@ class CronScheduler:
                     logger.info("Released %d runs waiting for the main instance", released)
         except Exception:
             logger.exception("Run queue maintenance failed")
+
+    async def _apply_automatic_weighting(self) -> None:
+        """Give a newly joined instance a share so it does not sit idle."""
+        if not settings.cluster_enabled:
+            return
+        try:
+            await apply_automatic_weighting()
+        except Exception:
+            logger.exception("Automatic weighting failed")
 
     async def _cleanup_old_cron_slot_claims(self) -> None:
         async with async_session_maker() as db:

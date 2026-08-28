@@ -37,3 +37,42 @@ def rescale_counters(counters: dict[str, int]) -> dict[str, int]:
     if not counters or max(counters.values()) < COUNTER_RESCALE_THRESHOLD:
         return counters
     return {instance_id: value // 2 for instance_id, value in counters.items()}
+
+
+def seed_weights(current: dict[str, tuple[bool, int]]) -> dict[str, int] | None:
+    """Give every never-configured instance a share, or None if there is none.
+
+    `current` maps instance id to (weight_configured, weight). An instance is a
+    newcomer only while `weight_configured` is False, so this runs once per
+    machine: an operator who deliberately sets a worker to 0 is never fought.
+
+    Newcomers take an equal share of the pool and the configured instances are
+    scaled down proportionally, so a deliberate 70/30 still reads as 70/30
+    afterwards. The result always totals exactly 100; the rounding remainder
+    goes to the largest configured instance, which is main in practice.
+    """
+    newcomers = sorted(i for i, (configured, _w) in current.items() if not configured)
+    if not newcomers:
+        return None
+
+    pool_size = len(current)
+    share = 100 // pool_size
+    seeded = {instance_id: share for instance_id in newcomers}
+
+    configured = {i: w for i, (c, w) in current.items() if c}
+    configured_total = sum(configured.values())
+    remaining = 100 - share * len(newcomers)
+
+    if configured_total > 0:
+        for instance_id, weight in configured.items():
+            seeded[instance_id] = int(weight * remaining / configured_total)
+    else:
+        # Nothing configured to scale against: split what is left evenly.
+        for instance_id in configured:
+            seeded[instance_id] = remaining // max(len(configured), 1)
+
+    drift = 100 - sum(seeded.values())
+    if drift:
+        largest = max(seeded, key=lambda i: (seeded[i], i))
+        seeded[largest] += drift
+    return seeded

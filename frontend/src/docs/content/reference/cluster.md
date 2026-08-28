@@ -46,6 +46,14 @@ So with a strong main and a smaller worker, start nearer 60/40 than the machines
 
 Weights are renormalized across the instances that are currently live and enabled. With `main=70, A=15, B=15`, if A goes offline the split becomes 70/85 and 15/85 between main and B, and returns to 70/15/15 when A comes back.
 
+### A new instance joins at zero
+
+An instance that has never been given a weight starts at 0, which would leave it Live, Enabled and receiving nothing. **Give new instances a share automatically** — on by default, under the instances table — fixes that: on the leader's next pass the newcomer is given an equal share of the pool, and the existing weights are scaled down keeping their ratios to each other, so a deliberate 70/30 still reads as roughly 70/30 afterwards. The total stays exactly 100.
+
+This runs **once per instance**. Both the automatic pass and your own edit mark the instance as configured, so an instance you set yourself is never changed behind your back — including one you deliberately set to 0. Turn the setting off if you would rather every new machine wait for you.
+
+Only enabled, live and compatible instances take part. Handing a share to a machine that cannot execute anything would strand that share.
+
 ### When percentages cannot help
 
 The settings panel reports how many of the last 24 hours' runs could only execute on main. If that number is high — a Codex-heavy or Drive-heavy workload — the workers will sit idle whatever the weights say, and the answer is a bigger main instance rather than more of them.
