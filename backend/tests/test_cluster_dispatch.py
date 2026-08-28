@@ -3,6 +3,7 @@
 import asyncio
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.services.cluster import run_result_bus as bus_module
@@ -161,3 +162,51 @@ class TestRunTests(unittest.TestCase):
                 cluster_enabled=True, placement="anywhere", is_main=False, test_run=True
             )
         )
+
+
+class ClaimedRunAlwaysCompletesTests(unittest.IsolatedAsyncioTestCase):
+    """A claimed row must always reach a terminal state and notify its waiter.
+
+    A failure that escapes _execute_claimed leaves the row 'claimed' forever and
+    the waiting request blocks for its whole timeout. That is exactly what a
+    mistyped import did: it raised before the try block, so neither complete()
+    nor notify_done() ran.
+    """
+
+    async def _run_with_failure(self, exc: Exception) -> tuple[AsyncMock, AsyncMock]:
+        from app.services.cluster.dispatch import RunQueueWorker
+
+        row = SimpleNamespace(
+            execution_id=uuid.uuid4(),
+            workflow_id=uuid.uuid4(),
+            inputs={},
+            trigger_source="API",
+            actor_user_id=None,
+            credentials_owner_id=None,
+            test_run=False,
+            timeout_seconds=None,
+        )
+        complete = AsyncMock()
+        notify_done = AsyncMock()
+        with (
+            patch("app.db.session.async_session_maker", side_effect=exc),
+            patch("app.services.cluster.dispatch.run_queue.complete", complete),
+            patch("app.services.cluster.dispatch.run_queue.notify_done", notify_done),
+        ):
+            await RunQueueWorker()._execute_claimed(row)  # type: ignore[arg-type]
+        return complete, notify_done
+
+    async def test_a_failure_still_completes_the_row(self) -> None:
+        complete, _notify = await self._run_with_failure(RuntimeError("boom"))
+        complete.assert_awaited_once()
+        self.assertIn("boom", str(complete.await_args.kwargs["error"]))
+
+    async def test_a_failure_still_wakes_the_waiter(self) -> None:
+        _complete, notify = await self._run_with_failure(RuntimeError("boom"))
+        notify.assert_awaited_once()
+
+    async def test_an_import_error_is_handled_like_any_other(self) -> None:
+        """The original bug: an ImportError raised outside the try block."""
+        complete, notify = await self._run_with_failure(ImportError("cannot import name"))
+        complete.assert_awaited_once()
+        notify.assert_awaited_once()

@@ -40,6 +40,17 @@ def validate_weight_map(weights: dict[str, tuple[bool, int]]) -> None:
         raise ValueError("At least one enabled instance needs a weight above zero.")
 
 
+def ensure_main_enabled(role: str, enabled: bool) -> None:
+    """The main instance cannot be taken out of rotation.
+
+    Disabling it would drop it from the ANYWHERE pool while MAIN_ONLY work -
+    files, plugins, coding agents, email - still routes there and still runs
+    in-process. The toggle would stop describing what actually happens.
+    """
+    if role == "main" and not enabled:
+        raise ValueError("The main instance cannot be disabled.")
+
+
 def placement_ratio(*, main_only: int, anywhere: int) -> dict[str, int]:
     """How much of the recent workload could not leave the main instance."""
     total = main_only + anywhere
@@ -125,6 +136,10 @@ async def update_instances(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown instance: {instance_id}"
             )
+        try:
+            ensure_main_enabled(row.role, update.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         row.name = update.name.strip() or row.id
         row.enabled = update.enabled
         row.weight = update.weight

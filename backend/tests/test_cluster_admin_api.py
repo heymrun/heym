@@ -2,7 +2,7 @@
 
 import unittest
 
-from app.api.admin_cluster import placement_ratio, validate_weight_map
+from app.api.admin_cluster import ensure_main_enabled, placement_ratio, validate_weight_map
 
 
 class WeightValidationTests(unittest.TestCase):
@@ -53,3 +53,22 @@ class PlacementRatioTests(unittest.TestCase):
         for main_only, anywhere in ((1, 2), (7, 93), (33, 67), (1, 999)):
             ratio = placement_ratio(main_only=main_only, anywhere=anywhere)
             self.assertEqual(ratio["mainOnlyPercent"] + ratio["anywherePercent"], 100)
+
+
+class MainStaysEnabledTests(unittest.TestCase):
+    """Main cannot be taken out of rotation.
+
+    MAIN_ONLY work - files, plugins, coding agents, email - routes there
+    regardless, so a disabled main would be a state the toggle does not
+    describe rather than a machine that stopped taking work.
+    """
+
+    def test_disabling_main_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ensure_main_enabled("main", False)
+
+    def test_main_may_stay_enabled(self) -> None:
+        ensure_main_enabled("main", True)
+
+    def test_a_worker_may_be_disabled(self) -> None:
+        ensure_main_enabled("worker", False)

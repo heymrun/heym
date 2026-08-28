@@ -613,6 +613,12 @@ class CronScheduler:
             expired = await run_queue.expire_late_rows()
             if expired:
                 logger.info("Retired %d run queue rows past the misfire grace window", expired)
+            for execution_id in await run_queue.expire_stranded_claims():
+                logger.warning(
+                    "Retired run %s: the instance that claimed it stopped before finishing",
+                    execution_id,
+                )
+                await run_queue.notify_done(execution_id)
             instances = await registry.list_instances()
             main = registry.find_main(instances)
             if main is not None and registry.is_live(main, now=datetime.now(timezone.utc)):

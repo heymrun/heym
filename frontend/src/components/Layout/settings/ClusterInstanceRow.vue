@@ -22,6 +22,8 @@ const statusClass = computed<string>(() => {
   return "text-emerald-600 dark:text-emerald-400";
 });
 
+const isMain = computed<boolean>(() => props.instance.role === "main");
+
 const dotClass = computed<string>(() => {
   if (!props.instance.compatible) return "bg-destructive";
   if (!props.instance.live) return "bg-muted-foreground/50";
@@ -91,6 +93,12 @@ function onWeight(value: string): void {
       <SettingsToggle
         :id="`cluster-enabled-${instance.id}`"
         :model-value="instance.enabled"
+        :disabled="isMain"
+        :title="
+          isMain
+            ? 'The main instance cannot be taken out of rotation: file, plugin and coding-agent work runs there whatever this says.'
+            : undefined
+        "
         label=""
         @update:model-value="(value: boolean) => emitUpdate({ enabled: value })"
       />

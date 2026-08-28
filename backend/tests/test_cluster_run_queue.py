@@ -11,6 +11,7 @@ from app.services.cluster.run_queue import (
     QueuedRun,
     build_queue_values,
     is_expired,
+    is_stranded_claim,
     next_status,
 )
 
@@ -69,3 +70,55 @@ class QueueValueTests(unittest.TestCase):
         values = build_queue_values(self.run, target_instance_id=None, grace_seconds=600)
         self.assertEqual(values["status"], STATUS_WAITING_FOR_MAIN)
         self.assertIsNone(values["target_instance_id"])
+
+
+class StrandedClaimTests(unittest.TestCase):
+    """A claimed row whose runner died must not sit there forever.
+
+    Expiring on age alone would kill legitimately long runs, so the deciding
+    signal is the active-execution row: while a run is really executing, one
+    exists and is heartbeating. Once it is gone the queue row is bookkeeping for
+    a run nobody is doing - and orphan recovery, not the queue, owns re-running
+    it, so the row is retired rather than requeued.
+    """
+
+    def setUp(self) -> None:
+        self.now = datetime.now(timezone.utc)
+
+    def test_a_running_claim_is_left_alone(self) -> None:
+        self.assertFalse(
+            is_stranded_claim(
+                claimed_at=self.now - timedelta(hours=2),
+                has_active_execution=True,
+                now=self.now,
+                grace_seconds=60,
+            )
+        )
+
+    def test_a_claim_with_no_active_execution_is_stranded(self) -> None:
+        self.assertTrue(
+            is_stranded_claim(
+                claimed_at=self.now - timedelta(seconds=61),
+                has_active_execution=False,
+                now=self.now,
+                grace_seconds=60,
+            )
+        )
+
+    def test_a_fresh_claim_is_never_stranded(self) -> None:
+        """Claiming and registering the execution are not one atomic step."""
+        self.assertFalse(
+            is_stranded_claim(
+                claimed_at=self.now - timedelta(seconds=1),
+                has_active_execution=False,
+                now=self.now,
+                grace_seconds=60,
+            )
+        )
+
+    def test_a_missing_claim_time_is_not_stranded(self) -> None:
+        self.assertFalse(
+            is_stranded_claim(
+                claimed_at=None, has_active_execution=False, now=self.now, grace_seconds=60
+            )
+        )

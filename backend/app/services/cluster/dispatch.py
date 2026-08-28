@@ -8,6 +8,7 @@ go to the caller's own HTTP response and cannot cross an instance boundary.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from typing import Any
@@ -26,6 +27,7 @@ from app.services.cluster.run_history import (
     summarize,
 )
 from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS, run_result_bus
+from app.services.execution_cancellation import complete_execution, register_execution
 from app.services.workflow_executor import execute_workflow
 
 logger = logging.getLogger("cluster")
@@ -231,27 +233,23 @@ class RunQueueWorker:
                 await asyncio.sleep(1)
 
     async def _execute_claimed(self, row: WorkflowRunQueue) -> None:
-        """Load the graph here rather than carrying it through the queue.
-
-        A queue row holds run parameters only. The workflow itself is read from
-        the database at claim time, so an edited workflow is never executed from
-        a stale copy, and the row stays small.
-        """
-        from app.db.session import async_session_maker
-        from app.services.credential_access import get_credentials_context
-        from app.services.execution_cancellation import complete_execution, register_execution
-
-        # The claiming instance owns cancellation and the active-execution row.
-        # Without this the run would be invisible to the cancel bus and to the
-        # leader's orphan recovery sweep, which reads active_workflow_executions.
-        cancel_event = register_execution(
-            workflow_id=row.workflow_id,
-            execution_id=row.execution_id,
-            inputs=row.inputs,
-            trigger_source=row.trigger_source,
-            actor_user_id=row.actor_user_id,
-        )
+        """Load the graph here rather than carrying it through the queue."""
+        cancel_event = None
+        # Imports included: anything raising outside this try strands the row.
         try:
+            # Local: app.api.workflows imports dispatch_workflow.
+            from app.api.workflows import get_credentials_context
+            from app.db.session import async_session_maker
+
+            # Without this the run is invisible to the cancel bus and to recovery.
+            cancel_event = register_execution(
+                workflow_id=row.workflow_id,
+                execution_id=row.execution_id,
+                inputs=row.inputs,
+                trigger_source=row.trigger_source,
+                actor_user_id=row.actor_user_id,
+            )
+
             async with async_session_maker() as db:
                 workflow = (
                     await db.execute(select(Workflow).where(Workflow.id == row.workflow_id))
@@ -300,7 +298,9 @@ class RunQueueWorker:
             logger.exception("Claimed run failed")
             await run_queue.complete(row.execution_id, result=None, error=str(exc))
         finally:
-            complete_execution(row.execution_id, workflow_id=row.workflow_id, result={})
+            # Never let cleanup failure block notify_done; the caller is waiting.
+            with contextlib.suppress(Exception):
+                complete_execution(row.execution_id, workflow_id=row.workflow_id, result={})
             await run_queue.notify_done(row.execution_id)
 
 

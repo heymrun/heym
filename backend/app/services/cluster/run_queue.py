@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import exists, select, text, update
 
 from app.config import settings
-from app.db.models import ClusterDispatchState, WorkflowRunQueue
+from app.db.models import ActiveWorkflowExecution, ClusterDispatchState, WorkflowRunQueue
 from app.db.session import async_session_maker
 from app.services.cluster import registry
 from app.services.cluster.weights import pick_instance, rescale_counters
@@ -164,13 +164,52 @@ async def complete(execution_id: uuid.UUID, *, result: dict | None, error: str |
         await db.commit()
 
 
-async def expire_late_rows() -> int:
-    """Retire rows past their grace window instead of replaying a backlog.
+# Claiming and registering the execution are two steps, not one.
+STRANDED_CLAIM_GRACE_SECONDS = 120
 
-    Without this, a main instance returning after a long outage would run every
-    queued MAIN_ONLY job at once - the mirror image of the cron duplicate-fire
-    incident that cron_misfire_grace_seconds already guards against.
-    """
+
+def is_stranded_claim(
+    *,
+    claimed_at: datetime | None,
+    has_active_execution: bool,
+    now: datetime,
+    grace_seconds: int,
+) -> bool:
+    """Whether a claimed row belongs to a runner that is no longer running it."""
+    if claimed_at is None or has_active_execution:
+        return False
+    return claimed_at < now - timedelta(seconds=grace_seconds)
+
+
+async def expire_stranded_claims() -> list[uuid.UUID]:
+    """Retire claims whose runner died, and return them so waiters are woken."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=STRANDED_CLAIM_GRACE_SECONDS)
+    async with async_session_maker() as db:
+        result = await db.execute(
+            update(WorkflowRunQueue)
+            .where(
+                WorkflowRunQueue.status == STATUS_CLAIMED,
+                WorkflowRunQueue.claimed_at.is_not(None),
+                WorkflowRunQueue.claimed_at < cutoff,
+                ~exists().where(
+                    ActiveWorkflowExecution.execution_id == WorkflowRunQueue.execution_id
+                ),
+            )
+            .values(
+                status=STATUS_FAILED,
+                error="The instance that claimed this run stopped before finishing it",
+                finished_at=now,
+            )
+            .returning(WorkflowRunQueue.execution_id)
+        )
+        execution_ids = [row[0] for row in result.all()]
+        await db.commit()
+    return execution_ids
+
+
+async def expire_late_rows() -> int:
+    """Retire rows past their grace window instead of replaying a backlog."""
     async with async_session_maker() as db:
         result = await db.execute(
             update(WorkflowRunQueue)
