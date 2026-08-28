@@ -485,6 +485,8 @@ class ExecutionHistoryListResponse(BaseModel):
     execution_time_ms: float
     trigger_source: str | None = None
     recovered: bool = False
+    executed_by_instance_id: str | None = None
+    executed_by_instance_name: str | None = None
 
 
 class HistoryListResponse(BaseModel):

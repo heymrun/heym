@@ -11,10 +11,11 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import String, case, cast, func, literal, or_, select, text, union_all
+from sqlalchemy import String, case, cast, func, literal, null, or_, select, text, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.sql import Select
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
@@ -1026,6 +1027,8 @@ async def list_all_execution_history(
             ExecutionHistory.execution_time_ms,
             ExecutionHistory.trigger_source,
             ExecutionHistory.recovered,
+            ExecutionHistory.executed_by_instance_id,
+            ExecutionHistory.executed_by_instance_name,
         )
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
         .where(
@@ -1076,6 +1079,10 @@ async def list_all_execution_history(
             RunHistory.execution_time_ms,
             RunHistory.trigger_source,
             literal(False).label("recovered"),
+            # Chat/assistant runs are not workflow executions and have no
+            # instance of their own; the union needs matching columns.
+            cast(null(), String).label("executed_by_instance_id"),
+            cast(null(), String).label("executed_by_instance_name"),
         ).where(RunHistory.user_id == current_user.id)
         if trigger_source:
             run_subq = run_subq.where(RunHistory.trigger_source == trigger_source)
@@ -1111,6 +1118,8 @@ async def list_all_execution_history(
             execution_time_ms=row.execution_time_ms,
             trigger_source=row.trigger_source,
             recovered=row.recovered,
+            executed_by_instance_id=row.executed_by_instance_id,
+            executed_by_instance_name=row.executed_by_instance_name,
         )
         for row in items_result.all()
     ]
@@ -3457,6 +3466,24 @@ async def stream_workflow_execution_history_entry(
     )
 
 
+def apply_instance_filter(query: Select, instance_id: str | None) -> Select:
+    """Narrow a history query to one executing instance.
+
+    Filters on the id rather than the stored name: the name is a snapshot taken
+    when the run finished, so two rows can carry different names for the same
+    instance after a rename, and different instances can share a name.
+    """
+    # Tests call this endpoint function directly, where FastAPI has not resolved
+    # Query(default=None) into a value, so anything that is not a string is
+    # treated as "no filter".
+    if not isinstance(instance_id, str):
+        return query
+    cleaned = instance_id.strip()
+    if not cleaned:
+        return query
+    return query.where(ExecutionHistory.executed_by_instance_id == cleaned)
+
+
 @router.get("/{workflow_id}/history", response_model=HistoryListResponse)
 async def get_execution_history(
     workflow_id: uuid.UUID,
@@ -3466,6 +3493,7 @@ async def get_execution_history(
     offset: int = 0,
     search: str | None = None,
     trigger_source: str | None = Query(default=None),
+    instance_id: str | None = Query(default=None),
 ) -> HistoryListResponse:
     """List workflow execution history (lightweight, paginated)."""
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
@@ -3492,9 +3520,11 @@ async def get_execution_history(
                 cast(ExecutionHistory.node_results, String).ilike(pattern),
             )
         )
+    total_query = apply_instance_filter(total_query, instance_id)
     total_result = await db.execute(total_query)
     total = total_result.scalar() or 0
     history_query = select(ExecutionHistory).where(ExecutionHistory.workflow_id == workflow_id)
+    history_query = apply_instance_filter(history_query, instance_id)
     if trigger_source:
         history_query = history_query.where(ExecutionHistory.trigger_source == trigger_source)
     if search:
@@ -3523,6 +3553,8 @@ async def get_execution_history(
             execution_time_ms=h.execution_time_ms,
             trigger_source=h.trigger_source,
             recovered=h.recovered,
+            executed_by_instance_id=h.executed_by_instance_id,
+            executed_by_instance_name=h.executed_by_instance_name,
         )
         for h in history
     ]
