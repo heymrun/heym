@@ -12,7 +12,7 @@ const emit = defineEmits<{ update: [value: ClusterInstanceUpdate] }>();
 
 const statusLabel = computed<string>(() => {
   if (!props.instance.compatible) return "Incompatible";
-  if (!props.instance.live) return "Offline";
+  if (!props.instance.live) return "Off";
   return "Live";
 });
 
@@ -22,6 +22,12 @@ const statusClass = computed<string>(() => {
   return "text-emerald-600 dark:text-emerald-400";
 });
 
+const dotClass = computed<string>(() => {
+  if (!props.instance.compatible) return "bg-destructive";
+  if (!props.instance.live) return "bg-muted-foreground/50";
+  return "bg-emerald-500";
+});
+
 const statusTitle = computed<string>(() => {
   if (!props.instance.compatible) {
     return "This instance's version, database revision or keys differ from the main instance, so it receives no work.";
@@ -29,6 +35,13 @@ const statusTitle = computed<string>(() => {
   if (!props.instance.live) return "No heartbeat in the last 30 seconds.";
   return `Version ${props.instance.version}`;
 });
+
+/** The field grows only for a three-digit weight, so 100 is never clipped and a
+ *  two-digit one is not padded out. The column is right-aligned, so the field's
+ *  right edge - and the % beside it - stays put across rows either way. */
+const weightWidth = computed<string>(() =>
+  String(props.instance.weight).length >= 3 ? "w-12" : "w-9",
+);
 
 function emitUpdate(patch: Partial<ClusterInstanceUpdate>): void {
   emit("update", {
@@ -45,23 +58,36 @@ function onWeight(value: string): void {
 </script>
 
 <template>
-  <div class="grid grid-cols-12 items-center gap-3 border-b border-border py-2 text-sm">
-    <div class="col-span-4">
-      <Input
-        :model-value="instance.name"
-        :placeholder="instance.id"
-        @update:model-value="(value: string) => emitUpdate({ name: value })"
-      />
-    </div>
-    <span class="col-span-2 text-muted-foreground">{{ instance.role }}</span>
+  <!-- Fixed widths rather than a 12-column grid: the weight has to stay wide
+       enough to read at any dialog width, and only the name should absorb the
+       rest. -->
+  <div
+    class="flex items-center gap-2 border-b border-border/60 py-1.5 text-sm last:border-b-0"
+  >
+    <!-- Reads as a table cell until you go to edit it: a full form field per row
+         turns five rows into a stack of boxes. -->
+    <Input
+      class="h-8 min-h-0 w-32 shrink-0 rounded-md bg-transparent px-2 shadow-none focus-visible:bg-background mr-4"
+      :model-value="instance.name"
+      :placeholder="instance.id"
+      @update:model-value="(value: string) => emitUpdate({ name: value })"
+    />
+    <span class="w-16 shrink-0 truncate text-muted-foreground">{{ instance.role }}</span>
     <span
-      class="col-span-3"
-      :class="statusClass"
+      class="flex min-w-0 flex-1 items-center gap-1.5 text-xs"
       :title="statusTitle"
     >
-      {{ statusLabel }} &middot; {{ Math.round(instance.db_latency_ms) }} ms
+      <span
+        class="h-1.5 w-1.5 shrink-0 rounded-full"
+        :class="dotClass"
+      />
+      <span
+        class="whitespace-nowrap"
+        :class="statusClass"
+      >{{ statusLabel }}</span>
+      <span class="whitespace-nowrap text-muted-foreground">{{ Math.round(instance.db_latency_ms) }} ms</span>
     </span>
-    <div class="col-span-1">
+    <div class="ml-2 w-11 shrink-0">
       <SettingsToggle
         :id="`cluster-enabled-${instance.id}`"
         :model-value="instance.enabled"
@@ -69,13 +95,18 @@ function onWeight(value: string): void {
         @update:model-value="(value: boolean) => emitUpdate({ enabled: value })"
       />
     </div>
-    <div class="col-span-2">
+    <div class="flex w-16 shrink-0 items-center justify-center gap-1">
       <Input
+        class="h-8 min-h-0 rounded-md px-1.5 text-center tabular-nums transition-[width] duration-150 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        :class="weightWidth"
         type="number"
+        min="0"
+        max="100"
         :model-value="String(instance.weight)"
         :disabled="!instance.enabled"
         @update:model-value="onWeight"
       />
+      <span class="w-3 text-xs text-muted-foreground">%</span>
     </div>
   </div>
 </template>

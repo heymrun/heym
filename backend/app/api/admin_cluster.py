@@ -24,18 +24,20 @@ router = APIRouter()
 
 
 def validate_weight_map(weights: dict[str, tuple[bool, int]]) -> None:
-    """Enabled weights must be non-negative and total exactly 100.
+    """Reject a split nothing could run on.
 
-    Validated as a whole map so the cluster never sits in a half-saved,
-    invalid split.
+    Weights are shares of whichever instances can currently take work, not
+    percentages of 100: the scheduler divides by the pool's own total. Demanding
+    a total of 100 would fail the moment an instance is disabled or goes
+    offline, even though the cluster keeps working - so only genuinely unusable
+    input is rejected here.
     """
     if any(weight < 0 for _enabled, weight in weights.values()):
         raise ValueError("Weights cannot be negative.")
     if not any(enabled for enabled, _weight in weights.values()):
         raise ValueError("At least one instance must be enabled.")
-    enabled_total = sum(weight for enabled, weight in weights.values() if enabled)
-    if enabled_total != 100:
-        raise ValueError(f"Enabled instance weights must total 100, got {enabled_total}.")
+    if sum(weight for enabled, weight in weights.values() if enabled) <= 0:
+        raise ValueError("At least one enabled instance needs a weight above zero.")
 
 
 def placement_ratio(*, main_only: int, anywhere: int) -> dict[str, int]:
@@ -51,6 +53,7 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
     instances = await registry.list_instances()
     now = datetime.now(timezone.utc)
     main = registry.find_main(instances)
+    connected = await registry.connected_instance_ids()
 
     since = now - timedelta(hours=24)
     counts = dict(
@@ -81,7 +84,7 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
                 version=i.version,
                 docker_ok=i.docker_ok,
                 db_latency_ms=i.db_latency_ms,
-                live=registry.is_live(i, now=now),
+                live=registry.is_live_now(i, now=now, connected_ids=connected),
                 compatible=main is not None and registry.is_compatible_with(i, main),
                 heartbeat_at=i.heartbeat_at,
             )

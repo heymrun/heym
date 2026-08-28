@@ -24,7 +24,39 @@ const enabledTotal = computed<number>(() =>
     .reduce((sum: number, instance: ClusterInstance) => sum + instance.weight, 0),
 );
 
-const canSave = computed<boolean>(() => enabledTotal.value === 100);
+// Only a split nothing could run on is refused. Requiring a total of 100 would
+// block saving the moment an instance is disabled, even though the scheduler
+// divides by the pool's own total and keeps working.
+const canSave = computed<boolean>(() => enabledTotal.value > 0);
+
+/** The instances a run can actually be assigned to, mirroring the scheduler's
+ *  own filter: enabled, weighted, live and compatible. */
+const eligible = computed<ClusterInstance[]>(() =>
+  (config.value?.instances ?? []).filter(
+    (instance: ClusterInstance) =>
+      instance.enabled && instance.weight > 0 && instance.live && instance.compatible,
+  ),
+);
+
+/** What each instance really receives. Weights are shares of the eligible pool,
+ *  not of 100, so 41 out of 41+26 is 61% once a third instance drops out. */
+const effectiveSplit = computed<string>(() => {
+  const pool = eligible.value;
+  const total = pool.reduce((sum: number, instance: ClusterInstance) => sum + instance.weight, 0);
+  if (total === 0) return "";
+  return pool
+    .map(
+      (instance: ClusterInstance) =>
+        `${instance.name || instance.id} ${Math.round((instance.weight / total) * 100)}%`,
+    )
+    .join(" \u00b7 ");
+});
+
+const excluded = computed<ClusterInstance[]>(() =>
+  (config.value?.instances ?? []).filter(
+    (instance: ClusterInstance) => !eligible.value.includes(instance),
+  ),
+);
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -87,7 +119,7 @@ onMounted(load);
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-start justify-between gap-4">
+    <div class="flex items-center justify-between gap-4">
       <p class="text-sm text-muted-foreground">
         Share background workflow execution across the instances connected to this database. Work
         that touches files, coding-agent workspaces or plugins always runs on the main instance.
@@ -95,11 +127,13 @@ onMounted(load);
       <Button
         variant="outline"
         size="sm"
+        class="shrink-0 px-2"
+        title="Refresh"
+        aria-label="Refresh"
         :disabled="loading"
         @click="load"
       >
-        <RefreshCw class="mr-2 h-4 w-4" />
-        Refresh
+        <RefreshCw class="h-4 w-4" />
       </Button>
     </div>
 
@@ -141,13 +175,13 @@ onMounted(load);
       class="rounded-md border border-border p-3"
     >
       <div
-        class="grid grid-cols-12 gap-3 border-b border-border pb-2 text-xs uppercase text-muted-foreground"
+        class="flex items-center gap-2 border-b border-border pb-2 text-xs uppercase text-muted-foreground"
       >
-        <span class="col-span-4">Name</span>
-        <span class="col-span-2">Role</span>
-        <span class="col-span-3">Status</span>
-        <span class="col-span-1">On</span>
-        <span class="col-span-2">Weight</span>
+        <span class="mr-4 w-32 shrink-0 pl-2">Name</span>
+        <span class="w-16 shrink-0">Role</span>
+        <span class="min-w-0 flex-1">Status</span>
+        <span class="ml-2 w-11 shrink-0">On</span>
+        <span class="w-16 shrink-0 text-center">Weight</span>
       </div>
       <ClusterInstanceRow
         v-for="instance in config.instances"
@@ -158,10 +192,24 @@ onMounted(load);
     </div>
 
     <p
+      v-if="effectiveSplit"
+      class="text-sm text-muted-foreground"
+    >
+      Runs are being shared
+      <span class="text-foreground">{{ effectiveSplit }}</span>.
+      <template v-if="excluded.length">
+        The weights above are shares of the instances that can take work, so they read
+        differently once
+        {{ excluded.map((instance) => instance.name || instance.id).join(", ") }}
+        {{ excluded.length === 1 ? "is" : "are" }} out of the pool.
+      </template>
+    </p>
+
+    <p
       v-if="config && !canSave"
       class="text-sm text-destructive"
     >
-      Enabled weights total {{ enabledTotal }}. They must total 100 before you can save.
+      Give at least one enabled instance a weight above zero, or nothing can be scheduled.
     </p>
     <p
       v-if="error"

@@ -36,7 +36,11 @@ A workflow whose sub-workflow is chosen by an expression cannot be inspected ahe
 
 ## Choosing percentages
 
-Weights are integers that total 100 across the enabled instances, set under **Settings → Instances**. Two things about them are easy to get wrong.
+Weights are integers set under **Settings → Instances**. They are **shares of whichever instances can currently take work**, not percentages of 100: the scheduler divides by that pool's own total.
+
+That distinction shows up as soon as one instance drops out. With `Main 41, Worker A 26, Worker B 33`, turning Worker B off leaves a pool of 67, so Main really receives 41/67 = **61%** and Worker A 26/67 = **39%**. The panel prints the effective split under the table for exactly this reason, and saving is never blocked because the numbers do not add to 100 — only a split where no enabled instance has a weight is refused.
+
+Two more things are easy to get wrong.
 
 **A percentage is not a share of machine power.** It only covers runs that go through the queue. Serving the UI and the API, streaming editor and portal runs, and handling file uploads are all main's work and none of it is counted. Main is doing more than its number says.
 
@@ -57,6 +61,23 @@ Only enabled, live and compatible instances take part. Handing a share to a mach
 ### When percentages cannot help
 
 The settings panel reports how many of the last 24 hours' runs could only execute on main. If that number is high — a Codex-heavy or Drive-heavy workload — the workers will sit idle whatever the weights say, and the answer is a bigger main instance rather than more of them.
+
+## Sizing PostgreSQL for a cluster
+
+Connections scale with instances, not just users. Each instance runs several uvicorn processes, and each process holds a connection pool plus three `LISTEN` connections (cancellation, queue wake-ups, run results). A three-instance cluster on the default `max_connections = 100` runs out, and Heym then fails to reach its own database.
+
+Budget roughly `instances x processes x (async pool + sync pool + 3)` and set `max_connections` above it.
+
+Shrink the pools rather than only raising the ceiling. A single deployment defaults to 10+20 async and 5+10 sync connections per process, which is generous for one machine and far too much for a cluster:
+
+| Variable | Single instance | Cluster |
+|---|---|---|
+| `HEYM_DB_POOL_SIZE` | 10 | 3 |
+| `HEYM_DB_MAX_OVERFLOW` | 20 | 5 |
+| `HEYM_DB_SYNC_POOL_SIZE` | 5 | 2 |
+| `HEYM_DB_SYNC_MAX_OVERFLOW` | 10 | 3 |
+
+The example compose file sets those and `max_connections = 300`. That takes a two-instance cluster from a 768-connection ceiling down to 192, with three instances still under 300.
 
 ## Requirements the cluster cannot enforce for you
 

@@ -6,12 +6,22 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 
+
+def _application_name() -> str:
+    """Tag every connection with this instance, so the admin view can tell a
+    stopped container from one that merely missed a heartbeat."""
+    from app.services.cluster.identity import instance_id
+
+    return f"heym-{instance_id()}"
+
+
 engine = create_async_engine(
     settings.database_url,
     echo=False,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    connect_args={"server_settings": {"application_name": _application_name()}},
 )
 
 async_session_maker = async_sessionmaker(
@@ -35,8 +45,9 @@ sync_engine = create_engine(
     sync_database_url,
     echo=False,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=settings.db_sync_pool_size,
+    max_overflow=settings.db_sync_max_overflow,
+    connect_args={"application_name": _application_name()},
 )
 
 SessionLocal = sessionmaker(

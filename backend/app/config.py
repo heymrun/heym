@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     instance_name: str = Field(default="", validation_alias="HEYM_INSTANCE_NAME")
     instance_role: str = Field(default="main", validation_alias="HEYM_INSTANCE_ROLE")
     cluster_enabled: bool = Field(default=False, validation_alias="HEYM_CLUSTER_ENABLED")
+    db_pool_size: int = Field(default=10, validation_alias="HEYM_DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=20, validation_alias="HEYM_DB_MAX_OVERFLOW")
+    db_sync_pool_size: int = Field(default=5, validation_alias="HEYM_DB_SYNC_POOL_SIZE")
+    db_sync_max_overflow: int = Field(default=10, validation_alias="HEYM_DB_SYNC_MAX_OVERFLOW")
     plugins_dir: str = Field(default="data/plugins", validation_alias="HEYM_PLUGINS_DIR")
     # Custom Playwright code runs arbitrary Python in the backend process. It is OFF by
     # default; an operator must opt in explicitly. Step-based Playwright nodes are unaffected.

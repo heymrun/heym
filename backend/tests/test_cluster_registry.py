@@ -10,6 +10,7 @@ from app.services.cluster.registry import (
     candidate_instances,
     is_compatible_with,
     is_live,
+    is_live_now,
 )
 
 
@@ -93,3 +94,33 @@ class CandidatePoolTests(unittest.TestCase):
     def test_an_empty_pool_when_main_is_missing(self) -> None:
         """Without a main row there is no compatibility reference, so nobody runs."""
         self.assertEqual(candidate_instances([_view()], now=self.now), [])
+
+
+class ConnectionAwareLivenessTests(unittest.TestCase):
+    """A stopped container drops its database connections within seconds.
+
+    The heartbeat alone cannot beat its own window, so the admin view combines
+    both: gone from pg_stat_activity means gone now, and a stale heartbeat still
+    catches an instance whose process is up but wedged.
+    """
+
+    def setUp(self) -> None:
+        self.now = datetime.now(timezone.utc)
+
+    def test_connected_and_beating_is_live(self) -> None:
+        self.assertTrue(is_live_now(_view(), now=self.now, connected_ids={"worker-a"}))
+
+    def test_no_connections_is_offline_immediately(self) -> None:
+        """Heartbeat is still fresh, but the process is already gone."""
+        self.assertFalse(is_live_now(_view(), now=self.now, connected_ids=set()))
+
+    def test_connected_but_not_beating_is_offline(self) -> None:
+        """Process up, event loop wedged: connections linger, the heartbeat does not."""
+        stale = _view(heartbeat_at=self.now - timedelta(seconds=LIVENESS_WINDOW_SECONDS + 1))
+        self.assertFalse(is_live_now(stale, now=self.now, connected_ids={"worker-a"}))
+
+    def test_an_unknown_connection_set_falls_back_to_the_heartbeat(self) -> None:
+        """pg_stat_activity can be unreadable; never report a healthy instance dead."""
+        self.assertTrue(is_live_now(_view(), now=self.now, connected_ids=None))
+        stale = _view(heartbeat_at=self.now - timedelta(seconds=LIVENESS_WINDOW_SECONDS + 1))
+        self.assertFalse(is_live_now(stale, now=self.now, connected_ids=None))

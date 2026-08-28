@@ -9,16 +9,21 @@ class WeightValidationTests(unittest.TestCase):
     def test_enabled_weights_totalling_100_are_accepted(self) -> None:
         validate_weight_map({"main": (True, 70), "a": (True, 30)})
 
-    def test_a_total_below_100_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            validate_weight_map({"main": (True, 70), "a": (True, 20)})
+    def test_a_total_other_than_100_is_accepted(self) -> None:
+        """Weights are shares of the live pool; the scheduler renormalizes them.
 
-    def test_a_total_above_100_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            validate_weight_map({"main": (True, 70), "a": (True, 40)})
+        Requiring 100 would block saving the moment an instance is disabled.
+        """
+        validate_weight_map({"main": (True, 70), "a": (True, 20)})
+        validate_weight_map({"main": (True, 70), "a": (True, 40)})
 
-    def test_disabled_instances_are_excluded_from_the_total(self) -> None:
-        validate_weight_map({"main": (True, 100), "a": (False, 40)})
+    def test_a_disabled_instance_does_not_break_the_split(self) -> None:
+        validate_weight_map({"main": (True, 41), "a": (True, 26), "b": (False, 33)})
+
+    def test_all_enabled_weights_at_zero_is_rejected(self) -> None:
+        """Nothing could be scheduled."""
+        with self.assertRaises(ValueError):
+            validate_weight_map({"main": (True, 0), "a": (False, 50)})
 
     def test_a_negative_weight_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

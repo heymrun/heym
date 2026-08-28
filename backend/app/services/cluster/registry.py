@@ -47,6 +47,25 @@ def is_live(instance: InstanceView, *, now: datetime) -> bool:
     return instance.heartbeat_at >= now - timedelta(seconds=LIVENESS_WINDOW_SECONDS)
 
 
+def is_live_now(instance: InstanceView, *, now: datetime, connected_ids: set[str] | None) -> bool:
+    """Liveness for the admin view, which must answer "right now".
+
+    A stopped container drops its database connections within seconds, while its
+    last heartbeat stays fresh for the rest of the window - so the heartbeat
+    alone cannot report a stop quickly. Requiring both signals makes a stop
+    visible on the next Refresh, and still catches an instance whose process is
+    up but no longer beating.
+
+    `connected_ids` of None means pg_stat_activity could not be read; fall back
+    to the heartbeat rather than declaring a healthy instance dead.
+    """
+    if not is_live(instance, now=now):
+        return False
+    if connected_ids is None:
+        return True
+    return instance.id in connected_ids
+
+
 def is_compatible_with(instance: InstanceView, main: InstanceView) -> bool:
     """Whether this instance can safely execute work main would have executed.
 
@@ -89,6 +108,30 @@ def _docker_reachable() -> bool:
         return True
     except OSError:
         return False
+
+
+APPLICATION_NAME_PREFIX = "heym-"
+
+
+async def connected_instance_ids() -> set[str] | None:
+    """Instance ids holding a database connection, or None if unreadable.
+
+    Every pooled connection is tagged with the instance's id, so this is the
+    fastest honest signal that a container is gone.
+    """
+    try:
+        async with async_session_maker() as db:
+            rows = await db.execute(
+                text(
+                    "SELECT DISTINCT application_name FROM pg_stat_activity "
+                    "WHERE application_name LIKE :prefix"
+                ),
+                {"prefix": f"{APPLICATION_NAME_PREFIX}%"},
+            )
+        return {str(name)[len(APPLICATION_NAME_PREFIX) :] for (name,) in rows.all()}
+    except Exception:
+        logger.warning("Could not read pg_stat_activity; falling back to heartbeats")
+        return None
 
 
 async def _schema_revision() -> str:
