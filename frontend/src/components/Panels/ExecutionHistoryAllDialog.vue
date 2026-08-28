@@ -214,12 +214,6 @@ const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() =>
     entries = entries.filter((entry) => entry.trigger_source === selectedTriggerSource.value);
   }
 
-  if (selectedInstanceId.value) {
-    entries = entries.filter(
-      (entry) => entry.executed_by_instance_id === selectedInstanceId.value,
-    );
-  }
-
   return entries;
 });
 
@@ -257,6 +251,7 @@ async function loadHistory(): Promise<void> {
         props.initialStatus || undefined,
         selectedTriggerSource.value,
         props.workflowId,
+        selectedInstanceId.value,
       ),
       workflowApi.getActiveExecutions(),
     ]);
@@ -315,6 +310,7 @@ watch(
       searchActive.value = false;
       searchQuery.value = "";
       selectedTriggerSource.value = undefined;
+      selectedInstanceId.value = undefined;
       cancelScheduledSearchReload();
       delete document.body.dataset.heymOverlayEscapeTrap;
       return;
@@ -345,6 +341,15 @@ watch(
 );
 
 watch(selectedTriggerSource, async () => {
+  if (!props.open) return;
+
+  cancelScheduledSearchReload();
+  entryDetailsCache.value = new Map();
+  expandedNodes.value = new Set();
+  await loadHistory();
+});
+
+watch(selectedInstanceId, async () => {
   if (!props.open) return;
 
   cancelScheduledSearchReload();
@@ -412,6 +417,7 @@ async function refreshHistory(): Promise<void> {
         props.initialStatus || undefined,
         selectedTriggerSource.value,
         props.workflowId,
+        selectedInstanceId.value,
       ),
       workflowApi.getActiveExecutions(),
     ]);
@@ -528,6 +534,7 @@ async function loadMore(): Promise<void> {
       props.initialStatus || undefined,
       selectedTriggerSource.value,
       props.workflowId,
+      selectedInstanceId.value,
     );
     executionHistory.value = [...executionHistory.value, ...result.items];
     totalCount.value = result.total;

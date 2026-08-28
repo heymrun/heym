@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Build, visualize, and run intelligent AI workflows without writing code.</strong><br/>
-  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support · OIDC SSO login
+  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support · OIDC SSO
 </p>
 
 <p align="center">

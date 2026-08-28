@@ -1014,6 +1014,7 @@ async def list_all_execution_history(
     execution_status: str | None = Query(default=None, alias="status"),
     trigger_source: str | None = Query(default=None),
     workflow_id: str | None = Query(default=None),
+    instance_id: str | None = Query(default=None),
 ) -> HistoryListResponse:
     """List execution history (lightweight, paginated)."""
     exec_subq = (
@@ -1046,6 +1047,7 @@ async def list_all_execution_history(
         exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)
     if trigger_source:
         exec_subq = exec_subq.where(ExecutionHistory.trigger_source == trigger_source)
+    exec_subq = apply_instance_filter(exec_subq, instance_id)
     if execution_status:
         exec_subq = exec_subq.where(ExecutionHistory.status == execution_status)
     if search:
@@ -1061,7 +1063,7 @@ async def list_all_execution_history(
             )
         )
 
-    if workflow_id:
+    if workflow_id or filters_to_workflow_runs(instance_id):
         combined = exec_subq.subquery()
     else:
         run_display_name = case(
@@ -3465,6 +3467,11 @@ async def stream_workflow_execution_history_entry(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def filters_to_workflow_runs(instance_id: str | None) -> bool:
+    """Whether an instance filter is set, which excludes non-workflow runs."""
+    return isinstance(instance_id, str) and bool(instance_id.strip())
 
 
 def apply_instance_filter(query: Select, instance_id: str | None) -> Select:
