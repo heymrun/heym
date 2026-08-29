@@ -184,6 +184,70 @@ describe("workflow execution state", () => {
     expect(store.isExecuting).toBe(false);
   });
 
+  it("uses the streamed start timestamp for a running canvas node", async () => {
+    const workflow = makeWorkflow("workflow-a");
+    const getWorkflow = vi.mocked(workflowApi.get);
+    const executeStream = vi.mocked(workflowApi.executeStream);
+    const stream = {
+      started: null as ((data: { execution_id: string; server_now_ms?: number }) => void) | null,
+      nodeStart: null as ((data: { node_id: string; started_at_ms: number }) => void) | null,
+      complete: null as ((result: ExecutionResult) => void) | null,
+    };
+
+    getWorkflow.mockResolvedValue(workflow);
+    executeStream.mockImplementation(
+      (
+        _id,
+        _body,
+        onExecutionStarted,
+        onNodeStart,
+        _onNodeComplete,
+        onComplete,
+      ): void => {
+        stream.started = onExecutionStarted as unknown as typeof stream.started;
+        stream.nodeStart = onNodeStart as unknown as typeof stream.nodeStart;
+        stream.complete = onComplete;
+      },
+    );
+
+    const store = useWorkflowStore();
+    await store.loadWorkflow(workflow.id);
+
+    const execution = store.executeWorkflow({});
+    await vi.waitFor(() => expect(executeStream).toHaveBeenCalledOnce());
+    vi.spyOn(Date, "now").mockReturnValue(3_601_000);
+    stream.started?.({
+      execution_id: "execution-a",
+      server_now_ms: 1_000,
+    });
+    expect(store.serverClockOffsetMs).toBe(-3_600_000);
+    stream.nodeStart?.({
+      node_id: `${workflow.id}-node`,
+      started_at_ms: 1_000,
+    });
+
+    expect(store.nodeResults).toMatchObject([
+      {
+        node_id: `${workflow.id}-node`,
+        status: "running",
+        metadata: {
+          started_at_ms: 1_000,
+          ended_at_ms: 1_000,
+        },
+      },
+    ]);
+
+    stream.complete?.({
+      workflow_id: workflow.id,
+      status: "success",
+      outputs: {},
+      execution_time_ms: 0,
+      node_results: [],
+      highlight: { records: [] },
+    });
+    await execution;
+  });
+
   it("applies the completion of a live execution opened in another tab", async () => {
     const workflow = makeWorkflow("workflow-a");
     const getWorkflow = vi.mocked(workflowApi.get);
@@ -191,6 +255,7 @@ describe("workflow execution state", () => {
     const streamActiveExecution = vi.mocked(workflowApi.streamActiveExecution);
     const stream = {
       started: null as ((data: { execution_id: string; inputs: Record<string, unknown> }) => void) | null,
+      nodeStart: null as ((data: { node_id: string; started_at_ms: number }) => void) | null,
       complete: null as ((result: ExecutionResult) => void) | null,
     };
 
@@ -211,11 +276,12 @@ describe("workflow execution state", () => {
         _workflowId,
         _executionId,
         onExecutionStarted,
-        _onNodeStart,
+        onNodeStart,
         _onNodeComplete,
         onComplete,
       ): void => {
         stream.started = onExecutionStarted;
+        stream.nodeStart = onNodeStart as unknown as typeof stream.nodeStart;
         stream.complete = onComplete;
       },
     );
@@ -226,6 +292,14 @@ describe("workflow execution state", () => {
     const observation = store.observeExecution("execution-a");
     await vi.waitFor(() => expect(streamActiveExecution).toHaveBeenCalledOnce());
     stream.started?.({ execution_id: "execution-a", inputs: {} });
+    stream.nodeStart?.({
+      node_id: `${workflow.id}-node`,
+      started_at_ms: 1_000,
+    });
+    expect(store.nodeResults[0]?.metadata).toMatchObject({
+      started_at_ms: 1_000,
+      ended_at_ms: 1_000,
+    });
     await stream.complete?.({
       workflow_id: workflow.id,
       status: "success",

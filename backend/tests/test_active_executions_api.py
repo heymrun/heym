@@ -390,6 +390,27 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             clear_execution(execution_id)
 
+    def test_preserves_running_node_start_time_for_live_observers(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+        try:
+            record_execution_node_started(
+                str(execution_id),
+                "node-1",
+                started_at_ms=1_000.0,
+            )
+
+            snapshot = get_active_execution_stream_snapshot(
+                execution_id,
+                workflow_id=workflow_id,
+            )
+
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot.running_node_started_at_ms, {"node-1": 1_000.0})
+        finally:
+            clear_execution(execution_id)
+
     async def test_registry_writes_progress_only_after_node_state_changes(self) -> None:
         workflow_id = uuid.uuid4()
         execution_id = uuid.uuid4()
@@ -456,7 +477,11 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 "error": None,
             },
         )
-        record_execution_node_started(str(execution_id), "wait")
+        record_execution_node_started(
+            str(execution_id),
+            "wait",
+            started_at_ms=1_000.0,
+        )
 
         workflow = MagicMock()
         workflow.id = workflow_id
@@ -487,10 +512,13 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn('"type": "execution_started"', started)
             self.assertIn('"inputs": {"text": "live input"}', started)
+            started_payload = json.loads(started.removeprefix("data: "))
+            self.assertIsInstance(started_payload.get("server_now_ms"), float)
             self.assertIn('"type": "node_complete"', completed)
             self.assertIn('"message": "hello"', completed)
             self.assertIn('"type": "node_start"', running)
             self.assertIn('"node_id": "wait"', running)
+            self.assertIn('"started_at_ms": 1000.0', running)
         finally:
             clear_execution(execution_id)
 

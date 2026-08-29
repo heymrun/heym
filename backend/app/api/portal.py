@@ -1,6 +1,7 @@
 import asyncio
 import json
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -503,6 +504,7 @@ async def portal_execute_stream(
                     {
                         "type": "execution_started",
                         "execution_id": str(execution_id),
+                        "server_now_ms": time.time() * 1000,
                     }
                 )
                 + "\n\n"

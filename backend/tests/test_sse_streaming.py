@@ -213,6 +213,7 @@ class ExecuteWorkflowStreamingSseTests(unittest.TestCase):
 
         node_start = next(event for event in events if event.get("type") == "node_start")
         self.assertEqual(node_start.get("message"), "[START] LLM")
+        self.assertIsInstance(node_start.get("started_at_ms"), float)
 
     def test_node_start_no_message_when_send_start_false(self) -> None:
         events = self._collect_events({"node-1": {"send_start": False, "start_message": None}})

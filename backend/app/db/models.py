@@ -613,6 +613,7 @@ class ActiveWorkflowExecution(Base):
     )
     inputs: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     running_node_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    running_node_started_at_ms: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     node_results: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -25,8 +25,8 @@ Each SSE frame is newline-delimited JSON prefixed with `data: `.
 
 | Event type | When it is emitted | Key fields |
 |------------|--------------------|------------|
-| `execution_started` | Immediately after the request is accepted | `execution_id` |
-| `node_start` | Right before a node begins execution | `node_id`, `node_label`, optional `message` |
+| `execution_started` | Immediately after the request is accepted | `execution_id`, `server_now_ms` |
+| `node_start` | Right before a node begins execution | `node_id`, `node_label`, `started_at_ms`, optional `message` |
 | `node_retry` | When a node retries | `node_id`, `attempt`, `max_attempts` |
 | `node_complete` | After a node finishes | `node_id`, `node_label`, `status`, `output`, `execution_time_ms` |
 | `final_output` | When an Output node returns early | `node_label`, `output` |
@@ -70,9 +70,9 @@ curl -X POST --no-buffer \
 Sample event stream:
 
 ```text
-data: {"type":"execution_started","execution_id":"..."}
+data: {"type":"execution_started","execution_id":"...","server_now_ms":1735660800000}
 
-data: {"type":"node_start","node_id":"...","node_label":"LLM","message":"[START] LLM"}
+data: {"type":"node_start","node_id":"...","node_label":"LLM","started_at_ms":1735660800000,"message":"[START] LLM"}
 
 data: {"type":"node_complete","node_id":"...","node_label":"LLM","status":"success","output":{"text":"Hello world"},"execution_time_ms":312}
 

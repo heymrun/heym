@@ -726,8 +726,9 @@ export const workflowApi = {
     onExecutionStarted: (data: {
       execution_id: string;
       inputs: Record<string, unknown>;
+      server_now_ms?: number;
     }) => void,
-    onNodeStart: (nodeId: string) => void,
+    onNodeStart: (data: { node_id: string; started_at_ms?: number }) => void,
     onNodeComplete: (data: {
       node_id: string;
       node_label?: string;
@@ -792,9 +793,15 @@ export const workflowApi = {
                   data.inputs && typeof data.inputs === "object" && !Array.isArray(data.inputs)
                     ? data.inputs
                     : {},
+                server_now_ms:
+                  typeof data.server_now_ms === "number" ? data.server_now_ms : undefined,
               });
             } else if (data.type === "node_start") {
-              onNodeStart(data.node_id);
+              onNodeStart({
+                node_id: data.node_id,
+                started_at_ms:
+                  typeof data.started_at_ms === "number" ? data.started_at_ms : undefined,
+              });
             } else if (data.type === "node_retry" && onNodeRetry) {
               onNodeRetry(data);
             } else if (data.type === "agent_progress" && onAgentProgress) {
@@ -935,8 +942,8 @@ export const workflowApi = {
   executeStream: (
     id: string,
     body: unknown,
-    onExecutionStarted: (data: { execution_id: string }) => void,
-    onNodeStart: (nodeId: string) => void,
+    onExecutionStarted: (data: { execution_id: string; server_now_ms?: number }) => void,
+    onNodeStart: (data: { node_id: string; started_at_ms?: number }) => void,
     onNodeComplete: (data: {
       node_id: string;
       node_label?: string;
@@ -1014,9 +1021,17 @@ export const workflowApi = {
               const data = JSON.parse(line.slice(6));
 
               if (data.type === "execution_started") {
-                onExecutionStarted({ execution_id: data.execution_id });
+                onExecutionStarted({
+                  execution_id: data.execution_id,
+                  server_now_ms:
+                    typeof data.server_now_ms === "number" ? data.server_now_ms : undefined,
+                });
               } else if (data.type === "node_start") {
-                onNodeStart(data.node_id);
+                onNodeStart({
+                  node_id: data.node_id,
+                  started_at_ms:
+                    typeof data.started_at_ms === "number" ? data.started_at_ms : undefined,
+                });
               } else if (data.type === "node_retry" && onNodeRetry) {
                 onNodeRetry(data);
               } else if (data.type === "agent_progress" && onAgentProgress) {

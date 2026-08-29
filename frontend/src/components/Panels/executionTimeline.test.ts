@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TimelineEntry } from "@/components/Panels/executionTimeline";
+import * as executionTimeline from "@/components/Panels/executionTimeline";
 import {
   buildTimelineModel,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
@@ -148,6 +149,16 @@ describe("buildTimelineModel HITL wait spans", () => {
 });
 
 describe("buildTimelineModel running spans", () => {
+  it("aligns a client clock ahead by one hour with the server clock", () => {
+    const alignNow = (
+      executionTimeline as typeof executionTimeline & {
+        getServerAlignedNowMs?: (clientNowMs: number, serverClockOffsetMs: number) => number;
+      }
+    ).getServerAlignedNowMs;
+
+    expect(alignNow?.(3_601_000, -3_600_000)).toBe(1_000);
+  });
+
   it("extends an open running span to the current timeline time", () => {
     const results: TimelineEntry[] = [
       entry({

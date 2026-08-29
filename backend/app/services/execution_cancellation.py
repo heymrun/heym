@@ -3,6 +3,7 @@ import contextlib
 import copy
 import json
 import logging
+import math
 import os
 import queue
 import socket
@@ -74,6 +75,7 @@ class ExecutionCancellationHandle:
     actor_user_id: uuid.UUID | None = None
     recoverable: bool = True
     running_node_ids: set[str] = field(default_factory=set)
+    running_node_started_at_ms: dict[str, float] = field(default_factory=dict)
     node_results: list[dict[str, Any]] = field(default_factory=list)
     progress_version: int = 0
     synced_progress_version: int = 0
@@ -90,6 +92,7 @@ class ActiveExecutionStreamSnapshot:
 
     publishes_progress_events: bool
     running_node_ids: list[str]
+    running_node_started_at_ms: dict[str, float]
     node_results: list[dict[str, Any]]
     events: list[str]
     next_event_seq: int
@@ -274,12 +277,24 @@ def get_active_execution_inputs(
         return dict(handle.inputs)
 
 
-def record_execution_node_started(execution_id: str, node_id: str) -> None:
+def record_execution_node_started(
+    execution_id: str,
+    node_id: str,
+    *,
+    started_at_ms: float | None = None,
+) -> None:
     """Record a node start in the cross-worker live execution snapshot."""
     try:
         parsed_execution_id = uuid.UUID(str(execution_id))
     except (TypeError, ValueError):
         return
+
+    if (
+        isinstance(started_at_ms, bool)
+        or not isinstance(started_at_ms, (int, float))
+        or not math.isfinite(started_at_ms)
+    ):
+        started_at_ms = time.time() * 1000
 
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
@@ -288,6 +303,10 @@ def record_execution_node_started(execution_id: str, node_id: str) -> None:
         normalized_node_id = str(node_id)
         if normalized_node_id not in handle.running_node_ids:
             handle.running_node_ids.add(normalized_node_id)
+            handle.running_node_started_at_ms[normalized_node_id] = float(started_at_ms)
+            handle.progress_version += 1
+        elif normalized_node_id not in handle.running_node_started_at_ms:
+            handle.running_node_started_at_ms[normalized_node_id] = float(started_at_ms)
             handle.progress_version += 1
 
 
@@ -307,6 +326,7 @@ def record_execution_node_completed(
         if handle is None:
             return
         handle.running_node_ids.discard(str(node_id))
+        handle.running_node_started_at_ms.pop(str(node_id), None)
         handle.node_results.append(node_result)
         handle.progress_version += 1
 
@@ -394,6 +414,7 @@ def get_active_execution_stream_snapshot(
         return ActiveExecutionStreamSnapshot(
             publishes_progress_events=handle.publishes_progress_events,
             running_node_ids=sorted(handle.running_node_ids),
+            running_node_started_at_ms=dict(handle.running_node_started_at_ms),
             node_results=list(handle.node_results),
             events=[payload for _seq, payload in handle.progress_events],
             next_event_seq=handle.next_progress_event_seq,
@@ -491,6 +512,7 @@ def _build_active_execution_upsert(
     actor_user_id: uuid.UUID | None,
     recoverable: bool,
     running_node_ids: list[str],
+    running_node_started_at_ms: dict[str, float],
     node_results: list[dict[str, Any]],
 ) -> Any:
     """Insert-or-refresh one active execution row.
@@ -513,6 +535,7 @@ def _build_active_execution_upsert(
         "trigger_source": trigger_source,
         "actor_user_id": actor_user_id,
         "running_node_ids": running_node_ids,
+        "running_node_started_at_ms": running_node_started_at_ms,
         "node_results": node_results,
     }
     return (
@@ -637,6 +660,7 @@ class ActiveExecutionRegistry:
                 actor_user_id=command.actor_user_id,
                 recoverable=command.recoverable,
                 running_node_ids=[],
+                running_node_started_at_ms={},
                 node_results=[],
             )
         )
@@ -730,6 +754,7 @@ class ActiveExecutionRegistry:
             if _ACTIVE_EXECUTIONS.get(execution_id) is not handle:
                 return None
             running_node_ids = sorted(handle.running_node_ids)
+            running_node_started_at_ms = dict(handle.running_node_started_at_ms)
             node_results = list(handle.node_results)
             version = handle.progress_version
         await session.execute(
@@ -743,6 +768,7 @@ class ActiveExecutionRegistry:
                 actor_user_id=handle.actor_user_id,
                 recoverable=handle.recoverable,
                 running_node_ids=running_node_ids,
+                running_node_started_at_ms=running_node_started_at_ms,
                 node_results=node_results,
             )
         )
@@ -763,7 +789,14 @@ class ActiveExecutionRegistry:
         execution_ids = list(handles_by_id)
         progress_snapshots: dict[
             uuid.UUID,
-            tuple[ExecutionCancellationHandle, list[str], list[dict[str, Any]], int, bool],
+            tuple[
+                ExecutionCancellationHandle,
+                list[str],
+                dict[str, float],
+                list[dict[str, Any]],
+                int,
+                bool,
+            ],
         ] = {}
         with _LOCK:
             for execution_id, listed_handle in handles_by_id.items():
@@ -776,6 +809,7 @@ class ActiveExecutionRegistry:
                 progress_snapshots[execution_id] = (
                     current_handle,
                     sorted(current_handle.running_node_ids) if progress_changed else [],
+                    dict(current_handle.running_node_started_at_ms) if progress_changed else {},
                     list(current_handle.node_results) if progress_changed else [],
                     current_handle.progress_version,
                     progress_changed,
@@ -801,7 +835,14 @@ class ActiveExecutionRegistry:
                 self._failures.success("cancel poll")
 
             for execution_id, snapshot in progress_snapshots.items():
-                handle, running_node_ids, node_results, version, progress_changed = snapshot
+                (
+                    handle,
+                    running_node_ids,
+                    running_node_started_at_ms,
+                    node_results,
+                    version,
+                    progress_changed,
+                ) = snapshot
                 update_values: dict[str, Any] = {
                     "heartbeat_at": now,
                     "worker_id": _WORKER_ID,
@@ -809,6 +850,7 @@ class ActiveExecutionRegistry:
                 if progress_changed:
                     update_values.update(
                         running_node_ids=running_node_ids,
+                        running_node_started_at_ms=running_node_started_at_ms,
                         node_results=node_results,
                     )
                 # Each row gets its own savepoint: a single unwritable row (a corrupt

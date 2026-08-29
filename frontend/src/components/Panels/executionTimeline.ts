@@ -120,6 +120,14 @@ const GC_PAUSE_DISPLAY_MIN_MS = 20;
 /** Refresh open running spans while the execution timeline is visible. */
 export const LIVE_TIMELINE_REFRESH_INTERVAL_MS = 50;
 
+/** Convert the browser clock into the server's wall-clock domain for live spans. */
+export function getServerAlignedNowMs(clientNowMs: number, serverClockOffsetMs: number): number {
+  if (!Number.isFinite(clientNowMs) || !Number.isFinite(serverClockOffsetMs)) {
+    return clientNowMs;
+  }
+  return clientNowMs + serverClockOffsetMs;
+}
+
 function nodeColorVar(nodeType: string): string {
   const def = NODE_DEFINITIONS[nodeType as NodeType];
   return def?.color ?? "primary";

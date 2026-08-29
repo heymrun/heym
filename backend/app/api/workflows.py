@@ -2,6 +2,7 @@ import asyncio
 import copy
 import json
 import logging
+import time
 import uuid
 from collections.abc import Coroutine, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -1205,6 +1206,7 @@ async def stream_active_workflow_execution(
 
         def derived_catch_up_frames(
             running_node_ids: list[str],
+            running_node_started_at_ms: dict[str, float],
             node_results: list[dict],
         ) -> Iterator[str]:
             """Rebuild node lifecycle frames from a coarse progress snapshot."""
@@ -1214,7 +1216,11 @@ async def stream_active_workflow_execution(
             emitted_result_count = max(emitted_result_count, len(node_results))
             current_running_node_ids = set(running_node_ids)
             for node_id in sorted(current_running_node_ids - emitted_running_node_ids):
-                yield "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
+                event: dict[str, str | float] = {"type": "node_start", "node_id": node_id}
+                started_at_ms = running_node_started_at_ms.get(node_id)
+                if isinstance(started_at_ms, (int, float)) and not isinstance(started_at_ms, bool):
+                    event["started_at_ms"] = float(started_at_ms)
+                yield "data: " + json.dumps(event) + "\n\n"
             emitted_running_node_ids = current_running_node_ids
 
         yield (
@@ -1224,6 +1230,7 @@ async def stream_active_workflow_execution(
                     "type": "execution_started",
                     "execution_id": str(execution_id),
                     "inputs": initial_inputs,
+                    "server_now_ms": time.time() * 1000,
                 }
             )
             + "\n\n"
@@ -1234,6 +1241,7 @@ async def stream_active_workflow_execution(
                 break
 
             running_node_ids: list[str] = []
+            running_node_started_at_ms: dict[str, float] = {}
             node_results: list[dict] = []
             active_found = False
 
@@ -1257,6 +1265,7 @@ async def stream_active_workflow_execution(
                         # the catch-up, then follow the live events from here on.
                         for frame in derived_catch_up_frames(
                             snapshot.running_node_ids,
+                            snapshot.running_node_started_at_ms,
                             snapshot.node_results,
                         ):
                             yield frame
@@ -1288,6 +1297,7 @@ async def stream_active_workflow_execution(
             if snapshot is not None:
                 active_found = True
                 running_node_ids = snapshot.running_node_ids
+                running_node_started_at_ms = snapshot.running_node_started_at_ms
                 node_results = snapshot.node_results
             else:
                 completed_result = get_completed_execution_result(
@@ -1309,6 +1319,7 @@ async def stream_active_workflow_execution(
                 if active is not None:
                     active_found = True
                     running_node_ids = list(active.running_node_ids or [])
+                    running_node_started_at_ms = dict(active.running_node_started_at_ms or {})
                     node_results = list(active.node_results or [])
 
             if active_found:
@@ -1317,7 +1328,11 @@ async def stream_active_workflow_execution(
                 # Once the runner's own events have been streamed, never fall back to the
                 # coarse snapshot: its node results were already emitted as live events.
                 if stream_mode == "derived":
-                    for frame in derived_catch_up_frames(running_node_ids, node_results):
+                    for frame in derived_catch_up_frames(
+                        running_node_ids,
+                        running_node_started_at_ms,
+                        node_results,
+                    ):
                         yield frame
                         emitted_event = True
                 now = loop.time()
@@ -3922,6 +3937,7 @@ async def execute_workflow_stream(
                     {
                         "type": "execution_started",
                         "execution_id": str(execution_id),
+                        "server_now_ms": time.time() * 1000,
                     }
                 )
                 + "\n\n"

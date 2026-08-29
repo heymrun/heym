@@ -70,6 +70,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const currentExecutionWorkflowId = ref<string | null>(null);
   const isExecuting = ref(false);
   const isObservingExecution = ref(false);
+  const serverClockOffsetMs = ref(0);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
   const workflowLoadedAt = ref<string | null>(null);
@@ -1279,14 +1280,17 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
-  function appendLiveRunningNodeResult(nodeId: string): void {
+  function appendLiveRunningNodeResult(nodeId: string, startedAtMs?: number): void {
     const existingRunningResult = nodeResults.value.some(
       (result) => result.node_id === nodeId && result.status === "running",
     );
     if (existingRunningResult) return;
 
     const node = nodes.value.find((candidate) => candidate.id === nodeId);
-    const startedAtMs = Date.now();
+    const resolvedStartedAtMs =
+      typeof startedAtMs === "number" && Number.isFinite(startedAtMs)
+        ? startedAtMs
+        : Date.now();
     nodeResults.value = [
       ...nodeResults.value,
       {
@@ -1298,11 +1302,18 @@ export const useWorkflowStore = defineStore("workflow", () => {
         execution_time_ms: 0,
         error: null,
         metadata: {
-          started_at_ms: startedAtMs,
-          ended_at_ms: startedAtMs,
+          started_at_ms: resolvedStartedAtMs,
+          ended_at_ms: resolvedStartedAtMs,
         },
       },
     ];
+  }
+
+  function synchronizeServerClock(serverNowMs?: number): void {
+    serverClockOffsetMs.value =
+      typeof serverNowMs === "number" && Number.isFinite(serverNowMs)
+        ? serverNowMs - Date.now()
+        : 0;
   }
 
   function replaceLiveRunningNodeResult(nodeResult: NodeResult): void {
@@ -1449,6 +1460,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     abortController.value = new AbortController();
     const streamAbort = abortController.value;
     currentExecutionId.value = null;
+    serverClockOffsetMs.value = 0;
 
     try {
       nodes.value.forEach((node) => {
@@ -1473,11 +1485,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
           (data) => {
             if (!isActiveExecutionStream(wf.id, streamAbort)) return;
             currentExecutionId.value = data.execution_id;
+            synchronizeServerClock(data.server_now_ms);
           },
-          (nodeId) => {
+          (data) => {
             if (!isActiveExecutionStream(wf.id, streamAbort)) return;
-            setNodeStatus(nodeId, "running");
-            appendLiveRunningNodeResult(nodeId);
+            setNodeStatus(data.node_id, "running");
+            appendLiveRunningNodeResult(data.node_id, data.started_at_ms);
           },
           (data) => {
             if (!isActiveExecutionStream(wf.id, streamAbort)) return;
@@ -1733,6 +1746,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     const streamAbort = abortController.value;
     isExecuting.value = true;
     isObservingExecution.value = true;
+    serverClockOffsetMs.value = 0;
     currentExecutionId.value = executionId;
     currentExecutionWorkflowId.value = workflowId;
     executionResult.value = null;
@@ -1754,6 +1768,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           executionId,
           (data) => {
             currentExecutionId.value = data.execution_id;
+            synchronizeServerClock(data.server_now_ms);
             loadHistoryInputs(data.inputs);
             nodeResults.value = [];
             // Each (re)connect replays the run's live events from the start, so the
@@ -1763,9 +1778,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
             clearNodeStatuses();
             nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
           },
-          (nodeId) => {
-            setNodeStatus(nodeId, "running");
-            appendLiveRunningNodeResult(nodeId);
+          (data) => {
+            setNodeStatus(data.node_id, "running");
+            appendLiveRunningNodeResult(data.node_id, data.started_at_ms);
           },
           (data) => {
             setNodeStatus(
@@ -3548,6 +3563,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     applyExecutionResultSnapshot,
     isExecuting,
     isObservingExecution,
+    serverClockOffsetMs,
     isSaving,
     hasUnsavedChanges,
     runningNodeIds,

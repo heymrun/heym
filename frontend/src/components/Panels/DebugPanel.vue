@@ -2815,7 +2815,7 @@ function renderContent(content: string): string {
           <Download class="w-3.5 h-3.5" />
         </Button>
         <Button
-          v-if="executionResult || nodeResults.length > 0"
+          v-if="isExecuting || executionResult || nodeResults.length > 0"
           :variant="showTimeline ? 'secondary' : 'ghost'"
           size="icon"
           class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
@@ -3654,6 +3654,7 @@ function renderContent(content: string): string {
       :node-results="timelineResults"
       :total-time-ms="executionResult?.execution_time_ms ?? 0"
       :sub-agent-label-to-parent-id="subAgentLabelToParentId"
+      :server-clock-offset-ms="workflowStore.serverClockOffsetMs"
       @select-node="selectCanvasNodeFromTimeline"
     />
 

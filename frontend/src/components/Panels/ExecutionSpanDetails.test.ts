@@ -16,7 +16,9 @@ describe("execution span details", () => {
       source.indexOf('title="Execution timeline"'),
     );
 
-    expect(timelineButton).toContain('v-if="executionResult || nodeResults.length > 0"');
+    expect(timelineButton).toContain(
+      'v-if="isExecuting || executionResult || nodeResults.length > 0"',
+    );
     expect(timelineButton).not.toContain("!isExecuting");
   });
 });

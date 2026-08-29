@@ -13,6 +13,7 @@ import {
   buildTimelineModel,
   formatTimelineMs,
   getTimelineRowKey,
+  getServerAlignedNowMs,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
@@ -22,6 +23,7 @@ interface Props {
   nodeResults: TimelineEntry[];
   totalTimeMs: number;
   subAgentLabelToParentId: Map<string, string>;
+  serverClockOffsetMs?: number;
 }
 
 const props = defineProps<Props>();
@@ -79,7 +81,24 @@ function onRowLabelClick(row: SpanRow, event: MouseEvent): void {
   emitSelectNode({ nodeId: row.nodeId, resultListIndex: null }, event);
 }
 
-const timelineNowMs = ref(Date.now());
+let timelineClockOffsetMs = props.serverClockOffsetMs ?? 0;
+let timelineClockAnchorMs = getServerAlignedNowMs(Date.now(), timelineClockOffsetMs);
+let timelineClockMonotonicAnchorMs = performance.now();
+
+function synchronizeTimelineClock(): void {
+  timelineClockOffsetMs = props.serverClockOffsetMs ?? 0;
+  timelineClockAnchorMs = getServerAlignedNowMs(Date.now(), timelineClockOffsetMs);
+  timelineClockMonotonicAnchorMs = performance.now();
+}
+
+function getTimelineNowMs(): number {
+  if (timelineClockOffsetMs !== (props.serverClockOffsetMs ?? 0)) {
+    synchronizeTimelineClock();
+  }
+  return timelineClockAnchorMs + (performance.now() - timelineClockMonotonicAnchorMs);
+}
+
+const timelineNowMs = ref(getTimelineNowMs());
 let timelineNowTimer: ReturnType<typeof setInterval> | null = null;
 
 const hasLiveHitlWait = computed(() =>
@@ -101,10 +120,10 @@ const hasLiveTimelineSpan = computed(
 
 function syncTimelineNowTimer(): void {
   if (hasLiveTimelineSpan.value) {
-    timelineNowMs.value = Date.now();
+    timelineNowMs.value = getTimelineNowMs();
     if (timelineNowTimer === null) {
       timelineNowTimer = setInterval(() => {
-        timelineNowMs.value = Date.now();
+        timelineNowMs.value = getTimelineNowMs();
       }, LIVE_TIMELINE_REFRESH_INTERVAL_MS);
     }
     return;
@@ -129,6 +148,13 @@ onBeforeUnmount(() => {
 watch(hasLiveTimelineSpan, () => {
   syncTimelineNowTimer();
 });
+watch(
+  () => props.serverClockOffsetMs,
+  () => {
+    synchronizeTimelineClock();
+    timelineNowMs.value = getTimelineNowMs();
+  },
+);
 
 const fullTimelineModel = computed(() =>
   buildTimelineModel(

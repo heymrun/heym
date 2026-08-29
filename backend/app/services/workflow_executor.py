@@ -1779,6 +1779,24 @@ def _serialize_node_results(results: list[NodeResult]) -> list[dict]:
     return [_serialize_node_result(result) for result in results]
 
 
+def _build_node_start_event(
+    node_id: str,
+    node_label: str,
+    *,
+    message: str | None = None,
+) -> dict[str, object]:
+    """Build a node-start event with the timeline's authoritative wall-clock anchor."""
+    event: dict[str, object] = {
+        "type": "node_start",
+        "node_id": node_id,
+        "node_label": node_label,
+        "started_at_ms": time.time() * 1000,
+    }
+    if message is not None:
+        event["message"] = message
+    return event
+
+
 def _build_node_complete_event(result: NodeResult, output: dict | None = None) -> dict:
     output_payload = result.output if output is None else output
     return {
@@ -2006,10 +2024,16 @@ class WorkflowExecutor:
                 if label in sub_agent_labels:
                     self.skipped_nodes.add(node_id)
 
+        # Orphan outputs are skipped when other executable nodes exist (disconnected
+        # terminals). A lone output on the canvas — sticky notes aside — still runs so a
+        # static message workflow works without an upstream node.
+        executable_node_count = sum(
+            1 for node in self.nodes.values() if node.get("type") != "sticky"
+        )
         for node_id, node in self.nodes.items():
             if node.get("type") == "output":
                 has_input = any(edge["target"] == node_id for edge in self.edges)
-                if not has_input:
+                if not has_input and executable_node_count > 1:
                     self.skipped_nodes.add(node_id)
 
     def _get_accessible_credential(self, db, credential_id: object):
@@ -3706,11 +3730,7 @@ class WorkflowExecutor:
         sub_agent_label_display = target_node_data.get("label", sub_agent_label)
         if self.agent_progress_queue is not None:
             self.agent_progress_queue.put(
-                {
-                    "type": "node_start",
-                    "node_id": target_node_id,
-                    "node_label": sub_agent_label_display,
-                }
+                _build_node_start_event(target_node_id, sub_agent_label_display)
             )
         start_ms = time.time() * 1000
         try:
@@ -4736,7 +4756,7 @@ class WorkflowExecutor:
         node_label = original_data.get("label", node_id)
         _queue = getattr(self, "agent_progress_queue", None)
         if _queue is not None:
-            _queue.put({"type": "node_start", "node_id": node_id, "node_label": node_label})
+            _queue.put(_build_node_start_event(node_id, node_label))
 
         node["data"] = merged_data
         try:
@@ -8479,13 +8499,7 @@ def execute_llm_batch_notification_branch(
         if agent_progress_queue is None:
             return
         node_label = wf_executor.get_node_label(node_id)
-        agent_progress_queue.put(
-            {
-                "type": "node_start",
-                "node_id": node_id,
-                "node_label": node_label,
-            }
-        )
+        agent_progress_queue.put(_build_node_start_event(node_id, node_label))
 
     def _submit_node(node_id: str, node_inputs: dict | None = None) -> None:
         already_running = any(
@@ -8906,11 +8920,7 @@ def _execute_error_flow_streaming(
                             queue.append(target)
             continue
 
-        yield {
-            "type": "node_start",
-            "node_id": node_id,
-            "node_label": node_label,
-        }
+        yield _build_node_start_event(node_id, node_label)
 
         if node_type == "errorHandler":
             inputs = {"error": error_payload}
@@ -9166,14 +9176,12 @@ def _execute_workflow_streaming_impl(
         node = wf_executor.nodes[node_id]
         node_label = node.get("data", {}).get("label", node_id)
 
-        node_start_event: dict[str, object] = {
-            "type": "node_start",
-            "node_id": node_id,
-            "node_label": node_label,
-        }
         start_message = build_node_start_message(node_id, node_label, sse_node_config)
-        if start_message is not None:
-            node_start_event["message"] = start_message
+        node_start_event = _build_node_start_event(
+            node_id,
+            node_label,
+            message=start_message,
+        )
         event_queue.put(node_start_event)
 
         if node_inputs is None:
