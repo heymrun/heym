@@ -66,7 +66,7 @@
       <g transform="translate(0,208)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Customer-facing portals</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Limited to one or less Datatables &amp; Eval Suites</text>
         <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">PAID TIER</text>
       </g>
       <g transform="translate(0,260)">
@@ -146,7 +146,7 @@
       <g transform="translate(0,208)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Public chat portals</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Unlimited Datatables &amp; Unlimited Eval Suites</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d4"></rect>
       </g>
