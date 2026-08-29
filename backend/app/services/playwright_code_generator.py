@@ -234,6 +234,56 @@ STEALTH_INIT_SCRIPT = r"""(() => {
     }
     return el;
   };
+
+  // Fingerprint scripts call RTCPeerConnection to force STUN (stun.l.google.com:19302).
+  // That UDP leaks Docker Desktop sailor flows even after the browser closes.
+  const EmptyPeerConnection = function () {
+    this.localDescription = null;
+    this.remoteDescription = null;
+    this.signalingState = 'stable';
+    this.iceConnectionState = 'closed';
+    this.iceGatheringState = 'complete';
+    this.connectionState = 'closed';
+    this.onicecandidate = null;
+  };
+  EmptyPeerConnection.prototype.createDataChannel = function () { return {}; };
+  EmptyPeerConnection.prototype.createOffer = function () { return Promise.resolve({}); };
+  EmptyPeerConnection.prototype.createAnswer = function () { return Promise.resolve({}); };
+  EmptyPeerConnection.prototype.setLocalDescription = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.setRemoteDescription = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.addIceCandidate = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.addEventListener = function () {};
+  EmptyPeerConnection.prototype.removeEventListener = function () {};
+  EmptyPeerConnection.prototype.close = function () {};
+  window.RTCPeerConnection = EmptyPeerConnection;
+  window.webkitRTCPeerConnection = EmptyPeerConnection;
+})();"""
+
+# Chromium still gathers ICE via STUN without getUserMedia. disable_non_proxied_udp
+# skips host/srflx candidates when no proxy is configured, so sailor never sees 19302.
+CHROMIUM_DISABLE_WEBRTC_STUN_ARG = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+
+WEBRTC_STUN_INIT_SCRIPT = r"""(() => {
+  const EmptyPeerConnection = function () {
+    this.localDescription = null;
+    this.remoteDescription = null;
+    this.signalingState = 'stable';
+    this.iceConnectionState = 'closed';
+    this.iceGatheringState = 'complete';
+    this.connectionState = 'closed';
+    this.onicecandidate = null;
+  };
+  EmptyPeerConnection.prototype.createDataChannel = function () { return {}; };
+  EmptyPeerConnection.prototype.createOffer = function () { return Promise.resolve({}); };
+  EmptyPeerConnection.prototype.createAnswer = function () { return Promise.resolve({}); };
+  EmptyPeerConnection.prototype.setLocalDescription = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.setRemoteDescription = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.addIceCandidate = function () { return Promise.resolve(); };
+  EmptyPeerConnection.prototype.addEventListener = function () {};
+  EmptyPeerConnection.prototype.removeEventListener = function () {};
+  EmptyPeerConnection.prototype.close = function () {};
+  window.RTCPeerConnection = EmptyPeerConnection;
+  window.webkitRTCPeerConnection = EmptyPeerConnection;
 })();"""
 
 
@@ -266,6 +316,7 @@ def _stealth_chromium_launch_kwargs(headless: object) -> dict:
     args = [
         "--disable-blink-features=AutomationControlled",
         "--exclude-switches=enable-automation",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     ]
     ignore_default_args = ["--enable-automation"]
     system = platform.system()
@@ -825,7 +876,10 @@ def generate_playwright_code(
     if stealth_enabled:
         lines.append("    browser = p.chromium.launch(**_stealth_chromium_launch_kwargs(headless))")
     else:
-        lines.append("    browser = p.chromium.launch(headless=headless)")
+        lines.append(
+            "    browser = p.chromium.launch("
+            f"headless=headless, args=[{CHROMIUM_DISABLE_WEBRTC_STUN_ARG!r}])"
+        )
 
     context_args: list[str] = []
     if stealth_enabled:
@@ -842,6 +896,8 @@ def generate_playwright_code(
         lines.append(f"    context.add_cookies({repr(auth_state['cookies'])})")
     if stealth_enabled:
         lines.append(f"    context.add_init_script({repr(STEALTH_INIT_SCRIPT)})")
+    else:
+        lines.append(f"    context.add_init_script({repr(WEBRTC_STUN_INIT_SCRIPT)})")
 
     lines.append("    page = context.new_page()")
     if stealth_enabled:
