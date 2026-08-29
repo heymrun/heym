@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildReleaseTour,
+  buildReleaseTourCatalog,
   buildReleaseTours,
   buildTourSlides,
   computeTourRevision,
@@ -214,6 +215,69 @@ describe("buildReleaseTours", () => {
   });
 });
 
+describe("buildReleaseTourCatalog", () => {
+  it("flattens enabled releases newest first for manual browsing", () => {
+    const older = makeRelease({
+      releaseId: "2026.08",
+      publishedAt: new Date("2026-08-01T00:00:00Z"),
+    });
+    const newer = makeRelease({
+      releaseId: "2026.09",
+      publishedAt: new Date("2026-08-29T00:00:00Z"),
+      releaseTour: {
+        label: "New in Heym",
+        introTitle: "Latest release",
+        introDescription: "Latest feature",
+        sectionOrder: ["newest"],
+      },
+      sections: [
+        {
+          id: "newest",
+          title: "Newest feature",
+          blocks: [{ type: "prose", markdown: "newest notes" }],
+          tour: { description: "newest tour", useCases: ["n"], tourVisual: "newest-visual" },
+        },
+      ],
+    });
+
+    const catalog = buildReleaseTourCatalog([older, newer]);
+
+    expect(catalog?.introTitle).toBe("Everything new in Heym");
+    expect(catalog?.slides.map((slide) => slide.id)).toEqual(["newest", "alpha", "beta"]);
+  });
+
+  it("orders slides by their feature date within a release", () => {
+    const release = makeRelease({
+      sections: [
+        {
+          id: "older",
+          title: "Older feature",
+          blocks: [{ type: "prose", markdown: "older notes" }],
+          publishedAt: new Date("2026-08-01T00:00:00Z"),
+          tour: { description: "older tour", useCases: ["o"], tourVisual: "older-visual" },
+        },
+        {
+          id: "newer",
+          title: "Newer feature",
+          blocks: [{ type: "prose", markdown: "newer notes" }],
+          publishedAt: new Date("2026-08-29T00:00:00Z"),
+          tour: { description: "newer tour", useCases: ["n"], tourVisual: "newer-visual" },
+        },
+      ],
+      releaseTour: {
+        label: "New in Heym",
+        introTitle: "Release",
+        introDescription: "Release features",
+        sectionOrder: ["older", "newer"],
+      },
+    });
+
+    const catalog = buildReleaseTourCatalog([release]);
+
+    expect(catalog?.slides.map((slide) => slide.id)).toEqual(["newer", "older"]);
+  });
+});
+
 describe("selectPendingReleaseTour", () => {
   const tours = buildReleaseTours([
     makeRelease({ releaseId: "2026.07", publishedAt: new Date("2026-07-01T00:00:00Z") }),
@@ -247,6 +311,21 @@ describe("selectPendingReleaseTour", () => {
 });
 
 describe("shipped release registry", () => {
+  it("keeps the existing August tours in newest-first catalog order", () => {
+    const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
+
+    expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "cluster-load-distribution",
+      "span-details-inspector",
+      "oidc-sso",
+      "playwright-ai-steps",
+      "html-output-mapper",
+      "workflow-listing",
+      "folder-icons",
+      "code-node",
+    ]);
+  });
+
   it("resolves every registry slide to a registered visual", () => {
     const slides = buildReleaseTours(RELEASE_REGISTRY).flatMap((tour) => tour.slides);
 

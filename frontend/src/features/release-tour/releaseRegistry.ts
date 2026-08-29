@@ -21,13 +21,14 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["cluster-load-distribution"],
     },
     sections: [
       {
         id: "cluster-load-distribution",
         title: "Split execution across instances",
+        publishedAt: new Date("2026-08-29T10:12:49Z"),
         blocks: [
           {
             type: "prose",
@@ -74,6 +75,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "oidc-sso",
         title: "Sign in with your identity provider",
+        publishedAt: new Date("2026-08-26T19:53:29Z"),
         blocks: [
           {
             type: "prose",
@@ -112,17 +114,18 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
       sectionOrder: [
-        "workflow-listing",
-        "code-node",
-        "folder-icons",
         "playwright-ai-steps",
         "html-output-mapper",
+        "workflow-listing",
+        "folder-icons",
+        "code-node",
       ],
     },
     sections: [
       {
         id: "workflow-listing",
         title: "The workflow list, rebuilt around what you were about to do",
+        publishedAt: new Date("2026-08-19T15:57:23Z"),
         blocks: [
           {
             type: "prose",
@@ -145,6 +148,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "code-node",
         title: "Run Python right on the canvas",
+        publishedAt: new Date("2026-08-14T19:40:15Z"),
         blocks: [
           {
             type: "prose",
@@ -167,6 +171,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "folder-icons",
         title: "Give every folder its own icon",
+        publishedAt: new Date("2026-08-17T18:41:24Z"),
         blocks: [
           {
             type: "prose",
@@ -189,6 +194,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "playwright-ai-steps",
         title: "Playwright AI steps you can actually read",
+        publishedAt: new Date("2026-08-23T14:09:53Z"),
         blocks: [
           {
             type: "prose",
@@ -211,6 +217,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "html-output-mapper",
         title: "Workflows that answer with a web page",
+        publishedAt: new Date("2026-08-23T10:33:25Z"),
         blocks: [
           {
             type: "prose",
@@ -252,6 +259,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "span-details-inspector",
         title: "Diagnose a run from the timeline",
+        publishedAt: new Date("2026-08-27T05:23:28Z"),
         blocks: [
           {
             type: "prose",

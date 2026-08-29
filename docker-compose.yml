@@ -2,18 +2,6 @@ services:
   postgres:
     image: postgres:16
     container_name: heym-postgres
-    # Keep the official postgres:16 image (existing data dirs and their collation
-    # are never changed). The pgvector extension package is installed at container
-    # start before Postgres boots, so the migration's CREATE EXTENSION succeeds.
-    # Non-fatal: if it cannot be installed (e.g. no network) Postgres still starts,
-    # the migration skips the pgvector table, and Qdrant RAG keeps working.
-    #
-    # The guard below refuses to start when a pre-named-volume database is still
-    # sitting in ./data/postgres and the named volume is empty. Without it, initdb
-    # would create a fresh cluster, Alembic would build an empty schema, and the app
-    # would come up healthy but blank — unrecoverable with ALLOW_REGISTER=false.
-    # PG_VERSION is the probe, not the directory: Docker auto-creates an empty
-    # bind-mount source, so /legacy-pgdata always exists.
     entrypoint:
       - bash
       - -c
@@ -73,6 +61,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-heym}
       SECRET_KEY: ${SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # Cluster identity. Defaults preserve single-instance behavior until
+      # HEYM_CLUSTER_ENABLED=true is configured in .env.
+      HEYM_CLUSTER_ENABLED: ${HEYM_CLUSTER_ENABLED:-false}
+      HEYM_INSTANCE_ROLE: ${HEYM_INSTANCE_ROLE:-main}
+      HEYM_INSTANCE_NAME: ${HEYM_INSTANCE_NAME:-}
+      HEYM_INSTANCE_ID: ${HEYM_INSTANCE_ID:-}
+      HEYM_ADMIN_EMAILS: ${HEYM_ADMIN_EMAILS:-}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}

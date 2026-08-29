@@ -54,6 +54,7 @@ frontend/.e2e-artifacts/
 
 # Docker data
 data/
+docker-compose.override.yml
 
 # Lock files — bun.lock is the source of truth for frontend
 package-lock.json

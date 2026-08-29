@@ -9,7 +9,11 @@ import {
 } from "vue";
 
 import { RELEASE_REGISTRY } from "@/features/release-tour/releaseRegistry";
-import { buildReleaseTours, selectPendingReleaseTour } from "@/features/release-tour/releaseTourMapper";
+import {
+  buildReleaseTourCatalog,
+  buildReleaseTours,
+  selectPendingReleaseTour,
+} from "@/features/release-tour/releaseTourMapper";
 import { appendSeenReleaseId, readSeenReleaseIds } from "@/features/release-tour/releaseTourStorage";
 import type { ReleaseTour } from "@/features/release-tour/releaseTour.types";
 
@@ -30,13 +34,18 @@ export interface UseReleaseTourResult {
  */
 export function useReleaseTour(eligible: MaybeRefOrGetter<boolean>): UseReleaseTourResult {
   const tours = buildReleaseTours(RELEASE_REGISTRY);
+  const catalogTour = buildReleaseTourCatalog(RELEASE_REGISTRY);
   const seenReleaseIds = ref<string[]>(readSeenReleaseIds());
   const isOpen = ref(false);
+  const isBrowsingCatalog = ref(false);
   let autoOpenTimeoutId: number | null = null;
 
   const pendingTour = computed(() => selectPendingReleaseTour(tours, seenReleaseIds.value));
-  /** Falls back to the newest tour so the launcher can replay an already-seen release. */
-  const activeTour = computed<ReleaseTour | null>(() => pendingTour.value ?? tours[0] ?? null);
+  const newestTour = computed<ReleaseTour | null>(() => pendingTour.value ?? tours[0] ?? null);
+  /** The launcher always opens the complete product catalog, while prompts stay concise. */
+  const activeTour = computed<ReleaseTour | null>(() =>
+    isBrowsingCatalog.value ? catalogTour ?? newestTour.value : newestTour.value,
+  );
   const hasUnseenRelease = computed(() => pendingTour.value !== null);
 
   function clearAutoOpenTimeout(): void {
@@ -48,15 +57,17 @@ export function useReleaseTour(eligible: MaybeRefOrGetter<boolean>): UseReleaseT
   function openTour(): void {
     clearAutoOpenTimeout();
     if (!activeTour.value) return;
+    isBrowsingCatalog.value = true;
     isOpen.value = true;
   }
 
   function completeTour(): void {
     clearAutoOpenTimeout();
-    const tour = activeTour.value;
+    const tour = newestTour.value;
     if (tour) {
       seenReleaseIds.value = appendSeenReleaseId(tour.versionedReleaseId);
     }
+    isBrowsingCatalog.value = false;
     isOpen.value = false;
   }
 

@@ -16,6 +16,8 @@ export interface ReleaseSection {
   id: string;
   title: string;
   blocks: ReleaseSectionBlock[];
+  /** Publication date used to keep multi-release browsing chronological. */
+  publishedAt?: Date;
   tour?: ReleaseSectionTour;
 }
 
@@ -43,6 +45,7 @@ export interface ReleaseTourSlide {
   description: string;
   useCases: string[];
   tourVisual: string;
+  publishedAt: Date;
   docTarget?: ShowcaseDocTarget;
 }
 

@@ -26,7 +26,7 @@ export function toVersionedReleaseId(releaseId: string, revision: string): strin
   return `${releaseId}@r${revision}`;
 }
 
-function toSlide(section: ReleaseSection): ReleaseTourSlide | null {
+function toSlide(section: ReleaseSection, releasePublishedAt: Date): ReleaseTourSlide | null {
   if (!section.tour) return null;
 
   return {
@@ -35,6 +35,7 @@ function toSlide(section: ReleaseSection): ReleaseTourSlide | null {
     description: section.tour.description,
     useCases: section.tour.useCases,
     tourVisual: section.tour.tourVisual,
+    publishedAt: section.publishedAt ?? releasePublishedAt,
     docTarget: section.tour.docTarget,
   };
 }
@@ -48,7 +49,7 @@ export function buildTourSlides(entry: ReleaseEntry): ReleaseTourSlide[] {
     const section = sectionsById.get(sectionId);
     if (!section) return [];
 
-    const slide = toSlide(section);
+    const slide = toSlide(section, entry.publishedAt);
     return slide ? [slide] : [];
   });
 }
@@ -91,6 +92,31 @@ export function buildReleaseTours(
       return tour ? [tour] : [];
     })
     .sort((left, right) => right.publishedAt.getTime() - left.publishedAt.getTime());
+}
+
+/**
+ * Combines every enabled release into one manual-browse tour. Automatic prompts
+ * still use one release at a time through `selectPendingReleaseTour`.
+ */
+export function buildReleaseTourCatalog(entries: ReleaseEntry[]): ReleaseTour | null {
+  const tours = buildReleaseTours(entries);
+  const newest = tours[0];
+  if (!newest) return null;
+
+  const slides = tours
+    .flatMap((tour) => tour.slides)
+    .sort((left, right) => right.publishedAt.getTime() - left.publishedAt.getTime());
+  const revision = computeTourRevision(slides.map((slide) => slide.id));
+
+  return {
+    ...newest,
+    releaseId: "catalog",
+    versionedReleaseId: toVersionedReleaseId("catalog", revision),
+    headline: "Everything new in Heym",
+    introTitle: "Everything new in Heym",
+    introDescription: "Browse every shipped feature, with the latest changes first.",
+    slides,
+  };
 }
 
 /**
