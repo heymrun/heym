@@ -237,6 +237,7 @@ class ClaimedRunExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
         )
         db = MagicMock()
         db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
+        db.commit = AsyncMock()
         session_factory = MagicMock()
         session_factory.return_value.__aenter__ = AsyncMock(return_value=db)
         session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -255,6 +256,14 @@ class ClaimedRunExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.workflows.get_credentials_context",
                 new=AsyncMock(return_value={}),
             ),
+            patch(
+                "app.api.workflows.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
             patch("app.services.cluster.dispatch.register_execution"),
             patch("app.services.cluster.dispatch.asyncio.to_thread", execute),
             patch(
@@ -267,3 +276,160 @@ class ClaimedRunExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
             await RunQueueWorker()._execute_claimed(row)
 
         self.assertTrue(execute.await_args.kwargs["return_on_chart_output"])
+
+
+class ClaimedRunContextTests(unittest.IsolatedAsyncioTestCase):
+    """A claimed run sees the context its trigger call site would have built."""
+
+    async def _claim(
+        self,
+        *,
+        nodes: list[dict] | None = None,
+        node_results: list[dict] | None = None,
+        credentials_owner_id: uuid.UUID | None = ...,  # type: ignore[assignment]
+    ) -> dict[str, object]:
+        from app.services.cluster.dispatch import RunQueueWorker
+
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Cron run",
+            nodes=nodes if nodes is not None else [{"id": "n1", "type": "set", "data": {}}],
+            edges=[],
+        )
+        row = SimpleNamespace(
+            execution_id=uuid.uuid4(),
+            workflow_id=workflow.id,
+            inputs={},
+            trigger_source="schedule",
+            actor_user_id=workflow.owner_id,
+            credentials_owner_id=(
+                workflow.owner_id if credentials_owner_id is ... else credentials_owner_id
+            ),
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=False,
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
+        db.commit = AsyncMock()
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = SimpleNamespace(
+            status="success",
+            outputs={},
+            node_results=node_results or [],
+            execution_time_ms=1.0,
+            sub_workflow_executions=[],
+        )
+        execute = AsyncMock(return_value=result)
+        credentials_loader = AsyncMock(return_value={})
+        globals_loader = AsyncMock(return_value={"authCookies": [{"name": "auth_token"}]})
+        cache_loader = AsyncMock(return_value={"sub-id": {"nodes": [], "edges": []}})
+        persist_globals = AsyncMock()
+
+        with (
+            patch("app.db.session.async_session_maker", session_factory),
+            patch("app.api.workflows.get_credentials_context", new=credentials_loader),
+            patch("app.api.workflows.collect_referenced_workflows", new=cache_loader),
+            patch(
+                "app.api.workflows._persist_global_variables_from_execution",
+                new=persist_globals,
+            ),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=globals_loader,
+            ),
+            patch("app.services.cluster.dispatch.register_execution"),
+            patch("app.services.cluster.dispatch.asyncio.to_thread", execute),
+            patch("app.services.cluster.dispatch.persist_run_history", new=AsyncMock()),
+            patch("app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()),
+            patch("app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()),
+        ):
+            await RunQueueWorker()._execute_claimed(row)
+
+        return {
+            "row": row,
+            "workflow": workflow,
+            "kwargs": execute.await_args.kwargs,
+            "credentials_loader": credentials_loader,
+            "globals_loader": globals_loader,
+            "cache_loader": cache_loader,
+            "persist_globals": persist_globals,
+        }
+
+    @staticmethod
+    def _owner_arg(loader: AsyncMock) -> object:
+        if "actor_user_id" in loader.await_args.kwargs:
+            return loader.await_args.kwargs["actor_user_id"]
+        return loader.await_args.args[1]
+
+    async def test_global_variables_reach_the_claiming_instance(self) -> None:
+        """$global.x resolved to nothing on every cluster run: nobody loaded it."""
+        claimed = await self._claim()
+        self.assertEqual(
+            claimed["kwargs"]["global_variables_context"],
+            {"authCookies": [{"name": "auth_token"}]},
+        )
+
+    async def test_global_variables_are_scoped_to_the_credentials_owner(self) -> None:
+        """Globals hold secrets, so they may never reach further than credentials do."""
+        claimed = await self._claim()
+        self.assertEqual(
+            self._owner_arg(claimed["globals_loader"]),  # type: ignore[arg-type]
+            self._owner_arg(claimed["credentials_loader"]),  # type: ignore[arg-type]
+        )
+
+    async def test_a_run_without_a_credentials_owner_gets_no_globals(self) -> None:
+        """No identified actor means no credentials today, and no globals either."""
+        claimed = await self._claim(credentials_owner_id=None)
+        self.assertIsNone(self._owner_arg(claimed["globals_loader"]))  # type: ignore[arg-type]
+        self.assertIsNone(self._owner_arg(claimed["cache_loader"]))  # type: ignore[arg-type]
+
+    async def test_sub_workflows_reach_the_claiming_instance(self) -> None:
+        """Without the cache an execute node silently does nothing."""
+        claimed = await self._claim()
+        self.assertEqual(
+            claimed["kwargs"]["workflow_cache"], {"sub-id": {"nodes": [], "edges": []}}
+        )
+
+    async def test_the_public_base_url_reaches_the_claiming_instance(self) -> None:
+        """$workflowUrl and HITL review links are built from it."""
+        claimed = await self._claim()
+        self.assertTrue(str(claimed["kwargs"]["public_base_url"]).strip())
+
+    async def test_global_variable_writes_are_persisted_where_the_run_happened(self) -> None:
+        """A cluster run that refreshes a global must save it, like history."""
+        claimed = await self._claim(
+            nodes=[{"id": "v1", "type": "variable", "data": {"isGlobal": True}}],
+            node_results=[
+                {
+                    "node_id": "v1",
+                    "node_type": "variable",
+                    "output": {"name": "authCookies", "value": [], "type": "array"},
+                }
+            ],
+        )
+        persist: AsyncMock = claimed["persist_globals"]  # type: ignore[assignment]
+        persist.assert_awaited_once()
+        self.assertEqual(
+            persist.await_args.args[1],
+            claimed["row"].credentials_owner_id,  # type: ignore[union-attr]
+        )
+
+    async def test_a_run_without_a_credentials_owner_writes_no_globals(self) -> None:
+        """An unowned run must not overwrite the owner's global variables."""
+        claimed = await self._claim(
+            credentials_owner_id=None,
+            nodes=[{"id": "v1", "type": "variable", "data": {"isGlobal": True}}],
+            node_results=[
+                {
+                    "node_id": "v1",
+                    "node_type": "variable",
+                    "output": {"name": "authCookies", "value": [], "type": "array"},
+                }
+            ],
+        )
+        persist: AsyncMock = claimed["persist_globals"]  # type: ignore[assignment]
+        persist.assert_not_awaited()

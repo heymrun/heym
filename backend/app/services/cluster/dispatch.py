@@ -239,8 +239,14 @@ class RunQueueWorker:
         # Imports included: anything raising outside this try strands the row.
         try:
             # Local: app.api.workflows imports dispatch_workflow.
-            from app.api.workflows import get_credentials_context
+            from app.api.workflows import (
+                _persist_global_variables_from_execution,
+                collect_referenced_workflows,
+                get_credentials_context,
+            )
             from app.db.session import async_session_maker
+            from app.services.global_variables_service import get_global_variables_context
+            from app.services.hitl_service import build_default_public_base_url
 
             # Without this the run is invisible to the cancel bus and to recovery.
             cancel_event = register_execution(
@@ -262,6 +268,12 @@ class RunQueueWorker:
                     await run_queue.notify_done(row.execution_id)
                     return
                 credentials_context = await get_credentials_context(db, row.credentials_owner_id)
+                global_variables_context = await get_global_variables_context(
+                    db, row.credentials_owner_id
+                )
+                workflow_cache = await collect_referenced_workflows(
+                    db, workflow.nodes, actor_user_id=row.credentials_owner_id
+                )
                 nodes = list(workflow.nodes or [])
                 edges = list(workflow.edges or [])
                 owner_id = workflow.owner_id
@@ -273,7 +285,10 @@ class RunQueueWorker:
                 nodes=nodes,
                 edges=edges,
                 inputs=row.inputs,
+                workflow_cache=workflow_cache,
                 credentials_context=credentials_context,
+                global_variables_context=global_variables_context,
+                public_base_url=build_default_public_base_url(),
                 test_run=row.test_run,
                 trace_user_id=owner_id,
                 actor_user_id=row.actor_user_id,
@@ -293,6 +308,17 @@ class RunQueueWorker:
                 trigger_source=row.trigger_source,
                 result=result,
             )
+            if row.credentials_owner_id is not None:
+                async with async_session_maker() as db:
+                    await _persist_global_variables_from_execution(
+                        db,
+                        row.credentials_owner_id,
+                        nodes,
+                        workflow_cache,
+                        result.node_results,
+                        result.sub_workflow_executions,
+                    )
+                    await db.commit()
             await run_queue.complete(
                 row.execution_id, result=summarize(result, row.execution_id), error=None
             )
