@@ -845,7 +845,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.15.0" },
     { name = "python-docx", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.31" },
-    { name = "qdrant-client", specifier = ">=1.17.1" },
+    { name = "qdrant-client", specifier = ">=1.19.0" },
     { name = "redis", specifier = ">=7.4.0" },
     { name = "reportlab", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.15.12" },
@@ -2383,7 +2383,7 @@ wheels = [
 
 [[package]]
 name = "qdrant-client"
-version = "1.17.1"
+version = "1.19.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
@@ -2394,9 +2394,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/dd/f8a8261b83946af3cd65943c93c4f83e044f01184e8525404989d22a81a5/qdrant_client-1.17.1.tar.gz", hash = "sha256:22f990bbd63485ed97ba551a4c498181fcb723f71dcab5d6e4e43fe1050a2bc0", size = 344979, upload-time = "2026-03-13T17:13:44.678Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/33/c6e4ec45b4fca5a0b808e8804e60be54a6d7505b68b53c0b1d0d62ba86c1/qdrant_client-1.19.0.tar.gz", hash = "sha256:365395a04b0a26c309b25b7d8b1c99ef2071ec9a2b74bc8a5fd3b7a3642fe963", size = 350953, upload-time = "2026-08-04T14:32:56.923Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/69/77d1a971c4b933e8c79403e99bcbb790463da5e48333cc4fd5d412c63c98/qdrant_client-1.17.1-py3-none-any.whl", hash = "sha256:6cda4064adfeaf211c751f3fbc00edbbdb499850918c7aff4855a9a759d56cbd", size = 389947, upload-time = "2026-03-13T17:13:43.156Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/3c/480c61cc8d5a3e76bb44e86231f408c93643e5498beadbbeb381ab55d02b/qdrant_client-1.19.0-py3-none-any.whl", hash = "sha256:13602a2b3478a95ecdf42f97b93d7f703b63a3361cd912a04495a33a5ac14121", size = 396157, upload-time = "2026-08-04T14:32:55.734Z" },
 ]
 
 [[package]]

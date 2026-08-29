@@ -130,11 +130,13 @@ class QdrantVectorStoreService:
                 host=qdrant_host,
                 port=qdrant_port,
                 api_key=qdrant_api_key,
+                check_compatibility=False,
             )
         else:
             self.client = QdrantClient(
                 host=qdrant_host,
                 port=qdrant_port,
+                check_compatibility=False,
             )
         if embedding_config is None:
             embedding_config = EmbeddingConfig(api_key=openai_api_key)

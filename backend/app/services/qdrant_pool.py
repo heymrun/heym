@@ -27,11 +27,13 @@ def get_qdrant_client(
                     host=host,
                     port=port,
                     api_key=api_key,
+                    check_compatibility=False,
                 )
             else:
                 _clients[pool_key] = QdrantClient(
                     host=host,
                     port=port,
+                    check_compatibility=False,
                 )
             logger.info("Qdrant client pool created for: %s:%s", host, port)
 
