@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
@@ -574,6 +575,20 @@ class ExecutionHistory(Base):
     codex_followup_requests: Mapped[list["CodexFollowupRequest"]] = relationship(
         "CodexFollowupRequest", back_populates="execution_history", cascade="all, delete-orphan"
     )
+
+
+@event.listens_for(ExecutionHistory, "before_insert")
+def stamp_execution_history_attribution(
+    _mapper: object, _connection: object, target: ExecutionHistory
+) -> None:
+    """Stamp every newly persisted workflow run with its executing instance."""
+    from app.services.cluster.attribution import attribution_fields
+
+    fields = attribution_fields()
+    if target.executed_by_instance_id is None:
+        target.executed_by_instance_id = fields["executed_by_instance_id"]
+    if target.executed_by_instance_name is None:
+        target.executed_by_instance_name = fields["executed_by_instance_name"]
 
 
 class ActiveWorkflowExecution(Base):
@@ -2369,6 +2384,7 @@ class WorkflowRunQueue(Base):
     )
     test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    return_on_chart_output: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

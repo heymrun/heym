@@ -1,6 +1,7 @@
 """What the executing instance stamps onto a run's history row."""
 
 import unittest
+import uuid
 from unittest.mock import patch
 
 from app.services.cluster import identity
@@ -48,3 +49,18 @@ class AttributionTests(unittest.TestCase):
 
         for key in attribution_fields():
             self.assertIn(key, ExecutionHistory.__table__.columns)
+
+    def test_clustered_main_stamps_unattributed_history_rows(self) -> None:
+        """Every in-process execution records the main instance once clustering is enabled."""
+        from app.db.models import ExecutionHistory, stamp_execution_history_attribution
+
+        history = ExecutionHistory(workflow_id=uuid.uuid4(), status="success")
+        with (
+            patch.object(identity.settings, "cluster_enabled", True),
+            patch.object(identity.settings, "instance_id", "main"),
+            patch.object(identity.settings, "instance_name", "Mini"),
+        ):
+            stamp_execution_history_attribution(None, None, history)
+
+        self.assertEqual(history.executed_by_instance_id, "main")
+        self.assertEqual(history.executed_by_instance_name, "Mini")

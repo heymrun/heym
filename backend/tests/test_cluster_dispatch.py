@@ -4,7 +4,7 @@ import asyncio
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.cluster import run_result_bus as bus_module
 from app.services.cluster.dispatch import (
@@ -210,3 +210,60 @@ class ClaimedRunAlwaysCompletesTests(unittest.IsolatedAsyncioTestCase):
         complete, notify = await self._run_with_failure(ImportError("cannot import name"))
         complete.assert_awaited_once()
         notify.assert_awaited_once()
+
+
+class ClaimedRunExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chart_early_return_reaches_the_executing_instance(self) -> None:
+        """Dashboard charts return on their output even when a worker claims the run."""
+        from app.services.cluster.dispatch import RunQueueWorker
+
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Dashboard chart",
+            nodes=[{"id": "chart", "type": "chartOutput", "data": {}}],
+            edges=[],
+        )
+        row = SimpleNamespace(
+            execution_id=uuid.uuid4(),
+            workflow_id=workflow.id,
+            inputs={},
+            trigger_source="dashboard",
+            actor_user_id=workflow.owner_id,
+            credentials_owner_id=workflow.owner_id,
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=True,
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = SimpleNamespace(
+            status="success",
+            outputs={"type": "bar"},
+            node_results=[],
+            execution_time_ms=1.0,
+            sub_workflow_executions=[],
+        )
+        execute = AsyncMock(return_value=result)
+
+        with (
+            patch("app.db.session.async_session_maker", session_factory),
+            patch(
+                "app.api.workflows.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("app.services.cluster.dispatch.register_execution"),
+            patch("app.services.cluster.dispatch.asyncio.to_thread", execute),
+            patch(
+                "app.services.cluster.dispatch.persist_run_history",
+                new=AsyncMock(),
+            ),
+            patch("app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()),
+            patch("app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()),
+        ):
+            await RunQueueWorker()._execute_claimed(row)
+
+        self.assertTrue(execute.await_args.kwargs["return_on_chart_output"])

@@ -44,6 +44,7 @@ class QueuedRun:
     credentials_owner_id: uuid.UUID | None
     test_run: bool
     timeout_seconds: float | None
+    return_on_chart_output: bool
 
 
 def next_status(*, target_instance_id: str | None) -> str:
@@ -72,6 +73,7 @@ def build_queue_values(
         "credentials_owner_id": run.credentials_owner_id,
         "test_run": run.test_run,
         "timeout_seconds": run.timeout_seconds,
+        "return_on_chart_output": run.return_on_chart_output,
         "enqueued_at": now,
         "not_after": now + timedelta(seconds=grace_seconds),
     }

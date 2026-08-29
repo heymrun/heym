@@ -166,6 +166,7 @@ async def dispatch_workflow(
         credentials_owner_id=credentials_owner_id,
         test_run=test_run,
         timeout_seconds=timeout_seconds,
+        return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
     )
     target = await run_queue.enqueue(queued)
     if target:
@@ -278,6 +279,7 @@ class RunQueueWorker:
                 actor_user_id=row.actor_user_id,
                 cancel_event=cancel_event,
                 timeout_seconds=row.timeout_seconds,
+                return_on_chart_output=row.return_on_chart_output,
                 execution_id=str(row.execution_id),
             )
             # History is written here, on the instance that ran it, stamped with

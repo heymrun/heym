@@ -2,6 +2,7 @@
 
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from app.services.cluster.run_queue import (
@@ -49,6 +50,7 @@ class QueueValueTests(unittest.TestCase):
             credentials_owner_id=uuid.uuid4(),
             test_run=False,
             timeout_seconds=None,
+            return_on_chart_output=False,
         )
 
     def test_values_carry_the_credentials_owner_not_a_context(self) -> None:
@@ -70,6 +72,11 @@ class QueueValueTests(unittest.TestCase):
         values = build_queue_values(self.run, target_instance_id=None, grace_seconds=600)
         self.assertEqual(values["status"], STATUS_WAITING_FOR_MAIN)
         self.assertIsNone(values["target_instance_id"])
+
+    def test_values_preserve_chart_early_return_behavior(self) -> None:
+        run = replace(self.run, return_on_chart_output=True)
+        values = build_queue_values(run, target_instance_id="worker-a", grace_seconds=600)
+        self.assertTrue(values["return_on_chart_output"])
 
 
 class StrandedClaimTests(unittest.TestCase):

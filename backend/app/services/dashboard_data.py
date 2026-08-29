@@ -12,9 +12,10 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.db.models import DashboardWidget, ExecutionHistory, User, Workflow
 from app.db.session import async_session_maker
 from app.models.dashboard_schemas import WidgetDataResponse
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.highlight.highlight_builder import build_highlight_payload
-from app.services.workflow_executor import _to_json_compatible, execute_workflow
+from app.services.workflow_executor import _to_json_compatible
 
 logger = logging.getLogger(__name__)
 
@@ -256,14 +257,16 @@ async def compute_widget_data(
             credentials_context,
             global_variables_context,
         ) = await _load_widget_execution_context(db, workflow, user)
-        result = await asyncio.to_thread(
-            execute_workflow,
+        result = await dispatch_workflow(
             workflow_id=workflow.id,
             nodes=nodes,
             edges=edges,
             inputs={},
             workflow_cache=workflow_cache,
             test_run=False,
+            trigger_source="dashboard",
+            credentials_owner_id=user.id,
+            run_in_thread=True,
             credentials_context=credentials_context,
             global_variables_context=global_variables_context,
             trace_user_id=user.id,
@@ -276,7 +279,11 @@ async def compute_widget_data(
         )
 
     payload = _extract_chart_payload(result)
-    history_entry = await _record_widget_execution(db, workflow, result)
+    history_entry = (
+        None
+        if getattr(result, "history_written", False) is True
+        else await _record_widget_execution(db, workflow, result)
+    )
 
     background_finalize = bool(getattr(result, "allow_downstream_pending", False))
     if not background_finalize:

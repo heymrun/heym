@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["119_add_auto_weighting"])
+        self.assertEqual(self.script.get_heads(), ["120_queue_chart_return"])
 
     def test_folder_icon_revision_follows_oauth_token_hashes(self) -> None:
         folder_icon_revision = self.script.get_revision("112_add_folder_icon")
