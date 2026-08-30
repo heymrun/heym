@@ -53,6 +53,21 @@ const workflowStore = useWorkflowStore();
 const aiDefaults = useAiDefaults();
 const isMobile = useMediaQuery("(max-width: 767px)");
 
+interface Props {
+  embedded?: boolean;
+  openAi?: boolean;
+  aiOnly?: boolean;
+  mobileAiSheet?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+  openAi: false,
+  aiOnly: false,
+  mobileAiSheet: false,
+});
+const emit = defineEmits<{ (event: "ai-close"): void }>();
+
 const panelHeight = ref(212);
 const isResizing = ref(false);
 const isCollapsed = ref(false);
@@ -1734,17 +1749,35 @@ onUnmounted(() => {
 });
 
 function toggleAiPanel(): void {
-  aiPanelOpen.value = !aiPanelOpen.value;
-  if (aiPanelOpen.value && aiCredentials.value.length === 0) {
+  if (aiPanelOpen.value) {
+    aiPanelOpen.value = false;
+    return;
+  }
+  openAiPanel();
+}
+
+function openAiPanel(): void {
+  aiPanelOpen.value = true;
+  if (aiCredentials.value.length === 0) {
     void loadAiCredentials();
   }
-  if (aiPanelOpen.value) {
-    void loadAllCredentialsForSanitize();
-    nextTick(() => {
-      aiTextareaRef.value?.focus();
-    });
-  }
+  void loadAllCredentialsForSanitize();
+  nextTick(() => {
+    aiTextareaRef.value?.focus();
+  });
 }
+
+watch(
+  () => props.openAi,
+  (open) => {
+    if (open && !aiPanelOpen.value) openAiPanel();
+  },
+  { immediate: true },
+);
+
+watch(aiPanelOpen, (open) => {
+  if (!open && props.aiOnly) emit("ai-close");
+});
 
 function askAiAboutError(result: {
   node_label: string;
@@ -2713,10 +2746,14 @@ function renderContent(content: string): string {
 <template>
   <div
     class="border-t bg-card/50 flex flex-col relative overflow-x-hidden min-w-0"
-    :class="{ 'transition-[height] duration-200': !isResizing }"
-    :style="{ height: `${panelHeight}px` }"
+    :class="{
+      'transition-[height] duration-200': !isResizing && !props.embedded,
+      'debug-panel-ai-only-host': props.aiOnly,
+    }"
+    :style="props.embedded ? undefined : { height: `${panelHeight}px` }"
   >
     <div
+      v-if="!props.embedded"
       class="debug-panel-resize-handle h-3 min-h-[44px] cursor-ns-resize hover:bg-primary/20 transition-colors flex items-center justify-center group md:h-1.5"
       :class="isResizing && 'bg-primary/30'"
       @mousedown="startResize"
@@ -2742,8 +2779,10 @@ function renderContent(content: string): string {
           class="hidden h-4 w-4 text-muted-foreground sm:block"
         />
       </div>
-      <div class="-mr-3 ml-auto flex shrink-0 items-center justify-end gap-1 sm:mr-0 sm:translate-y-0 md:gap-2" style="gap: 3px;">
-
+      <div
+        class="-mr-3 ml-auto flex shrink-0 items-center justify-end gap-1 sm:mr-0 sm:translate-y-0 md:gap-2"
+        style="gap: 3px;"
+      >
         <div
           v-if="executionResult"
           class="flex shrink-0 items-center gap-2 text-xs"
@@ -2833,7 +2872,10 @@ function renderContent(content: string): string {
         >
           <Timer class="w-3.5 h-3.5" />
         </Button>
-        <div class="ml-auto flex items-center gap-0.5">
+        <div
+          v-if="!props.embedded"
+          class="ml-auto flex items-center gap-0.5"
+        >
           <div class="mx-1 h-5 w-px bg-border" />
           <Button
             :variant="aiPanelOpen ? 'default' : 'ghost'"
@@ -3673,6 +3715,7 @@ function renderContent(content: string): string {
       <div
         v-if="aiPanelOpen"
         class="ai-panel"
+        :class="{ 'ai-panel-mobile-sheet': props.mobileAiSheet }"
       >
         <div
           class="ai-panel-header"
@@ -3959,6 +4002,30 @@ function renderContent(content: string): string {
   flex-direction: column;
   z-index: 101;
   overflow: hidden;
+}
+
+.debug-panel-ai-only-host {
+  background: transparent;
+  border: 0;
+  height: 0 !important;
+  overflow: visible;
+  width: 0;
+}
+
+.debug-panel-ai-only-host > :not(.ai-panel) {
+  display: none;
+}
+
+.ai-panel-mobile-sheet {
+  --ai-panel-gap: 0px;
+  bottom: 0;
+  height: min(78dvh, 44rem);
+  left: 0;
+  max-width: 100vw;
+  right: 0;
+  top: auto;
+  width: 100vw;
+  border-radius: 20px 20px 0 0;
 }
 
 .execution-markdown-output {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { AlertCircle, Check, CheckCircle2, Copy, X } from "lucide-vue-next";
+import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Settings2, X } from "lucide-vue-next";
 
 import JsonTree from "@/components/ui/JsonTree.vue";
 import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
@@ -13,10 +13,17 @@ interface Props {
   node: WorkflowNode | null;
   output: unknown;
   workflowName: string;
+  previousNodeLabel?: string | null;
+  nextNodeLabel?: string | null;
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{
+  close: [];
+  properties: [];
+  previous: [];
+  next: [];
+}>();
 
 type DetailTab = "input" | "output" | "errors";
 
@@ -203,10 +210,32 @@ watch(
                   </p>
                 </div>
               </div>
-              <span
-                class="shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
-                :class="statusBadgeClass"
-              >{{ statusLabel }}</span>
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  v-if="previousNodeLabel"
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  :aria-label="`Previous node: ${previousNodeLabel}`"
+                  :title="`Previous: ${previousNodeLabel}`"
+                  @click="emit('previous')"
+                >
+                  <ChevronLeft class="h-4 w-4" />
+                </button>
+                <span
+                  class="rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
+                  :class="statusBadgeClass"
+                >{{ statusLabel }}</span>
+                <button
+                  v-if="nextNodeLabel"
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  :aria-label="`Next node: ${nextNodeLabel}`"
+                  :title="`Next: ${nextNodeLabel}`"
+                  @click="emit('next')"
+                >
+                  <ChevronRight class="h-4 w-4" />
+                </button>
+              </div>
             </section>
 
             <div
@@ -333,10 +362,10 @@ watch(
           </div>
         </main>
 
-        <footer class="grid shrink-0 grid-cols-2 gap-3 border-t border-border/60 bg-card p-4">
+        <footer class="grid shrink-0 grid-cols-3 gap-2 border-t border-border/60 bg-card p-4">
           <button
             type="button"
-            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border/60 bg-muted/60 px-3 text-sm font-semibold transition-colors hover:bg-muted"
+            class="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-muted/60 px-2 text-xs font-semibold transition-colors hover:bg-muted"
             @click="copyOutput"
           >
             <Check
@@ -351,10 +380,17 @@ watch(
           </button>
           <button
             type="button"
-            class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            class="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-muted/60 px-2 text-xs font-semibold transition-colors hover:bg-muted"
+            @click="emit('properties')"
+          >
+            <Settings2 class="h-4 w-4" />Properties
+          </button>
+          <button
+            type="button"
+            class="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
             @click="emit('close')"
           >
-            Back to canvas
+            Back to workflow
           </button>
         </footer>
       </section>

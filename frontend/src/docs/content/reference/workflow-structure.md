@@ -76,9 +76,26 @@ See [Agent Persistent Memory](./agent-persistent-memory.md) for API paths, edito
 
 Common `type` values: [Input](../nodes/input-node.md) (`textInput`), [Cron](../nodes/cron-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md) (`websocketTrigger`), [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [Condition](../nodes/condition-node.md), [Switch](../nodes/switch-node.md), [Output](../nodes/output-node.md), [JSON output mapper](../nodes/json-output-mapper-node.md) (`jsonOutputMapper`), [Wait](../nodes/wait-node.md), [HTTP](../nodes/http-node.md), [WebSocket Send](../nodes/websocket-send-node.md) (`websocketSend`), [Merge](../nodes/merge-node.md), [Set](../nodes/set-node.md), [Variable](../nodes/variable-node.md), [Loop](../nodes/loop-node.md), and more. Full list: [Node Types](./node-types.md). Nodes in the same execution level run in [parallel](./parallel-execution.md).
 
-## Position
+## Editor layout
 
-Each node has `position.x` and `position.y` for canvas layout. The editor uses Vue Flow for rendering.
+Each node has `position.x` and `position.y` for the desktop canvas layout. On screens below the
+768px breakpoint, the editor replaces the freeform Vue Flow canvas with a full-screen, indented
+workflow tree. The tree follows connected execution paths, marks parallel branches, and uses the
+same node labels, icons, and latest run status as the desktop editor.
+
+Tap a node to select it. If it has a recorded execution result, its full-screen detail opens with
+input, output, and error tabs. The mobile bottom navigation provides **Nodes**, **Properties**,
+**Run**, and **More**; the header retains save, history, search, settings, and share actions.
+Desktop continues to use the freeform Vue Flow canvas and side panels.
+
+Use **Add node** in the mobile Nodes tab to search the node library. A regular node opens a
+connection sheet immediately after it is added: choose an anchor node and place it **After**,
+**Before**, or as a **Parallel** branch. In edit mode, tap an existing regular node to open the same
+sheet with its current connection selected. Trigger nodes stay independent because they do not accept
+regular input. The edit control also exposes a remove action for the selected node. Execution details
+include previous and next arrows when adjacent
+node results are available. The AI Assistant opens above the mobile tree as a bottom sheet, without
+changing the active editor tab.
 
 ## Related
 

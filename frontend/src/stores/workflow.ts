@@ -89,6 +89,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
   const mobileNodeExecutionDetailNodeId = ref<string | null>(null);
+  const mobileEditorTab = ref<"nodes" | "properties" | "run" | "more">("nodes");
   const analysisPanelOpen = ref(false);
   const analysisNoteEmpty = ref(true);
 
@@ -1995,6 +1996,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     edges.value = [];
     selectedNodeId.value = null;
     closeMobileNodeExecutionDetail();
+    mobileEditorTab.value = "nodes";
     clearEvaluateLoopSelection();
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
@@ -3655,6 +3657,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     mobileNodeExecutionDetailNodeId,
     openMobileNodeExecutionDetail,
     closeMobileNodeExecutionDetail,
+    mobileEditorTab,
     analysisPanelOpen,
     analysisNoteEmpty,
     refreshAnalysisNoteEmpty,

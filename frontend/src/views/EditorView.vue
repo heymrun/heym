@@ -17,6 +17,7 @@ import type {
 import type { Team, TeamShare } from "@/types/team";
 
 import WorkflowCanvas from "@/components/Canvas/WorkflowCanvas.vue";
+import MobileWorkflowTree from "@/components/Canvas/MobileWorkflowTree.vue";
 import ContextualShowcase from "@/features/showcase/components/ContextualShowcase.vue";
 import ShareTemplateModal from "@/features/templates/components/ShareTemplateModal.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
@@ -33,6 +34,7 @@ import ExecutionHistoryDialog from "@/components/Panels/ExecutionHistoryDialog.v
 import NodePanel from "@/components/Panels/NodePanel.vue";
 import PropertiesPanel from "@/components/Panels/PropertiesPanel.vue";
 import MobileCanvasExecutionDetail from "@/components/Panels/propertiesPanel/MobileCanvasExecutionDetail.vue";
+import MobilePropertiesPanel from "@/components/Panels/propertiesPanel/MobilePropertiesPanel.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -172,6 +174,13 @@ function returnToDashboard(event?: MouseEvent): void {
   }
 
   void router.push(target);
+}
+
+function returnToWorkflowList(): void {
+  if (hasUnsavedChanges.value && !confirm("You have unsaved changes. Are you sure you want to leave?")) {
+    return;
+  }
+  void router.push("/");
 }
 let skipNextDescriptionCommit = false;
 
@@ -782,6 +791,9 @@ async function focusNodeFromQuery(): Promise<void> {
   workflowStore.selectNode(focusNodeId);
   // The panel opens on the Run tab by default; a node deep link wants its configuration.
   workflowStore.propertiesPanelTab = "properties";
+  if (isMobile.value) {
+    workflowStore.mobileEditorTab = "properties";
+  }
 }
 
 onUnmounted(() => {
@@ -1380,7 +1392,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
     class="h-screen flex flex-col bg-background overflow-x-hidden"
     :style="{ '--showcase-width': '40vw' }"
   >
-    <header class="editor-header h-16 border-b border-border/30 flex items-center justify-between px-2 sm:px-4 shrink-0 overflow-x-hidden">
+    <header class="editor-header hidden h-16 shrink-0 items-center justify-between overflow-x-hidden border-b border-border/30 px-2 sm:px-4 md:flex">
       <div class="flex items-center gap-1 sm:gap-2 md:gap-4 min-w-0 flex-1">
         <router-link
           to="/"
@@ -2381,16 +2393,22 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       v-else
       class="flex-1 flex overflow-hidden overflow-x-hidden"
     >
-      <NodePanel v-show="leftPanelOpen && !analysisPanelOpen" />
+      <NodePanel
+        v-if="!isMobile"
+        v-show="leftPanelOpen && !analysisPanelOpen"
+      />
       <AnalysisPanel
-        v-if="analysisPanelOpen"
+        v-if="!isMobile && analysisPanelOpen"
         :workflow-id="analysisWorkflowId"
         :current-workflow="analysisWorkflowPayload"
         :run-workflow="runWorkflowForAnalysis"
       />
 
       <div class="flex-1 flex flex-col min-h-0 min-w-0">
-        <div class="flex-1 relative min-h-0 min-w-0">
+        <div
+          v-if="!isMobile"
+          class="flex-1 relative min-h-0 min-w-0"
+        >
           <button
             class="panel-toggle panel-toggle-left absolute top-1/2 -translate-y-1/2 z-30 w-5 h-12 rounded-r-lg flex items-center justify-center transition-all left-0"
             @click.stop="leftPanelOpen = !leftPanelOpen"
@@ -2406,7 +2424,6 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           </button>
 
           <WorkflowCanvas />
-          <MobileCanvasExecutionDetail />
 
           <button
             class="panel-toggle panel-toggle-right absolute top-1/2 -translate-y-1/2 z-30 w-5 h-12 rounded-l-lg flex items-center justify-center transition-all pointer-events-auto right-0"
@@ -2422,10 +2439,34 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             />
           </button>
         </div>
-        <DebugPanel />
+        <MobileWorkflowTree
+          v-else
+          class="flex-1"
+          @home="returnToWorkflowList"
+          @save="handleSave"
+          @history="historyOpen = true; pushOverlayState()"
+          @search="showCommandPalette = true; pushOverlayState()"
+          @share="shareOpen = true; pushOverlayState()"
+          @clear="workflowStore.clearCanvas()"
+          @edit-history="editHistoryOpen = true; pushOverlayState()"
+          @download="downloadWorkflow"
+          @portal="portalDialogRef?.openDialog(); pushOverlayState()"
+          @template="shareTemplateOpen = true"
+          @curl="curlOpen = true; pushOverlayState()"
+          @guide="toggleShowcaseGuide"
+        >
+          <template #properties>
+            <MobilePropertiesPanel tab="properties" />
+          </template>
+          <template #run>
+            <MobilePropertiesPanel tab="config" />
+          </template>
+        </MobileWorkflowTree>
+        <MobileCanvasExecutionDetail />
+        <DebugPanel v-if="!isMobile" />
       </div>
 
-      <PropertiesPanel v-if="rightPanelOpen" />
+      <PropertiesPanel v-if="!isMobile && rightPanelOpen" />
     </div>
 
     <Teleport to="body">

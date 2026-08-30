@@ -151,7 +151,7 @@ When the editor's **Execution Log** is open, click the timer button to show the 
 
 ## Mobile node detail
 
-On a phone, tap a canvas node with a recorded result to open its execution as a full-screen detail. The view provides separate **Input Data**, **Output Data**, and **Errors** tabs. The output tab displays the recorded result and offers **Copy Output**; the input tab shows the selected node's configuration, and the errors tab shows the recorded error when the node failed. Use **Back to canvas** or the close button to return to the editor.
+On a phone, the editor displays a full-screen workflow tree instead of the freeform canvas. Tap a tree node with a recorded result to open its execution as a full-screen detail. The view provides separate **Input Data**, **Output Data**, and **Errors** tabs. The output tab displays the recorded result and offers **Copy Output**; the input tab shows the selected node's configuration, and the errors tab shows the recorded error when the node failed. Use **Back to workflow** or the close button to return to the tree.
 
 The canvas and dashboard history dialogs keep their run controls on one row and place the available tag and instance filters in a responsive grid. Their filter menus use the same in-app selector, so the selected checkmark has a consistent gutter and baseline with every option label.
 
