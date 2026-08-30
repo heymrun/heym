@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useMediaQuery } from "@vueuse/core";
 import { useVueFlow } from "@vue-flow/core";
 import axios from "axios";
 import DOMPurify from "dompurify";
@@ -50,6 +51,7 @@ const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
 const workflowStore = useWorkflowStore();
 const aiDefaults = useAiDefaults();
+const isMobile = useMediaQuery("(max-width: 767px)");
 
 const panelHeight = ref(212);
 const isResizing = ref(false);
@@ -451,6 +453,9 @@ function toggleTimeline(): void {
 }
 
 function selectCanvasNodeFromTimeline(payload: TimelineSelectPayload): void {
+  if (isMobile.value) {
+    return;
+  }
   if (!workflowStore.nodes.some((n) => n.id === payload.nodeId)) {
     return;
   }
@@ -2723,26 +2728,30 @@ function renderContent(content: string): string {
     </div>
 
     <div
-      class="px-4 py-2 border-b flex items-center justify-between bg-muted/30 cursor-pointer"
+      class="flex min-w-0 items-center gap-1 border-b bg-muted/30 px-3 py-2 cursor-pointer md:px-4"
       @click="toggleCollapse"
     >
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 items-center gap-2">
         <Terminal class="w-4 h-4 text-muted-foreground" />
-        <span class="font-medium text-sm">Execution Log</span>
+        <span class="font-medium text-sm">
+          <span class="sm:hidden">Log</span>
+          <span class="hidden sm:inline">Execution Log</span>
+        </span>
         <component
           :is="isCollapsed ? ChevronUp : ChevronDown"
-          class="w-4 h-4 text-muted-foreground"
+          class="hidden h-4 w-4 text-muted-foreground sm:block"
         />
       </div>
-      <div class="flex items-center gap-2">
+      <div class="-mr-3 ml-auto flex shrink-0 items-center justify-end gap-1 sm:mr-0 sm:translate-y-0 md:gap-2" style="gap: 3px;">
+
         <div
           v-if="executionResult"
-          class="flex items-center gap-2 text-xs mr-2"
+          class="flex shrink-0 items-center gap-2 text-xs"
         >
           <span :class="cn(statusColors[executionResult.status])">
             {{ executionResult.status.toUpperCase() }}
           </span>
-          <span class="text-muted-foreground">
+          <span class="hidden min-[400px]:inline text-muted-foreground">
             {{ executionResult.execution_time_ms.toFixed(2) }}ms
           </span>
         </div>
@@ -2750,7 +2759,7 @@ function renderContent(content: string): string {
           v-if="isExecuting"
           variant="destructive"
           size="sm"
-          class="h-11 min-h-[44px] md:h-7 px-2 gap-1"
+          class="h-9 min-h-9 px-2 gap-1 md:h-7"
           title="Stop execution"
           @click.stop="stopExecution"
         >
@@ -2761,7 +2770,7 @@ function renderContent(content: string): string {
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting && !isCollapsed"
           variant="ghost"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="hidden h-9 w-9 min-h-9 min-w-9 min-[480px]:inline-flex md:h-7 md:w-7"
           title="Scroll to top"
           @click.stop="scrollContainer?.scrollTo({ top: 0, behavior: 'smooth' })"
         >
@@ -2771,7 +2780,7 @@ function renderContent(content: string): string {
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
           variant="ghost"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="h-9 w-9 min-h-9 min-w-9 md:h-7 md:w-7"
           :title="logsCopied ? 'Copied!' : 'Copy logs as JSON'"
           @click.stop="copyLogsAsJson"
         >
@@ -2788,7 +2797,7 @@ function renderContent(content: string): string {
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
           variant="ghost"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="hidden h-9 w-9 min-h-9 min-w-9 md:inline-flex md:h-7 md:w-7"
           title="Open in JSON Editor"
           @click.stop="openInJsonEditor"
         >
@@ -2798,7 +2807,7 @@ function renderContent(content: string): string {
           v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
           variant="ghost"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="h-9 w-9 min-h-9 min-w-9 md:h-7 md:w-7"
           title="Clear execution log"
           @click.stop="clearExecutionLog"
         >
@@ -2808,7 +2817,7 @@ function renderContent(content: string): string {
           v-if="skillGeneratedFiles.length > 0 && !isExecuting"
           variant="ghost"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="hidden h-9 w-9 min-h-9 min-w-9 min-[480px]:inline-flex md:h-7 md:w-7"
           title="Download generated files"
           @click.stop="onDownloadGeneratedFiles"
         >
@@ -2818,23 +2827,25 @@ function renderContent(content: string): string {
           v-if="isExecuting || executionResult || nodeResults.length > 0"
           :variant="showTimeline ? 'secondary' : 'ghost'"
           size="icon"
-          class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"
+          class="h-9 w-9 min-h-9 min-w-9 md:h-7 md:w-7"
           title="Execution timeline"
           @click.stop="toggleTimeline"
         >
           <Timer class="w-3.5 h-3.5" />
         </Button>
-        <div class="w-px h-5 bg-border mx-1" />
-        <Button
-          :variant="aiPanelOpen ? 'default' : 'ghost'"
-          size="sm"
-          class="h-7 px-2 gap-1"
-          title="AI Assistant"
-          @click.stop="toggleAiPanel"
-        >
-          <Sparkles class="w-3.5 h-3.5" />
-          AI
-        </Button>
+        <div class="ml-auto flex items-center gap-0.5">
+          <div class="mx-1 h-5 w-px bg-border" />
+          <Button
+            :variant="aiPanelOpen ? 'default' : 'ghost'"
+            size="sm"
+            class="h-9 min-h-9 px-2 gap-1 md:h-7"
+            title="AI Assistant"
+            @click.stop="toggleAiPanel"
+          >
+            <Sparkles class="w-3.5 h-3.5" />
+            AI
+          </Button>
+        </div>
       </div>
     </div>
 

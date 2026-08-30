@@ -20,8 +20,19 @@ function isExpandable(val: unknown): val is Record<string, unknown> | unknown[] 
 }
 
 function entries(val: unknown): [string, unknown][] {
-  if (Array.isArray(val)) return val.map((v, i) => [String(i), v]);
-  if (val && typeof val === "object") return Object.entries(val as Record<string, unknown>);
+  if (Array.isArray(val)) {
+    return val.reduce<[string, unknown][]>((result, value, index) => {
+      if (value !== undefined) {
+        result.push([String(index), value]);
+      }
+      return result;
+    }, []);
+  }
+  if (val && typeof val === "object") {
+    return Object.entries(val as Record<string, unknown>).filter(
+      ([, value]) => value !== undefined,
+    );
+  }
   return [];
 }
 
@@ -69,7 +80,10 @@ function toggle(key: string): void {
 </script>
 
 <template>
-  <div class="json-tree">
+  <div
+    v-if="data !== undefined"
+    class="json-tree"
+  >
     <template v-if="isExpandable(data)">
       <div
         v-for="[key, val] in entries(data)"

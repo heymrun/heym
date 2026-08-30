@@ -149,6 +149,12 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 
 When the editor's **Execution Log** is open, click the timer button to show the execution timeline. Select a span to open an inline details inspector that takes over the rows area. It shows the selected step's status, duration, attempt count, retry information, errors, trace ID, and a compact output preview. Object and array outputs use the same `JsonTree` viewer as the rest of the Debug panel; scalar values use a text preview. Use **Open trace** for LLM and Agent spans when a trace ID is available.
 
+## Mobile node detail
+
+On a phone, tap a canvas node with a recorded result to open its execution as a full-screen detail. The view provides separate **Input Data**, **Output Data**, and **Errors** tabs. The output tab displays the recorded result and offers **Copy Output**; the input tab shows the selected node's configuration, and the errors tab shows the recorded error when the node failed. Use **Back to canvas** or the close button to return to the editor.
+
+The canvas and dashboard history dialogs keep their run controls on one row and place the available tag and instance filters in a responsive grid. Their filter menus use the same in-app selector, so the selected checkmark has a consistent gutter and baseline with every option label.
+
 ## Related
 
 - [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)

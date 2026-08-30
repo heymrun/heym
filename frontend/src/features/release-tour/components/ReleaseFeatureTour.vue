@@ -243,10 +243,12 @@ onUnmounted(() => {
               leave-from-class="opacity-100"
               leave-to-class="opacity-0"
             >
-              <component
-                :is="currentVisual"
+              <div
                 :key="currentSlide.id"
-              />
+                class="h-full w-full"
+              >
+                <component :is="currentVisual" />
+              </div>
             </Transition>
           </div>
 

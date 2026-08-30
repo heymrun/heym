@@ -1898,6 +1898,7 @@ export function usePropertiesPanelController() {
   }
 
   const selectedNode = computed(() => workflowStore.selectedNode);
+  const workflowName = computed(() => workflowStore.currentWorkflow?.name ?? "Workflow");
 
 
   const selectedNodeEvaluateDialogLabel = computed((): string => {
@@ -9333,6 +9334,7 @@ export function usePropertiesPanelController() {
     handleFallbackCredentialChange,
     handleFallbackModelChange,
     selectedNode,
+    workflowName,
     selectedNodeEvaluateDialogLabel,
     selectedNodeTypeLabel,
     isExecuting,

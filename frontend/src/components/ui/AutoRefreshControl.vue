@@ -4,7 +4,7 @@ import { Clock } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import {
   AUTO_REFRESH_MAX_SECONDS,
   AUTO_REFRESH_MIN_SECONDS,
@@ -136,12 +136,15 @@ watch(
 </script>
 
 <template>
-  <div class="flex items-center gap-1.5 flex-wrap">
-    <Select
+  <div class="flex shrink-0 items-center gap-1.5">
+    <SearchableSelect
       :model-value="selectedPreset"
       :options="presetOptions"
+      placeholder=""
+      search-placeholder="Search refresh interval..."
       class="w-[5.5rem] sm:w-24"
       select-class="h-9 min-h-0 px-2.5 py-1.5 text-xs sm:text-sm"
+      hide-trigger-icon
       @update:model-value="handlePresetChange"
     />
 
@@ -167,7 +170,7 @@ watch(
 
     <div
       v-if="countdownLabel"
-      class="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-muted-foreground tabular-nums"
+      class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-muted-foreground tabular-nums"
       :title="`Next refresh in ${formatCountdown(secondsRemaining ?? 0)}`"
     >
       <Clock class="h-3.5 w-3.5 shrink-0" />

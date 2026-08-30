@@ -32,6 +32,7 @@ import DebugPanel from "@/components/Panels/DebugPanel.vue";
 import ExecutionHistoryDialog from "@/components/Panels/ExecutionHistoryDialog.vue";
 import NodePanel from "@/components/Panels/NodePanel.vue";
 import PropertiesPanel from "@/components/Panels/PropertiesPanel.vue";
+import MobileCanvasExecutionDetail from "@/components/Panels/propertiesPanel/MobileCanvasExecutionDetail.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -291,7 +292,25 @@ watch(isMobile, (mobile) => {
   }
 });
 
+watch(
+  () => workflowStore.mobileNodeExecutionDetailNodeId,
+  (nodeId) => {
+    if (nodeId !== null && isMobile.value) {
+      rightPanelOpen.value = false;
+    }
+  },
+);
+
 function toggleRightPanel(): void {
+  const selectedNodeId = workflowStore.selectedNodeId;
+  if (
+    isMobile.value &&
+    selectedNodeId !== null &&
+    workflowStore.getLatestNodeResult(selectedNodeId) !== null
+  ) {
+    workflowStore.openMobileNodeExecutionDetail(selectedNodeId);
+    return;
+  }
   rightPanelOpen.value = !rightPanelOpen.value;
 }
 
@@ -2387,6 +2406,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           </button>
 
           <WorkflowCanvas />
+          <MobileCanvasExecutionDetail />
 
           <button
             class="panel-toggle panel-toggle-right absolute top-1/2 -translate-y-1/2 z-30 w-5 h-12 rounded-l-lg flex items-center justify-center transition-all pointer-events-auto right-0"

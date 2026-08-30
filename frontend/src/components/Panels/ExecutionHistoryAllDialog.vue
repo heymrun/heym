@@ -32,7 +32,7 @@ import type {
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import AutoRefreshControl from "@/components/ui/AutoRefreshControl.vue";
 import {
   AUTO_REFRESH_MAX_SECONDS,
@@ -848,31 +848,11 @@ function bringToCanvas(): void {
     @escape="handleDialogEscape"
   >
     <div class="space-y-3 sm:space-y-4">
-      <div class="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-        <div class="flex min-w-0 flex-col gap-1.5 sm:flex-1 sm:flex-row sm:items-center sm:gap-2">
-          <p class="text-sm text-muted-foreground shrink-0">
-            {{ totalCount }} run(s)
-          </p>
-          <Select
-            v-if="triggerSourceOptions.length > 1 || selectedTriggerSource"
-            v-model="selectedTriggerSource"
-            :options="triggerSourceOptions"
-            placeholder=""
-            class="w-full sm:w-56"
-            clearable
-            clear-aria-label="Clear tag filter"
-          />
-          <Select
-            v-if="instanceOptions.length > 1 || selectedInstanceId"
-            v-model="selectedInstanceId"
-            :options="instanceOptions"
-            placeholder=""
-            class="w-full sm:w-56"
-            clearable
-            clear-aria-label="Clear instance filter"
-          />
-        </div>
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
+        <p class="order-1 self-center shrink-0 text-base leading-none text-muted-foreground">
+          {{ totalCount }} run(s)
+        </p>
+        <div class="order-2 flex items-center gap-2 sm:order-3 sm:col-start-3 flex-wrap justify-end shrink-0">
           <AutoRefreshControl
             :active="open"
             :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
@@ -911,8 +891,28 @@ function bringToCanvas(): void {
             @click="clearAllHistory"
           >
             <Trash2 class="w-4 h-4 sm:mr-1" />
-            <span class="hidden sm:inline">Clear All</span>
+            <span class="hidden lg:inline">Clear All</span>
           </Button>
+        </div>
+        <div class="order-3 col-span-2 grid grid-cols-1 gap-2 min-[400px]:grid-cols-2 sm:order-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:grid-cols-2 sm:min-w-0">
+          <SearchableSelect
+            v-if="triggerSourceOptions.length > 1 || selectedTriggerSource"
+            v-model="selectedTriggerSource"
+            :options="triggerSourceOptions"
+            placeholder=""
+            search-placeholder="Search tags..."
+            class="min-w-0 w-full"
+            hide-trigger-icon
+          />
+          <SearchableSelect
+            v-if="instanceOptions.length > 1 || selectedInstanceId"
+            v-model="selectedInstanceId"
+            :options="instanceOptions"
+            placeholder=""
+            search-placeholder="Search instances..."
+            class="min-w-0 w-full"
+            hide-trigger-icon
+          />
         </div>
       </div>
 

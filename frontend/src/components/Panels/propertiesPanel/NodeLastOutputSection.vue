@@ -3,6 +3,7 @@ import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Maximize2, Minimi
 import Button from "@/components/ui/Button.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
 import Label from "@/components/ui/Label.vue";
+import MobileNodeExecutionDetail from "./MobileNodeExecutionDetail.vue";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
 
 const {
@@ -23,6 +24,8 @@ const {
   nodeOutputImageSrcs,
   openImageLightbox,
   copyOutput,
+  selectedNode,
+  workflowName,
 } = usePropertiesPanelContext();
 </script>
 
@@ -167,11 +170,20 @@ const {
       Execution time: {{ nodeOutput.execution_time_ms.toFixed(2) }}ms
     </div>
 
+    <MobileNodeExecutionDetail
+      :open="isLastOutputExpanded"
+      :result="nodeOutput"
+      :node="selectedNode"
+      :output="displayNodeOutput"
+      :workflow-name="workflowName"
+      @close="isLastOutputExpanded = false"
+    />
+
     <Teleport to="body">
       <Transition name="fade">
         <div
           v-if="isLastOutputExpanded && nodeOutput && !nodeOutput.error"
-          class="fixed inset-0 z-50 flex items-center justify-center"
+          class="fixed inset-0 z-50 hidden items-center justify-center md:flex"
         >
           <div
             class="absolute inset-0 bg-black/50 backdrop-blur-sm"

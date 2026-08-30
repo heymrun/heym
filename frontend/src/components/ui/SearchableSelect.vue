@@ -158,6 +158,9 @@ watch(
   [selectedOption, internalOptions],
   () => {
     selectedKey.value = selectedOption.value?.key ?? "";
+    if (!open.value) {
+      searchTerm.value = selectedOption.value?.label ?? "";
+    }
   },
   { immediate: true }
 );
@@ -165,7 +168,10 @@ watch(
 watch(open, (isOpen) => {
   if (isOpen) {
     searchTerm.value = "";
+    return;
   }
+
+  searchTerm.value = selectedOption.value?.label ?? "";
 });
 
 function displayValue(key: string): string {
@@ -207,6 +213,7 @@ function handleUpdateSelectedKey(key: string | undefined): void {
   }
 
   selectedKey.value = nextKey;
+  searchTerm.value = option?.label ?? "";
   const value = option?.value;
   emit("update:modelValue", value && value.length > 0 ? value : undefined);
 }
@@ -237,7 +244,7 @@ function clearValue(): void {
     :disabled="disabled"
     :display-value="displayValue"
     :filter-function="filterOptions"
-    :reset-search-term-on-blur="false"
+    :reset-search-term-on-blur="true"
     class="relative w-full"
     @update:model-value="handleUpdateSelectedKey"
   >

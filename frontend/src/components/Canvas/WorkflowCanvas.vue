@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useMediaQuery } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import { Background, BackgroundVariant } from "@vue-flow/background";
 import { ControlButton, Controls } from "@vue-flow/controls";
@@ -45,6 +46,7 @@ import "@vue-flow/controls/dist/style.css";
 import "@vue-flow/minimap/dist/style.css";
 
 const workflowStore = useWorkflowStore();
+const isMobile = useMediaQuery("(max-width: 767px)");
 const router = useRouter();
 const { isRunbookPlaying, playRunbookInPlace } = useRunbookPlayer();
 const showTemplatesBrowse = ref(false);
@@ -529,9 +531,16 @@ function closeContextMenu(): void {
   contextMenuVisible.value = false;
 }
 
+function nodeHasExecutionResult(nodeId: string): boolean {
+  return workflowStore.getLatestNodeResult(nodeId) !== null;
+}
+
 function handleNodeClick(event: { node: { id: string } }): void {
   closeContextMenu();
   workflowStore.selectNode(event.node.id);
+  if (isMobile.value && nodeHasExecutionResult(event.node.id)) {
+    workflowStore.openMobileNodeExecutionDetail(event.node.id);
+  }
 }
 
 function handleNodeContextMenu(event: { event: MouseEvent | TouchEvent; node: { id: string } }): void {
@@ -674,10 +683,16 @@ function handleNodeDoubleClick(event: {
     };
   };
 }): void {
-  const shouldOpenExpressionDialog =
-    workflowStore.propertiesPanelVisible && workflowStore.propertiesPanelTab === "properties";
   workflowStore.selectNode(event.node.id);
   if (event.node.data?.nodeType === "sticky") return;
+
+  if (isMobile.value && nodeHasExecutionResult(event.node.id)) {
+    workflowStore.openMobileNodeExecutionDetail(event.node.id);
+    return;
+  }
+
+  const shouldOpenExpressionDialog =
+    workflowStore.propertiesPanelVisible && workflowStore.propertiesPanelTab === "properties";
   const nodeType = event.node.data?.nodeType;
   let fieldToFocus: string | undefined;
   if (nodeType === "llm") {
