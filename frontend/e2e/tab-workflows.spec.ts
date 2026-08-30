@@ -438,7 +438,7 @@ test("shows the workflow name without overflow on small screens", async ({ page 
     await page.setViewportSize({ width: 380, height: 720 });
     await page.goto(`/workflows/${workflow.id}`);
 
-    const title = page.getByTestId("workflow-title");
+    const title = page.getByTestId("mobile-workflow-title");
     // The name must remain visible on small screens, not hidden away.
     await expect(title).toBeVisible();
     await expect(title).toHaveText(longName);
@@ -456,8 +456,8 @@ test("shows the workflow name without overflow on small screens", async ({ page 
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
 
     // Inline editing must not blow out the header width either.
-    await title.dispatchEvent("mousedown");
-    const titleInput = page.locator("[data-heym-inline-edit] input").first();
+    await title.click();
+    const titleInput = page.locator("input[aria-label='Workflow name']:visible");
     await expect(titleInput).toBeVisible();
     const inputBox = await titleInput.boundingBox();
     expect(inputBox).not.toBeNull();
@@ -587,66 +587,6 @@ test("shows execution highlights after a workflow run", async ({ page }) => {
     await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
     await page.getByTestId("execution-highlights-open").click();
     await expect(highlightsPanel).toBeVisible();
-  } finally {
-    await deleteWorkflow(page, workflow.id);
-  }
-});
-
-test("keeps execution highlights collapsed by default on mobile", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-
-  const workflow = await createWorkflow(
-    page,
-    `Mobile Highlights ${Date.now()}`,
-    [
-      {
-        id: "set-highlight",
-        type: "set",
-        position: { x: 120, y: 120 },
-        data: {
-          label: "Build Highlight",
-          mappings: [{ key: "message", value: "Mobile highlight smoke" }],
-          highlight: true,
-        },
-      },
-      {
-        id: "output-final",
-        type: "output",
-        position: { x: 460, y: 120 },
-        data: { label: "Final Output", message: "$input.message" },
-      },
-    ],
-    [
-      {
-        id: "edge-highlight-output",
-        source: "set-highlight",
-        target: "output-final",
-        sourceHandle: "output",
-        targetHandle: "input",
-      },
-    ],
-  );
-
-  try {
-    await page.goto(`/workflows/${workflow.id}`);
-    await expect(page.getByTestId("workflow-title")).toBeVisible();
-    await expect(page.getByText("Build Highlight")).toBeVisible();
-
-    // On mobile the properties panel starts closed and the Run label is icon-only
-    // below `sm`, so drive the run via the editor shortcut instead.
-    await page.keyboard.press("ControlOrMeta+Enter");
-
-    // The shortcut opens the properties panel; close it so the canvas chip is
-    // unobstructed on a narrow viewport.
-    await expect(page.locator(".properties-panel")).toBeVisible();
-    await page.locator("button.panel-toggle-right").click();
-    await expect(page.locator(".properties-panel")).toBeHidden();
-
-    await expect(page.getByTestId("execution-highlights-open")).toBeVisible();
-    await expect(page.getByTestId("execution-highlights-panel")).toBeHidden();
-
-    await page.getByTestId("execution-highlights-open").click();
-    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible();
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

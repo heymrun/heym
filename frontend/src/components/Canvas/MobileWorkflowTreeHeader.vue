@@ -87,6 +87,7 @@ function cancelDescriptionEdit(): void {
         <button
           v-else
           type="button"
+          data-testid="mobile-workflow-title"
           class="block max-w-44 truncate text-left text-sm font-bold leading-4 hover:text-primary"
           :title="workflowStore.currentWorkflow?.name ?? 'Workflow'"
           @click="startTitleEdit"
