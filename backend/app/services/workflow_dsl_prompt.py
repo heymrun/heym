@@ -2087,7 +2087,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `documentId`: Value of that unique id (for "upsert" and "delete", supports expressions)
   - `queryText`: Search query text (only for "search" operation, supports expressions)
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
-  - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation)
+  - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation). String values support expressions and are resolved after the JSON is parsed, so `{"url": "$start.url"}` filters on the resolved value, and a whole-string expression keeps its type (`{"count": "$start.count"}` matches a stored number)
 
 **SETUP**: Requires a Vector Store created in the Vector Stores tab with a "RAG: Qdrant + OpenAI" credential (external Qdrant server), a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service), or a "RAG: Custom Embeddings" credential (any OpenAI-compatible embedding endpoint by URL, targeting either backend). The same RAG operations, metadata filters, and reranking work identically with every backend.
 

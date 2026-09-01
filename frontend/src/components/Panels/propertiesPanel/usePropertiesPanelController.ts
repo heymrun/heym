@@ -600,9 +600,20 @@ export function usePropertiesPanelController() {
   >(new Map());
   const gristColumns = ref<{ id: string; name: string; type: string }[]>([]);
   const vectorStores = ref<{ id: string; name: string; backend: string }[]>([]);
-  const ragQueryInputRef = ref<ExpandableFieldRef | null>(null);
-  const ragDocumentInputRef = ref<ExpandableFieldRef | null>(null);
-  const ragDocumentIdInputRef = ref<ExpandableFieldRef | null>(null);
+  type RagExpressionFieldKey =
+    | "documentId"
+    | "documentContent"
+    | "documentMetadata"
+    | "queryText"
+    | "metadataFilters";
+
+  interface RagExpressionField {
+    key: RagExpressionFieldKey;
+    label: string;
+  }
+
+  const ragExpressionInputRefs = ref<Map<RagExpressionFieldKey, ExpandableFieldRef>>(new Map());
+  const currentRagExpressionFieldIndex = ref(0);
   const rabbitmqExchangeInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqRoutingKeyInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqQueueNameInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2205,9 +2216,7 @@ export function usePropertiesPanelController() {
     redisKeyInputRef.value?.closeExpandDialog();
     variableValueInputRef.value?.closeExpandDialog();
     throwErrorMessageInputRef.value?.closeExpandDialog();
-    ragQueryInputRef.value?.closeExpandDialog();
-    ragDocumentInputRef.value?.closeExpandDialog();
-    ragDocumentIdInputRef.value?.closeExpandDialog();
+    closeRagExpressionDialogs();
     rabbitmqExchangeInputRef.value?.closeExpandDialog();
     rabbitmqRoutingKeyInputRef.value?.closeExpandDialog();
     rabbitmqQueueNameInputRef.value?.closeExpandDialog();
@@ -2646,24 +2655,16 @@ export function usePropertiesPanelController() {
         if (!n || n.type !== "rag") {
           return;
         }
-        const op = (n.data.ragOperation as string | undefined) || "";
-        const focusField = workflowStore.focusField;
-        if (focusField === "documentContent" && ragDocumentInputRef.value) {
-          nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
-        } else if (focusField === "documentId" && ragDocumentIdInputRef.value) {
-          nextTick(() => ragDocumentIdInputRef.value?.openExpandDialog());
-        } else if (focusField === "queryText" && ragQueryInputRef.value) {
-          nextTick(() => ragQueryInputRef.value?.openExpandDialog());
-        } else if ((op === "insert" || op === "upsert") && ragDocumentInputRef.value) {
-          nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
-        } else if (op === "delete" && ragDocumentIdInputRef.value) {
-          nextTick(() => ragDocumentIdInputRef.value?.openExpandDialog());
-        } else if (op === "search" && ragQueryInputRef.value) {
-          nextTick(() => ragQueryInputRef.value?.openExpandDialog());
-        } else if (ragQueryInputRef.value) {
-          nextTick(() => ragQueryInputRef.value?.openExpandDialog());
-        } else if (ragDocumentInputRef.value) {
-          nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
+        const fields = ragExpressionFields.value;
+        if (fields.length === 0) {
+          return;
+        }
+        const focusField = workflowStore.focusField as RagExpressionFieldKey | null;
+        const startIndex = focusField ? ragExpressionFieldIndex(focusField) : 0;
+        const field = fields[startIndex];
+        if (field && ragExpressionInputRefs.value.get(field.key)) {
+          currentRagExpressionFieldIndex.value = startIndex;
+          nextTick(() => openRagExpressionFieldAtIndex(startIndex));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -5868,6 +5869,92 @@ export function usePropertiesPanelController() {
     nextTick(() => {
       openConverterExpressionFieldAtIndex(newIndex);
     });
+  }
+
+  /** Expression-capable rag fields, in the order the panel renders them. */
+  const ragExpressionFields = computed<RagExpressionField[]>(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "rag") {
+      return [];
+    }
+    const operation = (n.data.ragOperation as string | undefined) || "";
+    if (operation === "search") {
+      return [
+        { key: "queryText", label: "Query text" },
+        { key: "metadataFilters", label: "Metadata filters" },
+      ];
+    }
+    if (operation === "delete") {
+      return [{ key: "documentId", label: "Document ID" }];
+    }
+    if (operation === "upsert") {
+      return [
+        { key: "documentId", label: "Document ID" },
+        { key: "documentContent", label: "Document content" },
+        { key: "documentMetadata", label: "Document metadata" },
+      ];
+    }
+    if (operation === "insert") {
+      return [
+        { key: "documentContent", label: "Document content" },
+        { key: "documentMetadata", label: "Document metadata" },
+      ];
+    }
+    return [];
+  });
+
+  const ragExpressionFieldCount = computed((): number => ragExpressionFields.value.length);
+
+  function ragExpressionFieldIndex(key: RagExpressionFieldKey): number {
+    const index = ragExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : 0;
+  }
+
+  function setRagExpressionInputRef(key: RagExpressionFieldKey, el: unknown): void {
+    if (el) {
+      ragExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
+    } else {
+      ragExpressionInputRefs.value.delete(key);
+    }
+  }
+
+  function openRagExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "rag") {
+      return;
+    }
+    const field = ragExpressionFields.value[index];
+    if (!field) {
+      return;
+    }
+    currentRagExpressionFieldIndex.value = index;
+    ragExpressionInputRefs.value.get(field.key)?.openExpandDialog();
+  }
+
+  function closeRagExpressionDialogs(): void {
+    for (const input of ragExpressionInputRefs.value.values()) {
+      input.closeExpandDialog();
+    }
+  }
+
+  function handleRagExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = ragExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentRagExpressionFieldIndex.value - 1
+        : currentRagExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeRagExpressionDialogs();
+    currentRagExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openRagExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onRagRegisterExpressionFieldIndex(index: number): void {
+    currentRagExpressionFieldIndex.value = index;
   }
 
   const heymExpressionFields = computed<HeymExpressionField[]>(() => {
@@ -9132,9 +9219,12 @@ export function usePropertiesPanelController() {
     dataTableColumns,
     dataTableSelectiveValues,
     gristColumns,
-    ragQueryInputRef,
-    ragDocumentInputRef,
-    ragDocumentIdInputRef,
+    ragExpressionFields,
+    ragExpressionFieldCount,
+    ragExpressionFieldIndex,
+    setRagExpressionInputRef,
+    handleRagExpressionFieldNavigate,
+    onRagRegisterExpressionFieldIndex,
     rabbitmqExchangeInputRef,
     rabbitmqRoutingKeyInputRef,
     rabbitmqQueueNameInputRef,

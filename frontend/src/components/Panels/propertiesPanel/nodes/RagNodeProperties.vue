@@ -5,14 +5,10 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
-import Textarea from "@/components/ui/Textarea.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
   workflowStore,
-  ragQueryInputRef,
-  ragDocumentInputRef,
-  ragDocumentIdInputRef,
   selectedNode,
   selectedNodeEvaluateDialogLabel,
   vectorStoreOptions,
@@ -20,6 +16,11 @@ const {
   ragOperationOptions,
   cohereCredentialOptions,
   updateNodeData,
+  ragExpressionFieldCount,
+  ragExpressionFieldIndex,
+  setRagExpressionInputRef,
+  handleRagExpressionFieldNavigate,
+  onRagRegisterExpressionFieldIndex,
 } = usePropertiesPanelContext();
 </script>
 
@@ -102,7 +103,7 @@ const {
       <div class="space-y-2">
         <Label>Document ID <span class="text-destructive">*</span></Label>
         <ExpressionInput
-          ref="ragDocumentIdInputRef"
+          :ref="(el: unknown) => setRagExpressionInputRef('documentId', el)"
           :model-value="selectedNode.data.documentId || ''"
           placeholder="$input.id"
           :rows="1"
@@ -113,6 +114,11 @@ const {
           :dialog-node-label="selectedNodeEvaluateDialogLabel"
           dialog-key-label="Document ID"
           field-key="documentId"
+          :navigation-enabled="ragExpressionFieldCount > 1"
+          :navigation-index="ragExpressionFieldIndex('documentId')"
+          :navigation-total="ragExpressionFieldCount"
+          @navigate="handleRagExpressionFieldNavigate"
+          @register-field-index="onRagRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('documentId', $event)"
         />
         <p
@@ -141,7 +147,7 @@ const {
       <div class="space-y-2">
         <Label>Document Content <span class="text-destructive">*</span></Label>
         <ExpressionInput
-          ref="ragDocumentInputRef"
+          :ref="(el: unknown) => setRagExpressionInputRef('documentContent', el)"
           :model-value="selectedNode.data.documentContent || ''"
           placeholder="$input.text"
           :rows="3"
@@ -152,6 +158,11 @@ const {
           :dialog-node-label="selectedNodeEvaluateDialogLabel"
           dialog-key-label="Document content"
           field-key="documentContent"
+          :navigation-enabled="ragExpressionFieldCount > 1"
+          :navigation-index="ragExpressionFieldIndex('documentContent')"
+          :navigation-total="ragExpressionFieldCount"
+          @navigate="handleRagExpressionFieldNavigate"
+          @register-field-index="onRagRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('documentContent', $event)"
         />
         <p class="text-xs text-muted-foreground">
@@ -162,6 +173,7 @@ const {
       <div class="space-y-2">
         <Label>Document Metadata (JSON)</Label>
         <ExpressionInput
+          :ref="(el: unknown) => setRagExpressionInputRef('documentMetadata', el)"
           :model-value="selectedNode.data.documentMetadata || '{}'"
           placeholder="{&quot;source&quot;: &quot;manual&quot;, &quot;url&quot;: &quot;$start.url&quot;}"
           :rows="3"
@@ -172,6 +184,11 @@ const {
           :dialog-node-label="selectedNodeEvaluateDialogLabel"
           dialog-key-label="Document metadata"
           field-key="documentMetadata"
+          :navigation-enabled="ragExpressionFieldCount > 1"
+          :navigation-index="ragExpressionFieldIndex('documentMetadata')"
+          :navigation-total="ragExpressionFieldCount"
+          @navigate="handleRagExpressionFieldNavigate"
+          @register-field-index="onRagRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('documentMetadata', $event)"
         />
         <p class="text-xs text-muted-foreground">
@@ -185,7 +202,7 @@ const {
       <div class="space-y-2">
         <Label>Query Text <span class="text-destructive">*</span></Label>
         <ExpressionInput
-          ref="ragQueryInputRef"
+          :ref="(el: unknown) => setRagExpressionInputRef('queryText', el)"
           :model-value="selectedNode.data.queryText || ''"
           placeholder="$input.text"
           :rows="2"
@@ -196,6 +213,11 @@ const {
           :dialog-node-label="selectedNodeEvaluateDialogLabel"
           dialog-key-label="Query text"
           field-key="queryText"
+          :navigation-enabled="ragExpressionFieldCount > 1"
+          :navigation-index="ragExpressionFieldIndex('queryText')"
+          :navigation-total="ragExpressionFieldCount"
+          @navigate="handleRagExpressionFieldNavigate"
+          @register-field-index="onRagRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('queryText', $event)"
         />
         <p class="text-xs text-muted-foreground">
@@ -220,14 +242,28 @@ const {
 
       <div class="space-y-2">
         <Label>Metadata Filters (JSON)</Label>
-        <Textarea
+        <ExpressionInput
+          :ref="(el: unknown) => setRagExpressionInputRef('metadataFilters', el)"
           :model-value="selectedNode.data.metadataFilters || '{}'"
-          placeholder="{&quot;category&quot;: &quot;faq&quot;}"
+          placeholder="{&quot;category&quot;: &quot;faq&quot;, &quot;url&quot;: &quot;$start.url&quot;}"
           :rows="3"
+          :nodes="workflowStore.nodes"
+          :node-results="workflowStore.nodeResults"
+          :edges="workflowStore.edges"
+          :current-node-id="selectedNode.id"
+          :dialog-node-label="selectedNodeEvaluateDialogLabel"
+          dialog-key-label="Metadata filters"
+          field-key="metadataFilters"
+          :navigation-enabled="ragExpressionFieldCount > 1"
+          :navigation-index="ragExpressionFieldIndex('metadataFilters')"
+          :navigation-total="ragExpressionFieldCount"
+          @navigate="handleRagExpressionFieldNavigate"
+          @register-field-index="onRagRegisterExpressionFieldIndex"
           @update:model-value="updateNodeData('metadataFilters', $event)"
         />
         <p class="text-xs text-muted-foreground">
-          Filter results by metadata (exact match)
+          Filter results by metadata (exact match). Values support expressions, so
+          <code>{ "url": "$start.url" }</code> filters on the resolved value.
         </p>
       </div>
 

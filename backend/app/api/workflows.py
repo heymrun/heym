@@ -3819,7 +3819,38 @@ async def execute_workflow_stream(
     final_result: dict = {}
     executor_holder: dict = {}
     was_cancelled: bool = False
+    run_released = False
     query_params = dict(request.query_params)
+
+    def release_run() -> None:
+        """End the client stream and hand observers this run's terminal payload.
+
+        Called before draining fire-and-forget sub-workflows: the parent's own run is
+        over once its nodes finish, and a dispatched sub-workflow must not keep the
+        parent reported as running. Persistence is unaffected — ``finalize_execution``
+        awaits the whole thread, drain included.
+
+        The payload has to be handed over rather than the handle simply cleared:
+        ``execution_complete`` is never buffered as a progress event, so an observer
+        that loses the handle before the history row exists has no way left to learn
+        the run ended. That window is normally tiny; a dispatched sub-workflow makes
+        it as long as the sub-workflow runs.
+        """
+        nonlocal run_released
+        if run_released:
+            return
+        run_released = True
+        event_queue.put(None)
+        if final_result:
+            complete_active_execution(
+                execution_id,
+                workflow_id=workflow.id,
+                result={
+                    key: value for key, value in final_result.items() if not key.startswith("_")
+                },
+            )
+        else:
+            clear_active_execution(execution_id)
 
     def run_executor():
         nonlocal final_result, was_cancelled
@@ -3845,8 +3876,9 @@ async def execute_workflow_stream(
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
                     final_result = event
-            # Drain executeDoNotWait background sub-workflows AFTER execution_complete
-            # has been put on the queue (client already got the response).
+            # Drain executeDoNotWait background sub-workflows AFTER the run has been
+            # released, so a dispatched sub-workflow never holds the parent open.
+            release_run()
             wf_exec = executor_holder.get("executor")
             if wf_exec is not None:
                 wf_exec.drain_bg_futures()
@@ -3876,17 +3908,7 @@ async def execute_workflow_stream(
             was_cancelled = True
             return
         finally:
-            event_queue.put(None)
-            if test_run and final_result:
-                complete_active_execution(
-                    execution_id,
-                    workflow_id=workflow.id,
-                    result={
-                        key: value for key, value in final_result.items() if not key.startswith("_")
-                    },
-                )
-            else:
-                clear_active_execution(execution_id)
+            release_run()
 
     async def persist_terminal_result() -> None:
         async with async_session_maker() as session:

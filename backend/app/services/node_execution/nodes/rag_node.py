@@ -37,6 +37,20 @@ def _resolve_metadata_expressions(executor, value: object, inputs: dict, node_id
     return executor._resolve_value_with_dollar_refs(value, inputs, node_id)
 
 
+def _resolve_filter_expressions(
+    executor, parsed: object, inputs: dict, node_id: str
+) -> dict | None:
+    """Search filter JSON with ``$`` expressions resolved, using the document metadata rules.
+
+    Sharing the resolver keeps a whole-string expression's type, so a numeric filter value
+    stays a number and still matches the number stored by an insert.
+    """
+    resolved = executor._unwrap_value(
+        _resolve_metadata_expressions(executor, parsed, inputs, node_id)
+    )
+    return resolved if isinstance(resolved, dict) else None
+
+
 def _with_workflow_source(executor, metadata: dict) -> dict:
     """Name the workflow as the source when the author supplied none of their own."""
     from app.services.vector_store import WORKFLOW_SOURCE_PREFIX
@@ -172,6 +186,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 metadata_filter = metadata_filter_json or None
         except Exception:
             metadata_filter = None
+        if metadata_filter is not None:
+            metadata_filter = _resolve_filter_expressions(self, metadata_filter, inputs, node_id)
 
         enable_reranker = node_data.get("enableReranker", False)
         reranker_credential_id = node_data.get("rerankerCredentialId")

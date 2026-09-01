@@ -35,7 +35,7 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 | `documentId` | expression | Value of the unique id (upsert, delete) |
 | `queryText` | expression | Search query (search only) |
 | `searchLimit` | number | Max results (default: 5) |
-| `metadataFilters` | JSON string | Metadata filters for search |
+| `metadataFilters` | JSON string | Metadata filters for search (values support expressions) |
 | `enableReranker` | boolean | Use Cohere to rerank search results |
 | `rerankerCredentialId` | UUID | Cohere credential for reranking |
 | `rerankerTopN` | number | Number of top results to keep after reranking |
@@ -67,8 +67,9 @@ whole expression keeps its resolved type — `{"count": "$start.count"}` stores 
 `"7"` — which matters because search `metadataFilters` match on exact type. Mixed text such as
 `"page $start.count"` resolves to a string, and nested objects and arrays are walked too.
 
-The same applies to `upsert`. Search's `metadataFilters` field is still a literal JSON object
-and does not resolve expressions.
+The same applies to `upsert`, and to search's `metadataFilters`: it is parsed first and its
+values resolved after, by the same rules. So a filter written as `{"count": "$start.count"}`
+matches the number an insert stored, rather than the string `"7"`.
 
 ### Which workflow stored a document
 
@@ -124,7 +125,7 @@ Semantic search for similar documents.
 |-------|----------|-------------|
 | `queryText` | yes | Search query |
 | `searchLimit` | no | Max results (default: 5) |
-| `metadataFilters` | no | Filter by metadata (exact match JSON object) |
+| `metadataFilters` | no | Filter by metadata (exact match JSON object, values support expressions) |
 | `enableReranker` | no | Enable Cohere reranking for better relevance |
 | `rerankerCredentialId` | when reranking | Cohere credential |
 | `rerankerTopN` | no | Final number of results after reranking |

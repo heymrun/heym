@@ -5,7 +5,48 @@ from concurrent.futures import Future
 from importlib import import_module
 from threading import Event, Thread
 
+from app.services.execution_cancellation import clear_execution, complete_execution
 from app.services.node_execution.base import NodeExecutionContext
+
+
+def _finish_sub_execution(
+    execution_id: uuid.UUID,
+    workflow_id: str,
+    *,
+    result: object = None,
+    error: BaseException | None = None,
+) -> None:
+    """Hand anyone watching the sub-workflow a terminal event, then drop the handle.
+
+    Without this the handle simply vanishes and the observer stream has nothing to find:
+    the sub-workflow's history row is written under a different id by the parent's run.
+    """
+    if error is not None or result is None:
+        payload: dict = {
+            "type": "execution_complete",
+            "workflow_id": workflow_id,
+            "status": "error",
+            "outputs": {"error": str(error) if error is not None else "Sub-workflow did not run"},
+            "execution_time_ms": 0,
+            "node_results": [],
+        }
+    else:
+        payload = {
+            "type": "execution_complete",
+            "workflow_id": workflow_id,
+            "status": result.status,
+            "outputs": result.outputs,
+            "execution_time_ms": result.execution_time_ms,
+            "node_results": result.node_results,
+        }
+    try:
+        complete_execution(
+            execution_id,
+            workflow_id=uuid.UUID(workflow_id),
+            result=payload,
+        )
+    except Exception:
+        clear_execution(execution_id)
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -14,7 +55,6 @@ def execute(ctx: NodeExecutionContext) -> object:
     SubWorkflowExecution = _workflow_executor.SubWorkflowExecution  # noqa: N806
     WorkflowExecutor = _workflow_executor.WorkflowExecutor  # noqa: N806
     _SHARED_EXECUTOR = _workflow_executor._SHARED_EXECUTOR  # noqa: N806
-    _clear_sub_execution = _workflow_executor._clear_sub_execution
     _register_sub_execution = _workflow_executor._register_sub_execution
     self = ctx.executor
     node_id = ctx.node_id
@@ -67,6 +107,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             if self._merged_global_context_cache is not None
             else {}
         )
+        _sub_exec_id = uuid.uuid4()
         _exec_node_cancel_event = Event()
         if self.cancel_event is not None:
             _exec_node_parent = self.cancel_event
@@ -89,6 +130,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
             cancel_event=_exec_node_cancel_event,
             invoked_by_agent=self._invoked_by_agent,
+            execution_id=str(_sub_exec_id),
         )
         enriched_execute_inputs = {
             "headers": {},
@@ -100,6 +142,15 @@ def execute(ctx: NodeExecutionContext) -> object:
             wf_name = target_workflow.get("name", "")
             inputs_snap = dict(execute_inputs)
             bg_callback_done = Event()
+            # Registered before submit so the dispatched run shows as running from its
+            # first moment; without it the sub-workflow stays invisible until it ends.
+            _register_sub_execution(
+                workflow_id=uuid.UUID(execute_workflow_id),
+                execution_id=_sub_exec_id,
+                event=_exec_node_cancel_event,
+                inputs=enriched_execute_inputs,
+                recoverable=False,
+            )
 
             def _on_execute_do_not_wait_done(f: Future) -> None:
                 try:
@@ -107,6 +158,13 @@ def execute(ctx: NodeExecutionContext) -> object:
                         f, self, execute_workflow_id, wf_name, inputs_snap
                     )
                 finally:
+                    bg_error = f.exception()
+                    _finish_sub_execution(
+                        _sub_exec_id,
+                        execute_workflow_id,
+                        result=None if bg_error else f.result(),
+                        error=bg_error,
+                    )
                     bg_callback_done.set()
 
             bg_future = _SHARED_EXECUTOR.submit(
@@ -127,13 +185,13 @@ def execute(ctx: NodeExecutionContext) -> object:
                 )
             output = {"status": "dispatched", "workflow_id": execute_workflow_id}
         else:
-            _sub_exec_id = uuid.uuid4()
             _register_sub_execution(
                 workflow_id=uuid.UUID(execute_workflow_id),
                 execution_id=_sub_exec_id,
                 event=_exec_node_cancel_event,
                 recoverable=False,
             )
+            sub_error: BaseException | None = None
             try:
                 sub_result = sub_executor.execute(
                     workflow_id=uuid.UUID(execute_workflow_id),
@@ -141,8 +199,17 @@ def execute(ctx: NodeExecutionContext) -> object:
                 )
                 if sub_result.allow_downstream_pending:
                     sub_result.join_allow_downstream()
+            except BaseException as exc:
+                sub_error = exc
+                raise
             finally:
-                _clear_sub_execution(_sub_exec_id)
+                # `sub_result` is only read when nothing was raised, so it is always bound.
+                _finish_sub_execution(
+                    _sub_exec_id,
+                    execute_workflow_id,
+                    result=None if sub_error else sub_result,
+                    error=sub_error,
+                )
             if sub_result.status == "pending":
                 raise ValueError("HITL is not supported inside Execute node sub-workflows.")
 

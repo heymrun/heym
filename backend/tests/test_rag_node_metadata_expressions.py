@@ -2,7 +2,10 @@
 
 import unittest
 
-from app.services.node_execution.nodes.rag_node import _metadata_from_node_data
+from app.services.node_execution.nodes.rag_node import (
+    _metadata_from_node_data,
+    _resolve_filter_expressions,
+)
 from app.services.workflow_executor import WorkflowExecutor
 
 
@@ -72,6 +75,48 @@ class TestRagMetadataExpressions(unittest.TestCase):
     def test_empty_or_invalid_metadata_stays_empty(self) -> None:
         self.assertEqual(self._resolve(""), {})
         self.assertEqual(self._resolve("{"), {})
+
+
+class TestRagSearchFilterExpressions(unittest.TestCase):
+    """Search filters resolve by the same rules, so the dialog and the run agree."""
+
+    def setUp(self) -> None:
+        self.executor = WorkflowExecutor(nodes=[], edges=[])
+        self.inputs = {
+            "start": {
+                "url": "https://heym.run/docs",
+                "count": 7,
+                "title": 'He said "hello"',
+            }
+        }
+
+    def _resolve(self, parsed: object) -> dict | None:
+        return _resolve_filter_expressions(self.executor, parsed, self.inputs, "rag_1")
+
+    def test_resolves_a_plain_reference(self) -> None:
+        self.assertEqual(
+            self._resolve({"url": "$start.url"}),
+            {"url": "https://heym.run/docs"},
+        )
+
+    def test_keeps_the_resolved_type_so_a_number_filter_matches(self) -> None:
+        resolved = self._resolve({"count": "$start.count"})
+
+        assert resolved is not None
+        self.assertEqual(resolved["count"], 7)
+        self.assertIs(type(resolved["count"]), int)
+
+    def test_resolves_inside_a_text_template(self) -> None:
+        self.assertEqual(self._resolve({"label": "page $start.count"}), {"label": "page 7"})
+
+    def test_literal_filters_are_left_alone(self) -> None:
+        self.assertEqual(self._resolve({"category": "faq"}), {"category": "faq"})
+
+    def test_an_empty_filter_stays_empty(self) -> None:
+        self.assertEqual(self._resolve({}), {})
+
+    def test_a_non_object_filter_becomes_none(self) -> None:
+        self.assertIsNone(self._resolve(["faq"]))
 
 
 class TestRagMetadataWorkflowSource(unittest.TestCase):

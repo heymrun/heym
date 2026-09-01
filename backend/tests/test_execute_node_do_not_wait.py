@@ -2,8 +2,13 @@
 
 import time
 import unittest
+import unittest.mock
 import uuid
 
+from app.services.execution_cancellation import (
+    get_completed_execution_result,
+    list_active_executions,
+)
 from app.services.workflow_executor import WorkflowExecutor
 
 TARGET_WF_ID = "11111111-1111-1111-1111-111111111111"
@@ -31,6 +36,32 @@ _WORKFLOW_CACHE = {
         "name": "Target",
     }
 }
+
+_SLOW_TARGET_NODES = [
+    {"id": "t1", "type": "textInput", "data": {"label": "input", "inputFields": [{"key": "text"}]}},
+    {"id": "t2", "type": "wait", "data": {"label": "wait", "duration": 400}},
+    {"id": "t3", "type": "output", "data": {"label": "output"}},
+]
+_SLOW_TARGET_EDGES = [
+    {"id": "te1", "source": "t1", "target": "t2"},
+    {"id": "te2", "source": "t2", "target": "t3"},
+]
+_SLOW_WORKFLOW_CACHE = {
+    TARGET_WF_ID: {
+        "nodes": _SLOW_TARGET_NODES,
+        "edges": _SLOW_TARGET_EDGES,
+        "name": "Target",
+    }
+}
+
+
+def _active_target_handles() -> list:
+    """Registered, not-yet-cancelled active executions for the dispatched workflow."""
+    return [
+        handle
+        for handle in list_active_executions()
+        if str(handle.workflow_id) == TARGET_WF_ID and not handle.event.is_set()
+    ]
 
 
 def _make_parent_nodes(do_not_wait: bool) -> list[dict]:
@@ -200,6 +231,107 @@ class ExecuteNodeDoNotWaitTests(unittest.TestCase):
             [item["node_id"] for item in sub_exec.node_results],
             ["t1", "t2", "t3", "t4"],
         )
+
+    def test_do_not_wait_registers_active_execution_while_running(self) -> None:
+        """A dispatched sub-workflow is visible as running before it finishes."""
+        executor = WorkflowExecutor(
+            nodes=_make_parent_nodes(do_not_wait=True),
+            edges=_PARENT_EDGES,
+            workflow_cache=dict(_SLOW_WORKFLOW_CACHE),
+        )
+        self.assertEqual(_active_target_handles(), [])
+
+        executor.execute(workflow_id=uuid.uuid4(), initial_inputs=_INITIAL_INPUTS)
+
+        handles = _active_target_handles()
+        self.assertEqual(len(handles), 1)
+        self.assertEqual(handles[0].inputs, {"headers": {}, "query": {}, "body": {"text": "hello"}})
+
+        deadline = time.time() + 5
+        while _active_target_handles() and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(_active_target_handles(), [])
+
+    def test_do_not_wait_reports_progress_against_the_registered_id(self) -> None:
+        """The sub-executor records node progress on the handle a watcher polls.
+
+        The sub-workflow's own execution id has to be the registered one; when it mints
+        its own instead, every node start lands on a handle nobody is looking at.
+        """
+        executor = WorkflowExecutor(
+            nodes=_make_parent_nodes(do_not_wait=True),
+            edges=_PARENT_EDGES,
+            workflow_cache=dict(_SLOW_WORKFLOW_CACHE),
+        )
+        executor.execute(workflow_id=uuid.uuid4(), initial_inputs=_INITIAL_INPUTS)
+
+        handles = _active_target_handles()
+        self.assertEqual(len(handles), 1)
+        handle = handles[0]
+
+        deadline = time.time() + 5
+        while not (handle.running_node_ids or handle.node_results) and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(
+            handle.running_node_ids or handle.node_results,
+            "sub-workflow node progress never reached the registered handle",
+        )
+
+    def test_do_not_wait_leaves_a_terminal_event_for_a_watcher(self) -> None:
+        """When the dispatched run ends, a watcher gets execution_complete, not silence."""
+        executor = WorkflowExecutor(
+            nodes=_make_parent_nodes(do_not_wait=True),
+            edges=_PARENT_EDGES,
+            workflow_cache=dict(_SLOW_WORKFLOW_CACHE),
+        )
+        executor.execute(workflow_id=uuid.uuid4(), initial_inputs=_INITIAL_INPUTS)
+
+        handles = _active_target_handles()
+        self.assertEqual(len(handles), 1)
+        execution_id = handles[0].execution_id
+
+        deadline = time.time() + 5
+        completed = None
+        while completed is None and time.time() < deadline:
+            completed = get_completed_execution_result(
+                execution_id,
+                workflow_id=uuid.UUID(TARGET_WF_ID),
+            )
+            if completed is None:
+                time.sleep(0.05)
+
+        self.assertIsNotNone(completed)
+        assert completed is not None
+        self.assertEqual(completed["type"], "execution_complete")
+        self.assertEqual(completed["status"], "success")
+        self.assertEqual(completed["workflow_id"], TARGET_WF_ID)
+
+    def test_wait_mode_also_reports_under_the_registered_id(self) -> None:
+        """The synchronous branch shares the fix: watcher id and executor id are one."""
+        seen: list[str] = []
+        original = WorkflowExecutor.execute
+
+        def _capture(self, workflow_id, initial_inputs):  # type: ignore[no-untyped-def]
+            if str(workflow_id) == TARGET_WF_ID:
+                seen.append(self.execution_id)
+            return original(self, workflow_id, initial_inputs)
+
+        with unittest.mock.patch.object(WorkflowExecutor, "execute", _capture):
+            executor = WorkflowExecutor(
+                nodes=_make_parent_nodes(do_not_wait=False),
+                edges=_PARENT_EDGES,
+                workflow_cache=dict(_WORKFLOW_CACHE),
+            )
+            executor.execute(workflow_id=uuid.uuid4(), initial_inputs=_INITIAL_INPUTS)
+
+        self.assertEqual(len(seen), 1)
+        completed = get_completed_execution_result(
+            uuid.UUID(seen[0]),
+            workflow_id=uuid.UUID(TARGET_WF_ID),
+        )
+        self.assertIsNotNone(completed)
+        assert completed is not None
+        self.assertEqual(completed["status"], "success")
 
 
 if __name__ == "__main__":
