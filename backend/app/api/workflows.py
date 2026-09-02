@@ -113,6 +113,7 @@ from app.services.hitl_service import (
     persist_pending_hitl_execution,
 )
 from app.services.html_response import build_html_response, find_sole_html_terminal
+from app.services.pending_execution import needs_local_pending_persist
 from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,
@@ -3136,7 +3137,7 @@ async def execute_workflow_endpoint(
     finally:
         clear_active_execution(execution_id)
 
-    if execution_result.status == "pending":
+    if needs_local_pending_persist(execution_result):
         if is_codex_pending_execution(execution_result):
             history_entry, _ = await persist_pending_codex_followup_execution(
                 db=db,
@@ -3202,6 +3203,7 @@ async def execute_workflow_endpoint(
     # An offloaded run wrote its history on the instance that executed it;
     # writing it again here would collide on the execution id.
     already_written = getattr(execution_result, "history_written", False)
+    remote_history_id = execution_id if already_written and not test_run else None
     if not test_run and not already_written:
         history_entry = ExecutionHistory(
             id=execution_id,
@@ -3349,7 +3351,7 @@ async def execute_workflow_endpoint(
         outputs=execution_result.outputs,
         node_results=execution_result.node_results,
         execution_time_ms=execution_result.execution_time_ms,
-        execution_history_id=history_entry.id if history_entry is not None else None,
+        execution_history_id=history_entry.id if history_entry is not None else remote_history_id,
         highlight=build_highlight_payload(
             execution_result.node_results, workflow.nodes or [], enriched_inputs
         ),

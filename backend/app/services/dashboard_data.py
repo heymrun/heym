@@ -45,8 +45,34 @@ async def _record_widget_execution(
     increases the history of both the widget and its underlying workflow.
     """
     from app.api.analytics import upsert_workflow_analytics_snapshot
+    from app.services.hitl_service import build_default_public_base_url
+    from app.services.pending_execution import (
+        needs_local_pending_persist,
+        persist_pending_execution,
+    )
 
     try:
+        if needs_local_pending_persist(result):
+            paused_entry, _ = await persist_pending_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs={},
+                execution_result=result,
+                trigger_source="dashboard",
+                credentials_owner_id=workflow.owner_id,
+                trace_user_id=workflow.owner_id,
+                public_base_url=build_default_public_base_url(),
+            )
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                workflow_name_snapshot=workflow.name,
+                status=result.status,
+                execution_time_ms=result.execution_time_ms,
+            )
+            return paused_entry
+
         history_entry = ExecutionHistory(
             id=uuid.uuid4(),
             workflow_id=workflow.id,
@@ -286,7 +312,7 @@ async def compute_widget_data(
     )
 
     background_finalize = bool(getattr(result, "allow_downstream_pending", False))
-    if not background_finalize:
+    if not background_finalize and result.status != "pending":
         await _persist_widget_global_variables(db, user.id, nodes, workflow_cache, result)
 
     widget.cached_payload = payload

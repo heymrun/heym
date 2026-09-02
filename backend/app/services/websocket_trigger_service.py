@@ -22,6 +22,11 @@ from app.db.session import async_session_maker
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
+from app.services.hitl_service import build_default_public_base_url
+from app.services.pending_execution import (
+    needs_local_pending_persist,
+    persist_pending_execution,
+)
 from app.services.ssrf_guard import (
     SsrfBlockedError,
     SsrfResolutionError,
@@ -450,6 +455,30 @@ class WebSocketTriggerManager:
                     workflow.id,
                     result.status,
                 )
+                return
+
+            if needs_local_pending_persist(result):
+                await persist_pending_execution(
+                    db=db,
+                    workflow=workflow,
+                    enriched_inputs=inputs,
+                    execution_result=result,
+                    trigger_source="websocket",
+                    credentials_owner_id=workflow.owner_id,
+                    trace_user_id=workflow.owner_id,
+                    public_base_url=build_default_public_base_url(),
+                    history_entry_id=execution_id,
+                )
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status=result.status,
+                    execution_time_ms=result.execution_time_ms,
+                )
+                await db.commit()
+                logger.info("Workflow %s paused for human review via WebSocket", workflow.id)
                 return
 
             history_entry = ExecutionHistory(

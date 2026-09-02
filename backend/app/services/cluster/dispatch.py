@@ -23,6 +23,7 @@ from app.services.cluster.run_history import (
     OffloadedRun,
     from_summary,
     offloaded_error,
+    persist_pending_run_history,
     persist_run_history,
     summarize,
 )
@@ -299,26 +300,38 @@ class RunQueueWorker:
             )
             # History is written here, on the instance that ran it, stamped with
             # this instance's label. The caller only ever sees the summary.
-            await persist_run_history(
-                execution_id=row.execution_id,
-                workflow_id=row.workflow_id,
-                owner_id=owner_id,
-                workflow_name=workflow_name,
-                inputs=row.inputs,
-                trigger_source=row.trigger_source,
-                result=result,
-            )
-            if row.credentials_owner_id is not None:
-                async with async_session_maker() as db:
-                    await _persist_global_variables_from_execution(
-                        db,
-                        row.credentials_owner_id,
-                        nodes,
-                        workflow_cache,
-                        result.node_results,
-                        result.sub_workflow_executions,
-                    )
-                    await db.commit()
+            if result.status == "pending":
+                await persist_pending_run_history(
+                    execution_id=row.execution_id,
+                    workflow_id=row.workflow_id,
+                    owner_id=owner_id,
+                    workflow_name=workflow_name,
+                    inputs=row.inputs,
+                    trigger_source=row.trigger_source,
+                    credentials_owner_id=row.credentials_owner_id,
+                    result=result,
+                )
+            else:
+                await persist_run_history(
+                    execution_id=row.execution_id,
+                    workflow_id=row.workflow_id,
+                    owner_id=owner_id,
+                    workflow_name=workflow_name,
+                    inputs=row.inputs,
+                    trigger_source=row.trigger_source,
+                    result=result,
+                )
+                if row.credentials_owner_id is not None:
+                    async with async_session_maker() as db:
+                        await _persist_global_variables_from_execution(
+                            db,
+                            row.credentials_owner_id,
+                            nodes,
+                            workflow_cache,
+                            result.node_results,
+                            result.sub_workflow_executions,
+                        )
+                        await db.commit()
             await run_queue.complete(
                 row.execution_id, result=summarize(result, row.execution_id), error=None
             )

@@ -57,8 +57,13 @@ from app.services.cluster.dispatch import dispatch_workflow
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
+from app.services.hitl_service import build_default_public_base_url
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
+from app.services.pending_execution import (
+    needs_local_pending_persist,
+    persist_pending_execution,
+)
 from app.services.secret_tokens import hash_secret
 
 router = APIRouter()
@@ -574,10 +579,31 @@ async def _dispatch_named_server_jsonrpc(
                 cancel_event=cancel_event,
             )
 
+            if needs_local_pending_persist(execution_result):
+                await persist_pending_execution(
+                    db=db,
+                    workflow=target_workflow,
+                    enriched_inputs=enriched_inputs,
+                    execution_result=execution_result,
+                    trigger_source="MCP",
+                    credentials_owner_id=user.id,
+                    trace_user_id=user.id,
+                    public_base_url=build_default_public_base_url(),
+                    history_entry_id=execution_id,
+                )
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=target_workflow.id,
+                    owner_id=target_workflow.owner_id,
+                    workflow_name_snapshot=target_workflow.name,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                )
+                await db.flush()
             # An offloaded run already wrote its history and analytics on the
             # instance that executed it; writing them again would collide on the
             # execution id.
-            if not getattr(execution_result, "history_written", False):
+            elif not getattr(execution_result, "history_written", False):
                 history_entry = ExecutionHistory(
                     id=execution_id,
                     workflow_id=target_workflow.id,

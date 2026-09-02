@@ -89,6 +89,8 @@ That also defines the upgrade order. Upgrading main first marks every worker inc
 
 **Point ingress at the main instance only.** Round-robining user traffic across instances would send a file upload to one machine and its download to another. Nothing in the code prevents this, because a worker runs the same image and will answer any request it receives.
 
+**Every instance needs `FRONTEND_URL`, set to the same public address.** A run that pauses for human review mints its review link on the instance that executed it, not on main, and the same holds for Codex follow-up links and for the download URLs of generated files. A worker left without it builds those links against its own local address, and whoever receives one cannot open it.
+
 **Worker instances have a different outbound IP.** Any API that allowlists source addresses sees the new one. Send Email runs on main for exactly this reason; for the HTTP node, either give the cluster a single NAT egress address or allowlist every instance.
 
 ## Adding a worker on another machine

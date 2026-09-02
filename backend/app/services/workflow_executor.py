@@ -1682,6 +1682,9 @@ def _extract_pending_metadata(result: "NodeResult") -> dict:
     return {}
 
 
+SUB_WORKFLOW_HITL_UNSUPPORTED = "HITL is not supported inside Execute node sub-workflows."
+
+
 @dataclass
 class SubWorkflowExecution:
     workflow_id: str
@@ -3054,6 +3057,21 @@ class WorkflowExecutor:
             return
         if sub_res.allow_downstream_pending:
             sub_res.join_allow_downstream()
+        if sub_res.status == "pending":
+            with parent.lock:
+                parent.sub_workflow_executions.append(
+                    SubWorkflowExecution(
+                        workflow_id=wf_id,
+                        inputs=inputs_snapshot,
+                        outputs={"error": SUB_WORKFLOW_HITL_UNSUPPORTED},
+                        status="error",
+                        execution_time_ms=sub_res.execution_time_ms,
+                        node_results=sub_res.node_results,
+                        workflow_name=wf_name,
+                        trigger_source=bg_trigger_source,
+                    )
+                )
+            return
         sub_exec = SubWorkflowExecution(
             workflow_id=wf_id,
             inputs=inputs_snapshot,

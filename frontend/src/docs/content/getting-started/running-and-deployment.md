@@ -37,7 +37,7 @@ For every supported variable, default, and production note, see [Environment Var
 | `DATABASE_URL` | Optional database connection string override. If empty, Heym builds it from `POSTGRES_*` settings. |
 | `BACKEND_PORT` | Backend API port — defaults to `10105` |
 | `FRONTEND_PORT` | Frontend port — defaults to `4017` |
-| `FRONTEND_URL` | **Required in production.** Public URL of the app (scheme + host, e.g. `https://heym.example.com`). Used for OAuth redirect URIs (Google Sheets, BigQuery, Notion, and similar); must match the URL users use in the browser. |
+| `FRONTEND_URL` | **Required in production.** Public URL of the app (scheme + host, e.g. `https://heym.example.com`). Used for OAuth redirect URIs (Google Sheets, BigQuery, Notion, and similar), and for the review, Codex follow-up and file links that background runs mint; must match the URL users use in the browser. In a cluster, set the same value on every instance. |
 | `ALLOW_REGISTER` | Open user registration (`false` in prod, `true` in dev). Flip it to `false` only after your admin account exists — there is no first-user bootstrap, so an empty database plus disabled registration leaves no way to create one. |
 | `DOCKER_LOGS_ENABLED` | Enables Docker-backed Logs tab access when set to `true`; also requires Docker socket access |
 | `DOCKER_LOGS_ALLOWED_EMAILS` | Comma-separated list of trusted user emails allowed to access Docker logs when `DOCKER_LOGS_ENABLED=true` |

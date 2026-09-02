@@ -54,6 +54,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     _workflow_executor = import_module("app.services.workflow_executor")
     SubWorkflowExecution = _workflow_executor.SubWorkflowExecution  # noqa: N806
     WorkflowExecutor = _workflow_executor.WorkflowExecutor  # noqa: N806
+    SUB_WORKFLOW_HITL_UNSUPPORTED = _workflow_executor.SUB_WORKFLOW_HITL_UNSUPPORTED  # noqa: N806
     _BACKGROUND_WORKFLOW_EXECUTOR = _workflow_executor._BACKGROUND_WORKFLOW_EXECUTOR  # noqa: N806
     _BACKGROUND_NODE_EXECUTOR = _workflow_executor._BACKGROUND_NODE_EXECUTOR  # noqa: N806
     _register_sub_execution = _workflow_executor._register_sub_execution
@@ -213,7 +214,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                     error=sub_error,
                 )
             if sub_result.status == "pending":
-                raise ValueError("HITL is not supported inside Execute node sub-workflows.")
+                raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
 
             sub_exec = SubWorkflowExecution(
                 workflow_id=execute_workflow_id,

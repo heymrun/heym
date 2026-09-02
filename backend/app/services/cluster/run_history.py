@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
-from app.db.models import ExecutionHistory
+from app.db.models import ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.cluster.attribution import attribution_fields
 
@@ -28,6 +28,7 @@ def summarize(result: Any, execution_id: uuid.UUID) -> dict[str, Any]:
     """
     return {
         "execution_id": str(execution_id),
+        "workflow_id": str(getattr(result, "workflow_id", "") or ""),
         "status": result.status,
         "outputs": result.outputs,
         "execution_time_ms": result.execution_time_ms,
@@ -84,6 +85,54 @@ async def persist_run_history(
         await db.commit()
 
 
+async def persist_pending_run_history(
+    *,
+    execution_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    workflow_name: str,
+    inputs: dict,
+    trigger_source: str | None,
+    credentials_owner_id: uuid.UUID | None,
+    result: Any,
+) -> None:
+    """Mint a paused run's review request where the run actually paused.
+
+    A pause is not a finished run: without the request row there is no public
+    token, no link, no notification branch and no way to resume, and the run
+    sits at pending forever.
+    """
+    from app.services.hitl_service import build_default_public_base_url
+    from app.services.pending_execution import persist_pending_execution
+
+    async with async_session_maker() as db:
+        workflow = await db.get(Workflow, workflow_id)
+        if workflow is None:
+            return
+        history_entry, _ = await persist_pending_execution(
+            db=db,
+            workflow=workflow,
+            enriched_inputs=inputs,
+            execution_result=result,
+            trigger_source=trigger_source,
+            credentials_owner_id=credentials_owner_id or owner_id,
+            trace_user_id=owner_id,
+            public_base_url=build_default_public_base_url(),
+            history_entry_id=execution_id,
+        )
+        for name, value in attribution_fields().items():
+            setattr(history_entry, name, value)
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=workflow_id,
+            owner_id=owner_id,
+            workflow_name_snapshot=workflow_name,
+            status=result.status,
+            execution_time_ms=result.execution_time_ms,
+        )
+        await db.commit()
+
+
 @dataclass
 class OffloadedRun:
     """An offloaded run's result, shaped like ExecutionResult where it matters.
@@ -95,6 +144,7 @@ class OffloadedRun:
 
     status: str
     outputs: dict
+    workflow_id: str = ""
     execution_time_ms: float = 0.0
     error: str | None = None
     node_results: list = field(default_factory=list)
@@ -111,6 +161,7 @@ def from_summary(summary: dict[str, Any]) -> OffloadedRun:
     return OffloadedRun(
         status=str(summary.get("status") or "error"),
         outputs=summary.get("outputs") or {},
+        workflow_id=str(summary.get("workflow_id") or ""),
         execution_time_ms=float(summary.get("execution_time_ms") or 0.0),
         error=summary.get("error"),
     )
