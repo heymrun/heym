@@ -98,11 +98,10 @@ vulnerabilities in Heym:
   egress guard, and contributing that fix (GHSA-6rph-qqcv-jqh4), and a cluster
   of capability secrets stored or returned in plaintext across webhook auth,
   MCP keys, portal sessions, and Discord interactions (GHSA-6x65-w7q7-wg93).
-- [@fatihkaratash](https://github.com/fatihkaratash) for the Redis node reading
-  an inaccessible or missing credential as an empty configuration, so an
-  authorization result fell through to the `localhost:6379` connection defaults
-  instead of failing closed (GHSA-fmpw-hj3m-xvj6), and for contributing the
-  remediation.
-- [@fatihkaratash](https://github.com/fatihkaratash) for reporting
-  credential-controlled base URL SSRF across Jira, Sentry, GitHub, Grist,
-  Supabase, and custom OpenAI-compatible integrations (GHSA-xchj-mw74-2232).
+- [@fatihkaratash](https://github.com/fatihkaratash) for two reports: the Redis
+  node reading an inaccessible or missing credential as an empty configuration,
+  so an authorization result fell through to the `localhost:6379` connection
+  defaults instead of failing closed, and contributing that remediation
+  (GHSA-fmpw-hj3m-xvj6), and credential-controlled base URL SSRF across Jira,
+  Sentry, GitHub, Grist, Supabase, and custom OpenAI-compatible integrations
+  (GHSA-xchj-mw74-2232).
