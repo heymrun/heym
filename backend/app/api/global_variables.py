@@ -386,13 +386,7 @@ async def delete_global_variable(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(GlobalVariable).where(
-            GlobalVariable.id == variable_id,
-            GlobalVariable.owner_id == current_user.id,
-        )
-    )
-    variable = result.scalar_one_or_none()
+    variable = await _get_editable_variable(db, variable_id, current_user.id)
     if variable is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -415,13 +409,11 @@ async def bulk_delete_global_variables(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(GlobalVariable).where(
-            GlobalVariable.id.in_(body.ids),
-            GlobalVariable.owner_id == current_user.id,
-        )
-    )
-    variables = result.scalars().all()
+    variables = []
+    for vid in body.ids:
+        v = await _get_editable_variable(db, vid, current_user.id)
+        if v is not None:
+            variables.append(v)
     audit(
         action="variable.bulk_delete",
         actor=current_user,
