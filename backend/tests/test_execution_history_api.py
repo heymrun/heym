@@ -11,6 +11,7 @@ from app.api.workflows import (
     clear_all_execution_history,
     clear_execution_history,
     get_execution_history,
+    get_execution_history_entry,
     list_all_execution_history,
 )
 from app.db.models import ExecutionHistory, Workflow
@@ -34,6 +35,22 @@ class _ExecuteResult:
 
     def all(self) -> list[object]:
         return self._rows
+
+    def first(self) -> object | None:
+        return self._rows[0] if self._rows else None
+
+    def scalar_one_or_none(self) -> object | None:
+        return self._scalar_value
+
+
+class _DeleteResult:
+    def __init__(self, rowcount: int) -> None:
+        self.rowcount = rowcount
+
+
+def _actor(user_id: uuid.UUID) -> SimpleNamespace:
+    """A stand-in for User. audit() reads `email`, so a stub without it is not one."""
+    return SimpleNamespace(id=user_id, email=f"{user_id}@example.com")
 
 
 def _compile_sql(statement: object) -> str:
@@ -85,10 +102,10 @@ class ExecutionHistoryApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_collaborator_bulk_clear_preserves_shared_workflow_history(self) -> None:
         collaborator_id = uuid.uuid4()
-        self.db.execute = AsyncMock()
+        self.db.execute = AsyncMock(side_effect=[_DeleteResult(0), _DeleteResult(0)])
 
         await clear_all_execution_history(
-            current_user=SimpleNamespace(id=collaborator_id),
+            current_user=_actor(collaborator_id),
             db=self.db,
         )
 
@@ -114,7 +131,7 @@ class ExecutionHistoryApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await clear_execution_history(
                     workflow_id=workflow_id,
-                    current_user=SimpleNamespace(id=collaborator_id),
+                    current_user=_actor(collaborator_id),
                     db=self.db,
                 )
 
@@ -134,11 +151,117 @@ class ExecutionHistoryApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             await clear_execution_history(
                 workflow_id=workflow_id,
-                current_user=SimpleNamespace(id=owner_id),
+                current_user=_actor(owner_id),
                 db=self.db,
             )
 
         self.db.execute.assert_awaited_once()
+
+    async def test_owner_clear_emits_a_success_audit_line(self) -> None:
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(id=workflow_id, owner_id=owner_id, name="Owned workflow")
+        self.db.execute = AsyncMock()
+
+        with patch(
+            "app.api.workflows.get_workflow_for_user",
+            AsyncMock(return_value=workflow),
+        ):
+            with self.assertLogs("winston.audit", level="INFO") as captured:
+                await clear_execution_history(
+                    workflow_id=workflow_id,
+                    current_user=_actor(owner_id),
+                    db=self.db,
+                )
+
+        line = captured.records[0].getMessage()
+        self.assertIn("action=workflow.history_clear", line)
+        self.assertIn("outcome=success", line)
+        self.assertIn(f"target=workflow:{workflow_id}", line)
+
+    async def test_denied_clear_is_audited_rather_than_silently_rejected(self) -> None:
+        """A collaborator reaching for someone else's history has to leave a trail."""
+        workflow_id = uuid.uuid4()
+        collaborator_id = uuid.uuid4()
+        workflow = SimpleNamespace(id=workflow_id, owner_id=uuid.uuid4(), name="Shared workflow")
+        self.db.execute = AsyncMock()
+
+        with patch(
+            "app.api.workflows.get_workflow_for_user",
+            AsyncMock(return_value=workflow),
+        ):
+            with self.assertLogs("winston.audit", level="INFO") as captured:
+                with self.assertRaises(HTTPException):
+                    await clear_execution_history(
+                        workflow_id=workflow_id,
+                        current_user=_actor(collaborator_id),
+                        db=self.db,
+                    )
+
+        line = captured.records[0].getMessage()
+        self.assertIn("action=workflow.history_clear", line)
+        self.assertIn("outcome=denied", line)
+        self.assertIn("reason=not_owner", line)
+        self.assertIn(f"actor_id={collaborator_id}", line)
+        self.assertIn(f"target=workflow:{workflow_id}", line)
+
+    async def test_bulk_clear_is_audited_with_the_number_of_rows_removed(self) -> None:
+        owner_id = uuid.uuid4()
+        self.db.execute = AsyncMock(side_effect=[_DeleteResult(7), _DeleteResult(3)])
+
+        with self.assertLogs("winston.audit", level="INFO") as captured:
+            await clear_all_execution_history(current_user=_actor(owner_id), db=self.db)
+
+        line = captured.records[0].getMessage()
+        self.assertIn("action=workflow.history_clear_all", line)
+        self.assertIn("outcome=success", line)
+        self.assertIn(f"actor_id={owner_id}", line)
+        self.assertIn("workflow_runs_deleted=7", line)
+        self.assertIn("chat_runs_deleted=3", line)
+
+    async def test_all_history_list_reaches_team_shared_workflows(self) -> None:
+        """The aggregated list must use the same access rule as opening the workflow."""
+        self.db.execute = AsyncMock(
+            side_effect=[
+                _ExecuteResult(scalar_value=0),  # COUNT
+                _ExecuteResult(rows=[]),  # items
+            ]
+        )
+
+        await list_all_execution_history(
+            current_user=self.user,
+            db=self.db,
+            execution_status=None,
+            trigger_source=None,
+            workflow_id=None,
+        )
+
+        union_sql = _compile_sql(self.db.execute.call_args_list[0].args[0])
+        self.assertIn("workflow_shares", union_sql)
+        self.assertIn("workflow_team_shares", union_sql)
+        self.assertIn("team_members", union_sql)
+
+    async def test_all_history_entry_reaches_team_shared_workflows(self) -> None:
+        """A row the list shows has to be openable, so both use one access rule."""
+        self.db.execute = AsyncMock(
+            side_effect=[
+                _ExecuteResult(rows=[]),  # ExecutionHistory lookup
+                _ExecuteResult(scalar_value=None),  # RunHistory fallback
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            await get_execution_history_entry(
+                entry_id=uuid.uuid4(),
+                current_user=self.user,
+                db=self.db,
+            )
+
+        self.assertEqual(ctx.exception.status_code, status.HTTP_404_NOT_FOUND)
+        entry_sql = _compile_sql(self.db.execute.call_args_list[0].args[0])
+        self.assertIn("workflow_shares", entry_sql)
+        self.assertIn("workflow_team_shares", entry_sql)
+        self.assertIn("team_members", entry_sql)
 
     async def test_per_workflow_history_combines_search_and_trigger_source_filter(self) -> None:
         workflow_id = uuid.uuid4()

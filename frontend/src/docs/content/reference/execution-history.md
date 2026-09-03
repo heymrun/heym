@@ -30,7 +30,7 @@ Click the **History** button (clock icon) to open the dialog.
 ## Per-workflow vs All History
 
 - **Per-workflow** (Editor, Docs): Shows runs for the workflow you have open. Use **Clear history** to remove runs for that workflow only.
-- **All History** (Dashboard, Evals): Shows runs across all workflows and chat/assistant sessions. Use **Clear all history** to remove all records you own. History for shared workflows will be retained.
+- **All History** (Dashboard, Evals): Shows runs across all workflows and chat/assistant sessions. Coverage matches workflow access: workflows you own, workflows shared with you directly, and workflows shared with a team you belong to. Use **Clear all history** to remove all records you own. History for shared workflows will be retained.
 
 ## Bring to Canvas
 

@@ -945,16 +945,7 @@ async def get_execution_history_entry(
         select(ExecutionHistory, Workflow)
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
         .where(ExecutionHistory.id == entry_id)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            )
-        )
+        .where(workflow_access_clause(current_user.id))
     )
     row = exec_result.first()
     if row:
@@ -1034,16 +1025,7 @@ async def list_all_execution_history(
             ExecutionHistory.executed_by_instance_name,
         )
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-            )
-        )
+        .where(workflow_access_clause(current_user.id))
     )
     if workflow_id:
         exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)
@@ -1136,10 +1118,20 @@ async def clear_all_execution_history(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     owned_workflows = select(Workflow.id).where(Workflow.owner_id == current_user.id)
-    await db.execute(
+    workflow_history = await db.execute(
         ExecutionHistory.__table__.delete().where(ExecutionHistory.workflow_id.in_(owned_workflows))
     )
-    await db.execute(RunHistory.__table__.delete().where(RunHistory.user_id == current_user.id))
+    run_history = await db.execute(
+        RunHistory.__table__.delete().where(RunHistory.user_id == current_user.id)
+    )
+    audit(
+        action="workflow.history_clear_all",
+        actor=current_user,
+        target_type="user",
+        target_id=current_user.id,
+        workflow_runs_deleted=workflow_history.rowcount or 0,
+        chat_runs_deleted=run_history.rowcount or 0,
+    )
 
 
 @router.get("/executions/active", response_model=list[ActiveExecutionItem])
@@ -3602,6 +3594,15 @@ async def clear_execution_history(
         )
 
     if workflow.owner_id != current_user.id:
+        audit(
+            action="workflow.history_clear",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            reason="not_owner",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the owner can clear history",
