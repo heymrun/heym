@@ -7,6 +7,7 @@ from urllib.parse import quote
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.http_paths import encode_path_segment
 from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 GITHUB_API_BASE_URL = "https://api.github.com"
@@ -41,13 +42,29 @@ class GitHubService:
         if self._owns_client and not self._client.is_closed:
             self._client.close()
 
+    @staticmethod
+    def _encode_content_path(path: str) -> str:
+        """Encode a repository file path one segment at a time.
+
+        The slashes are structural here, so they stay, but every segment is
+        encoded and dot segments are escaped: httpx removes them, so a raw
+        ``../..`` in the path would climb out of the contents endpoint.
+        """
+        return "/".join(
+            encode_path_segment(segment) for segment in path.lstrip("/").split("/") if segment
+        )
+
     def get_repository(self, owner: str, repo: str) -> dict[str, Any]:
         """Fetch repository metadata."""
-        return self._request_json("GET", f"/repos/{owner}/{repo}")
+        return self._request_json(
+            "GET", f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}"
+        )
 
     def get_repository_license(self, owner: str, repo: str) -> dict[str, Any]:
         """Fetch the detected repository license and decoded file content."""
-        response = self._request_json("GET", f"/repos/{owner}/{repo}/license")
+        response = self._request_json(
+            "GET", f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/license"
+        )
         if not isinstance(response, dict):
             raise ValueError("GitHub getRepositoryLicense returned an unexpected response")
         decoded_content: str | None = None
@@ -62,24 +79,36 @@ class GitHubService:
 
     def get_repository_profile(self, owner: str, repo: str) -> dict[str, Any]:
         """Fetch repository community profile metrics."""
-        response = self._request_json("GET", f"/repos/{owner}/{repo}/community/profile")
+        response = self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/community/profile",
+        )
         if not isinstance(response, dict):
             raise ValueError("GitHub getRepositoryProfile returned an unexpected response")
         return response
 
     def list_popular_paths(self, owner: str, repo: str) -> list[dict[str, Any]]:
         """List the repository's popular content paths."""
-        response = self._request_json("GET", f"/repos/{owner}/{repo}/traffic/popular/paths")
+        response = self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/traffic/popular/paths",
+        )
         return response if isinstance(response, list) else []
 
     def list_referrers(self, owner: str, repo: str) -> list[dict[str, Any]]:
         """List the repository's top referring domains."""
-        response = self._request_json("GET", f"/repos/{owner}/{repo}/traffic/popular/referrers")
+        response = self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/traffic/popular/referrers",
+        )
         return response if isinstance(response, list) else []
 
     def get_issue(self, owner: str, repo: str, issue_number: int) -> dict[str, Any]:
         """Fetch one issue by number."""
-        return self._request_json("GET", f"/repos/{owner}/{repo}/issues/{issue_number}")
+        return self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues/{issue_number}",
+        )
 
     def list_issues(
         self,
@@ -113,7 +142,7 @@ class GitHubService:
                 params[key] = value
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/issues",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues",
             params=params,
         )
         if not isinstance(response, list):
@@ -134,7 +163,7 @@ class GitHubService:
         """Create an issue comment."""
         return self._request_json(
             "POST",
-            f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues/{issue_number}/comments",
             json={"body": body},
         )
 
@@ -149,7 +178,7 @@ class GitHubService:
         payload = {"lock_reason": lock_reason} if lock_reason else None
         self._request_no_content(
             "PUT",
-            f"/repos/{owner}/{repo}/issues/{issue_number}/lock",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues/{issue_number}/lock",
             json=payload,
             success_codes=(204,),
         )
@@ -172,7 +201,11 @@ class GitHubService:
             payload["labels"] = labels
         if assignees:
             payload["assignees"] = assignees
-        return self._request_json("POST", f"/repos/{owner}/{repo}/issues", json=payload)
+        return self._request_json(
+            "POST",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues",
+            json=payload,
+        )
 
     def update_issue(
         self,
@@ -204,7 +237,7 @@ class GitHubService:
             raise ValueError("GitHub updateIssue requires at least one field to update")
         return self._request_json(
             "PATCH",
-            f"/repos/{owner}/{repo}/issues/{issue_number}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/issues/{issue_number}",
             json=payload,
         )
 
@@ -228,7 +261,7 @@ class GitHubService:
             params["direction"] = direction
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/pulls",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls",
             params=params,
         )
         return response if isinstance(response, list) else []
@@ -270,7 +303,11 @@ class GitHubService:
         }
         if body:
             payload["body"] = body
-        return self._request_json("POST", f"/repos/{owner}/{repo}/pulls", json=payload)
+        return self._request_json(
+            "POST",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls",
+            json=payload,
+        )
 
     def get_review(
         self,
@@ -282,7 +319,7 @@ class GitHubService:
         """Fetch one pull request review."""
         return self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/pulls/{pull_request_number}/reviews/{review_id}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls/{pull_request_number}/reviews/{review_id}",
         )
 
     def list_reviews(
@@ -295,7 +332,7 @@ class GitHubService:
         """List reviews for a pull request."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/pulls/{pull_request_number}/reviews",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls/{pull_request_number}/reviews",
             params={"per_page": max(1, min(per_page, 100))},
         )
         return response if isinstance(response, list) else []
@@ -317,7 +354,7 @@ class GitHubService:
             payload["commit_id"] = commit_id
         return self._request_json(
             "POST",
-            f"/repos/{owner}/{repo}/pulls/{pull_request_number}/reviews",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls/{pull_request_number}/reviews",
             json=payload,
         )
 
@@ -332,7 +369,7 @@ class GitHubService:
         """Update a pull request review body."""
         return self._request_json(
             "PUT",
-            f"/repos/{owner}/{repo}/pulls/{pull_request_number}/reviews/{review_id}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/pulls/{pull_request_number}/reviews/{review_id}",
             json={"body": body},
         )
 
@@ -345,14 +382,17 @@ class GitHubService:
         """List repository releases."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/releases",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases",
             params={"per_page": max(1, min(per_page, 100))},
         )
         return response if isinstance(response, list) else []
 
     def get_release(self, owner: str, repo: str, release_id: int) -> dict[str, Any]:
         """Fetch a release by id."""
-        return self._request_json("GET", f"/repos/{owner}/{repo}/releases/{release_id}")
+        return self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/{release_id}",
+        )
 
     def create_release(
         self,
@@ -377,19 +417,25 @@ class GitHubService:
             payload["body"] = body
         if target_commitish:
             payload["target_commitish"] = target_commitish
-        return self._request_json("POST", f"/repos/{owner}/{repo}/releases", json=payload)
+        return self._request_json(
+            "POST",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases",
+            json=payload,
+        )
 
     def get_release_by_tag(self, owner: str, repo: str, tag: str) -> dict[str, Any]:
         """Fetch a release by git tag name."""
         return self._request_json(
-            "GET", f"/repos/{owner}/{repo}/releases/tags/{quote(tag, safe='')}"
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/tags/"
+            f"{encode_path_segment(tag)}",
         )
 
     def delete_release_asset(self, owner: str, repo: str, asset_id: int) -> dict[str, Any]:
         """Delete a release asset by id."""
         self._request_no_content(
             "DELETE",
-            f"/repos/{owner}/{repo}/releases/assets/{asset_id}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/assets/{asset_id}",
             success_codes=(204,),
         )
         return {"asset_id": asset_id, "deleted": True}
@@ -416,7 +462,7 @@ class GitHubService:
             base = template.split("{", 1)[0]
         else:
             upload_base = self._uploads_base_url()
-            base = f"{upload_base}/repos/{owner}/{repo}/releases/{release_id}/assets"
+            base = f"{upload_base}/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/{release_id}/assets"
         params = [f"name={quote(asset_name)}"]
         if label:
             params.append(f"label={quote(label)}")
@@ -473,14 +519,16 @@ class GitHubService:
         if not payload:
             raise ValueError("GitHub updateRelease requires at least one field to update")
         return self._request_json(
-            "PATCH", f"/repos/{owner}/{repo}/releases/{release_id}", json=payload
+            "PATCH",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/{release_id}",
+            json=payload,
         )
 
     def delete_release(self, owner: str, repo: str, release_id: int) -> dict[str, Any]:
         """Delete a release by id."""
         self._request_no_content(
             "DELETE",
-            f"/repos/{owner}/{repo}/releases/{release_id}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/releases/{release_id}",
             success_codes=(204,),
         )
         return {"release_id": release_id, "deleted": True}
@@ -494,7 +542,7 @@ class GitHubService:
         """List GitHub Actions workflows for a repository."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/actions/workflows",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows",
             params={"per_page": max(1, min(per_page, 100))},
         )
         if isinstance(response, dict):
@@ -504,13 +552,16 @@ class GitHubService:
 
     def get_workflow(self, owner: str, repo: str, workflow_id: str) -> dict[str, Any]:
         """Fetch a workflow by numeric id or file name."""
-        return self._request_json("GET", f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}")
+        return self._request_json(
+            "GET",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}",
+        )
 
     def enable_workflow(self, owner: str, repo: str, workflow_id: str) -> dict[str, Any]:
         """Enable a GitHub Actions workflow."""
         self._request_no_content(
             "PUT",
-            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}/enable",
             success_codes=(204,),
         )
         return {"workflow_id": workflow_id, "enabled": True}
@@ -519,7 +570,7 @@ class GitHubService:
         """Disable a GitHub Actions workflow."""
         self._request_no_content(
             "PUT",
-            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}/disable",
             success_codes=(204,),
         )
         return {"workflow_id": workflow_id, "disabled": True}
@@ -533,7 +584,7 @@ class GitHubService:
         """Fetch billable GitHub Actions usage for one workflow."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/timing",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}/timing",
         )
         if not isinstance(response, dict):
             raise ValueError("GitHub getWorkflowUsage returned an unexpected response")
@@ -551,7 +602,7 @@ class GitHubService:
         payload: dict[str, Any] = {"ref": ref}
         if inputs:
             payload["inputs"] = inputs
-        url = f"{self._base_url()}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"
+        url = f"{self._base_url()}/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}/dispatches"
         response = self._client.request(
             "POST",
             url,
@@ -584,7 +635,7 @@ class GitHubService:
         """Fetch one GitHub Actions workflow run."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/actions/runs/{run_id}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/runs/{run_id}",
         )
         if not isinstance(response, dict):
             raise ValueError("GitHub getWorkflowRun returned an unexpected response")
@@ -600,7 +651,7 @@ class GitHubService:
         """List recent workflow-dispatch runs for one workflow."""
         response = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/actions/workflows/{encode_path_segment(workflow_id)}/runs",
             params={
                 "event": "workflow_dispatch",
                 "per_page": max(1, min(per_page, 100)),
@@ -714,7 +765,7 @@ class GitHubService:
             params["ref"] = ref
         data = self._request_json(
             "GET",
-            f"/repos/{owner}/{repo}/contents/{quote(path.lstrip('/'), safe='/')}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents/{self._encode_content_path(path)}",
             params=params or None,
         )
         if not isinstance(data, dict):
@@ -748,8 +799,8 @@ class GitHubService:
         ref: str | None = None,
     ) -> dict[str, Any]:
         """List files inside a repository directory via the contents API."""
-        normalized_path = quote(path.lstrip("/"), safe="/")
-        endpoint = f"/repos/{owner}/{repo}/contents"
+        normalized_path = self._encode_content_path(path)
+        endpoint = f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents"
         if normalized_path:
             endpoint = f"{endpoint}/{normalized_path}"
         params: dict[str, Any] = {}
@@ -785,13 +836,13 @@ class GitHubService:
         sha: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a repository file."""
-        normalized_path = quote(path.lstrip("/"), safe="/")
+        normalized_path = self._encode_content_path(path)
         target_sha = sha.strip() if sha else ""
         if not target_sha:
             try:
                 existing = self._request_json(
                     "GET",
-                    f"/repos/{owner}/{repo}/contents/{normalized_path}",
+                    f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents/{normalized_path}",
                     params={"ref": branch} if branch else None,
                 )
                 if isinstance(existing, dict):
@@ -811,7 +862,7 @@ class GitHubService:
 
         data = self._request_json(
             "PUT",
-            f"/repos/{owner}/{repo}/contents/{normalized_path}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents/{normalized_path}",
             json=payload,
         )
         if not isinstance(data, dict):
@@ -837,12 +888,12 @@ class GitHubService:
         sha: str | None = None,
     ) -> dict[str, Any]:
         """Delete a repository file."""
-        normalized_path = quote(path.lstrip("/"), safe="/")
+        normalized_path = self._encode_content_path(path)
         target_sha = sha.strip() if sha else ""
         if not target_sha:
             existing = self._request_json(
                 "GET",
-                f"/repos/{owner}/{repo}/contents/{normalized_path}",
+                f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents/{normalized_path}",
                 params={"ref": branch} if branch else None,
             )
             if not isinstance(existing, dict):
@@ -856,7 +907,7 @@ class GitHubService:
             payload["branch"] = branch
         data = self._request_json(
             "DELETE",
-            f"/repos/{owner}/{repo}/contents/{normalized_path}",
+            f"/repos/{encode_path_segment(owner)}/{encode_path_segment(repo)}/contents/{normalized_path}",
             json=payload,
         )
         if not isinstance(data, dict):
@@ -878,7 +929,7 @@ class GitHubService:
         """List repositories for an organization."""
         response = self._request_json(
             "GET",
-            f"/orgs/{organization}/repos",
+            f"/orgs/{encode_path_segment(organization)}/repos",
             params={"per_page": max(1, min(per_page, 100))},
         )
         return response if isinstance(response, list) else []
@@ -891,7 +942,7 @@ class GitHubService:
         """List repositories for a user."""
         response = self._request_json(
             "GET",
-            f"/users/{username}/repos",
+            f"/users/{encode_path_segment(username)}/repos",
             params={"per_page": max(1, min(per_page, 100))},
         )
         return response if isinstance(response, list) else []
@@ -944,7 +995,7 @@ class GitHubService:
         """Invite a user to an organization by email."""
         response = self._request_json(
             "POST",
-            f"/orgs/{organization}/invitations",
+            f"/orgs/{encode_path_segment(organization)}/invitations",
             json={"email": email},
         )
         if not isinstance(response, dict):

@@ -29,13 +29,13 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
 
-    webhook_url = ""
     with SessionLocal() as db:
         cred = self._get_accessible_credential(db, credential_id)
-        if cred:
-            config = decrypt_config(cred.encrypted_config)
-            webhook_url = config.get("webhook_url", "")
+        if cred is None:
+            raise ValueError("Discord credential not found or not accessible")
+        config = decrypt_config(cred.encrypted_config)
 
+    webhook_url = config.get("webhook_url", "")
     if not webhook_url:
         raise ValueError("Discord credential requires webhook_url")
 

@@ -1,11 +1,12 @@
 """Sentry REST API client used by workflow nodes and credentials."""
 
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.http_paths import encode_path_segment
 from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 
@@ -56,7 +57,7 @@ class SentryService:
 
     @staticmethod
     def _path_segment(value: str) -> str:
-        return quote(value, safe="")
+        return encode_path_segment(value)
 
     @staticmethod
     def _normalize_limit(value: int | str | None, default: int = 25, maximum: int = 100) -> int:

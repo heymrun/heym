@@ -45,19 +45,28 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not credential_id:
         raise ValueError("Send Email node requires an SMTP credential")
 
-    smtp_config: dict = {}
     with SessionLocal() as db:
         cred = self._get_accessible_credential(db, credential_id)
-        if cred:
-            smtp_config = decrypt_config(cred.encrypted_config)
+        if cred is None:
+            raise ValueError("SMTP credential not found or not accessible")
+        smtp_config: dict = decrypt_config(cred.encrypted_config)
 
     smtp_server = smtp_config.get("smtp_server", "")
     smtp_port = int(smtp_config.get("smtp_port", 587))
     smtp_email = smtp_config.get("smtp_email", "")
     smtp_password = smtp_config.get("smtp_password", "")
 
-    if not all([smtp_server, smtp_email, smtp_password]):
-        raise ValueError("SMTP credential is missing required fields")
+    missing_fields = [
+        name
+        for name, value in (
+            ("smtp_server", smtp_server),
+            ("smtp_email", smtp_email),
+            ("smtp_password", smtp_password),
+        )
+        if not value
+    ]
+    if missing_fields:
+        raise ValueError(f"SMTP credential requires {', '.join(missing_fields)}")
 
     if not to_address:
         raise ValueError("Email recipient (to) is required")

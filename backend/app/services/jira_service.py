@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.http_paths import encode_path_segment
 from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 _DEFAULT_API_VERSION = "3"
@@ -96,7 +97,7 @@ class JiraService:
 
     def get_issue(self, issue_key: str) -> dict[str, Any]:
         """Fetch one Jira issue by key or ID."""
-        payload = self._request("GET", f"/issue/{issue_key}")
+        payload = self._request("GET", f"/issue/{encode_path_segment(issue_key)}")
         return self._expect_object(payload, "issue")
 
     def create_issue(
@@ -157,12 +158,17 @@ class JiraService:
             fields["labels"] = labels
         if not fields:
             raise ValueError("Jira updateIssue requires at least one field to update")
-        self._request("PUT", f"/issue/{issue_key}", json={"fields": fields}, expect_json=False)
+        self._request(
+            "PUT",
+            f"/issue/{encode_path_segment(issue_key)}",
+            json={"fields": fields},
+            expect_json=False,
+        )
         return self.get_issue(issue_key)
 
     def delete_issue(self, issue_key: str) -> bool:
         """Delete a Jira issue."""
-        self._request("DELETE", f"/issue/{issue_key}", expect_json=False)
+        self._request("DELETE", f"/issue/{encode_path_segment(issue_key)}", expect_json=False)
         return True
 
     def get_issue_changelog(
@@ -175,7 +181,7 @@ class JiraService:
             return self._get_issue_changelog_v2(issue_key, normalized_limit, offset)
         payload = self._request(
             "GET",
-            f"/issue/{issue_key}/changelog",
+            f"/issue/{encode_path_segment(issue_key)}/changelog",
             params={"maxResults": normalized_limit, "startAt": offset},
         )
         return self._expect_object(payload, "issue.changelog")
@@ -197,14 +203,19 @@ class JiraService:
         }
         if html_body:
             payload["htmlBody"] = html_body
-        self._request("POST", f"/issue/{issue_key}/notify", json=payload, expect_json=False)
+        self._request(
+            "POST",
+            f"/issue/{encode_path_segment(issue_key)}/notify",
+            json=payload,
+            expect_json=False,
+        )
         return True
 
     def list_comments(self, issue_key: str, limit: int = 50, start_at: int = 0) -> dict[str, Any]:
         """List comments on a Jira issue."""
         payload = self._request(
             "GET",
-            f"/issue/{issue_key}/comment",
+            f"/issue/{encode_path_segment(issue_key)}/comment",
             params={"maxResults": self._normalize_limit(limit), "startAt": max(start_at, 0)},
         )
         return self._expect_object(payload, "issue.comments")
@@ -213,34 +224,41 @@ class JiraService:
         """Add a comment to a Jira issue."""
         payload = self._request(
             "POST",
-            f"/issue/{issue_key}/comment",
+            f"/issue/{encode_path_segment(issue_key)}/comment",
             json={"body": self._text_document_payload(body)},
         )
         return self._expect_object(payload, "comment")
 
     def get_comment(self, issue_key: str, comment_id: str) -> dict[str, Any]:
         """Fetch one comment on a Jira issue."""
-        payload = self._request("GET", f"/issue/{issue_key}/comment/{comment_id}")
+        payload = self._request(
+            "GET",
+            f"/issue/{encode_path_segment(issue_key)}/comment/{encode_path_segment(comment_id)}",
+        )
         return self._expect_object(payload, "comment")
 
     def update_comment(self, issue_key: str, comment_id: str, body: str) -> dict[str, Any]:
         """Update a comment on a Jira issue."""
         payload = self._request(
             "PUT",
-            f"/issue/{issue_key}/comment/{comment_id}",
+            f"/issue/{encode_path_segment(issue_key)}/comment/{encode_path_segment(comment_id)}",
             json={"body": self._text_document_payload(body)},
         )
         return self._expect_object(payload, "comment")
 
     def delete_comment(self, issue_key: str, comment_id: str) -> bool:
         """Delete a comment from a Jira issue."""
-        self._request("DELETE", f"/issue/{issue_key}/comment/{comment_id}", expect_json=False)
+        self._request(
+            "DELETE",
+            f"/issue/{encode_path_segment(issue_key)}/comment/{encode_path_segment(comment_id)}",
+            expect_json=False,
+        )
         return True
 
     def list_transitions(self, issue_key: str) -> list[dict[str, Any]]:
         """List available transitions for a Jira issue."""
         payload = self._expect_object(
-            self._request("GET", f"/issue/{issue_key}/transitions"),
+            self._request("GET", f"/issue/{encode_path_segment(issue_key)}/transitions"),
             "issue.transitions",
         )
         transitions = payload.get("transitions")
@@ -252,7 +270,7 @@ class JiraService:
         """Transition a Jira issue using a transition ID."""
         self._request(
             "POST",
-            f"/issue/{issue_key}/transitions",
+            f"/issue/{encode_path_segment(issue_key)}/transitions",
             json={"transition": {"id": transition_id}},
             expect_json=False,
         )
@@ -270,7 +288,7 @@ class JiraService:
         """Add a file attachment to a Jira issue."""
         payload = self._request(
             "POST",
-            f"/issue/{issue_key}/attachments",
+            f"/issue/{encode_path_segment(issue_key)}/attachments",
             files={"file": (filename, content, mime_type or "application/octet-stream")},
             headers={"X-Atlassian-Token": "no-check"},
         )
@@ -280,7 +298,7 @@ class JiraService:
 
     def get_attachment(self, attachment_id: str) -> dict[str, Any]:
         """Fetch one Jira attachment metadata object."""
-        payload = self._request("GET", f"/attachment/{attachment_id}")
+        payload = self._request("GET", f"/attachment/{encode_path_segment(attachment_id)}")
         return self._expect_object(payload, "attachment")
 
     def list_attachments(
@@ -307,14 +325,16 @@ class JiraService:
 
     def delete_attachment(self, attachment_id: str) -> bool:
         """Delete a Jira attachment by ID."""
-        self._request("DELETE", f"/attachment/{attachment_id}", expect_json=False)
+        self._request(
+            "DELETE", f"/attachment/{encode_path_segment(attachment_id)}", expect_json=False
+        )
         return True
 
     def download_attachment(self, content_url: str) -> bytes:
         """Download raw attachment content from Jira's content URL."""
         payload = self._request_absolute(
             "GET",
-            content_url,
+            self._same_origin_url(content_url, "attachment content URL"),
             headers={"Accept": "*/*"},
             expect_json=False,
         )
@@ -357,7 +377,7 @@ class JiraService:
         """Fetch one Jira issue with a restricted fields list."""
         payload = self._request(
             "GET",
-            f"/issue/{issue_key}",
+            f"/issue/{encode_path_segment(issue_key)}",
             params={"fields": ",".join(fields)},
         )
         return self._expect_object(payload, "issue")
@@ -365,7 +385,7 @@ class JiraService:
     def _get_issue_changelog_v2(self, issue_key: str, limit: int, start_at: int) -> dict[str, Any]:
         payload = self._request(
             "GET",
-            f"/issue/{issue_key}",
+            f"/issue/{encode_path_segment(issue_key)}",
             params={"expand": "changelog", "fields": "none"},
         )
         issue = self._expect_object(payload, "issue")
@@ -458,7 +478,41 @@ class JiraService:
         return payload
 
     def _url(self, path: str) -> str:
-        return urljoin(f"{self._base_url}/rest/api/{self._api_version}/", path.lstrip("/"))
+        # api_version comes from the credential, so it is encoded like any other
+        # interpolated segment. "2", "3" and "latest" pass through unchanged.
+        version = encode_path_segment(self._api_version)
+        return urljoin(f"{self._base_url}/rest/api/{version}/", path.lstrip("/"))
+
+    def _same_origin_url(self, url: str, label: str) -> str:
+        """Resolve a Jira-supplied URL and refuse it if it leaves the credential's origin.
+
+        Response bodies choose these URLs, so an attacker who can place an issue
+        attachment could otherwise point one at their own host and receive the
+        credential's Basic auth header.
+        """
+        normalized = str(url or "").strip()
+        if not normalized:
+            raise ValueError(f"Jira {label} is empty")
+        resolved = urljoin(f"{self._base_url}/", normalized)
+        if self._origin(resolved) != self._origin(self._base_url):
+            raise ValueError(
+                f"Jira {label} points outside the credential base URL origin "
+                "and was refused to avoid sending Jira credentials to another host"
+            )
+        return resolved
+
+    @staticmethod
+    def _origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
+            raise ValueError("Jira URLs must use http or https")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Jira URL includes an invalid port") from exc
+        default_port = 443 if scheme == "https" else 80
+        return (scheme, (parsed.hostname or "").lower(), port or default_port)
 
     @property
     def _is_data_center(self) -> bool:
