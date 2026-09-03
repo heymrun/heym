@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from app.services.http_paths import encode_path_segment
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -48,10 +49,15 @@ def execute(ctx: NodeExecutionContext) -> object:
     table_id_template = node_data.get("gristTableId", "")
     table_id = self.evaluate_message_template(table_id_template, inputs, node_id)
 
+    # Both come from workflow data or upstream input, so they are encoded before
+    # they reach a path: httpx resolves "../" and would rewrite the endpoint.
+    doc_path = encode_path_segment(doc_id)
+    table_path = encode_path_segment(table_id)
+
     if operation == "listTables":
         if not doc_id:
             raise ValueError("Grist listTables requires a document ID")
-        response = client.get(f"/api/docs/{doc_id}/tables")
+        response = client.get(f"/api/docs/{doc_path}/tables")
         check_grist_response(response)
         data = response.json()
         output = {
@@ -63,7 +69,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     elif operation == "listColumns":
         if not doc_id or not table_id:
             raise ValueError("Grist listColumns requires document ID and table ID")
-        response = client.get(f"/api/docs/{doc_id}/tables/{table_id}/columns")
+        response = client.get(f"/api/docs/{doc_path}/tables/{table_path}/columns")
         check_grist_response(response)
         data = response.json()
         output = {
@@ -81,7 +87,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             raise ValueError("Grist getRecord requires a record ID")
         filter_param = json.dumps({"id": [int(record_id)]})
         response = client.get(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             params={"filter": filter_param},
         )
         check_grist_response(response)
@@ -126,7 +132,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             params["limit"] = int(limit)
 
         response = client.get(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             params=params,
         )
         check_grist_response(response)
@@ -153,7 +159,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         payload = {"records": [{"fields": record_data}]}
         response = client.post(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             json=payload,
         )
         check_grist_response(response)
@@ -185,7 +191,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         payload = {"records": [{"fields": r} for r in records_data]}
         response = client.post(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             json=payload,
         )
         check_grist_response(response)
@@ -217,7 +223,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         payload = {"records": [{"id": int(record_id), "fields": record_data}]}
         response = client.patch(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             json=payload,
         )
         check_grist_response(response)
@@ -250,7 +256,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             ]
         }
         response = client.patch(
-            f"/api/docs/{doc_id}/tables/{table_id}/records",
+            f"/api/docs/{doc_path}/tables/{table_path}/records",
             json=payload,
         )
         check_grist_response(response)
@@ -286,7 +292,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 raise ValueError("Invalid record IDs for deleteRecord")
 
         response = client.post(
-            f"/api/docs/{doc_id}/tables/{table_id}/data/delete",
+            f"/api/docs/{doc_path}/tables/{table_path}/data/delete",
             json=record_ids,
         )
         check_grist_response(response)
