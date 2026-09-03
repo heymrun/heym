@@ -32,11 +32,11 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
 
-    telegram_config: dict = {}
     with SessionLocal() as db:
         cred = self._get_accessible_credential(db, credential_id)
-        if cred:
-            telegram_config = decrypt_config(cred.encrypted_config)
+        if cred is None:
+            raise ValueError("Telegram credential not found or not accessible")
+        telegram_config: dict = decrypt_config(cred.encrypted_config)
 
     bot_token = str(telegram_config.get("bot_token", "")).strip()
     if not bot_token:
