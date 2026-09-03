@@ -1046,19 +1046,7 @@ async def delete_items_by_source(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == current_user.id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vector store not found",
-        )
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
 
     cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = cred_result.scalar_one_or_none()
@@ -1091,19 +1079,7 @@ async def delete_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == current_user.id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vector store not found",
-        )
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
 
     cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = cred_result.scalar_one_or_none()
