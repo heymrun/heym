@@ -1,10 +1,19 @@
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
-from app.api.workflows import get_execution_history, list_all_execution_history
+from app.api.workflows import (
+    clear_all_execution_history,
+    clear_execution_history,
+    get_execution_history,
+    list_all_execution_history,
+)
+from app.db.models import ExecutionHistory, Workflow
 
 
 class _ExecuteResult:
@@ -73,6 +82,63 @@ class ExecutionHistoryApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("execution_history.trigger_source = 'quick drawer'", history_sql)
         self.assertNotIn("ilike", total_sql)
         self.assertNotIn("ilike", history_sql)
+
+    async def test_collaborator_bulk_clear_preserves_shared_workflow_history(self) -> None:
+        collaborator_id = uuid.uuid4()
+        self.db.execute = AsyncMock()
+
+        await clear_all_execution_history(
+            current_user=SimpleNamespace(id=collaborator_id),
+            db=self.db,
+        )
+
+        history_delete = self.db.execute.call_args_list[0].args[0]
+        expected_delete = ExecutionHistory.__table__.delete().where(
+            ExecutionHistory.workflow_id.in_(
+                select(Workflow.id).where(Workflow.owner_id == collaborator_id)
+            )
+        )
+
+        self.assertTrue(history_delete.compare(expected_delete))
+
+    async def test_collaborator_cannot_clear_shared_workflow_history(self) -> None:
+        workflow_id = uuid.uuid4()
+        collaborator_id = uuid.uuid4()
+        workflow = SimpleNamespace(id=workflow_id, owner_id=uuid.uuid4(), name="Shared workflow")
+        self.db.execute = AsyncMock()
+
+        with patch(
+            "app.api.workflows.get_workflow_for_user",
+            AsyncMock(return_value=workflow),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await clear_execution_history(
+                    workflow_id=workflow_id,
+                    current_user=SimpleNamespace(id=collaborator_id),
+                    db=self.db,
+                )
+
+        self.assertEqual(ctx.exception.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(ctx.exception.detail, "Only the owner can clear history")
+        self.db.execute.assert_not_called()
+
+    async def test_owner_can_clear_owned_workflow_history(self) -> None:
+        workflow_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(id=workflow_id, owner_id=owner_id, name="Owned workflow")
+        self.db.execute = AsyncMock()
+
+        with patch(
+            "app.api.workflows.get_workflow_for_user",
+            AsyncMock(return_value=workflow),
+        ):
+            await clear_execution_history(
+                workflow_id=workflow_id,
+                current_user=SimpleNamespace(id=owner_id),
+                db=self.db,
+            )
+
+        self.db.execute.assert_awaited_once()
 
     async def test_per_workflow_history_combines_search_and_trigger_source_filter(self) -> None:
         workflow_id = uuid.uuid4()

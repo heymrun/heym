@@ -1135,17 +1135,10 @@ async def clear_all_execution_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    accessible_workflows = select(Workflow.id).where(
-        or_(
-            Workflow.owner_id == current_user.id,
-            Workflow.id.in_(
-                select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == current_user.id)
-            ),
-        )
-    )
+    owned_workflows = select(Workflow.id).where(Workflow.owner_id == current_user.id)
     await db.execute(
         ExecutionHistory.__table__.delete().where(
-            ExecutionHistory.workflow_id.in_(accessible_workflows)
+            ExecutionHistory.workflow_id.in_(owned_workflows)
         )
     )
     await db.execute(RunHistory.__table__.delete().where(RunHistory.user_id == current_user.id))
@@ -3608,6 +3601,12 @@ async def clear_execution_history(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found",
+        )
+
+    if workflow.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can clear history",
         )
 
     audit(
