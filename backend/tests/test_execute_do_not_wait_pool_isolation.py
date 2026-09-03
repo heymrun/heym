@@ -144,11 +144,14 @@ class DoNotWaitPoolIsolationTests(unittest.TestCase):
         self.assertIsNotNone(total, "the loop never finished dispatching")
         assert total is not None
         self.assertEqual(len(executor.sub_workflow_executions), 10)
-        # All ten dispatches overlap, so the run costs roughly one wait rather than one
-        # per pool-sized batch of items.
-        self.assertLess(
-            total,
-            (_WAIT_MS / 1000.0) * 2,
+        # Overlapping dispatches hold more work than the wall clock allows for; serialized
+        # ones converge on it. A ratio survives CI load, the absolute budget here did not.
+        dispatched_work = (
+            sum(sub.execution_time_ms for sub in executor.sub_workflow_executions) / 1000.0
+        )
+        self.assertGreater(
+            dispatched_work,
+            total * 2,
             "dispatched sub-workflows were serialized behind the caller's node pool",
         )
 

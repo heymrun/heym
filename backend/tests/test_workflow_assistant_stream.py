@@ -59,5 +59,13 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                     break
                 self.assertEqual(chunk, ": heartbeat\n\n")
 
-            with self.assertRaises(StopAsyncIteration):
-                await stream.__anext__()
+            # Payload and sentinel are two `call_soon_threadsafe` hops, so a keepalive can
+            # land between them; only "nothing but heartbeats, then the end" is guaranteed.
+            for _ in range(200):
+                try:
+                    trailing = await stream.__anext__()
+                except StopAsyncIteration:
+                    break
+                self.assertEqual(trailing, ": heartbeat\n\n")
+            else:
+                self.fail("the stream kept emitting heartbeats after the source finished")
