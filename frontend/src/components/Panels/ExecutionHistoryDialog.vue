@@ -39,6 +39,7 @@ import {
 } from "@/lib/executionLog";
 import { cn } from "@/lib/utils";
 import { workflowApi } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import { useWorkflowStore } from "@/stores/workflow";
 import type { ActiveExecutionItem, ExecutionHistoryEntry, NodeResult } from "@/types/workflow";
 
@@ -51,7 +52,14 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
+const authStore = useAuthStore();
 const workflowStore = useWorkflowStore();
+
+const isOwner = computed(() => {
+  const ownerId = workflowStore.currentWorkflow?.owner_id;
+  const userId = authStore.user?.id;
+  return Boolean(ownerId && userId && ownerId === userId);
+});
 const router = useRouter();
 const selectedId = ref<string | null>(null);
 const expandedNodes = ref<Set<string>>(new Set());
@@ -353,14 +361,18 @@ async function refreshHistory(): Promise<void> {
   }
 }
 
-function clearHistory(): void {
-  void workflowStore.clearExecutionHistory();
-  selectedId.value = null;
-  selectedTriggerSource.value = undefined;
-  selectedInstanceId.value = undefined;
-  searchActive.value = false;
-  searchQuery.value = "";
-  cancelScheduledSearchReload();
+async function clearHistory(): Promise<void> {
+  try {
+    await workflowStore.clearExecutionHistory();
+    selectedId.value = null;
+    selectedTriggerSource.value = undefined;
+    selectedInstanceId.value = undefined;
+    searchActive.value = false;
+    searchQuery.value = "";
+    cancelScheduledSearchReload();
+  } catch {
+    // Error is handled/toasted by store
+  }
 }
 
 function toggleSearch(): void {
@@ -736,6 +748,7 @@ function bringToCanvas(): void {
           <Search class="w-4 h-4" />
         </Button>
         <Button
+          v-if="isOwner"
           variant="ghost"
           size="sm"
           class="gap-2"

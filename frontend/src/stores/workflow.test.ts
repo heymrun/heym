@@ -10,6 +10,7 @@ vi.mock("@/services/api", () => ({
     executeStream: vi.fn(),
     getWorkflowHistoryEntry: vi.fn(),
     streamActiveExecution: vi.fn(),
+    clearHistory: vi.fn(),
   },
 }));
 
@@ -314,5 +315,59 @@ describe("workflow execution state", () => {
     expect(store.executionResult?.outputs).toEqual({ completed: true });
     expect(store.executionResult?.highlight).toEqual({ records: [] });
     expect(store.isExecuting).toBe(false);
+  });
+
+  it("clears local execution history on successful deletion", async () => {
+    const workflow = makeWorkflow("workflow-a");
+    const getWorkflow = vi.mocked(workflowApi.get);
+    const clearHistory = vi.mocked(workflowApi.clearHistory);
+    getWorkflow.mockResolvedValue(workflow);
+    clearHistory.mockResolvedValue(undefined);
+
+    const store = useWorkflowStore();
+    await store.loadWorkflow(workflow.id);
+
+    // Seed some history
+    store.executionHistoryList = [
+      { id: "run-1", workflow_id: workflow.id, workflow_name: "A", status: "success", started_at: "2026-08-11T00:00:00Z", execution_time_ms: 10, run_type: "workflow", trigger_source: null }
+    ];
+    store.executionHistoryTotal = 1;
+    store.executionHistoryDetails.set("run-1", { id: "run-1", started_at: "", inputs: {}, status: "success", recovered: false, result: { workflow_id: workflow.id, status: "success", outputs: {}, execution_time_ms: 10, node_results: [], execution_history_id: "run-1", highlight: null } });
+
+    await store.clearExecutionHistory();
+
+    expect(clearHistory).toHaveBeenCalledWith(workflow.id);
+    expect(store.executionHistoryList).toEqual([]);
+    expect(store.executionHistoryTotal).toBe(0);
+    expect(store.executionHistoryDetails.size).toBe(0);
+  });
+
+  it("preserves local execution history on forbidden error from clearHistory", async () => {
+    const workflow = makeWorkflow("workflow-a");
+    const getWorkflow = vi.mocked(workflowApi.get);
+    const clearHistory = vi.mocked(workflowApi.clearHistory);
+    getWorkflow.mockResolvedValue(workflow);
+    const error403 = Object.assign(new Error("Forbidden"), {
+      isAxiosError: true,
+      response: { status: 403 }
+    });
+    clearHistory.mockRejectedValue(error403);
+
+    const store = useWorkflowStore();
+    await store.loadWorkflow(workflow.id);
+
+    // Seed some history
+    store.executionHistoryList = [
+      { id: "run-1", workflow_id: workflow.id, workflow_name: "A", status: "success", started_at: "2026-08-11T00:00:00Z", execution_time_ms: 10, run_type: "workflow", trigger_source: null }
+    ];
+    store.executionHistoryTotal = 1;
+    store.executionHistoryDetails.set("run-1", { id: "run-1", started_at: "", inputs: {}, status: "success", recovered: false, result: { workflow_id: workflow.id, status: "success", outputs: {}, execution_time_ms: 10, node_results: [], execution_history_id: "run-1", highlight: null } });
+
+    await expect(store.clearExecutionHistory()).rejects.toThrow("Forbidden");
+
+    expect(clearHistory).toHaveBeenCalledWith(workflow.id);
+    expect(store.executionHistoryTotal).toBe(1);
+    expect(store.executionHistoryList.length).toBe(1);
+    expect(store.executionHistoryDetails.size).toBe(1);
   });
 });

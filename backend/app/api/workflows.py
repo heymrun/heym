@@ -1137,9 +1137,7 @@ async def clear_all_execution_history(
 ) -> None:
     owned_workflows = select(Workflow.id).where(Workflow.owner_id == current_user.id)
     await db.execute(
-        ExecutionHistory.__table__.delete().where(
-            ExecutionHistory.workflow_id.in_(owned_workflows)
-        )
+        ExecutionHistory.__table__.delete().where(ExecutionHistory.workflow_id.in_(owned_workflows))
     )
     await db.execute(RunHistory.__table__.delete().where(RunHistory.user_id == current_user.id))
 

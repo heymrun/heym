@@ -462,11 +462,7 @@ async function clearAllHistory(): Promise<void> {
   clearing.value = true;
   try {
     await workflowApi.clearAllHistory();
-    executionHistory.value = [];
-    totalCount.value = 0;
-    entryDetailsCache.value = new Map();
-    selectedId.value = null;
-    selectedTriggerSource.value = undefined;
+    await refreshHistory();
   } catch {
     error.value = "Failed to clear history";
   } finally {

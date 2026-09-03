@@ -2057,10 +2057,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
       executionHistoryList.value = [];
       executionHistoryDetails.value = new Map();
       executionHistoryTotal.value = 0;
-    } catch {
-      executionHistoryList.value = [];
-      executionHistoryDetails.value = new Map();
-      executionHistoryTotal.value = 0;
+    } catch (error) {
+      showToast("Failed to clear execution history", "error", 3000);
+      throw error;
     }
   }
 
