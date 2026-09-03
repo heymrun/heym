@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -314,7 +314,7 @@ class JiraService:
         """Download raw attachment content from Jira's content URL."""
         payload = self._request_absolute(
             "GET",
-            content_url,
+            self._same_origin_url(content_url, "attachment content URL"),
             headers={"Accept": "*/*"},
             expect_json=False,
         )
@@ -459,6 +459,37 @@ class JiraService:
 
     def _url(self, path: str) -> str:
         return urljoin(f"{self._base_url}/rest/api/{self._api_version}/", path.lstrip("/"))
+
+    def _same_origin_url(self, url: str, label: str) -> str:
+        """Resolve a Jira-supplied URL and refuse it if it leaves the credential's origin.
+
+        Response bodies choose these URLs, so an attacker who can place an issue
+        attachment could otherwise point one at their own host and receive the
+        credential's Basic auth header.
+        """
+        normalized = str(url or "").strip()
+        if not normalized:
+            raise ValueError(f"Jira {label} is empty")
+        resolved = urljoin(f"{self._base_url}/", normalized)
+        if self._origin(resolved) != self._origin(self._base_url):
+            raise ValueError(
+                f"Jira {label} points outside the credential base URL origin "
+                "and was refused to avoid sending Jira credentials to another host"
+            )
+        return resolved
+
+    @staticmethod
+    def _origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
+            raise ValueError("Jira URLs must use http or https")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Jira URL includes an invalid port") from exc
+        default_port = 443 if scheme == "https" else 80
+        return (scheme, (parsed.hostname or "").lower(), port or default_port)
 
     @property
     def _is_data_center(self) -> bool:
