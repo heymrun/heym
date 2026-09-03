@@ -10,7 +10,9 @@ router = APIRouter()
 
 
 @router.get("/reserved-variable-names")
-async def get_reserved_variable_names() -> list[str]:
+async def get_reserved_variable_names(
+    _current_user: User = Depends(get_current_user),
+) -> list[str]:
     return RESERVED_VARIABLE_NAMES
 
 
