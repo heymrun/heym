@@ -478,7 +478,10 @@ class JiraService:
         return payload
 
     def _url(self, path: str) -> str:
-        return urljoin(f"{self._base_url}/rest/api/{self._api_version}/", path.lstrip("/"))
+        # api_version comes from the credential, so it is encoded like any other
+        # interpolated segment. "2", "3" and "latest" pass through unchanged.
+        version = encode_path_segment(self._api_version)
+        return urljoin(f"{self._base_url}/rest/api/{version}/", path.lstrip("/"))
 
     def _same_origin_url(self, url: str, label: str) -> str:
         """Resolve a Jira-supplied URL and refuse it if it leaves the credential's origin.

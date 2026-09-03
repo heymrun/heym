@@ -99,6 +99,62 @@ class JiraPathSegmentTests(unittest.TestCase):
             "https://example.atlassian.net/rest/api/3/issue/%2E%2E",
         )
 
+    def test_credential_api_version_cannot_escape_the_rest_api_root(self) -> None:
+        client = MagicMock()
+        client.request.return_value = _response({"values": []})
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.example",
+                "api_version": _TRAVERSAL,
+            },
+            client=client,
+        )
+
+        service.list_projects()
+
+        url = client.request.call_args.args[1]
+        self.assertTrue(url.startswith("https://jira.example/rest/api/"))
+        self.assertNotIn("/admin/secrets", url)
+
+    def test_supported_api_versions_build_exactly_the_same_url_as_before(self) -> None:
+        """The encoder must be a no-op for every version a credential really holds."""
+        for version, expected in (
+            ("2", "https://jira.example/rest/api/2/project/search"),
+            ("3", "https://jira.example/rest/api/3/project/search"),
+            ("latest", "https://jira.example/rest/api/latest/project/search"),
+            ("", "https://jira.example/rest/api/3/project/search"),
+        ):
+            with self.subTest(api_version=version):
+                service = JiraService(
+                    {
+                        "email": "ada@example.com",
+                        "api_token": "jira-token",
+                        "base_url": "https://jira.example",
+                        "api_version": version,
+                    },
+                    client=MagicMock(),
+                )
+                self.assertEqual(service._url("/project/search"), expected)
+
+    def test_data_center_still_pins_itself_to_api_version_two(self) -> None:
+        service = JiraService(
+            {
+                "email": "ada@example.com",
+                "api_token": "jira-token",
+                "base_url": "https://jira.internal.example",
+                "deployment": "data_center",
+                "api_version": _TRAVERSAL,
+            },
+            client=MagicMock(),
+        )
+
+        self.assertEqual(service._api_version, "2")
+        self.assertEqual(
+            service._url("/project"), "https://jira.internal.example/rest/api/2/project"
+        )
+
     def test_ordinary_issue_keys_are_unchanged(self) -> None:
         client = MagicMock()
         client.request.return_value = _response({"key": "PROJ-42"})
