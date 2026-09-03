@@ -457,7 +457,7 @@ async function refreshHistory(): Promise<void> {
 }
 
 async function clearAllHistory(): Promise<void> {
-  if (!confirm("Are you sure you want to clear all execution history?")) return;
+  if (!confirm("Are you sure you want to clear all execution history? (History for shared workflows will be retained.)")) return;
   cancelScheduledSearchReload();
   clearing.value = true;
   try {

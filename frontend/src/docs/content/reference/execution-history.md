@@ -30,7 +30,7 @@ Click the **History** button (clock icon) to open the dialog.
 ## Per-workflow vs All History
 
 - **Per-workflow** (Editor, Docs): Shows runs for the workflow you have open. Use **Clear history** to remove runs for that workflow only.
-- **All History** (Dashboard, Evals): Shows runs across all workflows and chat/assistant sessions. Use **Clear all history** to remove everything.
+- **All History** (Dashboard, Evals): Shows runs across all workflows and chat/assistant sessions. Use **Clear all history** to remove all records you own. History for shared workflows will be retained.
 
 ## Bring to Canvas
 
@@ -143,7 +143,7 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 ## Clear History
 
 - **Per-workflow**: In the Editor history dialog, click **Clear history** to remove runs for the current workflow.
-- **All History**: In the Dashboard/Evals history dialog, click **Clear all history** to remove all execution records. This action cannot be undone.
+- **All History**: In the Dashboard/Evals history dialog, click **Clear all history** to remove all execution records you own. Runs from shared workflows are retained. This action cannot be undone.
 
 ## Execution timeline details
 
