@@ -11,7 +11,7 @@ import MobileWorkflowTreeHeader from "@/components/Canvas/MobileWorkflowTreeHead
 import MobileWorkflowTreeMore from "@/components/Canvas/MobileWorkflowTreeMore.vue";
 import MobileWorkflowTreeNodesTab from "@/components/Canvas/MobileWorkflowTreeNodesTab.vue";
 import DebugPanel from "@/components/Panels/DebugPanel.vue";
-import { NODE_DEFINITIONS } from "@/types/node";
+import { resolveNodeDisplay } from "@/lib/nodeDisplay";
 import { useThemeStore } from "@/stores/theme";
 import { useWorkflowStore } from "@/stores/workflow";
 
@@ -53,6 +53,13 @@ const statusText = computed(() => status.value.replace(/_/g, " "));
 const duration = computed(() => formatDuration(execution.value?.execution_time_ms));
 const isDashboardWidget = computed(() => workflowStore.currentWorkflow?.kind === "dashboard_widget");
 const isStandardWorkflow = computed(() => !isDashboardWidget.value);
+const selectedNodeLabel = computed(() => {
+  if (!selectedNode.value) return null;
+  return resolveNodeDisplay(
+    selectedNode.value.type,
+    selectedNode.value.data as Record<string, unknown>,
+  ).label;
+});
 
 function formatDuration(value: number | undefined): string {
   if (!value) return "—";
@@ -135,7 +142,7 @@ function openAiAssistant(): void {
             Node properties
           </p>
           <p class="mt-2 text-xs text-muted-foreground">
-            {{ selectedNode ? `${selectedNode.data.label || NODE_DEFINITIONS[selectedNode.type].label} is selected.` : "Select a node from the workflow tree." }}
+            {{ selectedNode ? `${selectedNodeLabel} is selected.` : "Select a node from the workflow tree." }}
           </p>
         </section>
       </slot>

@@ -50,7 +50,9 @@ function hasPrimaryOutputHandle(node: WorkflowNode): boolean {
     return false;
   }
 
-  return NODE_DEFINITIONS[node.type].outputs > 0;
+  // Safely handle unknown node types: most workflow nodes have outputs, so unknown types are assumed to have outputs.
+  const definition = NODE_DEFINITIONS[node.type as NodeType];
+  return definition ? definition.outputs > 0 : true;
 }
 
 export function resolveRenderedSourceHandle(
