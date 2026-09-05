@@ -9,7 +9,10 @@ import re
 from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
+
+from app.services.ssrf_guard import guard_http_url
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _READ_PREFIXES = ("SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "EXISTS")
@@ -100,9 +103,21 @@ class ClickHouseService:
         except (TypeError, ValueError):
             self._port = 8443 if self._secure else 8123
 
+    def _connection_url(self) -> str:
+        """Render the credential's host and port as the URL the guard inspects."""
+        scheme = "https" if self._secure else "http"
+        host = self._host
+        if "://" in host:
+            parsed = urlparse(host)
+            if parsed.hostname:
+                return f"{parsed.scheme or scheme}://{parsed.hostname}:{parsed.port or self._port}"
+        return f"{scheme}://{host}:{self._port}"
+
     def _client(self):
         from app.services.clickhouse_pool import get_clickhouse_client
 
+        # urllib3 transport, so only the pre-connection half of the guard applies.
+        guard_http_url(self._connection_url(), "ClickHouse credential host")
         return get_clickhouse_client(
             host=self._host,
             port=self._port,

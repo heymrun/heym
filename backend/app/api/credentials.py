@@ -951,6 +951,25 @@ async def run_credential_connection_test(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Credential type does not match the requested test",
             )
+        if credential.owner_id != current_user.id and config:
+            # A share grants use of a credential, not sight of it.
+            audit(
+                action="credential.connection_test",
+                outcome=OUTCOME_DENIED,
+                actor=current_user,
+                target_type="credential",
+                target_id=credential.id,
+                target_name=credential.name,
+                reason="config_override_by_non_owner",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Only the credential owner can override configuration in a "
+                    "connection test. Retry without a config body to test the "
+                    "stored configuration."
+                ),
+            )
         stored_config = decrypt_config(credential.encrypted_config)
         if test_data.type == CredentialType.supabase:
             config = _merge_supabase_test_config(config, stored_config)

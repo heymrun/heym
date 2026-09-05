@@ -84,7 +84,7 @@ Useful fields:
 - `Authorization`, `Origin`, `User-Agent`, and custom data headers are supported. `Origin` is sent through the WebSocket client's dedicated option. `Host`, `Connection`, `Upgrade`, and `Sec-WebSocket-*` headers cannot be overridden.
 - Trusted self-hosted deployments that intentionally connect to internal services can set `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`. Keep the default on hosted or multi-tenant deployments.
 
-**Upgrade note for v0.0.105:** this instance-wide policy now also protects credential-derived destinations used by Jira, Sentry, GitHub, Grist, Supabase, custom LLM execution and model discovery, the AI assistant, guardrails, and RAG embeddings. Existing credentials that point to loopback, private, or link-local addresses are refused unless `HEYM_HTTP_ALLOW_PRIVATE_URLS=true` is enabled on a trusted self-hosted instance. Guarded HTTP clients ignore `HTTP_PROXY` and `HTTPS_PROXY`, while operator CA bundles configured through `SSL_CERT_FILE` or `SSL_CERT_DIR` remain supported.
+**Upgrade note for v0.0.105:** this instance-wide policy now also protects credential-derived destinations used by Jira, Sentry, GitHub, Grist, Supabase, ClickHouse, custom LLM execution and model discovery, the AI assistant, guardrails, and RAG embeddings. Existing credentials that point to loopback, private, or link-local addresses are refused unless `HEYM_HTTP_ALLOW_PRIVATE_URLS=true` is enabled on a trusted self-hosted instance. Guarded HTTP clients ignore `HTTP_PROXY` and `HTTPS_PROXY`, while operator CA bundles configured through `SSL_CERT_FILE` or `SSL_CERT_DIR` remain supported. ClickHouse is checked before the connection opens but is not pinned at dial time, because clickhouse-connect brings its own urllib3 transport.
 
 ## Example Workflow
 

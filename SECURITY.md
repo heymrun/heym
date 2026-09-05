@@ -105,3 +105,6 @@ vulnerabilities in Heym:
   (GHSA-fmpw-hj3m-xvj6), and credential-controlled base URL SSRF across Jira,
   Sentry, GitHub, Grist, Supabase, and custom OpenAI-compatible integrations
   (GHSA-xchj-mw74-2232).
+- [@roonakyadav](https://github.com/roonakyadav) for credential exfiltration via
+  the connection-test endpoint, where a collaborator could point a shared
+  credential at a destination of their own (GHSA-39qx-wp7x-69rq).
