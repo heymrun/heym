@@ -3,8 +3,7 @@ import { computed } from "vue";
 import { GitBranch } from "lucide-vue-next";
 
 import type { MobileWorkflowTreeAccent, MobileWorkflowTreeEntry } from "@/components/Canvas/mobileWorkflowTree";
-import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
-import { NODE_DEFINITIONS } from "@/types/node";
+import { resolveNodeDisplay, type NodeDisplayMetadata } from "@/lib/nodeDisplay";
 import type { NodeResult, WorkflowNode } from "@/types/workflow";
 import { useWorkflowStore } from "@/stores/workflow";
 
@@ -27,7 +26,7 @@ function formatDuration(value: number | undefined): string {
 }
 
 function nodeLabel(node: WorkflowNode): string {
-  return String(node.data.label || NODE_DEFINITIONS[node.type].label);
+  return resolveNodeDisplay(node.type, node.data as unknown as Record<string, unknown>).label;
 }
 
 function nodeSummary(node: WorkflowNode): string {
@@ -36,7 +35,7 @@ function nodeSummary(node: WorkflowNode): string {
     const value = data[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return NODE_DEFINITIONS[node.type].description;
+  return resolveNodeDisplay(node.type, data).summary;
 }
 
 function accentClass(accent: MobileWorkflowTreeAccent): string {
@@ -66,6 +65,10 @@ function selectNode(): void {
   }
   emit("idle-node");
 }
+
+function nodeDisplay(node: WorkflowNode): NodeDisplayMetadata {
+  return resolveNodeDisplay(node.type, node.data as unknown as Record<string, unknown>);
+}
 </script>
 
 <template>
@@ -88,11 +91,11 @@ function selectNode(): void {
         <div class="flex min-w-0 items-center gap-2">
           <span
             class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-500/10"
-            :class="nodeIconColorClass[entry.node.type]"
+            :class="nodeDisplay(entry.node).iconColorClass"
           >
             <component
-              :is="nodeIcons[entry.node.type]"
-              :class="isTileFillingIcon(entry.node.type) ? 'h-full w-full' : 'h-3 w-3'"
+              :is="nodeDisplay(entry.node).icon"
+              :class="nodeDisplay(entry.node).tileFilling ? 'h-full w-full' : 'h-3 w-3'"
             />
           </span>
           <span class="min-w-0 text-left">

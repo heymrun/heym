@@ -2,10 +2,10 @@
 import { computed, ref, watch } from "vue";
 import { Check, GitBranch, Search, X } from "lucide-vue-next";
 
-import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
-import { NODE_DEFINITIONS } from "@/types/node";
-import type { WorkflowNode } from "@/types/workflow";
 import type { MobileWorkflowConnectionMode } from "@/components/Canvas/mobileWorkflowTreeConnections";
+import type { NodeDisplayMetadata } from "@/lib/nodeDisplay";
+import type { WorkflowNode } from "@/types/workflow";
+import { resolveNodeDisplay } from "@/lib/nodeDisplay";
 
 interface Props {
   open: boolean;
@@ -30,7 +30,7 @@ const candidates = computed(() => {
     .filter((node) => node.id !== props.node?.id)
     .filter((node) => mode.value === "before" || node.type !== "output" || node.data.allowDownstream === true)
     .filter((node) => {
-      const label = String(node.data.label || NODE_DEFINITIONS[node.type].label).toLowerCase();
+      const label = nodeDisplay(node).label.toLowerCase();
       return !normalizedQuery || label.includes(normalizedQuery);
     })
     .sort((left, right) => left.position.y - right.position.y || left.position.x - right.position.x);
@@ -69,7 +69,11 @@ function canConnectAfter(node: WorkflowNode): boolean {
 }
 
 function nodeLabel(node: WorkflowNode): string {
-  return String(node.data.label || NODE_DEFINITIONS[node.type].label);
+  return nodeDisplay(node).label;
+}
+
+function nodeDisplay(node: WorkflowNode): NodeDisplayMetadata {
+  return resolveNodeDisplay(node.type, node.data as unknown as Record<string, unknown>);
 }
 
 function submit(): void {
@@ -158,16 +162,16 @@ function submit(): void {
             >
               <span
                 class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted"
-                :class="nodeIconColorClass[candidate.type]"
+                :class="nodeDisplay(candidate).iconColorClass"
               >
                 <component
-                  :is="nodeIcons[candidate.type]"
-                  :class="isTileFillingIcon(candidate.type) ? 'h-full w-full' : 'h-3.5 w-3.5'"
+                  :is="nodeDisplay(candidate).icon"
+                  :class="nodeDisplay(candidate).tileFilling ? 'h-full w-full' : 'h-3.5 w-3.5'"
                 />
               </span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-xs font-semibold">{{ nodeLabel(candidate) }}</span>
-                <span class="block truncate text-[10px] text-muted-foreground">{{ NODE_DEFINITIONS[candidate.type].label }}</span>
+                <span class="block truncate text-[10px] text-muted-foreground">{{ nodeDisplay(candidate).typeLabel }}</span>
               </span>
               <Check
                 v-if="anchorId === candidate.id"

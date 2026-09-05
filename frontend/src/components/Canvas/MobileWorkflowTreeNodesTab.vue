@@ -11,6 +11,7 @@ import {
 } from "@/components/Canvas/mobileWorkflowTreeConnections";
 import { TOOL_INPUT_HANDLE, isNoRegularInputNodeType } from "@/lib/canvasConnectionRules";
 import { generateId } from "@/lib/utils";
+import { resolveNodeDisplay } from "@/lib/nodeDisplay";
 import { NODE_DEFINITIONS } from "@/types/node";
 import type { NodeType, WorkflowNode } from "@/types/workflow";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -26,7 +27,10 @@ const treeEntries = computed(() => buildMobileWorkflowTree(workflowStore.nodes, 
 const selectedNode = computed(() => workflowStore.selectedNode);
 const selectedLabel = computed(() => {
   if (!selectedNode.value) return null;
-  return String(selectedNode.value.data.label || NODE_DEFINITIONS[selectedNode.value.type].label);
+  return resolveNodeDisplay(
+    selectedNode.value.type,
+    selectedNode.value.data as Record<string, unknown>,
+  ).label;
 });
 const canConnectSelectedNode = computed(
   () => selectedNode.value !== null && !isNoRegularInputNodeType(selectedNode.value.type),
@@ -100,7 +104,9 @@ function connectSelectedNode(payload: { anchorId: string; mode: MobileWorkflowCo
 
 function removeSelectedNode(): void {
   const node = workflowStore.selectedNode;
-  if (!node || !window.confirm(`Remove ${node.data.label || NODE_DEFINITIONS[node.type].label}?`)) return;
+  if (!node) return;
+  const label = resolveNodeDisplay(node.type, node.data as Record<string, unknown>).label;
+  if (!window.confirm(`Remove ${label}?`)) return;
   workflowStore.removeNode(node.id);
 }
 </script>
