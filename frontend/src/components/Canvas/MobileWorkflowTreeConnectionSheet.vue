@@ -2,9 +2,10 @@
 import { computed, ref, watch } from "vue";
 import { Check, GitBranch, Search, X } from "lucide-vue-next";
 
-import { resolveNodeDisplay, type NodeDisplayMetadata } from "@/lib/nodeDisplay";
-import type { WorkflowNode } from "@/types/workflow";
 import type { MobileWorkflowConnectionMode } from "@/components/Canvas/mobileWorkflowTreeConnections";
+import type { NodeDisplayMetadata } from "@/lib/nodeDisplay";
+import type { WorkflowNode } from "@/types/workflow";
+import { resolveNodeDisplay } from "@/lib/nodeDisplay";
 
 interface Props {
   open: boolean;
@@ -170,7 +171,7 @@ function submit(): void {
               </span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-xs font-semibold">{{ nodeLabel(candidate) }}</span>
-                <span class="block truncate text-[10px] text-muted-foreground">{{ nodeDisplay(candidate).summary }}</span>
+                <span class="block truncate text-[10px] text-muted-foreground">{{ nodeDisplay(candidate).typeLabel }}</span>
               </span>
               <Check
                 v-if="anchorId === candidate.id"

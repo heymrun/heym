@@ -11,6 +11,7 @@ describe("resolveNodeDisplay", () => {
     it("preserves label and summary from node data", () => {
       expect(resolveNodeDisplay("llm", { label: "Summarize", model: "gpt-4o" })).toMatchObject({
         label: "Summarize",
+        typeLabel: "LLM",
         summary: "gpt-4o",
         icon: nodeIcons.llm,
         iconColorClass: nodeIconColorClass.llm,
@@ -21,6 +22,7 @@ describe("resolveNodeDisplay", () => {
     it("uses definition label when node data label is empty", () => {
       const display = resolveNodeDisplay("llm", { label: "", model: "gpt-4o" });
       expect(display.label).toBe("LLM");
+      expect(display.typeLabel).toBe("LLM");
       expect(display.summary).toBe("gpt-4o");
     });
 
@@ -33,6 +35,7 @@ describe("resolveNodeDisplay", () => {
       const display = resolveNodeDisplay("slack", {});
       expect(display.icon).toBe(nodeIcons.slack);
       expect(display.iconColorClass).toBe(nodeIconColorClass.slack);
+      expect(display.typeLabel).toBe("Slack");
     });
   });
 
@@ -41,9 +44,10 @@ describe("resolveNodeDisplay", () => {
       expect(() => resolveNodeDisplay("unknownNodeType", {})).not.toThrow();
     });
 
-    it("returns humanized type as label for unknown nodes", () => {
+    it("returns humanized type as label and typeLabel for unknown nodes", () => {
       const display = resolveNodeDisplay("deletedNode", {});
       expect(display.label).toBe("Deleted Node");
+      expect(display.typeLabel).toBe("Deleted Node");
     });
 
     it("returns humanized type as summary when no specific data is available", () => {
@@ -51,9 +55,10 @@ describe("resolveNodeDisplay", () => {
       expect(display.summary).toBe("Unsupported node type: Legacy Custom Node");
     });
 
-    it("preserves custom label for unknown node types", () => {
+    it("preserves custom label for unknown node types while keeping humanized typeLabel", () => {
       const display = resolveNodeDisplay("unknownType", { label: "My custom node" });
       expect(display.label).toBe("My custom node");
+      expect(display.typeLabel).toBe("Unknown Type");
     });
 
     it("extracts operation data for unknown integration-like types", () => {

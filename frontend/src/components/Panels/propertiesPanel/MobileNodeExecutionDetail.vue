@@ -2,10 +2,9 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Settings2, X } from "lucide-vue-next";
 
-import JsonTree from "@/components/ui/JsonTree.vue";
-import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
-import { NODE_DEFINITIONS } from "@/types/node";
 import type { NodeResult, WorkflowNode } from "@/types/workflow";
+import JsonTree from "@/components/ui/JsonTree.vue";
+import { resolveNodeDisplay } from "@/lib/nodeDisplay";
 
 interface Props {
   open: boolean;
@@ -31,15 +30,26 @@ const activeTab = ref<DetailTab>("output");
 const copied = ref(false);
 const detailRef = ref<HTMLElement | null>(null);
 
-const nodeIcon = computed(() => (props.node ? nodeIcons[props.node.type] : AlertCircle));
+const nodeDisplay = computed(() => {
+  if (props.node) {
+    return resolveNodeDisplay(props.node.type, props.node.data as unknown as Record<string, unknown>);
+  }
+  if (props.result?.node_type) {
+    return resolveNodeDisplay(props.result.node_type);
+  }
+  return null;
+});
+
+const nodeIcon = computed(() => nodeDisplay.value?.icon ?? AlertCircle);
 const nodeIconClass = computed(() =>
-  props.node ? nodeIconColorClass[props.node.type] : "text-muted-foreground",
+  nodeDisplay.value?.iconColorClass ?? "text-muted-foreground",
 );
+const isTileFilling = computed(() => nodeDisplay.value?.tileFilling ?? false);
 const nodeName = computed(
-  () => props.node?.data.label || props.result?.node_label || "Workflow node",
+  () => props.node?.data.label || props.result?.node_label || nodeDisplay.value?.label || "Workflow node",
 );
 const nodeType = computed(() => {
-  if (props.node) return NODE_DEFINITIONS[props.node.type].label;
+  if (nodeDisplay.value) return nodeDisplay.value.typeLabel;
   return props.result?.node_type || "Node";
 });
 const status = computed(() => props.result?.status || "pending");
@@ -198,7 +208,7 @@ watch(
                 >
                   <component
                     :is="nodeIcon"
-                    :class="isTileFillingIcon(node?.type ?? 'http') ? 'h-full w-full' : 'h-5 w-5'"
+                    :class="isTileFilling ? 'h-full w-full' : 'h-5 w-5'"
                   />
                 </div>
                 <div class="min-w-0">

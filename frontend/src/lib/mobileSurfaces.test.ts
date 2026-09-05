@@ -1,147 +1,256 @@
-/**
- * Source-level regression tests for the four mobile workflow editor components.
- *
- * These tests read each component's source file (following the same pattern as
- * NodePanel.test.ts and ExecutionSpanDetails.test.ts in this repository) and
- * assert that:
- *
- *   1. The component imports / calls resolveNodeDisplay() — the shared resolver
- *      that safely handles unknown runtime node types.
- *   2. The previously-unsafe direct NODE_DEFINITIONS[node.type].label /
- *      .description accesses are gone from the components that must not use them.
- *   3. The previously-unsafe direct nodeIcons[node.type] and
- *      nodeIconColorClass[node.type] accesses are gone from components where the
- *      resolver is now responsible for icon / color resolution.
- *
- * These tests intentionally do not mount Vue components or call resolveNodeDisplay()
- * themselves — that is covered by nodeDisplay.test.ts.  The purpose here is to
- * guard against regressions where a future edit re-introduces the unsafe accesses.
- */
+import { createSSRApp, h, type Component } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import { describe, expect, it, vi } from "vitest";
+import { renderToString } from "vue/server-renderer";
 
-import { readFile } from "node:fs/promises";
+vi.mock("@/stores/theme", () => ({
+  useThemeStore: () => ({
+    isDark: false,
+    toggle: vi.fn(),
+    setTheme: vi.fn(),
+  }),
+}));
 
-import { describe, expect, it } from "vitest";
+import type { NodeType, WorkflowNode } from "@/types/workflow";
+import MobileNodeExecutionDetail from "@/components/Panels/propertiesPanel/MobileNodeExecutionDetail.vue";
+import MobileWorkflowTree from "@/components/Canvas/MobileWorkflowTree.vue";
+import MobileWorkflowTreeConnectionSheet from "@/components/Canvas/MobileWorkflowTreeConnectionSheet.vue";
+import MobileWorkflowTreeNode from "@/components/Canvas/MobileWorkflowTreeNode.vue";
+import MobileWorkflowTreeNodesTab from "@/components/Canvas/MobileWorkflowTreeNodesTab.vue";
+import { useWorkflowStore } from "@/stores/workflow";
 
-// Resolve each component path relative to this test file, matching the
-// pattern used by NodePanel.test.ts and ExecutionSpanDetails.test.ts.
-const componentUrl = (name: string): URL =>
-  new URL(`../components/Canvas/${name}`, import.meta.url);
+async function renderComponent(component: Component, props: Record<string, unknown> = {}): Promise<string> {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  const app = createSSRApp({
+    render: () => h(component, props),
+  });
+  app.use(pinia);
+  const ssrContext: { teleports?: Record<string, string> } = {};
+  const html = await renderToString(app, ssrContext);
+  const teleports = ssrContext.teleports
+    ? Object.values(ssrContext.teleports).join("\n")
+    : "";
+  return `${html}\n${teleports}`;
+}
 
-describe("MobileWorkflowTreeNode.vue", () => {
-  it("imports resolveNodeDisplay from the shared resolver", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNode.vue"), "utf8");
-    expect(src).toMatch(
-      /import\s*\{[^}]*\bresolveNodeDisplay\b[^}]*\}\s*from\s*"@\/lib\/nodeDisplay"/,
-    );
+describe("Mobile surface SSR rendering with unknown/stale node types", () => {
+  describe("mobile node tree", () => {
+    it("renders MobileWorkflowTreeNode with unknown node type safely", async () => {
+      const unknownNode: WorkflowNode = {
+        id: "node-unknown-1",
+        type: "legacyCustomAction" as NodeType,
+        position: { x: 0, y: 0 },
+        data: {
+          label: "Custom Stale Action",
+          url: "https://example.com/api",
+        },
+      };
+
+      const html = await renderComponent(MobileWorkflowTreeNode, {
+        entry: {
+          node: unknownNode,
+          children: [],
+          depth: 0,
+          accent: "violet",
+          hasSuccessor: false,
+        },
+      });
+
+      expect(html).toContain("Custom Stale Action");
+      expect(html).toContain("https://example.com/api");
+    });
+
+    it("renders MobileWorkflowTreeNode with default humanized label when label is absent", async () => {
+      const unknownNode: WorkflowNode = {
+        id: "node-unknown-2",
+        type: "stalePluginNode" as NodeType,
+        position: { x: 0, y: 0 },
+        data: { label: "" },
+      };
+
+      const html = await renderComponent(MobileWorkflowTreeNode, {
+        entry: {
+          node: unknownNode,
+          children: [],
+          depth: 0,
+          accent: "emerald",
+          hasSuccessor: false,
+        },
+      });
+
+      expect(html).toContain("Stale Plugin Node");
+    });
+
+    it("renders MobileWorkflowTreeNodesTab containing selected unknown node without label safely", async () => {
+      const pinia = createPinia();
+      setActivePinia(pinia);
+      const store = useWorkflowStore();
+
+      const unknownNode: WorkflowNode = {
+        id: "node-unknown-tab",
+        type: "deprecatedCustomAction" as NodeType,
+        position: { x: 0, y: 0 },
+        data: { label: "" },
+      };
+
+      store.nodes = [unknownNode];
+      store.selectNode(unknownNode.id);
+
+      const app = createSSRApp({
+        render: () => h(MobileWorkflowTreeNodesTab),
+      });
+      app.use(pinia);
+
+      const ssrContext: { teleports?: Record<string, string> } = {};
+      const html = await renderToString(app, ssrContext);
+
+      expect(html).toContain("Deprecated Custom Action");
+    });
+
+    it("renders MobileWorkflowTree containing unknown node types and selections safely", async () => {
+      const pinia = createPinia();
+      setActivePinia(pinia);
+      const store = useWorkflowStore();
+
+      const unknownNode: WorkflowNode = {
+        id: "node-unknown-tree",
+        type: "deprecatedTrigger" as NodeType,
+        position: { x: 0, y: 0 },
+        data: {
+          label: "Legacy Webhook Trigger",
+        },
+      };
+
+      store.nodes = [unknownNode];
+      store.selectNode(unknownNode.id);
+
+      const app = createSSRApp({
+        render: () => h(MobileWorkflowTree),
+      });
+      app.use(pinia);
+
+      const ssrContext: { teleports?: Record<string, string> } = {};
+      const html = await renderToString(app, ssrContext);
+
+      expect(html).toContain("Legacy Webhook Trigger");
+    });
   });
 
-  it("calls resolveNodeDisplay() for icon / color / label resolution", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNode.vue"), "utf8");
-    expect(src).toContain("resolveNodeDisplay(");
+  describe("connection sheet", () => {
+    it("renders connection sheet with known and unknown candidate node types without throwing", async () => {
+      const activeNode: WorkflowNode = {
+        id: "source-node",
+        type: "http",
+        position: { x: 0, y: 0 },
+        data: { label: "Source HTTP" },
+      };
+
+      const knownCandidate: WorkflowNode = {
+        id: "candidate-known",
+        type: "http",
+        position: { x: 0, y: 100 },
+        data: {
+          label: "My Webhook Step",
+          url: "https://api.example.com/hook",
+        },
+      };
+
+      const unknownCandidate: WorkflowNode = {
+        id: "candidate-unknown",
+        type: "staleCustomIntegration" as NodeType,
+        position: { x: 0, y: 200 },
+        data: {
+          label: "Archived Integration",
+          url: "https://archive.example.com",
+        },
+      };
+
+      const unlabelledCandidate: WorkflowNode = {
+        id: "candidate-unlabelled",
+        type: "deletedWorkerType" as NodeType,
+        position: { x: 0, y: 300 },
+        data: {
+          label: "   ",
+        },
+      };
+
+      const html = await renderComponent(MobileWorkflowTreeConnectionSheet, {
+        open: true,
+        node: activeNode,
+        nodes: [activeNode, knownCandidate, unknownCandidate, unlabelledCandidate],
+      });
+
+      // Verify connection sheet dialog renders
+      expect(html).toContain("Connect Source HTTP");
+
+      // Verify candidates render their labels
+      expect(html).toContain("My Webhook Step");
+      expect(html).toContain("Archived Integration");
+
+      // Verify candidate secondary lines display typeLabel, not summary URL
+      expect(html).toContain("HTTP");
+      expect(html).toContain("Stale Custom Integration");
+      expect(html).not.toContain("https://api.example.com/hook");
+
+      // Verify candidate with empty/whitespace label falls back to typeLabel
+      expect(html).toContain("Deleted Worker Type");
+    });
   });
 
-  it("does not directly access NODE_DEFINITIONS for node type lookups", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNode.vue"), "utf8");
-    // NODE_DEFINITIONS should not be imported at all — it is no longer needed
-    // in this component since resolveNodeDisplay() encapsulates the lookup.
-    expect(src).not.toMatch(
-      /import\s*\{[^}]*\bNODE_DEFINITIONS\b[^}]*\}\s*from\s*"@\/types\/node"/,
-    );
-  });
+  describe("mobile node execution detail", () => {
+    it("renders execution detail with unknown node type safely", async () => {
+      const unknownNode: WorkflowNode = {
+        id: "node-exec-unknown",
+        type: "deletedWorkerType" as NodeType,
+        position: { x: 0, y: 0 },
+        data: {
+          label: "Stale Worker Step",
+        },
+      };
 
-  it("does not directly index nodeIcons by node type", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNode.vue"), "utf8");
-    expect(src).not.toMatch(/\bnodeIcons\s*\[/);
-  });
+      const html = await renderComponent(MobileNodeExecutionDetail, {
+        open: true,
+        node: unknownNode,
+        result: {
+          node_id: "node-exec-unknown",
+          node_label: "Stale Worker Step",
+          node_type: "deletedWorkerType",
+          status: "success",
+          output: { count: 42 },
+          execution_time_ms: 120,
+          error: null,
+        },
+        output: { count: 42 },
+        workflowName: "Demo Workflow",
+      });
 
-  it("does not directly index nodeIconColorClass by node type", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNode.vue"), "utf8");
-    expect(src).not.toMatch(/\bnodeIconColorClass\s*\[/);
-  });
-});
+      expect(html).toContain("Stale Worker Step");
+      expect(html).toContain("Deleted Worker Type");
+      expect(html).toContain("node-exec-unknown");
+      expect(html).toContain("success");
+    });
 
-describe("MobileWorkflowTreeConnectionSheet.vue", () => {
-  it("imports resolveNodeDisplay from the shared resolver", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    expect(src).toMatch(
-      /import\s*\{[^}]*\bresolveNodeDisplay\b[^}]*\}\s*from\s*"@\/lib\/nodeDisplay"/,
-    );
-  });
+    it("renders execution detail when node is null and only result has unknown node type", async () => {
+      const html = await renderComponent(MobileNodeExecutionDetail, {
+        open: true,
+        node: null,
+        result: {
+          node_id: "orphan-node-1",
+          node_label: "Orphan Execution",
+          node_type: "unregisteredCustomNode",
+          status: "error",
+          output: {},
+          execution_time_ms: 350,
+          error: "Execution failed",
+        },
+        output: {},
+        workflowName: "Demo Workflow",
+      });
 
-  it("calls resolveNodeDisplay() for candidate node display", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    expect(src).toContain("resolveNodeDisplay(");
-  });
-
-  it("does not directly access NODE_DEFINITIONS for node type lookups", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    expect(src).not.toMatch(
-      /import\s*\{[^}]*\bNODE_DEFINITIONS\b[^}]*\}\s*from\s*"@\/types\/node"/,
-    );
-  });
-
-  it("does not directly index nodeIcons by node type", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    expect(src).not.toMatch(/\bnodeIcons\s*\[/);
-  });
-
-  it("does not directly index nodeIconColorClass by node type", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    expect(src).not.toMatch(/\bnodeIconColorClass\s*\[/);
-  });
-
-  it("does not use NODE_DEFINITIONS to resolve candidate labels", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeConnectionSheet.vue"), "utf8");
-    // The old pattern was: NODE_DEFINITIONS[node.type].label or [candidate.type].label
-    expect(src).not.toMatch(/NODE_DEFINITIONS\s*\[\s*\w+\.type\s*\]\s*\.\s*label/);
-  });
-});
-
-describe("MobileWorkflowTreeNodesTab.vue", () => {
-  it("imports resolveNodeDisplay from the shared resolver", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNodesTab.vue"), "utf8");
-    expect(src).toMatch(
-      /import\s*\{[^}]*\bresolveNodeDisplay\b[^}]*\}\s*from\s*"@\/lib\/nodeDisplay"/,
-    );
-  });
-
-  it("calls resolveNodeDisplay() for selectedLabel and remove confirmation", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNodesTab.vue"), "utf8");
-    expect(src).toContain("resolveNodeDisplay(");
-  });
-
-  it("does not use NODE_DEFINITIONS to look up a runtime node type label", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTreeNodesTab.vue"), "utf8");
-    // NODE_DEFINITIONS[nodeType].defaultData is a legitimate safe call (known NodeType
-    // from the editor palette) and is allowed to remain.  The unsafe pattern that was
-    // removed is indexing by a runtime .type property for label / description.
-    expect(src).not.toMatch(/NODE_DEFINITIONS\s*\[\s*\w+\.type\s*\]\s*\.\s*label/);
-    expect(src).not.toMatch(/NODE_DEFINITIONS\s*\[\s*\w+\.type\s*\]\s*\.\s*description/);
-  });
-});
-
-describe("MobileWorkflowTree.vue", () => {
-  it("imports resolveNodeDisplay from the shared resolver", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTree.vue"), "utf8");
-    expect(src).toMatch(
-      /import\s*\{[^}]*\bresolveNodeDisplay\b[^}]*\}\s*from\s*"@\/lib\/nodeDisplay"/,
-    );
-  });
-
-  it("calls resolveNodeDisplay() for the selected node label", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTree.vue"), "utf8");
-    expect(src).toContain("resolveNodeDisplay(");
-  });
-
-  it("does not directly access NODE_DEFINITIONS for node type lookups", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTree.vue"), "utf8");
-    expect(src).not.toMatch(
-      /import\s*\{[^}]*\bNODE_DEFINITIONS\b[^}]*\}\s*from\s*"@\/types\/node"/,
-    );
-  });
-
-  it("does not use NODE_DEFINITIONS to resolve the selected node label", async () => {
-    const src = await readFile(componentUrl("MobileWorkflowTree.vue"), "utf8");
-    expect(src).not.toMatch(/NODE_DEFINITIONS\s*\[\s*\w+\.type\s*\]\s*\.\s*label/);
+      expect(html).toContain("Orphan Execution");
+      expect(html).toContain("Unregistered Custom Node");
+      expect(html).toContain("orphan-node-1");
+    });
   });
 });

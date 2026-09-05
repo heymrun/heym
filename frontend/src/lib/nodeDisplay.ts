@@ -1,15 +1,16 @@
-import { LayoutTemplate } from "lucide-vue-next";
 import type { Component } from "vue";
+import { LayoutTemplate } from "lucide-vue-next";
 
-import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
-import { describeNode, humanizeNodeType } from "@/lib/workflowPreview";
 import { NODE_DEFINITIONS } from "@/types/node";
 import type { NodeData, NodeType, WorkflowNode } from "@/types/workflow";
+import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
+import { describeNode, humanizeNodeType } from "@/lib/workflowPreview";
 
 const SUMMARY_KEYS = ["url", "path", "operation", "model", "prompt", "message", "code"];
 
 export interface NodeDisplayMetadata {
   label: string;
+  typeLabel: string;
   summary: string;
   icon: Component;
   iconColorClass: string;
@@ -49,15 +50,17 @@ export function resolveNodeDisplay(
 ): NodeDisplayMetadata {
   const knownType = knownNodeType(nodeType);
   const definition = knownType ? NODE_DEFINITIONS[knownType] : undefined;
+  const typeLabel = definition?.label || humanizeNodeType(nodeType) || "Unknown node";
   const label = typeof data.label === "string" && data.label.trim()
     ? data.label.trim()
-    : definition?.label || humanizeNodeType(nodeType) || "Unknown node";
+    : typeLabel;
   const summary = nodeSpecificSummary(data)
     || definition?.description
     || unknownNodeSummary(nodeType, data);
 
   return {
     label,
+    typeLabel,
     summary,
     icon: knownType ? nodeIcons[knownType] : LayoutTemplate,
     iconColorClass: knownType ? nodeIconColorClass[knownType] : "text-muted-foreground",
