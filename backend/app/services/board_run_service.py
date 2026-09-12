@@ -1062,6 +1062,34 @@ async def sync_recovered_board_run(
                 await db.commit()
                 return
 
+            if history.status == "skipped":
+                # Recovery was switched off for this workflow, so nothing failed. The
+                # card goes back to idle rather than red, and stays re-runnable.
+                run.status = "skipped"
+                run.error = None
+                db.add(
+                    BoardCardActivity(
+                        card_id=card.id,
+                        kind="event",
+                        author_type="system",
+                        content=f"{run.workflow_name} was not resumed after a restart",
+                        data={"status": history.status, "recovered": True},
+                        run_id=run.id,
+                    )
+                )
+                await _abort_remaining(
+                    db,
+                    card.id,
+                    column.id,
+                    remaining,
+                    0,
+                    run.chain_position + 1,
+                    run.chain_length,
+                )
+                card.run_status = "idle"
+                await db.commit()
+                return
+
             if history.status != "success":
                 run.status = "failed"
                 run.error = f"Workflow finished with status {history.status}"
