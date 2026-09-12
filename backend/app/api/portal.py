@@ -109,6 +109,29 @@ async def _validate_session(db: AsyncSession, token: str, workflow_id: uuid.UUID
     return True
 
 
+async def _run_portal_error_workflow(
+    db: AsyncSession,
+    workflow: Workflow,
+    *,
+    status: str,
+    node_results: list,
+    execution_id: uuid.UUID,
+) -> None:
+    """A portal run always executes in process, so dispatch_workflow's seam never sees it."""
+    if status != "error":
+        return
+    from app.services.error_workflow_runner import maybe_run_error_workflow
+
+    await maybe_run_error_workflow(
+        db,
+        workflow,
+        status=status,
+        node_results=node_results,
+        run_id=str(execution_id),
+        actor_user_id=workflow.owner_id,
+    )
+
+
 @router.get("/{slug}/info", response_model=PortalInfoResponse)
 async def get_portal_info(
     slug: str,
@@ -375,6 +398,13 @@ async def portal_execute(
         workflow_cache,
         execution_result.node_results,
         execution_result.sub_workflow_executions,
+    )
+    await _run_portal_error_workflow(
+        db,
+        workflow,
+        status=execution_result.status,
+        node_results=execution_result.node_results,
+        execution_id=execution_id,
     )
     await db.flush()
 
@@ -722,6 +752,13 @@ async def portal_execute_stream(
                         execution_time_ms=float(sub_exec["execution_time_ms"]),
                     )
 
+                await _run_portal_error_workflow(
+                    db,
+                    workflow,
+                    status=final_result.get("status", "error"),
+                    node_results=final_result.get("node_results", []),
+                    execution_id=execution_id,
+                )
                 await db.flush()
 
     return StreamingResponse(

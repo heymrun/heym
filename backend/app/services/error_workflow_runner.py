@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.workflows import collect_referenced_workflows, get_credentials_context
 from app.db.models import ExecutionHistory, Workflow
+from app.db.session import async_session_maker
 from app.services.global_variables_service import get_global_variables_context
 from app.services.workflow_executor import execute_workflow
 
@@ -122,4 +123,34 @@ async def maybe_run_error_workflow(
         return True
     except Exception:  # noqa: BLE001 — error workflow must never mask the original failure
         logger.exception("Error workflow execution failed for %s", getattr(workflow, "id", "?"))
+        return False
+
+
+async def run_error_workflow_for_run(
+    *,
+    workflow_id: uuid.UUID,
+    status: str,
+    node_results: list[dict[str, Any]],
+    run_id: str | None,
+    actor_user_id: uuid.UUID | None,
+) -> bool:
+    """Same hook for call sites that hold no session and no Workflow. Never raises."""
+    try:
+        async with async_session_maker() as db:
+            workflow = await _load_workflow(db, workflow_id)
+            if workflow is None or not should_run_error_workflow(workflow, status):
+                return False
+            ran = await maybe_run_error_workflow(
+                db,
+                workflow,
+                status=status,
+                node_results=node_results,
+                run_id=run_id,
+                actor_user_id=actor_user_id or workflow.owner_id,
+            )
+            if ran:
+                await db.commit()
+            return ran
+    except Exception:  # noqa: BLE001 — error workflow must never mask the original failure
+        logger.exception("Error workflow dispatch failed for %s", workflow_id)
         return False

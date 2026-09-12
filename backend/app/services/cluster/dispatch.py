@@ -21,6 +21,7 @@ from app.services.cluster import identity, run_queue
 from app.services.cluster.node_placement import Placement, workflow_placement
 from app.services.cluster.run_history import (
     OffloadedRun,
+    failure_node_results,
     from_summary,
     offloaded_error,
     persist_pending_run_history,
@@ -136,6 +137,40 @@ async def wait_for_result(
         run_result_bus.release(execution_id)
 
 
+async def run_error_workflow_for_failed_run(
+    result: Any,
+    *,
+    workflow_id: uuid.UUID,
+    execution_id: uuid.UUID | None,
+    test_run: bool,
+    actor_user_id: uuid.UUID | None,
+) -> None:
+    """Fire the workflow's configured error workflow when a top-level run fails.
+
+    Every trigger call site shares this seam, so the hook reaches the API, cron and
+    every trigger service in a single-instance install and in a cluster alike. It
+    runs on the dispatching instance, where ingress and the cron leader live, which
+    keeps a MAIN_ONLY error workflow on main; and it runs its target directly, so
+    the target never triggers an error workflow of its own.
+    """
+    if test_run or getattr(result, "status", None) != "error":
+        return
+    # A dispatch that produced no run carries its reason here. The workflow may
+    # still be executing, or recovery may yet re-run it, so this is not its failure.
+    if getattr(result, "error", None) is not None:
+        return
+    # Local: app.api.workflows imports dispatch_workflow.
+    from app.services.error_workflow_runner import run_error_workflow_for_run
+
+    await run_error_workflow_for_run(
+        workflow_id=workflow_id,
+        status="error",
+        node_results=failure_node_results(result),
+        run_id=str(execution_id) if execution_id else None,
+        actor_user_id=actor_user_id,
+    )
+
+
 async def dispatch_workflow(
     *,
     workflow_id: uuid.UUID,
@@ -183,8 +218,17 @@ async def dispatch_workflow(
         # Each call site keeps the blocking behaviour it already had: cron
         # deliberately runs off the event loop, the webhook triggers do not.
         if run_in_thread:
-            return await asyncio.to_thread(execute_workflow, **call_kwargs)
-        return execute_workflow(**call_kwargs)
+            result = await asyncio.to_thread(execute_workflow, **call_kwargs)
+        else:
+            result = execute_workflow(**call_kwargs)
+        await run_error_workflow_for_failed_run(
+            result,
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            test_run=test_run,
+            actor_user_id=actor_user_id or credentials_owner_id,
+        )
+        return result
 
     run_id = execution_id or uuid.uuid4()
     # Register before enqueueing so a run that finishes first still wakes us.
@@ -221,6 +265,13 @@ async def dispatch_workflow(
             trigger_source=trigger_source,
             message=result.error or "The run was retired before any instance executed it",
         )
+    await run_error_workflow_for_failed_run(
+        result,
+        workflow_id=workflow_id,
+        execution_id=run_id,
+        test_run=test_run,
+        actor_user_id=actor_user_id or credentials_owner_id,
+    )
     return result
 
 
