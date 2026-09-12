@@ -52,6 +52,8 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_ENTRIES = 200
 ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
+_RESTART_RUN_ERROR = "Server restarted during execution"
+_ABANDONED_RUN_ERROR = "Execution is no longer running"
 
 
 def live_execution_conditions() -> tuple[Any, ...]:
@@ -96,6 +98,47 @@ def board_run_is_dead(
     # register_execution queues the active row write, so a young run has none yet.
     now = now or datetime.now(timezone.utc)
     return (now - started_at) >= timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
+
+
+def _settle_dead_run(run: BoardCardRun, *, reason: str, now: datetime) -> None:
+    run.status = "failed"
+    run.error = reason
+    run.finished_at = now
+
+
+async def blocking_card_runs(
+    db, card_id: uuid.UUID, *, now: datetime | None = None
+) -> list[BoardCardRun]:
+    """Runs that still stop new work on a card.
+
+    When nothing is blocking, dead leftovers are settled here so the status column
+    stops lying to every other reader of it.
+    """
+    runs = (
+        (
+            await db.execute(
+                select(BoardCardRun).where(
+                    BoardCardRun.card_id == card_id,
+                    BoardCardRun.status.in_(ACTIVE_RUN_STATUSES),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not runs:
+        return []
+    live = await live_board_execution_ids(db, [run.active_execution_id for run in runs])
+    now = now or datetime.now(timezone.utc)
+    dead: list[BoardCardRun] = []
+    blocking: list[BoardCardRun] = []
+    for run in runs:
+        (dead if board_run_is_dead(run, live, now=now) else blocking).append(run)
+    if blocking:
+        return blocking
+    for run in dead:
+        _settle_dead_run(run, reason=_ABANDONED_RUN_ERROR, now=now)
+    return []
 
 
 # The planning gate is positional, not name-based: the leftmost column (index 0) and
@@ -750,19 +793,7 @@ async def answer_card_comment(db, *, card, column, board) -> bool:
     if column.id not in columns or columns.index(column.id) >= GATE_COLUMN_INDEX:
         return False
 
-    active = (
-        (
-            await db.execute(
-                select(BoardCardRun.id).where(
-                    BoardCardRun.card_id == card.id,
-                    BoardCardRun.status.in_(ACTIVE_RUN_STATUSES),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if active:
+    if await blocking_card_runs(db, card.id):
         return False
 
     # Only a card whose gate chain actually finished is waiting for an answer.
@@ -798,20 +829,7 @@ async def enqueue_card_chain(
     task's fresh session sees it. "Active" means still alive, not merely labelled
     ``running``, or an abandoned run locks the card out for good.
     """
-    candidates = (
-        (
-            await db.execute(
-                select(BoardCardRun).where(
-                    BoardCardRun.card_id == card.id,
-                    BoardCardRun.status.in_(ACTIVE_RUN_STATUSES),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    live = await live_board_execution_ids(db, [run.active_execution_id for run in candidates])
-    if any(not board_run_is_dead(run, live) for run in candidates):
+    if await blocking_card_runs(db, card.id):
         return False
     links = await _column_links(db, column.id)
     if not links:
@@ -1126,9 +1144,7 @@ async def reconcile_orphaned_board_runs() -> None:
             if not orphaned:
                 return
             for run in orphaned:
-                run.status = "failed"
-                run.error = "Server restarted during execution"
-                run.finished_at = now
+                _settle_dead_run(run, reason=_RESTART_RUN_ERROR, now=now)
             # A card keeps running while any of its other runs is still alive.
             card_ids = {run.card_id for run in orphaned} - alive_card_ids
             cards = (

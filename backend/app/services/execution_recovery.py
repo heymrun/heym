@@ -58,11 +58,16 @@ class ExecutionRecoveryService:
         logger.info("Execution recovery service stopped")
 
     async def _run_loop(self) -> None:
+        from app.services.board_run_service import reconcile_orphaned_board_runs
+
         await asyncio.sleep(_RECOVERY_GRACE_SECONDS)
         while self._running:
             try:
                 if lock_service.is_leader:
                     await self._sweep_once()
+                    # Startup alone is too early: a run whose heartbeat was still fresh
+                    # when this process booted is only settleable once it goes stale.
+                    await reconcile_orphaned_board_runs()
             except asyncio.CancelledError:
                 raise
             except Exception:
