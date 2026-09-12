@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from importlib import import_module
-
+from app.services import ssrf_guard
 from app.services.node_execution.base import NodeExecutionContext
 
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the crawler node."""
-    _workflow_executor = import_module("app.services.workflow_executor")
-    get_http_client = _workflow_executor.get_http_client
     self = ctx.executor
     node_id = ctx.node_id
     inputs = ctx.inputs
@@ -47,7 +44,10 @@ def execute(ctx: NodeExecutionContext) -> object:
     if wait_seconds and int(wait_seconds) > 0:
         request_body["waitInSeconds"] = int(wait_seconds)
 
-    http_client = get_http_client()
+    # Metadata-only: FlareSolverr normally runs on a private address. The crawl
+    # target it resolves for itself is a separate hop, not guarded here.
+    ssrf_guard.guard_carrier_url(flaresolverr_url, "FlareSolverr credential URL")
+    http_client = ssrf_guard.get_guarded_carrier_http_client()
     response = http_client.post(
         flaresolverr_url,
         json=request_body,

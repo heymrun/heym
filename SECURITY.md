@@ -108,3 +108,7 @@ vulnerabilities in Heym:
 - [@roonakyadav](https://github.com/roonakyadav) for credential exfiltration via
   the connection-test endpoint, where a collaborator could point a shared
   credential at a destination of their own (GHSA-39qx-wp7x-69rq).
+- [@unbengable12](https://github.com/unbengable12) for credential-controlled URL
+  SSRF in the Slack, Discord, and Crawler nodes, which reached the shared HTTP
+  client directly and so were never covered by the egress guard
+  (GHSA-39j3-6x3x-8rcr).

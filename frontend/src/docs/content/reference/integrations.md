@@ -859,6 +859,8 @@ OpenAI automatically caches the static (unchanging) prefix of your system prompt
 |-------|-------------|
 | `flaresolverr_url` | URL of your FlareSolverr instance (e.g. `http://localhost:8191`) |
 
+Loopback and private addresses are supported here, so running FlareSolverr beside Heym works as documented. The URL may not resolve to a link-local or cloud-metadata address. Because private addresses are allowed, this field can also be pointed at another internal service and the reply comes back in the node output. Any signed-in user can create this credential, so the boundary is who may author workflows plus your network rules, not credential sharing. See [Egress Safety](../nodes/crawler-node.md#egress-safety).
+
 ### Used By
 
 - [Crawler node](../nodes/crawler-node.md)

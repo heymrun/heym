@@ -14,7 +14,7 @@ from app.services.ssrf_guard import (
     _HttpEgressPinBackend,
     _install_egress_pin,
     _is_public_address,
-    _resolve_pinned_ip,
+    _resolve_pinned_addresses,
     get_guarded_http_client,
     guard_http_url,
 )
@@ -212,7 +212,7 @@ class Ipv6TransitionAddressTests(unittest.TestCase):
             return_value=_addrinfo("64:ff9b::169.254.169.254"),
         ):
             with self.assertRaises(SsrfBlockedError):
-                _resolve_pinned_ip("rebind.example.com")
+                _resolve_pinned_addresses("rebind.example.com")
 
     def test_pinned_dial_rejects_ipv4_compatible_metadata(self) -> None:
         with patch.object(
@@ -221,7 +221,7 @@ class Ipv6TransitionAddressTests(unittest.TestCase):
             return_value=_addrinfo("::169.254.169.254"),
         ):
             with self.assertRaises(SsrfBlockedError):
-                _resolve_pinned_ip("rebind.example.com")
+                _resolve_pinned_addresses("rebind.example.com")
 
 
 class PinBackendTests(unittest.TestCase):
@@ -251,10 +251,10 @@ class PinBackendTests(unittest.TestCase):
         with self.assertRaises(httpcore.ConnectError):
             backend.connect_unix_socket("/var/run/x.sock")
 
-    def test_resolve_pinned_ip_rejects_private(self) -> None:
+    def test_resolve_pinned_addresses_rejects_private(self) -> None:
         with patch.object(ssrf_guard.socket, "getaddrinfo", return_value=_addrinfo("192.168.0.2")):
             with self.assertRaises(SsrfBlockedError):
-                _resolve_pinned_ip("internal.example.com")
+                _resolve_pinned_addresses("internal.example.com")
 
 
 class GuardedClientTests(unittest.TestCase):

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from importlib import import_module
-
+from app.services import ssrf_guard
 from app.services.node_execution.base import NodeExecutionContext
 
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the slack node."""
-    _workflow_executor = import_module("app.services.workflow_executor")
-    get_http_client = _workflow_executor.get_http_client
     self = ctx.executor
     node_id = ctx.node_id
     inputs = ctx.inputs
@@ -33,7 +30,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not webhook_url:
         raise ValueError("Slack credential requires webhook_url")
 
-    http_client = get_http_client()
+    ssrf_guard.guard_http_url(webhook_url, "Slack credential webhook URL")
+    http_client = ssrf_guard.get_guarded_http_client()
     response = http_client.post(webhook_url, json={"text": message})
 
     if response.status_code >= 400:

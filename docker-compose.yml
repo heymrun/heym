@@ -124,6 +124,12 @@ services:
       HEYM_MCP_STDIO_FILES_SUBPATH: ${HEYM_MCP_STDIO_FILES_SUBPATH:-}
       HEYM_MCP_STDIO_FILES_HOST_DIR: ${HEYM_MCP_STDIO_FILES_HOST_DIR:-}
       HEYM_MCP_STDIO_FILES_PATH: ${HEYM_MCP_STDIO_FILES_PATH:-}
+      # SSRF egress opt-outs. Declared for the same reason as the sandbox
+      # settings above: Compose forwards nothing it has not declared, so without
+      # these two lines the documented escape hatch cannot be set at all on a
+      # compose deployment. Both default to false, which keeps the guard on.
+      HEYM_HTTP_ALLOW_PRIVATE_URLS: ${HEYM_HTTP_ALLOW_PRIVATE_URLS:-false}
+      HEYM_MCP_ALLOW_PRIVATE_URLS: ${HEYM_MCP_ALLOW_PRIVATE_URLS:-false}
       HEYM_MCP_STDIO_FILES_WRITABLE: ${HEYM_MCP_STDIO_FILES_WRITABLE:-}
       HEYM_MCP_STDIO_TMPFS_SIZE: ${HEYM_MCP_STDIO_TMPFS_SIZE:-}
       HEYM_MCP_STDIO_MEMORY: ${HEYM_MCP_STDIO_MEMORY:-}

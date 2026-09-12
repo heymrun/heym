@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from importlib import import_module
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+from app.services import ssrf_guard
 from app.services.node_execution.base import NodeExecutionContext
 
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the discord node."""
-    _workflow_executor = import_module("app.services.workflow_executor")
-    get_http_client = _workflow_executor.get_http_client
     self = ctx.executor
     node_id = ctx.node_id
     inputs = ctx.inputs
@@ -53,7 +51,9 @@ def execute(ctx: NodeExecutionContext) -> object:
         query=urlencode(filtered_query, doseq=True)
     ).geturl()
 
-    http_client = get_http_client()
+    # Guards the rewritten URL, which is the one actually dialed.
+    ssrf_guard.guard_http_url(request_webhook_url, "Discord credential webhook URL")
+    http_client = ssrf_guard.get_guarded_http_client()
     response = http_client.post(request_webhook_url, json=payload)
 
     if response.status_code >= 400:

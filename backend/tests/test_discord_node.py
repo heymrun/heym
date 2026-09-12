@@ -102,7 +102,10 @@ class TestDiscordExecutorBranch(unittest.TestCase):
                 "app.services.encryption.decrypt_config",
                 return_value={"webhook_url": "https://discord.com/api/webhooks/123/abc"},
             ),
-            patch("app.services.workflow_executor.get_http_client", return_value=mock_http_client),
+            patch(
+                "app.services.ssrf_guard.get_guarded_http_client",
+                return_value=mock_http_client,
+            ),
         ):
             executor = WorkflowExecutor(
                 nodes=nodes,
