@@ -109,12 +109,13 @@ class ExecutionRecoveryService:
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory
         from app.db.session import async_session_maker
 
-        wrote_history = False
+        has_history = False
         async with async_session_maker() as session:
             # A paused run already published history under this id, and its finish write
             # can be dropped by the registry, leaving a claimable active row. Inserting
             # again would collide on the primary key and overwrite real inputs.
             existing = await session.get(ExecutionHistory, orphan.execution_id)
+            has_history = existing is not None
             # A deleted workflow leaves nothing for the history row's foreign key to
             # point at, so the insert could only raise. Dropping the active row is
             # enough; board reconciliation settles the run once the execution is gone.
@@ -138,7 +139,7 @@ class ExecutionRecoveryService:
                                 recovered=True,
                             )
                         )
-                    wrote_history = True
+                    has_history = True
                 except IntegrityError:
                     logger.info(
                         "Recovery skipped history for execution %s: workflow %s is gone",
@@ -151,7 +152,10 @@ class ExecutionRecoveryService:
                 )
             )
             await session.commit()
-        if wrote_history and orphan.trigger_source == "board":
+        # Whether the row is new or was already there, the board may still be waiting
+        # for it: a previous pass can commit history and be interrupted before it syncs.
+        # Only the helper can tell applied from unapplied, so let it decide.
+        if has_history and orphan.trigger_source == "board":
             from app.services.board_run_service import sync_recovered_board_run
 
             await sync_recovered_board_run(orphan.execution_id)

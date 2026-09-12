@@ -155,10 +155,13 @@ class FinalizeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("active_workflow_executions", session.deleted_tables())
         sync.assert_not_awaited()
 
-    async def test_existing_history_is_not_written_or_re_applied(self) -> None:
-        # A paused run published history under this id already. Its real inputs must
-        # survive, the primary key must not collide, and the board must not be told to
-        # apply a result it has had all along.
+    async def test_existing_history_is_not_written_again_but_still_reaches_the_board(
+        self,
+    ) -> None:
+        # A paused run published history under this id already, so its real inputs must
+        # survive and the primary key must not collide. The board still has to be
+        # offered it: an earlier pass can commit history and die before syncing, and
+        # only the helper can tell an applied result from an unapplied one.
         orphan = _orphan(trigger_source="board")
         paused = SimpleNamespace(id=orphan.execution_id, status="pending")
 
@@ -168,7 +171,7 @@ class FinalizeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.history_rows(), [])
         self.assertIn("active_workflow_executions", session.deleted_tables())
-        sync.assert_not_awaited()
+        sync.assert_awaited_once_with(orphan.execution_id)
 
 
 class _GetSession:
@@ -355,6 +358,45 @@ class FinalizeDrivesTheRealSyncTests(unittest.IsolatedAsyncioTestCase):
         (history,) = recovery_session.history_rows()
         self.assertEqual(history.id, execution_id)
         self.assertEqual(run.status, "skipped")
+        self.assertEqual(card.run_status, "idle")
+
+    async def test_history_committed_by_an_interrupted_pass_still_reaches_the_board(
+        self,
+    ) -> None:
+        # The registry lost the finish write and an earlier recovery pass was cut off
+        # between committing history and syncing, so the row exists while the board run
+        # has no link to it. The chain has to be picked up, not left for reconciliation
+        # to fail.
+        execution_id, run, card, board_session = _board_env("skipped")
+        self.assertIsNone(run.execution_history_id)
+        orphan = ClaimedOrphan(
+            execution_id=execution_id,
+            workflow_id=uuid.uuid4(),
+            inputs={},
+            trigger_source="board",
+            actor_user_id=uuid.uuid4(),
+            attempt=1,
+        )
+        recovery_session = _RecordingSession(
+            existing_history=SimpleNamespace(id=execution_id, status="skipped")
+        )
+        real_sync = board_run_service.sync_recovered_board_run
+
+        async def sync_with_stub_session(eid):
+            await real_sync(eid, session_factory=lambda: board_session)
+
+        with (
+            patch("app.db.session.async_session_maker", lambda: recovery_session),
+            patch.object(board_run_service, "sync_recovered_board_run", sync_with_stub_session),
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=_LINKS)),
+        ):
+            await ExecutionRecoveryService()._finalize(
+                orphan=orphan, workflow=SimpleNamespace(id=orphan.workflow_id), status="skipped"
+            )
+
+        self.assertEqual(recovery_session.history_rows(), [])
+        self.assertEqual(run.status, "skipped")
+        self.assertEqual(run.execution_history_id, execution_id)
         self.assertEqual(card.run_status, "idle")
 
 
