@@ -1045,6 +1045,13 @@ async def sync_recovered_board_run(
             if history is None or card is None or column is None:
                 return
 
+            # The chain stamps this the moment it publishes an outcome of its own, so a
+            # result that is already on the board must not be applied a second time:
+            # the tail of the chain would run again. Reconciliation leaves it null, so
+            # a run it settled can still be corrected here.
+            if run.execution_history_id is not None:
+                return
+
             board = await db.get(Board, card.board_id)
             workflow = (
                 await db.get(Workflow, run.workflow_id) if run.workflow_id is not None else None
@@ -1059,6 +1066,34 @@ async def sync_recovered_board_run(
                 run.status = "pending"
                 run.error = None
                 card.run_status = "pending"
+                await db.commit()
+                return
+
+            if history.status == "skipped":
+                # Recovery was switched off for this workflow, so nothing failed. The
+                # card goes back to idle rather than red, and stays re-runnable.
+                run.status = "skipped"
+                run.error = None
+                db.add(
+                    BoardCardActivity(
+                        card_id=card.id,
+                        kind="event",
+                        author_type="system",
+                        content=f"{run.workflow_name} was not resumed after a restart",
+                        data={"status": history.status, "recovered": True},
+                        run_id=run.id,
+                    )
+                )
+                await _abort_remaining(
+                    db,
+                    card.id,
+                    column.id,
+                    remaining,
+                    0,
+                    run.chain_position + 1,
+                    run.chain_length,
+                )
+                card.run_status = "idle"
                 await db.commit()
                 return
 
