@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -15,6 +16,7 @@ from app.api.workflows import (
     get_credentials_context,
 )
 from app.db.models import (
+    ActiveWorkflowExecution,
     Board,
     BoardCard,
     BoardCardActivity,
@@ -35,7 +37,12 @@ from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
 )
-from app.services.execution_cancellation import clear_execution, register_execution
+from app.services.execution_cancellation import (
+    ACTIVE_EXECUTION_STALE_AFTER_SECONDS,
+    RECOVERY_STALE_AFTER_SECONDS,
+    clear_execution,
+    register_execution,
+)
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.workflow_executor import _to_json_compatible, execute_workflow
@@ -45,6 +52,51 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_ENTRIES = 200
 ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
+
+
+def live_execution_conditions() -> tuple[Any, ...]:
+    """The one definition of a live execution, shared by every query that needs it."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
+    return (
+        ActiveWorkflowExecution.heartbeat_at >= cutoff,
+        ActiveWorkflowExecution.cancel_requested_at.is_(None),
+    )
+
+
+async def live_board_execution_ids(db, execution_ids: Iterable[uuid.UUID | None]) -> set[uuid.UUID]:
+    """Return the ids among ``execution_ids`` whose execution is still live."""
+    candidates = {execution_id for execution_id in execution_ids if execution_id is not None}
+    if not candidates:
+        return set()
+    result = await db.execute(
+        select(ActiveWorkflowExecution.execution_id).where(
+            ActiveWorkflowExecution.execution_id.in_(candidates),
+            *live_execution_conditions(),
+        )
+    )
+    return set(result.scalars().all())
+
+
+def board_run_is_dead(
+    run: BoardCardRun, live_execution_ids: set[uuid.UUID], *, now: datetime | None = None
+) -> bool:
+    """Whether anything other than a run's own chain may settle it.
+
+    Needs positive evidence: calling a live run dead both reports a failure that did
+    not happen and releases the enqueue guard.
+    """
+    # Pending is parked on a human answer and has no active row by design.
+    if run.status != "running":
+        return False
+    if run.active_execution_id in live_execution_ids:
+        return False
+    started_at = run.started_at
+    if started_at is None:
+        return False
+    # register_execution queues the active row write, so a young run has none yet.
+    now = now or datetime.now(timezone.utc)
+    return (now - started_at) >= timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
+
 
 # The planning gate is positional, not name-based: the leftmost column (index 0) and
 # the column immediately to its right (index 1) run their chain then wait for a human.
@@ -743,9 +795,10 @@ async def enqueue_card_chain(
 
     Returns False when the column has no chain or the card already has an active run.
     Commits the ``running`` status flip before spawning the background task so the
-    task's fresh session sees it.
+    task's fresh session sees it. "Active" means still alive, not merely labelled
+    ``running``, or an abandoned run locks the card out for good.
     """
-    active = (
+    candidates = (
         (
             await db.execute(
                 select(BoardCardRun).where(
@@ -757,7 +810,8 @@ async def enqueue_card_chain(
         .scalars()
         .all()
     )
-    if active:
+    live = await live_board_execution_ids(db, [run.active_execution_id for run in candidates])
+    if any(not board_run_is_dead(run, live) for run in candidates):
         return False
     links = await _column_links(db, column.id)
     if not links:
@@ -1046,7 +1100,11 @@ async def sync_recovered_board_run(
 
 
 async def reconcile_orphaned_board_runs() -> None:
-    """On startup, fail runs/cards left 'running' by a previous process."""
+    """On startup, fail runs/cards left 'running' by a process that is really gone.
+
+    Runs once per uvicorn worker and once per instance, so it fires while other
+    processes are mid-chain: only runs with no live execution may be settled.
+    """
     try:
         async with async_session_maker() as db:
             runs = (
@@ -1054,11 +1112,25 @@ async def reconcile_orphaned_board_runs() -> None:
                 .scalars()
                 .all()
             )
-            card_ids = {run.card_id for run in runs}
+            live = await live_board_execution_ids(db, [run.active_execution_id for run in runs])
+            now = datetime.now(timezone.utc)
+            # Partition before mutating: once a run's status is "failed" it no longer
+            # reads as dead, so re-deriving the live side afterwards inverts the answer.
+            orphaned: list[BoardCardRun] = []
+            alive_card_ids: set[uuid.UUID] = set()
             for run in runs:
+                if board_run_is_dead(run, live, now=now):
+                    orphaned.append(run)
+                else:
+                    alive_card_ids.add(run.card_id)
+            if not orphaned:
+                return
+            for run in orphaned:
                 run.status = "failed"
                 run.error = "Server restarted during execution"
-                run.finished_at = datetime.now(timezone.utc)
+                run.finished_at = now
+            # A card keeps running while any of its other runs is still alive.
+            card_ids = {run.card_id for run in orphaned} - alive_card_ids
             cards = (
                 (
                     await db.execute(
@@ -1075,7 +1147,6 @@ async def reconcile_orphaned_board_runs() -> None:
             for card in cards:
                 card.run_status = "failed"
             await db.commit()
-            if runs:
-                logger.info("Reconciled %d orphaned board runs", len(runs))
+            logger.info("Reconciled %d orphaned board runs", len(orphaned))
     except Exception:  # noqa: BLE001 - reconciliation must never block startup
         logger.exception("Board run reconciliation failed")
