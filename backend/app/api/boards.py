@@ -1,7 +1,6 @@
 """Agentic kanban board API: boards, columns, cards, moves, runs, comments, sharing."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
 
 from fastapi import (
     APIRouter,
@@ -60,7 +59,6 @@ from app.models.board_schemas import (
 from app.services import board_run_service
 from app.services.audit_log import audit
 from app.services.credential_access import get_accessible_credential
-from app.services.execution_cancellation import ACTIVE_EXECUTION_STALE_AFTER_SECONDS
 from app.services.file_storage import (
     build_download_url,
     create_access_token,
@@ -239,7 +237,6 @@ async def _active_board_execution_ids(
     """Return fresh workflow executions linked to each board card run."""
     if not card_ids:
         return {}
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
     result = await db.execute(
         select(BoardCardRun.card_id, BoardCardRun.active_execution_id)
         .join(
@@ -248,8 +245,7 @@ async def _active_board_execution_ids(
         )
         .where(
             BoardCardRun.card_id.in_(card_ids),
-            ActiveWorkflowExecution.heartbeat_at >= cutoff,
-            ActiveWorkflowExecution.cancel_requested_at.is_(None),
+            *board_run_service.live_execution_conditions(),
         )
     )
     active_by_card: dict[uuid.UUID, set[uuid.UUID]] = {}
