@@ -64,10 +64,5 @@ if [ -f "$PROJECT_ROOT/frontend/package.json" ]; then
     sed -i.bak 's/"version": ".*"/"version": "'"$VERSION"'"/' "$PROJECT_ROOT/frontend/package.json" && rm "$PROJECT_ROOT/frontend/package.json.bak"
 fi
 
-# Update README contributor cache-buster
-if [ -f "$PROJECT_ROOT/README.md" ]; then
-    sed -i.bak -E "s#https://contrib\\.rocks/image\\?repo=heymrun/heym(&amp;v=[^\"]*|&v=[^\"]*)?#https://contrib.rocks/image?repo=heymrun/heym\\&amp;v=$VERSION#g" "$PROJECT_ROOT/README.md" && rm "$PROJECT_ROOT/README.md.bak"
-fi
-
 echo "Version updated to $VERSION"
 echo "Restart services to apply changes"

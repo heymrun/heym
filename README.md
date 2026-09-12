@@ -40,7 +40,6 @@
 [![Bun](https://img.shields.io/badge/Bun-runtime-14151A?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![Security](https://img.shields.io/badge/Security-policy-2A6F97?style=flat-square)](SECURITY.md)
-[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fheymrun%2Fheym.svg)](https://mcptoplist.com/server/glama%2Fheymrun%2Fheym)
 
 <br/>
 
@@ -783,11 +782,5 @@ Commercial licensing, enterprise deployment help, and professional support are a
 **Built with ❤️ using Vue.js, FastAPI, and a lot of LLM tokens.**
 
 [⭐ Star this repo](https://github.com/heymrun/heym/stargazers) · [🐛 Report a bug](https://github.com/heymrun/heym/issues) · [💡 Request a feature](https://github.com/heymrun/heym/discussions)
-
-## Contributors
-
-<a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.108" />
-</a>
 
 </div>
