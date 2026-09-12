@@ -104,10 +104,12 @@ class ExecutionRecoveryService:
     async def _finalize(self, *, orphan: ClaimedOrphan, workflow, status: str) -> None:
         """Write a terminal ExecutionHistory entry and drop the active row."""
         from sqlalchemy import delete
+        from sqlalchemy.exc import IntegrityError
 
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory
         from app.db.session import async_session_maker
 
+        wrote_history = False
         async with async_session_maker() as session:
             # A paused run already published history under this id, and its finish write
             # can be dropped by the registry, leaving a claimable active row. Inserting
@@ -117,28 +119,39 @@ class ExecutionRecoveryService:
             # point at, so the insert could only raise. Dropping the active row is
             # enough; board reconciliation settles the run once the execution is gone.
             if workflow is not None and existing is None:
-                session.add(
-                    ExecutionHistory(
-                        # Callers already hold this id: the streaming endpoint, the
-                        # by-id lookup and the board run are all keyed by it.
-                        id=orphan.execution_id,
-                        workflow_id=orphan.workflow_id,
-                        inputs=orphan.inputs,
-                        outputs={},
-                        node_results=[],
-                        status=status,
-                        execution_time_ms=0.0,
-                        trigger_source=orphan.trigger_source,
-                        recovered=True,
+                try:
+                    # The workflow can still go away between _load_workflow and here, so
+                    # the insert gets its own savepoint rather than losing the delete.
+                    async with session.begin_nested():
+                        session.add(
+                            ExecutionHistory(
+                                # Callers already hold this id: the streaming endpoint,
+                                # the by-id lookup and the board run are keyed by it.
+                                id=orphan.execution_id,
+                                workflow_id=orphan.workflow_id,
+                                inputs=orphan.inputs,
+                                outputs={},
+                                node_results=[],
+                                status=status,
+                                execution_time_ms=0.0,
+                                trigger_source=orphan.trigger_source,
+                                recovered=True,
+                            )
+                        )
+                    wrote_history = True
+                except IntegrityError:
+                    logger.info(
+                        "Recovery skipped history for execution %s: workflow %s is gone",
+                        orphan.execution_id,
+                        orphan.workflow_id,
                     )
-                )
             await session.execute(
                 delete(ActiveWorkflowExecution).where(
                     ActiveWorkflowExecution.execution_id == orphan.execution_id
                 )
             )
             await session.commit()
-        if workflow is not None and orphan.trigger_source == "board":
+        if wrote_history and orphan.trigger_source == "board":
             from app.services.board_run_service import sync_recovered_board_run
 
             await sync_recovered_board_run(orphan.execution_id)

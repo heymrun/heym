@@ -1045,6 +1045,13 @@ async def sync_recovered_board_run(
             if history is None or card is None or column is None:
                 return
 
+            # The chain stamps this the moment it publishes an outcome of its own, so a
+            # result that is already on the board must not be applied a second time:
+            # the tail of the chain would run again. Reconciliation leaves it null, so
+            # a run it settled can still be corrected here.
+            if run.execution_history_id is not None:
+                return
+
             board = await db.get(Board, card.board_id)
             workflow = (
                 await db.get(Workflow, run.workflow_id) if run.workflow_id is not None else None
