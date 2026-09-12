@@ -43,6 +43,8 @@ FIXED_DATE = "2026-03-05T14:30:00"
 SAMPLE_WORDS = ["beta", "alpha", "beta"]
 SAMPLE_PEOPLE = [{"name": "ada", "age": 36}, {"name": "bob", "age": 24}]
 SAMPLE_PROFILE = {"name": "ada", "age": 36}
+SAMPLE_FLAGS = [True, False, True]
+SAMPLE_USERS = [{"name": "alice", "active": True}, {"name": "bob", "active": False}]
 
 SAMPLE_MAPPINGS: list[dict[str, str]] = [
     {"key": "text", "value": SAMPLE_TEXT},
@@ -52,10 +54,15 @@ SAMPLE_MAPPINGS: list[dict[str, str]] = [
     {"key": "num", "value": "$int(7)"},
     {"key": "ratio", "value": "$float(2.5)"},
     {"key": "flag", "value": "$bool(1)"},
+    {"key": "flags", "value": "$array(true, false, true)"},
     {"key": "words", "value": "$array('beta', 'alpha', 'beta')"},
     {"key": "nullable", "value": "$array('beta', null)"},
     {"key": "nested", "value": "$array($array('a', 'b'), $array('c'))"},
     {"key": "people", "value": "$array(dict(name='ada', age=36), dict(name='bob', age=24))"},
+    {
+        "key": "users",
+        "value": "$array(dict(name='alice', active=true), dict(name='bob', active=false))",
+    },
     {"key": "profile", "value": "$dict(name='ada', age=36)"},
 ]
 
@@ -101,6 +108,10 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("intToString", "$sample.num.toString()", "7"),
     ("floatToString", "$sample.ratio.toString()", "2.5"),
     ("boolToString", "$sample.flag.toString()", "true"),
+    ("boolGreaterThan", "$sample.flag > false", True),
+    ("boolGreaterThanOrEqual", "$sample.flag >= true", True),
+    ("boolLessThan", "$sample.flag < true", False),
+    ("boolLessThanOrEqual", "$sample.flag <= false", False),
     ("intArithmetic", "$sample.num + 3", 10),
     ("floatArithmetic", "$sample.ratio - 0.5", 2.0),
     # --- DotList -----------------------------------------------------------------
@@ -109,6 +120,7 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("listLast", "$sample.words.last()", "beta"),
     ("listDistinct", "$sample.words.distinct()", ["beta", "alpha"]),
     ("listSort", "$sample.words.sort()", ["alpha", "beta", "beta"]),
+    ("listSortBooleans", "$sample.flags.sort()", [False, True, True]),
     ("listReverse", "$sample.words.reverse()", ["beta", "alpha", "beta"]),
     ("listTake", "$sample.words.take(2)", ["beta", "alpha"]),
     ("listJoin", "$sample.words.join('|')", "beta|alpha|beta"),
@@ -118,8 +130,14 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("listFlat", "$sample.nested.flat()", ["a", "b", "c"]),
     ("listMap", "$sample.people.map('item.name')", ["ada", "bob"]),
     ("listFilter", "$sample.people.filter('item.age > 30')", [SAMPLE_PEOPLE[0]]),
+    (
+        "listFilterBooleanOrdering",
+        "$sample.users.filter('item.active > false').map('item.name')",
+        ["alice"],
+    ),
     ("listDistinctBy", "$sample.people.distinctBy('item.name').length", 2),
     ("listSortBy", "$sample.people.sort('item.age')", [SAMPLE_PEOPLE[1], SAMPLE_PEOPLE[0]]),
+    ("listSortByBoolean", "$sample.users.sort('item.active').map('item.name')", ["bob", "alice"]),
     ("listToString", "$sample.words.toString()", json.dumps(SAMPLE_WORDS)),
     ("listRandom", "$sample.words.random()", lambda v: v in SAMPLE_WORDS),
     # --- DotDict -----------------------------------------------------------------
@@ -223,7 +241,9 @@ def _sample_fixture() -> dict[str, Any]:
         "nullable": ["beta", None],
         "nested": [["a", "b"], ["c"]],
         "people": [dict(person) for person in SAMPLE_PEOPLE],
+        "users": [dict(person) for person in SAMPLE_USERS],
         "profile": dict(SAMPLE_PROFILE),
+        "flags": list(SAMPLE_FLAGS),
     }
 
 

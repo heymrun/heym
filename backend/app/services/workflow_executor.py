@@ -1145,6 +1145,26 @@ class DotBool:
             return self._value == other._value
         return self._value == other
 
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, DotBool):
+            return self._value < other._value
+        return self._value < other  # type: ignore[operator]
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, DotBool):
+            return self._value <= other._value
+        return self._value <= other  # type: ignore[operator]
+
+    def __gt__(self, other: object) -> bool:
+        if isinstance(other, DotBool):
+            return self._value > other._value
+        return self._value > other  # type: ignore[operator]
+
+    def __ge__(self, other: object) -> bool:
+        if isinstance(other, DotBool):
+            return self._value >= other._value
+        return self._value >= other  # type: ignore[operator]
+
     def toString(self) -> "DotStr":  # noqa: N802
         return DotStr(str(self._value).lower())
 

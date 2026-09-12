@@ -25,8 +25,10 @@ from app.services.expression_evaluator import (
 )
 from app.services.expression_syntax import alias_reserved_context_names
 from app.services.workflow_executor import (
+    DotBool,
     WorkflowExecutor,
     _normalize_js_logical_ops_for_eval,
+    execute_workflow,
 )
 
 
@@ -1916,6 +1918,176 @@ class TestWorkflowMetadataVariables(unittest.TestCase):
             workflow_nodes=[], workflow_edges=[], workflow_id=uuid.uuid4()
         )
         self.assertEqual(service.evaluate("$executionId", {}).result, "")
+
+
+class TestDotBoolComparisonsAndPreview(unittest.TestCase):
+    """Regression coverage for DotBool rich comparisons across execution and preview."""
+
+    def _service(self) -> ExpressionEvaluatorService:
+        return ExpressionEvaluatorService()
+
+    def test_dotbool_rich_comparisons_direct(self) -> None:
+        t = DotBool(True)
+        f = DotBool(False)
+
+        # Ordering semantics
+        self.assertTrue(f < t)
+        self.assertFalse(t < f)
+        self.assertTrue(f <= t)
+        self.assertTrue(t <= t)
+        self.assertTrue(t > f)
+        self.assertFalse(f > t)
+        self.assertTrue(t >= f)
+        self.assertTrue(f >= f)
+
+        # DotBool vs native bool
+        self.assertTrue(f < True)
+        self.assertFalse(t < False)
+        self.assertTrue(f <= True)
+        self.assertTrue(t >= False)
+
+        # native bool vs DotBool (reflected operations)
+        self.assertTrue(False < t)
+        self.assertFalse(True < f)
+        self.assertTrue(False <= t)
+        self.assertTrue(True >= f)
+
+        # Incompatible type raises TypeError
+        with self.assertRaises(TypeError):
+            _ = t < "incompatible"
+
+    def test_expression_preview_boolean_comparisons(self) -> None:
+        service = self._service()
+        context = {"node": {"flag": True, "other": False}}
+
+        res_gt = service.evaluate("$node.flag > false", context)
+        self.assertIsNone(res_gt.error)
+        self.assertEqual(res_gt.result_type, "boolean")
+        self.assertTrue(res_gt.result)
+
+        res_gte = service.evaluate("$node.flag >= true", context)
+        self.assertIsNone(res_gte.error)
+        self.assertEqual(res_gte.result_type, "boolean")
+        self.assertTrue(res_gte.result)
+
+        res_lt = service.evaluate("$node.flag < true", context)
+        self.assertIsNone(res_lt.error)
+        self.assertEqual(res_lt.result_type, "boolean")
+        self.assertFalse(res_lt.result)
+
+        res_lte = service.evaluate("$node.flag <= false", context)
+        self.assertIsNone(res_lte.error)
+        self.assertEqual(res_lte.result_type, "boolean")
+        self.assertFalse(res_lte.result)
+
+        res_two_nodes = service.evaluate("$node.flag > $node.other", context)
+        self.assertIsNone(res_two_nodes.error)
+        self.assertEqual(res_two_nodes.result_type, "boolean")
+        self.assertTrue(res_two_nodes.result)
+
+    def test_expression_preview_boolean_sorting(self) -> None:
+        service = self._service()
+        context = {
+            "node": {
+                "flags": [True, False, True],
+                "users": [
+                    {"name": "alice", "active": True},
+                    {"name": "bob", "active": False},
+                ],
+            }
+        }
+
+        res_sort = service.evaluate("$node.flags.sort()", context)
+        self.assertIsNone(res_sort.error)
+        self.assertEqual(res_sort.result, [False, True, True])
+
+        res_sort_by = service.evaluate("$node.users.sort('item.active').map('item.name')", context)
+        self.assertIsNone(res_sort_by.error)
+        self.assertEqual(res_sort_by.result, ["bob", "alice"])
+
+    def test_expression_preview_boolean_filtering(self) -> None:
+        service = self._service()
+        context = {
+            "node": {
+                "users": [
+                    {"name": "alice", "active": True},
+                    {"name": "bob", "active": False},
+                ],
+            }
+        }
+
+        res_filter = service.evaluate(
+            "$node.users.filter('item.active > false').map('item.name')", context
+        )
+        self.assertIsNone(res_filter.error)
+        self.assertEqual(res_filter.result, ["alice"])
+
+    def test_maintainer_two_node_workflow_execution(self) -> None:
+        nodes = [
+            {
+                "id": "sample_node",
+                "type": "set",
+                "data": {
+                    "label": "sample",
+                    "mappings": [
+                        {"key": "flag", "value": "$bool(1)"},
+                        {"key": "flags", "value": "$array(true, false, true)"},
+                        {
+                            "key": "users",
+                            "value": (
+                                "$array(dict(name='alice', active=true), "
+                                "dict(name='bob', active=false))"
+                            ),
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "check_node",
+                "type": "set",
+                "data": {
+                    "label": "check",
+                    "mappings": [
+                        {"key": "compare", "value": "$sample.flag > false"},
+                        {"key": "sortFlags", "value": "$sample.flags.sort()"},
+                        {
+                            "key": "sortUsers",
+                            "value": "$sample.users.sort('item.active').map('item.name')",
+                        },
+                        {
+                            "key": "filterUsers",
+                            "value": "$sample.users.filter('item.active > false').map('item.name')",
+                        },
+                    ],
+                },
+            },
+        ]
+        edges = [{"id": "e1", "source": "sample_node", "target": "check_node"}]
+
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={},
+            test_run=True,
+        )
+        self.assertEqual(result.status, "success")
+
+        check_output = {}
+        for nr in result.node_results:
+            label = nr["node_label"] if isinstance(nr, dict) else nr.node_label
+            if label == "check":
+                check_output = nr["output"] if isinstance(nr, dict) else nr.output
+
+        self.assertEqual(
+            check_output,
+            {
+                "compare": True,
+                "sortFlags": [False, True, True],
+                "sortUsers": ["bob", "alice"],
+                "filterUsers": ["alice"],
+            },
+        )
 
 
 if __name__ == "__main__":
