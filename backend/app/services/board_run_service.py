@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.workflows import (
@@ -100,10 +100,34 @@ def board_run_is_dead(
     return (now - started_at) >= timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
 
 
-def _settle_dead_run(run: BoardCardRun, *, reason: str, now: datetime) -> None:
-    run.status = "failed"
-    run.error = reason
-    run.finished_at = now
+async def _settle_dead_runs(db, runs: list[BoardCardRun], *, reason: str, now: datetime) -> None:
+    """Fail runs judged dead, but only while they are still labelled running.
+
+    The judgement comes from a snapshot taken before the write. A chain publishing its
+    own result in between has to win, and it can: the active row is dropped as soon as
+    the workflow returns, while the run stays ``running`` until the output activity
+    (an LLM call) is built and committed. Re-checking the status in the WHERE makes
+    Postgres skip any row the chain has since settled itself.
+    """
+    if not runs:
+        return
+    await db.execute(
+        update(BoardCardRun)
+        .where(
+            BoardCardRun.id.in_([run.id for run in runs]),
+            BoardCardRun.status == "running",
+        )
+        .values(status="failed", error=reason, finished_at=now)
+    )
+
+
+async def _settle_stuck_card(db, card_id: uuid.UUID) -> None:
+    """Fail a card whose runs have all been settled, while it still says running."""
+    await db.execute(
+        update(BoardCard)
+        .where(BoardCard.id == card_id, BoardCard.run_status == "running")
+        .values(run_status="failed")
+    )
 
 
 async def blocking_card_runs(
@@ -136,8 +160,10 @@ async def blocking_card_runs(
         (dead if board_run_is_dead(run, live, now=now) else blocking).append(run)
     if blocking:
         return blocking
-    for run in dead:
-        _settle_dead_run(run, reason=_ABANDONED_RUN_ERROR, now=now)
+    await _settle_dead_runs(db, dead, reason=_ABANDONED_RUN_ERROR, now=now)
+    # Run and card settle together or not at all: reconciliation only ever looks at
+    # cards that still have a running run, so a card left behind here is stuck for good.
+    await _settle_stuck_card(db, card_id)
     return []
 
 
@@ -585,6 +611,8 @@ async def _run_chain(
 
                 run.status = "success"
                 run.output = outputs
+                # Clears any failure a concurrent settle wrote before this commit.
+                run.error = None
                 await _record_output_activity(
                     db,
                     card_id=card_id,
@@ -1143,25 +1171,10 @@ async def reconcile_orphaned_board_runs() -> None:
                     alive_card_ids.add(run.card_id)
             if not orphaned:
                 return
-            for run in orphaned:
-                _settle_dead_run(run, reason=_RESTART_RUN_ERROR, now=now)
+            await _settle_dead_runs(db, orphaned, reason=_RESTART_RUN_ERROR, now=now)
             # A card keeps running while any of its other runs is still alive.
-            card_ids = {run.card_id for run in orphaned} - alive_card_ids
-            cards = (
-                (
-                    await db.execute(
-                        select(BoardCard).where(
-                            BoardCard.id.in_(card_ids), BoardCard.run_status == "running"
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-                if card_ids
-                else []
-            )
-            for card in cards:
-                card.run_status = "failed"
+            for card_id in {run.card_id for run in orphaned} - alive_card_ids:
+                await _settle_stuck_card(db, card_id)
             await db.commit()
             logger.info("Reconciled %d orphaned board runs", len(orphaned))
     except Exception:  # noqa: BLE001 - reconciliation must never block startup

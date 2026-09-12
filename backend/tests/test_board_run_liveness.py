@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.sql.dml import Update
+
 from app.services import board_run_service, execution_recovery
 from app.services.execution_cancellation import RECOVERY_STALE_AFTER_SECONDS
 
@@ -45,17 +47,30 @@ def _result(rows):
 
 
 class _SequencedSession:
-    """Serves db.execute results in call order."""
+    """Serves db.execute results in call order and records the statements."""
 
     def __init__(self, results):
         self._results = list(results)
         self.commit = AsyncMock()
         self.executed = 0
+        self.statements = []
 
-    async def execute(self, *_args, **_kwargs):
-        result = self._results[self.executed]
+    async def execute(self, statement=None, *_args, **_kwargs):
+        self.statements.append(statement)
+        # Queued results stand in for reads only, so adding a write does not shift them.
+        if isinstance(statement, Update):
+            return _result([])
+        result = self._results[self.executed] if self.executed < len(self._results) else _result([])
         self.executed += 1
         return result
+
+    def writes(self, table):
+        """Recorded UPDATE statements against ``table``."""
+        return [
+            s
+            for s in self.statements
+            if isinstance(s, Update) and s.table.name == table  # type: ignore[attr-defined]
+        ]
 
     async def __aenter__(self):
         return self
@@ -99,64 +114,62 @@ class BoardRunIsDeadTests(unittest.TestCase):
 
 
 class ReconcileOrphanedBoardRunsTests(unittest.IsolatedAsyncioTestCase):
-    async def _reconcile(self, runs, live_execution_ids, cards):
-        session = _SequencedSession(
-            [
-                _result(runs),
-                _result(live_execution_ids),
-                _result(cards),
-            ]
-        )
+    async def _reconcile(self, runs, live_execution_ids, _cards=()):
+        session = _SequencedSession([_result(runs), _result(live_execution_ids)])
         with patch.object(board_run_service, "async_session_maker", lambda: session):
             await board_run_service.reconcile_orphaned_board_runs()
         return session
 
     async def test_live_run_is_left_alone(self) -> None:
         execution_id = uuid.uuid4()
-        card_id = uuid.uuid4()
-        run = _run(active_execution_id=execution_id, card_id=card_id)
-        card = SimpleNamespace(id=card_id, run_status="running")
+        run = _run(active_execution_id=execution_id)
 
-        await self._reconcile([run], [execution_id], [card])
+        session = await self._reconcile([run], [execution_id], [])
 
-        self.assertEqual(run.status, "running")
-        self.assertIsNone(run.finished_at)
-        self.assertEqual(card.run_status, "running")
+        self.assertEqual(session.writes("board_card_runs"), [])
+        self.assertEqual(session.writes("board_cards"), [])
 
     async def test_dead_run_and_its_card_are_failed(self) -> None:
-        card_id = uuid.uuid4()
-        run = _run(active_execution_id=uuid.uuid4(), card_id=card_id)
-        card = SimpleNamespace(id=card_id, run_status="running")
+        run = _run(active_execution_id=uuid.uuid4())
 
-        await self._reconcile([run], [], [card])
+        session = await self._reconcile([run], [], [])
 
-        self.assertEqual(run.status, "failed")
-        self.assertEqual(run.error, "Server restarted during execution")
-        self.assertIsNotNone(run.finished_at)
-        self.assertEqual(card.run_status, "failed")
+        (run_write,) = session.writes("board_card_runs")
+        self.assertEqual(run_write.compile().params["status"], "failed")
+        self.assertEqual(run_write.compile().params["error"], "Server restarted during execution")
+        (card_write,) = session.writes("board_cards")
+        self.assertEqual(card_write.compile().params["run_status"], "failed")
 
     async def test_young_run_is_left_alone(self) -> None:
-        card_id = uuid.uuid4()
-        run = _run(active_execution_id=uuid.uuid4(), age_seconds=FRESH_AGE, card_id=card_id)
-        card = SimpleNamespace(id=card_id, run_status="running")
+        run = _run(active_execution_id=uuid.uuid4(), age_seconds=FRESH_AGE)
 
-        await self._reconcile([run], [], [card])
+        session = await self._reconcile([run], [], [])
 
-        self.assertEqual(run.status, "running")
-        self.assertEqual(card.run_status, "running")
+        self.assertEqual(session.writes("board_card_runs"), [])
+        self.assertEqual(session.writes("board_cards"), [])
 
     async def test_card_stays_running_while_any_of_its_runs_is_live(self) -> None:
         card_id = uuid.uuid4()
         live_execution_id = uuid.uuid4()
         dead = _run(active_execution_id=uuid.uuid4(), card_id=card_id)
         live = _run(active_execution_id=live_execution_id, card_id=card_id)
-        card = SimpleNamespace(id=card_id, run_status="running")
 
-        await self._reconcile([dead, live], [live_execution_id], [card])
+        session = await self._reconcile([dead, live], [live_execution_id], [])
 
-        self.assertEqual(dead.status, "failed")
-        self.assertEqual(live.status, "running")
-        self.assertEqual(card.run_status, "running")
+        self.assertEqual(len(session.writes("board_card_runs")), 1)
+        self.assertEqual(session.writes("board_cards"), [])
+
+    async def test_settle_is_guarded_on_the_run_still_being_running(self) -> None:
+        # The judgement is made from a snapshot; the chain drops its active row before
+        # committing its own result, so an unguarded write lands on top of a success.
+        run = _run(active_execution_id=uuid.uuid4())
+
+        session = await self._reconcile([run], [], [])
+
+        (run_write,) = session.writes("board_card_runs")
+        self.assertIn("board_card_runs.status", str(run_write.whereclause))
+        (card_write,) = session.writes("board_cards")
+        self.assertIn("board_cards.run_status", str(card_write.whereclause))
 
 
 class EnqueueCardChainGuardTests(unittest.IsolatedAsyncioTestCase):
@@ -174,25 +187,25 @@ class EnqueueCardChainGuardTests(unittest.IsolatedAsyncioTestCase):
             enqueued = await board_run_service.enqueue_card_chain(
                 session, card=card, column=column, board=board, move=None, rerun=True
             )
-        return enqueued, spawn
+        return enqueued, spawn, session
 
     async def test_live_run_blocks_a_new_chain(self) -> None:
         execution_id = uuid.uuid4()
-        enqueued, spawn = await self._enqueue(
+        enqueued, spawn, _ = await self._enqueue(
             [_run(active_execution_id=execution_id)], [execution_id]
         )
         self.assertFalse(enqueued)
         spawn.assert_not_called()
 
     async def test_pending_run_blocks_a_new_chain(self) -> None:
-        enqueued, spawn = await self._enqueue(
+        enqueued, spawn, _ = await self._enqueue(
             [_run(status="pending", active_execution_id=None)], []
         )
         self.assertFalse(enqueued)
         spawn.assert_not_called()
 
     async def test_young_run_blocks_a_new_chain(self) -> None:
-        enqueued, spawn = await self._enqueue(
+        enqueued, spawn, _ = await self._enqueue(
             [_run(active_execution_id=uuid.uuid4(), age_seconds=FRESH_AGE)], []
         )
         self.assertFalse(enqueued)
@@ -201,7 +214,7 @@ class EnqueueCardChainGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_dead_run_does_not_block_a_new_chain(self) -> None:
         # A run abandoned by recovery's _finalize keeps active_execution_id but its
         # active row is gone, so it must not lock the card out forever.
-        enqueued, spawn = await self._enqueue([_run(active_execution_id=uuid.uuid4())], [])
+        enqueued, spawn, _ = await self._enqueue([_run(active_execution_id=uuid.uuid4())], [])
         self.assertTrue(enqueued)
         spawn.assert_called_once()
 
@@ -209,20 +222,20 @@ class EnqueueCardChainGuardTests(unittest.IsolatedAsyncioTestCase):
         # Starting a new chain over a stale row is not enough: the row keeps blocking
         # every other reader of the status column, such as the comment gate.
         dead = _run(active_execution_id=uuid.uuid4())
-        enqueued, _ = await self._enqueue([dead], [])
+        enqueued, _, session = await self._enqueue([dead], [])
         self.assertTrue(enqueued)
-        self.assertEqual(dead.status, "failed")
-        self.assertEqual(dead.error, "Execution is no longer running")
-        self.assertIsNotNone(dead.finished_at)
+        (run_write,) = session.writes("board_card_runs")
+        self.assertEqual(run_write.compile().params["error"], "Execution is no longer running")
+        self.assertIn("board_card_runs.status", str(run_write.whereclause))
 
     async def test_dead_run_is_left_untouched_while_a_sibling_is_live(self) -> None:
         live_execution_id = uuid.uuid4()
         dead = _run(active_execution_id=uuid.uuid4())
         live = _run(active_execution_id=live_execution_id)
-        enqueued, spawn = await self._enqueue([dead, live], [live_execution_id])
+        enqueued, spawn, session = await self._enqueue([dead, live], [live_execution_id])
         self.assertFalse(enqueued)
         spawn.assert_not_called()
-        self.assertEqual(dead.status, "running")
+        self.assertEqual(session.writes("board_card_runs"), [])
 
 
 class AnswerCardCommentGuardTests(unittest.IsolatedAsyncioTestCase):
@@ -230,22 +243,32 @@ class AnswerCardCommentGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def _blocking(self, runs, live_execution_ids):
         session = _SequencedSession([_result(runs), _result(live_execution_ids)])
-        return await board_run_service.blocking_card_runs(session, uuid.uuid4())
+        blocking = await board_run_service.blocking_card_runs(session, uuid.uuid4())
+        return blocking, session
 
     async def test_live_run_still_blocks_the_answer(self) -> None:
         execution_id = uuid.uuid4()
-        blocking = await self._blocking([_run(active_execution_id=execution_id)], [execution_id])
+        blocking, session = await self._blocking(
+            [_run(active_execution_id=execution_id)], [execution_id]
+        )
         self.assertEqual(len(blocking), 1)
 
     async def test_pending_run_still_blocks_the_answer(self) -> None:
-        blocking = await self._blocking([_run(status="pending", active_execution_id=None)], [])
+        blocking, session = await self._blocking(
+            [_run(status="pending", active_execution_id=None)], []
+        )
         self.assertEqual(len(blocking), 1)
 
     async def test_dead_run_is_settled_and_stops_blocking_the_answer(self) -> None:
         dead = _run(active_execution_id=uuid.uuid4())
-        blocking = await self._blocking([dead], [])
+        blocking, session = await self._blocking([dead], [])
         self.assertEqual(blocking, [])
-        self.assertEqual(dead.status, "failed")
+        (run_write,) = session.writes("board_card_runs")
+        self.assertIn("board_card_runs.status", str(run_write.whereclause))
+        # The card has to settle with the run: reconciliation only revisits cards that
+        # still have a running run, so a card left behind here is stuck for good.
+        (card_write,) = session.writes("board_cards")
+        self.assertEqual(card_write.compile().params["run_status"], "failed")
 
 
 class AnswerCardCommentEndToEndTests(unittest.IsolatedAsyncioTestCase):
@@ -290,8 +313,27 @@ class AnswerCardCommentEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result)
         advance.assert_awaited_once()
-        self.assertEqual(dead.status, "failed")
+        self.assertEqual(len(session.writes("board_card_runs")), 1)
         self.assertEqual(card.run_status, "running")
+
+    async def test_unanswered_gate_still_settles_run_and_card_together(self) -> None:
+        # The second regression the review caught: the helper settled the run, then
+        # answer_card_comment bailed out because no previous run had succeeded, leaving
+        # the card running with no running run for reconciliation to ever find again.
+        card, column, board, columns = self._env()
+        dead = _run(active_execution_id=uuid.uuid4(), card_id=card.id)
+        session = _SequencedSession([columns, _result([dead]), _result([])])
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            result = await board_run_service.answer_card_comment(
+                session, card=card, column=column, board=board
+            )
+
+        self.assertFalse(result)
+        advance.assert_not_awaited()
+        self.assertEqual(len(session.writes("board_card_runs")), 1)
+        (card_write,) = session.writes("board_cards")
+        self.assertEqual(card_write.compile().params["run_status"], "failed")
 
 
 class RecoveryLoopReconcilesBoardRunsTests(unittest.IsolatedAsyncioTestCase):
