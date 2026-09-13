@@ -219,13 +219,17 @@ class SessionOwningEntryPointTests(unittest.IsolatedAsyncioTestCase):
         target = SimpleNamespace(id=source.error_workflow_id, nodes=[{"type": "set"}], edges=[])
         session = AsyncMock()
         session.add = MagicMock()
-        executed = MagicMock(
+        executed = AsyncMock(
             return_value=SimpleNamespace(
-                outputs={}, node_results=[], status="success", execution_time_ms=1.0
+                outputs={},
+                node_results=[],
+                status="success",
+                execution_time_ms=1.0,
+                history_written=False,
             )
         )
         with self._patches(session, [source, target]):
-            with patch("app.services.error_workflow_runner.execute_workflow", executed):
+            with patch("app.services.error_workflow_runner.dispatch_workflow", executed):
                 ran = await run_error_workflow_for_run(
                     workflow_id=source.id,
                     status="error",
@@ -235,8 +239,8 @@ class SessionOwningEntryPointTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertTrue(ran)
-        self.assertEqual(executed.call_args.kwargs["workflow_id"], target.id)
-        context = executed.call_args.kwargs["inputs"]["body"]
+        self.assertEqual(executed.await_args.kwargs["workflow_id"], target.id)
+        context = executed.await_args.kwargs["inputs"]["body"]
         self.assertEqual(context["error"], "boom")
         self.assertEqual(context["errorNode"], "callApi")
         self.assertEqual(context["run_id"], "run-1")
@@ -254,6 +258,105 @@ class SessionOwningEntryPointTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse(ran)
         session.commit.assert_not_awaited()
+
+
+class ErrorWorkflowPlacementTests(unittest.IsolatedAsyncioTestCase):
+    """The target's own placement decides where it runs, not whoever caught the failure.
+
+    Cron, IMAP, RabbitMQ, WebSocket and the Heym event dispatcher all start on every
+    instance, and the cron leader may be a worker while main is down. Running a
+    MAIN_ONLY error workflow there would send `sendEmail` out of the wrong IP and
+    point `drive` at the wrong disk.
+    """
+
+    async def _run(self, dispatched: AsyncMock) -> AsyncMock:
+        source = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Orders",
+            nodes=[{"type": "set"}],
+            error_workflow_id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+        )
+        target = SimpleNamespace(
+            id=source.error_workflow_id, nodes=[{"type": "sendEmail"}], edges=[]
+        )
+        session = AsyncMock()
+        session.add = MagicMock()
+        module = "app.services.error_workflow_runner."
+        maker = MagicMock()
+        maker.return_value.__aenter__ = AsyncMock(return_value=session)
+        maker.return_value.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch(module + "async_session_maker", maker),
+            patch(module + "_load_workflow", AsyncMock(side_effect=[source, target])),
+            patch(module + "collect_referenced_workflows", AsyncMock(return_value={})),
+            patch(module + "get_credentials_context", AsyncMock(return_value={})),
+            patch(module + "get_global_variables_context", AsyncMock(return_value={})),
+            patch(module + "dispatch_workflow", dispatched),
+        ):
+            await run_error_workflow_for_run(
+                workflow_id=source.id,
+                status="error",
+                node_results=NODE_RESULTS,
+                run_id="run-1",
+                actor_user_id=uuid.uuid4(),
+            )
+        self.target = target
+        return session
+
+    def _dispatched(self, *, history_written: bool) -> AsyncMock:
+        return AsyncMock(
+            return_value=SimpleNamespace(
+                outputs={},
+                node_results=[],
+                status="success",
+                execution_time_ms=1.0,
+                history_written=history_written,
+            )
+        )
+
+    async def test_the_target_goes_through_dispatch_with_its_own_graph(self) -> None:
+        """dispatch_workflow resolves placement from these nodes, so they must be the target's."""
+        dispatched = self._dispatched(history_written=False)
+        await self._run(dispatched)
+        self.assertEqual(dispatched.await_args.kwargs["nodes"], self.target.nodes)
+        self.assertEqual(dispatched.await_args.kwargs["trigger_source"], "ERROR_WORKFLOW")
+
+    async def test_the_target_never_triggers_an_error_workflow_of_its_own(self) -> None:
+        dispatched = self._dispatched(history_written=False)
+        await self._run(dispatched)
+        self.assertIs(dispatched.await_args.kwargs["run_error_workflow"], False)
+
+    async def test_a_locally_run_target_is_written_to_history(self) -> None:
+        session = await self._run(self._dispatched(history_written=False))
+        session.add.assert_called_once()
+
+    async def test_an_offloaded_target_is_not_written_to_history_twice(self) -> None:
+        """The instance that ran it already wrote the row, keyed on the same execution id."""
+        session = await self._run(self._dispatched(history_written=True))
+        session.add.assert_not_called()
+
+
+class SuppressedHookTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_suppressed_dispatch_does_not_fire_the_hook(self) -> None:
+        hook = AsyncMock(return_value=True)
+        with (
+            patch("app.services.error_workflow_runner.run_error_workflow_for_run", hook),
+            patch("app.services.cluster.dispatch.settings.cluster_enabled", False),
+            patch(
+                "app.services.cluster.dispatch.execute_workflow",
+                return_value=_run_result(),
+            ),
+        ):
+            await dispatch_workflow(
+                workflow_id=uuid.uuid4(),
+                nodes=[{"type": "set"}],
+                edges=[],
+                inputs={},
+                execution_id=uuid.uuid4(),
+                run_error_workflow=False,
+            )
+        hook.assert_not_awaited()
 
 
 class StreamApiSeamTests(unittest.IsolatedAsyncioTestCase):

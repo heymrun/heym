@@ -143,17 +143,19 @@ async def run_error_workflow_for_failed_run(
     workflow_id: uuid.UUID,
     execution_id: uuid.UUID | None,
     test_run: bool,
+    enabled: bool,
     actor_user_id: uuid.UUID | None,
 ) -> None:
     """Fire the workflow's configured error workflow when a top-level run fails.
 
     Every trigger call site shares this seam, so the hook reaches the API, cron and
-    every trigger service in a single-instance install and in a cluster alike. It
-    runs on the dispatching instance, where ingress and the cron leader live, which
-    keeps a MAIN_ONLY error workflow on main; and it runs its target directly, so
-    the target never triggers an error workflow of its own.
+    every trigger service in a single-instance install and in a cluster alike. The
+    target is dispatched rather than executed here: this instance is not necessarily
+    main (the cron leader can be a worker), and a MAIN_ONLY error workflow has to
+    land on main wherever the failure was noticed.
     """
-    if test_run or getattr(result, "status", None) != "error":
+    # `enabled` is False for the error workflow's own dispatch: the recursion guard.
+    if not enabled or test_run or getattr(result, "status", None) != "error":
         return
     # A dispatch that produced no run carries its reason here. The workflow may
     # still be executing, or recovery may yet re-run it, so this is not its failure.
@@ -186,6 +188,7 @@ async def dispatch_workflow(
     wait_for_completion: bool = True,
     run_in_thread: bool = False,
     execution_id: uuid.UUID | None = None,
+    run_error_workflow: bool = True,
     **executor_kwargs: Any,
 ) -> Any:
     """Run here, or enqueue and wait for whichever instance takes it.
@@ -226,6 +229,7 @@ async def dispatch_workflow(
             workflow_id=workflow_id,
             execution_id=execution_id,
             test_run=test_run,
+            enabled=run_error_workflow,
             actor_user_id=actor_user_id or credentials_owner_id,
         )
         return result
@@ -270,6 +274,7 @@ async def dispatch_workflow(
         workflow_id=workflow_id,
         execution_id=run_id,
         test_run=test_run,
+        enabled=run_error_workflow,
         actor_user_id=actor_user_id or credentials_owner_id,
     )
     return result

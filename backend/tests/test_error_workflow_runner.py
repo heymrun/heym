@@ -67,7 +67,7 @@ class TestRunErrorWorkflow(unittest.IsolatedAsyncioTestCase):
     async def test_skips_when_guard_false(self) -> None:
         wf = _wf(error_workflow_id=None, nodes=[])
         db = AsyncMock()
-        with patch("app.services.error_workflow_runner.execute_workflow") as exec_mock:
+        with patch("app.services.error_workflow_runner.dispatch_workflow") as exec_mock:
             ran = await maybe_run_error_workflow(
                 db,
                 wf,
@@ -109,8 +109,9 @@ class TestRunErrorWorkflow(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value={}),
             ),
             patch(
-                "app.services.error_workflow_runner.asyncio.to_thread", new=AsyncMock()
-            ) as to_thread_mock,
+                "app.services.error_workflow_runner.dispatch_workflow",
+                new=AsyncMock(return_value=MagicMock(history_written=False)),
+            ) as dispatch_mock,
         ):
             ran = await maybe_run_error_workflow(
                 db,
@@ -129,7 +130,7 @@ class TestRunErrorWorkflow(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(ran)
-        to_thread_mock.assert_awaited()
+        dispatch_mock.assert_awaited()
 
     async def test_swallows_target_failure(self) -> None:
         target_id = uuid.uuid4()
