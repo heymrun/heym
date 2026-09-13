@@ -157,7 +157,7 @@
   
   <g transform="translate(64,56)">
     <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="3">FULL FEATURE SET · CORE PRIMITIVES</text>
-    <text y="36" font-size="32" font-weight="800" fill="url(#ff-title-grad)" letter-spacing="-1">Heym is a true AI-native workflow automation platform</text>
+    <text y="36" font-size="32" font-weight="800" fill="url(#ff-title-grad)" letter-spacing="-1">Build agentic systems. Run them with confidence.</text>
   </g>
   <g transform="translate(1146,44) scale(1.75)">
     <rect class="ff-logo-tile" width="32" height="32" rx="8" fill="url(#ff-logo-grad)"></rect>
@@ -199,9 +199,9 @@
     
     <g class="ff-scene s01">
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#7C3AED" letter-spacing="2">01 · VISUAL WORKFLOW EDITOR</text>
-      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Drag. Drop.</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Build it.</text>
       <text y="124" font-size="64" font-weight="800" fill="#A78BFA" letter-spacing="-2">It runs.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">A visual canvas with a broad node library — wire intent into execution.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Build and inspect agentic systems through a visual interface to the runtime.</text>
 
       
       <g transform="translate(640,30)">
@@ -265,7 +265,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">02 · AI ASSISTANT</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Tell it.</text>
       <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">It builds.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Describe a workflow in plain text or voice — nodes wire themselves.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Describe a workflow in plain text or voice · nodes wire themselves.</text>
 
       <g transform="translate(640,40)">
         
@@ -299,7 +299,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">03 · CHAT WITH DOCS</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">The docs</text>
       <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">talk back.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Context-aware Q&amp;A from any docs page — the current article is the prompt.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Context-aware Q&amp;A from any docs page · the current article is the prompt.</text>
 
       <g transform="translate(640,30)">
         <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
@@ -323,7 +323,7 @@
         <g transform="translate(120,200)">
           <rect width="360" height="92" rx="10" fill="#10D9A0" fill-opacity="0.1" stroke="#10D9A0" stroke-opacity="0.4"></rect>
           <text x="14" y="26" font-size="12" fill="#10D9A0" font-weight="600">heym docs</text>
-          <text x="14" y="48" font-size="12" fill="#E5E7EB">Max nesting is 5 — orchestrators can</text>
+          <text x="14" y="48" font-size="12" fill="#E5E7EB">Max nesting is 5 · orchestrators can</text>
           <text x="14" y="66" font-size="12" fill="#E5E7EB">call sub-agents that call sub-agents</text>
           <text x="14" y="84" font-size="12" fill="#E5E7EB">up to that depth.</text>
         </g>
@@ -335,7 +335,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#F59E0B" letter-spacing="2">04 · AI SKILL BUILDER</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Skills built</text>
       <text y="124" font-size="64" font-weight="800" fill="#F59E0B" letter-spacing="-2">by chat.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">SKILL.md and Python files — drafted, previewed, and saved live.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">SKILL.md and Python files · drafted, previewed, and saved live.</text>
 
       <g transform="translate(640,30)">
         <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
@@ -454,7 +454,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#F59E0B" letter-spacing="2">07 · HUMAN-IN-THE-LOOP</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">AI proposes.</text>
       <text y="124" font-size="64" font-weight="800" fill="#F59E0B" letter-spacing="-2">You decide.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Pause execution. Public review URL. Edit, accept, or refuse — then resume.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Pause execution. Public review URL. Edit, accept, or refuse · then resume.</text>
 
       <g transform="translate(660,30)">
         <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#F59E0B" stroke-opacity="0.4" stroke-dasharray="4 4"></rect>
@@ -465,7 +465,7 @@
         <g transform="translate(20,60)">
           <rect width="460" height="160" rx="10" fill="#0A0E1A" stroke="#1F2937"></rect>
           <text x="16" y="26" font-size="11" fill="#9CA3AF" font-family="&#39;JetBrains Mono&#39;,monospace">PROPOSED REPLY</text>
-          <text x="16" y="58" font-size="13" fill="#E5E7EB">Hi Sam — refund approved on order</text>
+          <text x="16" y="58" font-size="13" fill="#E5E7EB">Hi Sam · refund approved on order</text>
           <text x="16" y="78" font-size="13" fill="#E5E7EB">#A-3128. You&#39;ll see it in 3-5 days.</text>
           <text x="16" y="120" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">guideline: refunds &gt; $200 need approval</text>
         </g>
@@ -484,7 +484,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">08 · GUARDRAILS</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Unsafe in.</text>
       <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Caught here.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Filtering, NSFW protection, multilingual safety — on every LLM and Agent.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Configure content checks on LLM and Agent inputs before model execution.</text>
 
       <g transform="translate(660,40)">
         
@@ -504,7 +504,7 @@
           </g>
           <g transform="translate(0,140)">
             <rect width="160" height="32" rx="6" fill="#EF4444" fill-opacity="0.1" stroke="#EF4444" stroke-opacity="0.5"></rect>
-            <text x="12" y="20" fill="#EF4444">leaked secrets</text>
+            <text x="12" y="20" fill="#EF4444">personal data request</text>
           </g>
           <path d="M 162 56 L 220 100" stroke="#EF4444" stroke-width="1.5" class="ff-flow" fill="none"></path>
           <path d="M 162 106 L 220 110" stroke="#EF4444" stroke-width="1.5" class="ff-flow" fill="none"></path>
@@ -523,7 +523,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">09 · BUILT-IN RAG</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Drop docs.</text>
       <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">Search them.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Insert + semantic search on Qdrant or psql — two nodes, no glue code.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Insert and search company knowledge with Qdrant or PostgreSQL/pgvector.</text>
 
       <g transform="translate(660,40)">
         
@@ -536,7 +536,7 @@
           <ellipse cx="60" cy="0" rx="60" ry="14" fill="#0F1320" stroke="#22D3EE"></ellipse>
           <path d="M 0 0 L 0 80 C 0 90, 30 96, 60 96 C 90 96, 120 90, 120 80 L 120 0" fill="#0F1320" stroke="#22D3EE"></path>
           <ellipse cx="60" cy="40" rx="60" ry="14" fill="none" stroke="#22D3EE" stroke-opacity="0.4"></ellipse>
-          <text x="60" y="45" text-anchor="middle" font-size="10.5" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">Qdrant + psql</text>
+          <text x="60" y="45" text-anchor="middle" font-size="10.5" fill="#22D3EE" font-family="&#39;JetBrains Mono&#39;,monospace">Qdrant + pgvector</text>
         </g>
         
         <g transform="translate(340,80)">
@@ -559,7 +559,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#A78BFA" letter-spacing="2">10 · MCP SUPPORT</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Speak MCP</text>
       <text y="124" font-size="64" font-weight="800" fill="#A78BFA" letter-spacing="-2">both ways.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Connect Agent nodes to any server. Expose your workflow as one.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Connect agents to MCP tools. Publish workflows for external MCP clients.</text>
 
       <g transform="translate(660,30)">
         
@@ -599,7 +599,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">11 · PORTAL</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Any workflow,</text>
       <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">a chat UI.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Public at /chat/{slug} — streaming, file uploads, no frontend code.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Public at /chat/{slug} · streaming, file uploads, no frontend code.</text>
 
       <g transform="translate(660,30)">
         
@@ -644,7 +644,7 @@
         <rect y="14" width="500" height="14" fill="#151B2E"></rect>
         <text x="20" y="20" font-size="11" fill="#6B7280" font-family="&#39;JetBrains Mono&#39;,monospace">terminal · sse</text>
         <g font-family="&#39;JetBrains Mono&#39;,monospace" font-size="12" transform="translate(20,60)">
-          <text class="ff-sse q1" fill="#10D9A0">$ curl --no-buffer https://heym.run/api/wf/.../execute/stream</text>
+          <text class="ff-sse q1" fill="#10D9A0">$ curl --no-buffer .../api/workflows/{id}/execute/stream</text>
           <text class="ff-sse q2" y="32" fill="#22D3EE">event: execution_started</text>
           <text class="ff-sse q3" y="60" fill="#A78BFA">event: node_start    <tspan fill="#9CA3AF">[Input]</tspan></text>
           <text class="ff-sse q4" y="78" fill="#10D9A0">event: node_complete <tspan fill="#9CA3AF">[Input] 12ms</tspan></text>
@@ -718,8 +718,8 @@
     <g class="ff-scene s14">
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">14 · PARALLEL · AUTO HEAL</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">It runs wide.</text>
-      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Heals itself.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Independent nodes go concurrent. Broken Playwright selectors? AI rewrites them.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">Recovers.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Run independent nodes concurrently. Use AI for Playwright selector recovery.</text>
 
       <g transform="translate(660,30)">
         
@@ -764,7 +764,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">15 · LLM TRACES · EVALS</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Every call.</text>
       <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">Every test.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Full request, response, tool calls, timing — and a one-click test suite.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Inspect requests, responses, tools, and timing. Run repeatable prompt evals.</text>
 
       <g transform="translate(660,30)">
         
@@ -811,7 +811,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#A78BFA" letter-spacing="2">16 · SELF-HOSTED · COMMAND PALETTE</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Your data.</text>
       <text y="124" font-size="64" font-weight="800" fill="url(#ff-title-grad)" letter-spacing="-2">Your runtime.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">One container. No telemetry. ⌘K for everything else.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Deploy with Docker and PostgreSQL. Navigate with the command palette.</text>
 
       <g transform="translate(660,40)">
         
@@ -824,7 +824,7 @@
           <circle cx="42" cy="14" r="4" fill="#10D9A0"></circle>
           <text x="20" y="62" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#10D9A0">$</tspan> <tspan fill="#E5E7EB">docker compose up</tspan></text>
           <text x="20" y="86" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#22D3EE">▸</tspan> <tspan fill="#9CA3AF">heym ready on :4017</tspan></text>
-          <text x="20" y="106" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#10D9A0">✓</tspan> <tspan fill="#10D9A0">no telemetry · no run limits</tspan></text>
+          <text x="20" y="106" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="13"><tspan fill="#10D9A0">✓</tspan> <tspan fill="#10D9A0">self-hosted · your infrastructure</tspan></text>
         </g>
         
         <g transform="translate(0,140)">
@@ -947,7 +947,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">19 · LLM REAL COST · USD</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Tokens show</text>
       <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">real cost.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Per-trace token counts become live USD spend by model and provider.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Input and output tokens become USD costs with model pricing and overrides.</text>
 
       <g transform="translate(660,30)">
         <rect width="500" height="320" rx="14" fill="#0F1320" stroke="#1F2937"></rect>
@@ -998,7 +998,7 @@
       <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#10D9A0" letter-spacing="2">20 · AGENTIC KANBAN BOARD</text>
       <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Move it.</text>
       <text y="124" font-size="64" font-weight="800" fill="#10D9A0" letter-spacing="-2">It works.</text>
-      <text y="172" font-size="16" fill="#9CA3AF">Cards are agentic jobs — columns run workflow chains with full card context.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Cards are agentic jobs · columns run workflow chains with full card context.</text>
       <g transform="translate(620,36)">
         <rect width="500" height="216" rx="14" fill="#0B1020" stroke="#1F2937"></rect>
 

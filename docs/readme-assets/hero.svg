@@ -67,7 +67,7 @@
   
   <g clip-path="url(#hero-command-clip)">
     <text x="64" y="220" font-family="&#39;JetBrains Mono&#39;, ui-monospace, Menlo, monospace" font-size="18" fill="#9CA3AF">
-      <tspan fill="#10D9A0">$</tspan> heym <tspan fill="#A78BFA">--visual</tspan> <tspan fill="#A78BFA">--ai-native</tspan> <tspan fill="#A78BFA">--self-hosted</tspan>
+      <tspan fill="#10D9A0">$</tspan> heym <tspan fill="#A78BFA">--runtime</tspan> <tspan fill="#A78BFA">--agentic</tspan> <tspan fill="#A78BFA">--self-hosted</tspan>
     </text>
   </g>
 
