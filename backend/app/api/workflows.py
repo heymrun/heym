@@ -346,6 +346,7 @@ async def persist_stream_execution_result(
     credentials_owner_id: uuid.UUID,
     final_result: dict,
     was_cancelled: bool,
+    test_run: bool = False,
 ) -> bool:
     """Record a streamed run's terminal state. Returns False when there is nothing to write.
 
@@ -443,6 +444,19 @@ async def persist_stream_execution_result(
             workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
             status=sub_exec["status"],
             execution_time_ms=float(sub_exec["execution_time_ms"]),
+        )
+
+    # This endpoint streams in process, so dispatch_workflow's seam never sees it.
+    if status_value == "error" and not test_run:
+        from app.services.error_workflow_runner import maybe_run_error_workflow
+
+        await maybe_run_error_workflow(
+            db,
+            workflow,
+            status=status_value,
+            node_results=node_results,
+            run_id=str(execution_id),
+            actor_user_id=credentials_owner_id,
         )
     return True
 
@@ -3208,17 +3222,8 @@ async def execute_workflow_endpoint(
             execution_time_ms=execution_result.execution_time_ms,
         )
         await db.flush()
-        if execution_result.status == "error":
-            from app.services.error_workflow_runner import maybe_run_error_workflow
-
-            await maybe_run_error_workflow(
-                db,
-                workflow,
-                status=execution_result.status,
-                node_results=execution_result.node_results,
-                run_id=str(history_entry.id) if history_entry else None,
-                actor_user_id=credentials_owner_id,
-            )
+        # The error workflow hook moved to dispatch_workflow, which sees offloaded
+        # runs too and is shared with every other trigger.
         if execution_result.allow_downstream_pending:
             if background_tasks is None:
                 background_tasks = BackgroundTasks()
@@ -3924,6 +3929,7 @@ async def execute_workflow_stream(
                 credentials_owner_id=credentials_owner_id,
                 final_result=final_result,
                 was_cancelled=was_cancelled,
+                test_run=test_run,
             )
             if written:
                 await session.commit()

@@ -23,6 +23,32 @@ from app.services.cluster import identity
 from app.services.cluster.attribution import attribution_fields
 
 
+def failed_node_summary(node_results: Any) -> dict[str, Any] | None:
+    """The first failing node, reduced to the fields an error context reads.
+
+    A whole NodeResult carries outputs that need not survive JSON, so only these
+    four strings travel; everything else stays in the history row.
+    """
+    for item in node_results or []:
+        if isinstance(item, dict) and item.get("status") == "error":
+            return {
+                "status": "error",
+                "error": item.get("error"),
+                "node_label": item.get("node_label"),
+                "node_type": item.get("node_type"),
+            }
+    return None
+
+
+def failure_node_results(result: Any) -> list[dict[str, Any]]:
+    """Node results for an error workflow's context, either side of the queue."""
+    results = getattr(result, "node_results", None) or []
+    if results:
+        return list(results)
+    failed = getattr(result, "failed_node", None)
+    return [failed] if failed else []
+
+
 def summarize(result: Any, execution_id: uuid.UUID) -> dict[str, Any]:
     """The part of an ExecutionResult that can cross an instance boundary.
 
@@ -36,6 +62,9 @@ def summarize(result: Any, execution_id: uuid.UUID) -> dict[str, Any]:
         "outputs": result.outputs,
         "execution_time_ms": result.execution_time_ms,
         "history_written": True,
+        # The configured error workflow runs on the dispatching instance, which
+        # never sees node_results, so the failing node travels with the summary.
+        "failed_node": failed_node_summary(getattr(result, "node_results", None)),
         # Named so the caller's log can say where to look for the run.
         "instance": identity.instance_name(),
     }
@@ -174,6 +203,8 @@ class OffloadedRun:
     history_written: bool = True
     reported: bool = True
     instance: str = ""
+    # The failing node, for the error workflow the dispatching instance runs.
+    failed_node: dict | None = None
     # The executing instance already joined any allow-downstream work locally.
     allow_downstream_pending: bool = False
 
@@ -189,6 +220,7 @@ def from_summary(summary: dict[str, Any]) -> OffloadedRun:
         execution_time_ms=float(summary.get("execution_time_ms") or 0.0),
         error=summary.get("error"),
         instance=str(summary.get("instance") or ""),
+        failed_node=summary.get("failed_node"),
     )
 
 
