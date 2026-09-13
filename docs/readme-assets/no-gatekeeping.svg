@@ -27,13 +27,13 @@
   <rect width="1280" height="680" fill="url(#ng-bg)"></rect>
   <rect width="1280" height="680" fill="url(#ng-grid)"></rect>
 
-  <text x="640" y="56" text-anchor="middle" font-size="28" font-weight="800" fill="#F3F4F6" letter-spacing="-0.5">No Enterprise Gatekeeping</text>
-  <text x="640" y="84" text-anchor="middle" font-size="14" fill="#9CA3AF">Core workflow primitives. Free. Self-hostable. From day one.</text>
+  <text x="640" y="56" text-anchor="middle" font-size="28" font-weight="800" fill="#F3F4F6" letter-spacing="-0.5">Build and Operate in One Runtime</text>
+  <text x="640" y="84" text-anchor="middle" font-size="14" fill="#9CA3AF">Core capabilities. Source available. On your infrastructure.</text>
 
   
   <g transform="translate(80, 120)">
-    <text x="0" y="0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="2">OTHER PLATFORMS</text>
-    <text x="0" y="22" font-size="20" font-weight="700" fill="#F87171">Locked behind sales calls</text>
+    <text x="0" y="0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="2">OPERATIONAL CONTROLS</text>
+    <text x="0" y="22" font-size="20" font-weight="700" fill="#F87171">Define how your systems run</text>
 
     <g transform="translate(0, 50)" font-size="13">
       <g transform="translate(0,0)">
@@ -42,56 +42,56 @@
           <rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect>
           <path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path>
         </g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Global variables</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">ENTERPRISE</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Shared configuration</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">CONFIG</text>
       </g>
       <g transform="translate(0,52)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Execution history, search &amp; insights</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">$$$</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Inspect production runs</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">INSPECT</text>
       </g>
       <g transform="translate(0,104)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">AI Builder / Motherboard</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">ENTERPRISE</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Reusable agent capabilities</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">REUSE</text>
       </g>
       <g transform="translate(0,156)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Observability &amp; audit logs</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">CONTACT US</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Understand runtime behavior</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">OBSERVE</text>
       </g>
       <g transform="translate(0,208)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Limited to one or less Datatables &amp; Eval Suites</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">PAID TIER</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Test prompts and manage data</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">EVALUATE</text>
       </g>
       <g transform="translate(0,260)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Production run limits</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">QUOTA</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Execute workflows</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">RUN</text>
       </g>
       <g transform="translate(0,312)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">SSO Login</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">ENTERPRISE</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Team identity and access</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">ACCESS</text>
       </g>
       <g transform="translate(0,364)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Multi Cluster Worker Mode</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">$$$</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Distribute background work</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">SCALE</text>
       </g>
       <g transform="translate(0,416)">
         <rect width="500" height="44" rx="10" fill="#1F1115" stroke="#7F1D1D" stroke-opacity="0.5"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#F87171" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 0 V 14" stroke="#F87171" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Audit Logs / Log Streaming</text>
-        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">CONTACT US</text>
+        <text x="44" y="28" fill="#FCA5A5" font-weight="500">Review operational activity</text>
+        <text x="486" y="28" text-anchor="end" fill="#7F1D1D" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">AUDIT</text>
       </g>
     </g>
   </g>
@@ -100,13 +100,13 @@
   <g transform="translate(640, 400)">
     <line x1="0" y1="-220" x2="0" y2="240" stroke="#1F2937" stroke-dasharray="4 6"></line>
     <circle cx="0" cy="0" r="22" fill="#0A0E1A" stroke="#7C3AED" stroke-width="1.5"></circle>
-    <text x="0" y="5" text-anchor="middle" font-size="13" font-weight="800" fill="#A78BFA" font-family="&#39;JetBrains Mono&#39;, monospace">VS</text>
+    <text x="0" y="5" text-anchor="middle" font-size="13" font-weight="800" fill="#A78BFA" font-family="&#39;JetBrains Mono&#39;, monospace">→</text>
   </g>
 
   
   <g transform="translate(700, 120)">
     <text x="0" y="0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#6B7280" letter-spacing="2">HEYM · FREE &amp; SELF-HOSTED</text>
-    <text x="0" y="22" font-size="20" font-weight="700" fill="url(#ng-heym-grad)">Shipped. Inspectable. Yours.</text>
+    <text x="0" y="22" font-size="20" font-weight="700" fill="url(#ng-heym-grad)">Core capabilities, included.</text>
 
     <g transform="translate(0, 50)" font-size="13">
       
@@ -125,7 +125,7 @@
       <g transform="translate(0,52)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Execution history, search &amp; insights</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Execution history &amp; search</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d1"></rect>
       </g>
@@ -139,14 +139,14 @@
       <g transform="translate(0,156)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">LLM traces &amp; observability</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Traces, costs &amp; analytics</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d3"></rect>
       </g>
       <g transform="translate(0,208)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Unlimited Datatables &amp; Unlimited Eval Suites</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Data Tables &amp; Eval Suites</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d4"></rect>
       </g>
@@ -167,14 +167,14 @@
       <g transform="translate(0,364)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Multi Cluster Worker Mode</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Multi-instance workers</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d7"></rect>
       </g>
       <g transform="translate(0,416)">
         <rect width="500" height="44" rx="10" fill="#0B1A14" stroke="#10D9A0" stroke-opacity="0.4"></rect>
         <g transform="translate(14, 13)"><rect width="18" height="14" rx="2" fill="none" stroke="#10D9A0" stroke-width="1.5"></rect><path d="M 6 14 V 10 a 3 3 0 0 1 6 -1.5" stroke="#10D9A0" stroke-width="1.5" fill="none"></path></g>
-        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Audit Logs / Log Streaming</text>
+        <text x="44" y="28" fill="#A7F3D0" font-weight="500">Audit logs &amp; log streaming</text>
         <text x="486" y="28" text-anchor="end" fill="#10D9A0" font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace">✓ INCLUDED</text>
         <rect x="-3" y="-3" width="506" height="50" rx="13" fill="none" stroke="#10D9A0" class="ng-pulse ng-d8"></rect>
       </g>
