@@ -157,12 +157,6 @@ One e-commerce sales campaign, followed end to end: workflow generation with the
 
 </div>
 
-<div align="center">
-
-<img src="./docs/readme-assets/workflow-canvas.svg" width="100%" alt="Animated canvas for building and inspecting Heym runtime executions"/>
-
-</div>
-
 ## Product Demos
 
 The demos follow an **orchestrator and sub-agent** system from creation to a chat interface. For a request such as “How do I get from Berlin to Frankfurt?” and “What should I eat there?”, the orchestrator can call independent sub-agents in the same turn, run those tasks concurrently, and combine their results.
@@ -401,6 +395,12 @@ Skills are portable capability bundles: a `SKILL.md` instruction file plus optio
 ---
 
 ## Build and Orchestrate
+
+<div align="center">
+
+<img src="./docs/readme-assets/workflow-canvas.svg" width="100%" alt="Animated canvas for building and inspecting Heym runtime executions"/>
+
+</div>
 
 ### AI Assistant
 
