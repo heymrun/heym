@@ -562,5 +562,128 @@ class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase)
         db.rollback.assert_awaited_once()
 
 
+class DelayedRegistryWriteConflictTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        _flush()
+        from app.services.execution_cancellation import _RELINQUISHED_EXECUTIONS
+
+        _RELINQUISHED_EXECUTIONS.clear()
+
+    def tearDown(self) -> None:
+        _flush()
+        from app.services.execution_cancellation import _RELINQUISHED_EXECUTIONS
+
+        _RELINQUISHED_EXECUTIONS.clear()
+
+    def test_upsert_structure_preserves_cancellation_and_progress_on_conflict(self) -> None:
+        """Verify behaviorally through the upsert construction that ON CONFLICT DO UPDATE:
+        1. Never updates cancel_requested_at (so a delayed start write cannot clear cancellation)
+        2. Guards heartbeat_at and worker_id via CASE (so a delayed older write cannot regress ownership)
+        3. Guards running_node_ids, running_node_started_at_ms, and node_results via CASE
+        No SQL string assertions are used; we inspect the statement's AST objects directly.
+        """
+        from sqlalchemy.sql.elements import Case
+
+        from app.services.execution_cancellation import _build_active_execution_upsert
+
+        ex_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        t_start = datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc)
+        t_hb = datetime(2026, 9, 17, 10, 5, tzinfo=timezone.utc)
+
+        stmt = _build_active_execution_upsert(
+            execution_id=ex_id,
+            workflow_id=wf_id,
+            started_at=t_start,
+            heartbeat_at=t_hb,
+            inputs={"k": "v"},
+            trigger_source="api",
+            actor_user_id=None,
+            recoverable=True,
+            running_node_ids=[],
+            running_node_started_at_ms={},
+            node_results=[],
+        )
+
+        update_set = dict(stmt._post_values_clause.update_values_to_set)
+
+        # 1. cancel_requested_at is omitted from update_set:
+        # A delayed start write cannot overwrite cancellation timestamp to None
+        self.assertNotIn("cancel_requested_at", update_set)
+
+        # 2. heartbeat_at and worker_id use Case statements guarding against regression:
+        self.assertIn("heartbeat_at", update_set)
+        self.assertIsInstance(update_set["heartbeat_at"], Case)
+        self.assertIn("worker_id", update_set)
+        self.assertIsInstance(update_set["worker_id"], Case)
+
+        # 3. running_node_ids, running_node_started_at_ms, and node_results use Case statements:
+        self.assertIn("running_node_ids", update_set)
+        self.assertIsInstance(update_set["running_node_ids"], Case)
+        self.assertIn("running_node_started_at_ms", update_set)
+        self.assertIsInstance(update_set["running_node_started_at_ms"], Case)
+        self.assertIn("node_results", update_set)
+        self.assertIsInstance(update_set["node_results"], Case)
+
+    async def test_relinquished_execution_drops_finish_commands_on_drain(self) -> None:
+        """Proves that if an execution was relinquished, finish commands are discarded
+        during command drain and never reach the database.
+        """
+        from app.services.execution_cancellation import (
+            _RELINQUISHED_EXECUTIONS,
+            ActiveExecutionRegistry,
+            _RegistryCommand,
+        )
+
+        ex_id = uuid.uuid4()
+        _RELINQUISHED_EXECUTIONS.add(ex_id)
+        registry = ActiveExecutionRegistry()
+
+        # Enqueue a finish command for the relinquished execution
+        registry._commands.put(_RegistryCommand(action="finish", execution_id=ex_id))
+
+        # Drain commands
+        await registry._drain_commands()
+
+        # Must not be placed into _pending
+        self.assertEqual(len(registry._pending), 0)
+
+    async def test_delayed_start_command_applied_via_session(self) -> None:
+        """Applying a delayed start command passes the guarded upsert to the database session."""
+        from app.services.execution_cancellation import (
+            ActiveExecutionRegistry,
+            _RegistryCommand,
+        )
+
+        ex_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        now = datetime(2026, 9, 17, 10, 30, tzinfo=timezone.utc)
+        cmd = _RegistryCommand(
+            action="start",
+            execution_id=ex_id,
+            workflow_id=wf_id,
+            started_at=datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc),
+            inputs={"x": 1},
+            trigger_source="api",
+            actor_user_id=None,
+            recoverable=True,
+        )
+
+        executed_stmts = []
+
+        def handler(kind: str, execution_id: uuid.UUID | None) -> _FakeResult:
+            executed_stmts.append((kind, execution_id))
+            return _FakeResult(rowcount=1)
+
+        session = _FakeSession(handler)
+        registry = ActiveExecutionRegistry()
+        await registry._apply_command(session, cmd, now)
+
+        self.assertEqual(len(session.statements), 1)
+        kind, bound_id = session.statements[0]
+        self.assertEqual(kind, "insert")
+        self.assertEqual(bound_id, ex_id)
+
+
 if __name__ == "__main__":
     unittest.main()

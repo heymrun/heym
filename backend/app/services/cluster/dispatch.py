@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import uuid
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
-from app.db.models import Workflow, WorkflowRunQueue
+from app.db.models import ActiveWorkflowExecution, ExecutionHistory, Workflow, WorkflowRunQueue
 from app.services.cluster import identity, run_queue
+from app.services.cluster.attribution import attribution_fields
 from app.services.cluster.node_placement import Placement, workflow_placement
 from app.services.cluster.run_history import (
     OffloadedRun,
@@ -30,8 +33,13 @@ from app.services.cluster.run_history import (
     summarize,
 )
 from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS, run_result_bus
-from app.services.execution_cancellation import complete_execution, register_execution
-from app.services.workflow_executor import execute_workflow
+from app.services.execution_cancellation import (
+    complete_execution,
+    get_active_execution_handle,
+    register_execution,
+    relinquish_execution,
+)
+from app.services.workflow_executor import WorkflowCancelledError, execute_workflow
 
 logger = logging.getLogger("cluster")
 
@@ -256,6 +264,17 @@ async def dispatch_workflow(
     logger.info(
         "Dispatched workflow %s as %s to %s", workflow_id, placement, target or "waiting_for_main"
     )
+    handle = get_active_execution_handle(run_id)
+    if handle is None:
+        register_execution(
+            workflow_id=workflow_id,
+            execution_id=run_id,
+            inputs=inputs,
+            trigger_source=trigger_source,
+            actor_user_id=actor_user_id,
+        )
+        handle = get_active_execution_handle(run_id)
+    relinquish_execution(run_id, handle=handle)
     if not wait_for_completion:
         run_result_bus.release(run_id)
         return None
@@ -358,6 +377,19 @@ class RunQueueWorker:
             )
 
             async with async_session_maker() as db:
+                active_row: ActiveWorkflowExecution | None = None
+                if hasattr(db, "get"):
+                    raw = db.get(ActiveWorkflowExecution, row.execution_id)
+                    if inspect.isawaitable(raw):
+                        active_row = await raw
+                if (
+                    active_row is not None
+                    and getattr(active_row, "cancel_requested_at", None) is not None
+                ):
+                    if cancel_event is not None:
+                        cancel_event.set()
+                    raise WorkflowCancelledError("Workflow execution cancelled")
+
                 workflow = (
                     await db.execute(select(Workflow).where(Workflow.id == row.workflow_id))
                 ).scalar_one_or_none()
@@ -433,6 +465,39 @@ class RunQueueWorker:
                         await db.commit()
             await run_queue.complete(
                 row.execution_id, result=summarize(result, row.execution_id), error=None
+            )
+        except WorkflowCancelledError:
+            logger.info("Claimed run was cancelled: %s", row.execution_id)
+            async with async_session_maker() as db:
+                await db.execute(
+                    pg_insert(ExecutionHistory)
+                    .values(
+                        id=row.execution_id,
+                        workflow_id=row.workflow_id,
+                        inputs=row.inputs,
+                        outputs={"error": "Execution was cancelled"},
+                        node_results=[],
+                        status="cancelled",
+                        execution_time_ms=0.0,
+                        trigger_source=row.trigger_source,
+                        **attribution_fields(),
+                    )
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                await db.commit()
+            await run_queue.complete(
+                row.execution_id,
+                result={
+                    "execution_id": str(row.execution_id),
+                    "workflow_id": str(row.workflow_id),
+                    "status": "cancelled",
+                    "outputs": {"error": "Execution was cancelled"},
+                    "execution_time_ms": 0.0,
+                    "history_written": True,
+                    "error": "Execution was cancelled",
+                    "instance": identity.instance_name(),
+                },
+                error=None,
             )
         except Exception as exc:
             logger.exception("Claimed run failed")

@@ -47,6 +47,80 @@ class MarkOwnExecutionsOrphanedTests(unittest.IsolatedAsyncioTestCase):
         session.execute.assert_awaited_once()
         session.commit.assert_awaited_once()
 
+    async def test_worker_owned_and_queued_executions_not_backdated_on_dispatcher_shutdown(
+        self,
+    ) -> None:
+        """Dispatcher shutdown must not backdate rows belonging to other workers
+        or rows that are queued/waiting in the run queue.
+        """
+        from app.services.execution_cancellation import mark_own_executions_orphaned
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+        session.commit = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
+            await mark_own_executions_orphaned()
+
+        stmt = session.execute.await_args.args[0]
+        # Inspect statement parameters and clauses
+        params = stmt.compile().params
+        from app.services.execution_cancellation import _WORKER_ID
+
+        # Proves it binds the dispatcher's own instance_id as worker_id filter
+        self.assertIn(_WORKER_ID, params.values())
+        # Proves it excludes queued and waiting_for_main runs from orphan marking
+        self.assertIn(["queued", "waiting_for_main"], params.values())
+
+
+class RelinquishedDispatcherDoesNotKeepExecutionAliveTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services.execution_cancellation import (
+            _ACTIVE_EXECUTIONS,
+            _RELINQUISHED_EXECUTIONS,
+        )
+
+        _ACTIVE_EXECUTIONS.clear()
+        _RELINQUISHED_EXECUTIONS.clear()
+
+    async def test_relinquished_execution_is_not_heartbeated_by_dispatcher(self) -> None:
+        """Proves a dispatcher waiting on a relinquished run does not keep the row alive."""
+        from app.services.execution_cancellation import (
+            ActiveExecutionRegistry,
+            get_active_execution_handle,
+            register_execution,
+            relinquish_execution,
+        )
+
+        wf_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+
+        # Dispatcher registers
+        register_execution(workflow_id=wf_id, execution_id=run_id)
+        handle = get_active_execution_handle(run_id)
+        self.assertIsNotNone(handle)
+
+        # Dispatcher relinquishes
+        relinquish_execution(run_id, handle=handle)
+
+        # Dispatcher sync loop ticks
+        disp_registry = ActiveExecutionRegistry()
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        session.commit = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.db.session.async_session_maker", return_value=cm):
+            await disp_registry._sync_local_handles()
+
+        # Dispatcher emitted NO statements for run_id
+        session.execute.assert_not_called()
+
 
 class ClaimOrphanedExecutionsTests(unittest.IsolatedAsyncioTestCase):
     async def test_claims_only_rows_won_atomically(self) -> None:

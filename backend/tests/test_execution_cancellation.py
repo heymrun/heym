@@ -6,10 +6,13 @@ from datetime import timezone
 
 from app.services.execution_cancellation import (
     _ACTIVE_EXECUTIONS,
+    _RELINQUISHED_EXECUTIONS,
     cancel_execution,
     clear_execution,
+    get_active_execution_handle,
     list_active_executions,
     register_execution,
+    relinquish_execution,
 )
 
 
@@ -17,6 +20,7 @@ def _flush() -> None:
     """Clear global state between tests."""
     with threading.Lock():
         _ACTIVE_EXECUTIONS.clear()
+        _RELINQUISHED_EXECUTIONS.clear()
 
 
 class RegisterExecutionTests(unittest.TestCase):
@@ -180,3 +184,77 @@ class ListActiveExecutionsTests(unittest.TestCase):
         clear_execution(ex_id)
         result = list_active_executions()
         self.assertEqual(result, [])
+
+
+class RelinquishExecutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _flush()
+
+    def test_relinquish_drops_handle_and_records_relinquished(self) -> None:
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+        register_execution(workflow_id=wf_id, execution_id=ex_id)
+        handle = get_active_execution_handle(ex_id)
+        self.assertIsNotNone(handle)
+
+        relinquish_execution(ex_id, handle=handle)
+        self.assertNotIn(ex_id, _ACTIVE_EXECUTIONS)
+        self.assertIn(ex_id, _RELINQUISHED_EXECUTIONS)
+
+    def test_relinquish_with_wrong_handle_fails_and_preserves_active(self) -> None:
+        from app.services.execution_cancellation import ExecutionCancellationHandle
+
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+        register_execution(workflow_id=wf_id, execution_id=ex_id)
+        wrong_handle = ExecutionCancellationHandle(
+            workflow_id=wf_id,
+            execution_id=ex_id,
+            event=threading.Event(),
+            started_at=datetime.datetime.now(timezone.utc),
+        )
+
+        relinquish_execution(ex_id, handle=wrong_handle)
+        self.assertIn(ex_id, _ACTIVE_EXECUTIONS)
+
+    def test_clear_relinquished_execution_does_not_call_record_finished(self) -> None:
+        from unittest.mock import patch
+
+        from app.services.execution_cancellation import active_execution_registry
+
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+        register_execution(workflow_id=wf_id, execution_id=ex_id)
+        handle = get_active_execution_handle(ex_id)
+        relinquish_execution(ex_id, handle=handle)
+
+        with patch.object(active_execution_registry, "record_finished") as mock_record:
+            clear_execution(ex_id, handle=handle)
+            mock_record.assert_not_called()
+        self.assertNotIn(ex_id, _RELINQUISHED_EXECUTIONS)
+
+    def test_same_process_handle_identity_preserved_during_clear(self) -> None:
+        wf_id = uuid.uuid4()
+        ex_id = uuid.uuid4()
+
+        # Dispatcher registers handle_a
+        register_execution(workflow_id=wf_id, execution_id=ex_id)
+        handle_a = get_active_execution_handle(ex_id)
+        self.assertIsNotNone(handle_a)
+
+        # Dispatcher relinquishes
+        relinquish_execution(ex_id, handle=handle_a)
+        self.assertNotIn(ex_id, _ACTIVE_EXECUTIONS)
+
+        # Worker on same process registers handle_b
+        register_execution(workflow_id=wf_id, execution_id=ex_id)
+        handle_b = get_active_execution_handle(ex_id)
+        self.assertIsNotNone(handle_b)
+        self.assertIsNot(handle_a, handle_b)
+
+        # Dispatcher caller runs clear_execution with handle_a
+        cleared = clear_execution(ex_id, handle=handle_a)
+        self.assertFalse(cleared)
+
+        # Worker handle_b is preserved and still active
+        self.assertIs(_ACTIVE_EXECUTIONS.get(ex_id), handle_b)

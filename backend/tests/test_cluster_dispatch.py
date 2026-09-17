@@ -676,3 +676,143 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
         statement = db.execute.await_args.args[0]
         compiled = str(statement.compile(dialect=postgresql.dialect())).upper()
         self.assertIn("ON CONFLICT (ID) DO UPDATE", compiled)
+
+
+class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services.execution_cancellation import (
+            _ACTIVE_EXECUTIONS,
+            _RELINQUISHED_EXECUTIONS,
+        )
+
+        _ACTIVE_EXECUTIONS.clear()
+        _RELINQUISHED_EXECUTIONS.clear()
+
+    async def test_dispatch_workflow_relinquishes_execution_after_enqueue(self) -> None:
+        from app.services.cluster.dispatch import dispatch_workflow
+        from app.services.execution_cancellation import (
+            _ACTIVE_EXECUTIONS,
+            active_execution_registry,
+        )
+
+        wf_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        nodes = [{"type": "http", "data": {}}]
+
+        with (
+            patch("app.services.cluster.dispatch.settings") as s,
+            patch("app.services.cluster.dispatch.identity.is_main", return_value=True),
+            patch(
+                "app.services.cluster.dispatch.run_queue.enqueue", new=AsyncMock()
+            ) as mock_enqueue,
+            patch("app.services.cluster.dispatch.run_queue.notify_queue", new=AsyncMock()),
+            patch(
+                "app.services.cluster.dispatch.wait_for_result",
+                new=AsyncMock(return_value=SimpleNamespace(reported=True)),
+            ),
+            patch.object(active_execution_registry, "record_finished") as mock_finish,
+        ):
+            s.cluster_enabled = True
+            await dispatch_workflow(
+                workflow_id=wf_id,
+                nodes=nodes,
+                edges=[],
+                inputs={},
+                execution_id=run_id,
+                wait_for_completion=True,
+            )
+            mock_enqueue.assert_awaited_once()
+
+        # The dispatcher relinquished the execution from local registry
+        self.assertNotIn(run_id, _ACTIVE_EXECUTIONS)
+        # Even if caller cleans up, record_finished is NOT called for relinquished execution
+        mock_finish.assert_not_called()
+
+
+class QueuedRunCancellationWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_claimed_run_with_persisted_cancellation_exits_before_executor(self) -> None:
+        """A run marked cancelled while queued must not invoke execute_workflow,
+        must write cancelled execution history, and complete the queue cleanly.
+        Covers both STATUS_QUEUED and STATUS_WAITING_FOR_MAIN.
+        """
+        import datetime
+
+        from app.db.models import ActiveWorkflowExecution
+        from app.services.cluster.dispatch import RunQueueWorker
+        from app.services.cluster.run_queue import (
+            STATUS_QUEUED,
+            STATUS_WAITING_FOR_MAIN,
+        )
+
+        worker = RunQueueWorker()
+
+        for queue_status in (STATUS_QUEUED, STATUS_WAITING_FOR_MAIN):
+            run_id = uuid.uuid4()
+            wf_id = uuid.uuid4()
+            now = datetime.datetime.now(datetime.timezone.utc)
+            queued_row = SimpleNamespace(
+                execution_id=run_id,
+                workflow_id=wf_id,
+                status=queue_status,
+                target_instance_id="test-worker",
+                inputs={"x": 1},
+                trigger_source="api",
+                actor_user_id=None,
+                credentials_owner_id=None,
+                test_run=False,
+                timeout_seconds=None,
+                enqueued_at=now,
+                not_after=now + datetime.timedelta(seconds=60),
+                return_on_chart_output=False,
+            )
+
+            active_row = MagicMock(spec=ActiveWorkflowExecution)
+            active_row.execution_id = run_id
+            active_row.cancel_requested_at = now
+
+            mock_session = AsyncMock()
+            mock_session.get = AsyncMock(return_value=active_row)
+            mock_session.execute = AsyncMock()
+            mock_session.commit = AsyncMock()
+
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+
+            from app.services.execution_cancellation import register_execution
+
+            event_captured = None
+
+            def spy_register(*args, **kwargs):
+                nonlocal event_captured
+                event = register_execution(*args, **kwargs)
+                event_captured = event
+                return event
+
+            with (
+                patch("app.db.session.async_session_maker", return_value=cm),
+                patch(
+                    "app.services.cluster.dispatch.execute_workflow", new=AsyncMock()
+                ) as mock_exec,
+                patch(
+                    "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
+                ) as mock_complete,
+                patch("app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()),
+                patch("app.services.cluster.dispatch.register_execution", side_effect=spy_register),
+            ):
+                await worker._execute_claimed(queued_row)
+
+                # Proves executor was NEVER invoked
+                mock_exec.assert_not_called()
+                # Proves cancel_event was registered and set
+                self.assertIsNotNone(event_captured)
+                self.assertTrue(event_captured.is_set())
+                # Proves run_queue was completed with status="cancelled" and error=None
+                mock_complete.assert_awaited_once()
+                complete_call = mock_complete.await_args
+                self.assertEqual(complete_call.args[0], run_id)
+                self.assertEqual(complete_call.kwargs["result"]["status"], "cancelled")
+                self.assertIsNone(complete_call.kwargs["error"])
+                # Proves history row was inserted
+                mock_session.execute.assert_awaited_once()
+                mock_session.commit.assert_awaited_once()

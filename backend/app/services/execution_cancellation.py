@@ -147,6 +147,7 @@ class _RegistryCommand:
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
 _COMPLETED_EXECUTIONS: dict[uuid.UUID, CompletedExecutionResult] = {}
+_RELINQUISHED_EXECUTIONS: set[uuid.UUID] = set()
 _LOCK = threading.Lock()
 
 
@@ -181,6 +182,29 @@ def register_execution(
     return event
 
 
+def get_active_execution_handle(execution_id: uuid.UUID) -> ExecutionCancellationHandle | None:
+    with _LOCK:
+        return _ACTIVE_EXECUTIONS.get(execution_id)
+
+
+def relinquish_execution(
+    execution_id: uuid.UUID,
+    *,
+    handle: ExecutionCancellationHandle | None = None,
+) -> None:
+    """Relinquish local dispatcher ownership after offloading to cluster.
+
+    Stops local heartbeating and prevents subsequent dispatcher cleanup from
+    deleting the shared database row or worker registration.
+    """
+    with _LOCK:
+        current = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or current is handle:
+            _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        _RELINQUISHED_EXECUTIONS.add(execution_id)
+    active_execution_registry.relinquish(execution_id)
+
+
 def cancel_execution(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool:
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(execution_id)
@@ -190,11 +214,23 @@ def cancel_execution(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool
     return True
 
 
-def clear_execution(execution_id: uuid.UUID) -> None:
+def clear_execution(
+    execution_id: uuid.UUID,
+    *,
+    handle: ExecutionCancellationHandle | None = None,
+) -> None:
+    was_relinquished = False
     with _LOCK:
-        _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        if execution_id in _RELINQUISHED_EXECUTIONS:
+            _RELINQUISHED_EXECUTIONS.discard(execution_id)
+            was_relinquished = True
+        current = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or current is handle:
+            if not was_relinquished or (handle is not None and current is handle):
+                _ACTIVE_EXECUTIONS.pop(execution_id, None)
         _COMPLETED_EXECUTIONS.pop(execution_id, None)
-    active_execution_registry.record_finished(execution_id)
+    if not was_relinquished:
+        active_execution_registry.record_finished(execution_id)
 
 
 def complete_execution(
@@ -519,8 +555,11 @@ def _build_active_execution_upsert(
 
     ``set_`` intentionally omits ``attempt`` and ``recoverable`` so a recovery
     re-run (re-registering the same execution_id) preserves the claimed attempt
-    count and recoverable flag.
+    count and recoverable flag. It also omits ``cancel_requested_at`` so a delayed
+    start write or re-registration never clears an existing cancellation timestamp,
+    and preserves progress and newer heartbeats against delayed stale writes.
     """
+    from sqlalchemy import String, case, cast, func
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.db.models import ActiveWorkflowExecution
@@ -530,7 +569,6 @@ def _build_active_execution_upsert(
         "worker_id": _WORKER_ID,
         "started_at": started_at,
         "heartbeat_at": heartbeat_at,
-        "cancel_requested_at": None,
         "inputs": inputs,
         "trigger_source": trigger_source,
         "actor_user_id": actor_user_id,
@@ -538,16 +576,55 @@ def _build_active_execution_upsert(
         "running_node_started_at_ms": running_node_started_at_ms,
         "node_results": node_results,
     }
-    return (
-        pg_insert(ActiveWorkflowExecution)
-        .values(
-            execution_id=execution_id,
-            attempt=0,
-            recoverable=recoverable,
-            **shared_values,
-        )
-        .on_conflict_do_update(index_elements=["execution_id"], set_=shared_values)
+    stmt = pg_insert(ActiveWorkflowExecution).values(
+        execution_id=execution_id,
+        attempt=0,
+        recoverable=recoverable,
+        cancel_requested_at=None,
+        **shared_values,
     )
+    update_set: dict[str, Any] = {
+        "workflow_id": stmt.excluded.workflow_id,
+        "inputs": stmt.excluded.inputs,
+        "trigger_source": stmt.excluded.trigger_source,
+        "actor_user_id": stmt.excluded.actor_user_id,
+        "heartbeat_at": case(
+            (
+                ActiveWorkflowExecution.heartbeat_at > stmt.excluded.heartbeat_at,
+                ActiveWorkflowExecution.heartbeat_at,
+            ),
+            else_=stmt.excluded.heartbeat_at,
+        ),
+        "worker_id": case(
+            (
+                ActiveWorkflowExecution.heartbeat_at > stmt.excluded.heartbeat_at,
+                ActiveWorkflowExecution.worker_id,
+            ),
+            else_=stmt.excluded.worker_id,
+        ),
+        "running_node_ids": case(
+            (
+                func.json_array_length(stmt.excluded.running_node_ids) > 0,
+                stmt.excluded.running_node_ids,
+            ),
+            else_=ActiveWorkflowExecution.running_node_ids,
+        ),
+        "running_node_started_at_ms": case(
+            (
+                cast(stmt.excluded.running_node_started_at_ms, String) != "{}",
+                stmt.excluded.running_node_started_at_ms,
+            ),
+            else_=ActiveWorkflowExecution.running_node_started_at_ms,
+        ),
+        "node_results": case(
+            (
+                func.json_array_length(stmt.excluded.node_results) > 0,
+                stmt.excluded.node_results,
+            ),
+            else_=ActiveWorkflowExecution.node_results,
+        ),
+    }
+    return stmt.on_conflict_do_update(index_elements=["execution_id"], set_=update_set)
 
 
 class ActiveExecutionRegistry:
@@ -611,6 +688,14 @@ class ActiveExecutionRegistry:
         self._commands.put(_RegistryCommand(action="finish", execution_id=execution_id))
         self._wake()
 
+    def relinquish(self, execution_id: uuid.UUID) -> None:
+        """Drop pending finish commands so dispatcher cleanup cannot delete the active row."""
+        self._pending = [
+            cmd
+            for cmd in self._pending
+            if not (cmd.execution_id == execution_id and cmd.action == "finish")
+        ]
+
     def _wake(self) -> None:
         if self._loop is None or self._wakeup is None:
             return
@@ -668,9 +753,13 @@ class ActiveExecutionRegistry:
     async def _drain_commands(self) -> None:
         while True:
             try:
-                self._pending.append(self._commands.get_nowait())
+                cmd = self._commands.get_nowait()
             except queue.Empty:
                 break
+            with _LOCK:
+                if cmd.action == "finish" and cmd.execution_id in _RELINQUISHED_EXECUTIONS:
+                    continue
+            self._pending.append(cmd)
         if not self._pending:
             return
         if len(self._pending) > _MAX_PENDING_REGISTRY_COMMANDS:
@@ -960,9 +1049,10 @@ async def cleanup_stale_persisted_executions() -> int:
 
 async def mark_own_executions_orphaned() -> int:
     """Backdate this worker's recoverable rows so the next leader recovers them now."""
-    from sqlalchemy import update
+    from sqlalchemy import exists, update
 
-    from app.db.models import ActiveWorkflowExecution
+    from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
+    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
 
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     async with async_session_maker() as session:
@@ -973,6 +1063,11 @@ async def mark_own_executions_orphaned() -> int:
                 ActiveWorkflowExecution.recoverable.is_(True),
                 # Never hand a cancelled run to recovery on shutdown.
                 ActiveWorkflowExecution.cancel_requested_at.is_(None),
+                # Never mark an unclaimed queued run orphaned on shutdown.
+                ~exists().where(
+                    WorkflowRunQueue.execution_id == ActiveWorkflowExecution.execution_id,
+                    WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]),
+                ),
             )
             .values(heartbeat_at=epoch)
         )
@@ -987,9 +1082,10 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
     aborts the shared transaction and no orphan anywhere in the deployment can be
     recovered for as long as the row stays broken.
     """
-    from sqlalchemy import select, update
+    from sqlalchemy import exists, select, update
 
-    from app.db.models import ActiveWorkflowExecution
+    from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
+    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
 
     now = now or _utcnow()
     cutoff = now - timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
@@ -1015,6 +1111,14 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                             # re-running work the user explicitly stopped is worse
                             # than leaving the row for the stale sweep to clear.
                             ActiveWorkflowExecution.cancel_requested_at.is_(None),
+                            # An unclaimed queued run is waiting for a worker, not a crashed one.
+                            ~exists().where(
+                                WorkflowRunQueue.execution_id
+                                == ActiveWorkflowExecution.execution_id,
+                                WorkflowRunQueue.status.in_(
+                                    [STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]
+                                ),
+                            ),
                         )
                     )
                 ).all()
@@ -1063,9 +1167,10 @@ async def list_persisted_active_executions_for_user(
     user_id: uuid.UUID,
 ) -> list[ActiveExecutionRecord]:
     """Return active execution rows for workflows accessible to the user."""
-    from sqlalchemy import or_, select
+    from sqlalchemy import exists, or_, select
 
-    from app.db.models import ActiveWorkflowExecution, Workflow, WorkflowShare
+    from app.db.models import ActiveWorkflowExecution, Workflow, WorkflowRunQueue, WorkflowShare
+    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
 
     cutoff = _utcnow() - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
     result = await db.execute(
@@ -1080,7 +1185,13 @@ async def list_persisted_active_executions_for_user(
         )
         .join(Workflow, Workflow.id == ActiveWorkflowExecution.workflow_id)
         .where(
-            ActiveWorkflowExecution.heartbeat_at >= cutoff,
+            or_(
+                ActiveWorkflowExecution.heartbeat_at >= cutoff,
+                exists().where(
+                    WorkflowRunQueue.execution_id == ActiveWorkflowExecution.execution_id,
+                    WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]),
+                ),
+            ),
             ActiveWorkflowExecution.cancel_requested_at.is_(None),
             or_(
                 Workflow.owner_id == user_id,
