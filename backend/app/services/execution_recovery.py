@@ -11,6 +11,7 @@ from app.services.execution_cancellation import (
     RECOVERY_STALE_AFTER_SECONDS,  # noqa: F401  (re-exported for callers/tests)
     ClaimedOrphan,
     claim_orphaned_executions,
+    cleanup_completed_active_executions,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class ExecutionRecoveryService:
             await asyncio.sleep(_RECOVERY_POLL_SECONDS)
 
     async def _sweep_once(self) -> None:
+        await cleanup_completed_active_executions()
         orphans = await claim_orphaned_executions()
         for orphan in orphans:
             asyncio.create_task(self._recover_one(orphan))

@@ -5,6 +5,7 @@ whole sync transaction, which stopped every heartbeat on the worker, dropped que
 start/finish commands, and logged a traceback twice a second.
 """
 
+import asyncio
 import logging
 import threading
 import unittest
@@ -64,6 +65,12 @@ class _FakeResult:
 
     def all(self) -> list[Any]:
         return list(self._rows)
+
+    def scalar(self) -> Any:
+        return self._rows[0] if self._rows else False
+
+    def scalar_one_or_none(self) -> Any:
+        return self._rows[0] if self._rows else None
 
 
 class _FakeSession:
@@ -565,15 +572,9 @@ class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase)
 class DelayedRegistryWriteConflictTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _flush()
-        from app.services.execution_cancellation import _RELINQUISHED_EXECUTIONS
-
-        _RELINQUISHED_EXECUTIONS.clear()
 
     def tearDown(self) -> None:
         _flush()
-        from app.services.execution_cancellation import _RELINQUISHED_EXECUTIONS
-
-        _RELINQUISHED_EXECUTIONS.clear()
 
     def test_upsert_structure_preserves_cancellation_and_progress_on_conflict(self) -> None:
         """Verify behaviorally through the upsert construction that ON CONFLICT DO UPDATE:
@@ -625,31 +626,55 @@ class DelayedRegistryWriteConflictTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("node_results", update_set)
         self.assertIsInstance(update_set["node_results"], Case)
 
-    async def test_relinquished_execution_drops_finish_commands_on_drain(self) -> None:
-        """Proves that if an execution was relinquished, finish commands are discarded
-        during command drain and never reach the database.
+    async def test_relinquished_token_purges_finish_commands_but_preserves_start(self) -> None:
+        """Proves that relinquishing a registration token preserves start commands
+        (so queued runs get persisted active execution records for visibility/cancellation)
+        while purging finish commands (so dispatcher cleanup cannot delete worker rows).
         """
         from app.services.execution_cancellation import (
-            _RELINQUISHED_EXECUTIONS,
             ActiveExecutionRegistry,
             _RegistryCommand,
         )
 
-        ex_id = uuid.uuid4()
-        _RELINQUISHED_EXECUTIONS.add(ex_id)
+        token_a = uuid.uuid4()
+        token_b = uuid.uuid4()
+        ex_id_a = uuid.uuid4()
+        ex_id_b = uuid.uuid4()
+
         registry = ActiveExecutionRegistry()
+        cmd_start_a = _RegistryCommand(
+            action="start", execution_id=ex_id_a, registration_token=token_a
+        )
+        cmd_finish_a = _RegistryCommand(
+            action="finish", execution_id=ex_id_a, registration_token=token_a
+        )
+        cmd_start_b = _RegistryCommand(
+            action="start", execution_id=ex_id_b, registration_token=token_b
+        )
+        registry._commands.put(cmd_start_a)
+        registry._commands.put(cmd_finish_a)
+        registry._commands.put(cmd_start_b)
 
-        # Enqueue a finish command for the relinquished execution
-        registry._commands.put(_RegistryCommand(action="finish", execution_id=ex_id))
+        # Relinquish token_a
+        registry.relinquish(token_a)
 
-        # Drain commands
-        await registry._drain_commands()
+        # cmd_start_a and cmd_start_b must be preserved, cmd_finish_a purged
+        remaining_commands = list(registry._commands.queue)
+        self.assertIn(cmd_start_a, remaining_commands)
+        self.assertIn(cmd_start_b, remaining_commands)
+        self.assertNotIn(cmd_finish_a, remaining_commands)
 
-        # Must not be placed into _pending
-        self.assertEqual(len(registry._pending), 0)
+        # If placed in _pending, relinquish also cleans finish from _pending
+        registry._pending.append(cmd_finish_a)
+        registry._pending.append(cmd_start_a)
+        registry.relinquish(token_a)
+        self.assertNotIn(cmd_finish_a, registry._pending)
+        self.assertIn(cmd_start_a, registry._pending)
 
-    async def test_delayed_start_command_applied_via_session(self) -> None:
-        """Applying a delayed start command passes the guarded upsert to the database session."""
+    async def test_anti_resurrection_terminal_execution_discards_start_command(self) -> None:
+        """A delayed start command for an execution that already reached a terminal state
+        must be discarded and must NOT insert an ActiveWorkflowExecution row.
+        """
         from app.services.execution_cancellation import (
             ActiveExecutionRegistry,
             _RegistryCommand,
@@ -664,6 +689,44 @@ class DelayedRegistryWriteConflictTests(unittest.IsolatedAsyncioTestCase):
             workflow_id=wf_id,
             started_at=datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc),
             inputs={"x": 1},
+        )
+
+        executed_stmts = []
+
+        def handler(kind: str, execution_id: uuid.UUID | None) -> _FakeResult:
+            executed_stmts.append((kind, execution_id))
+            return _FakeResult(rowcount=1)
+
+        # Return True for terminal check select (execution already finished)
+        session = _FakeSession(handler, select_rows=[True])
+        registry = ActiveExecutionRegistry()
+        await registry._apply_command(session, cmd, now)
+
+        # Only the select check was executed; NO insert/upsert was executed!
+        self.assertEqual(len(executed_stmts), 0)
+        insert_stmts = [kind for kind, _ in session.statements if kind == "insert"]
+        self.assertEqual(len(insert_stmts), 0)
+
+    async def test_delayed_start_command_applied_via_session(self) -> None:
+        """Applying a delayed start command passes the guarded upsert to the database session
+        using command.enqueued_at as heartbeat_at rather than drain time.
+        """
+        from app.services.execution_cancellation import (
+            ActiveExecutionRegistry,
+            _RegistryCommand,
+        )
+
+        ex_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        enqueued_time = datetime(2026, 9, 17, 10, 5, tzinfo=timezone.utc)
+        drain_time = datetime(2026, 9, 17, 10, 30, tzinfo=timezone.utc)
+        cmd = _RegistryCommand(
+            action="start",
+            execution_id=ex_id,
+            workflow_id=wf_id,
+            started_at=datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc),
+            enqueued_at=enqueued_time,
+            inputs={"x": 1},
             trigger_source="api",
             actor_user_id=None,
             recoverable=True,
@@ -675,14 +738,325 @@ class DelayedRegistryWriteConflictTests(unittest.IsolatedAsyncioTestCase):
             executed_stmts.append((kind, execution_id))
             return _FakeResult(rowcount=1)
 
-        session = _FakeSession(handler)
+        # Non-terminal run (select returns False)
+        session = _FakeSession(handler, select_rows=[False])
         registry = ActiveExecutionRegistry()
-        await registry._apply_command(session, cmd, now)
+        await registry._apply_command(session, cmd, drain_time)
 
-        self.assertEqual(len(session.statements), 1)
-        kind, bound_id = session.statements[0]
+        self.assertEqual(len(executed_stmts), 1)
+        kind, bound_id = executed_stmts[0]
         self.assertEqual(kind, "insert")
         self.assertEqual(bound_id, ex_id)
+
+    async def test_in_flight_dispatcher_heartbeat_does_not_overwrite_worker_ownership(self) -> None:
+        """Proves that _sync_local_handles scopes its heartbeat update to _WORKER_ID
+        and checks if another worker owns the row before attempting reinsertion.
+        """
+        from app.services.execution_cancellation import (
+            _ACTIVE_EXECUTIONS,
+            ExecutionCancellationHandle,
+        )
+
+        ex_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        handle = ExecutionCancellationHandle(
+            execution_id=ex_id,
+            workflow_id=wf_id,
+            event=threading.Event(),
+        )
+        _ACTIVE_EXECUTIONS[ex_id] = handle
+
+        executed_stmts = []
+
+        def handler(kind: str, execution_id: uuid.UUID | None) -> _FakeResult:
+            executed_stmts.append((kind, execution_id))
+            if kind == "update":
+                # Returns 0 because worker took ownership with different worker_id
+                return _FakeResult(rowcount=0)
+            return _FakeResult(rowcount=1)
+
+        session = _FakeSession(handler, select_rows=[])
+        original_execute = session.execute
+
+        async def mock_execute(statement: Any) -> _FakeResult:
+            kind = _statement_kind(statement)
+            if kind == "select" and "worker_id" in str(statement):
+                res = _FakeResult(rowcount=1)
+                res.scalar_one_or_none = lambda: "other-worker-id"
+                executed_stmts.append((kind, _bound_execution_id(statement)))
+                return res
+            return await original_execute(statement)
+
+        session.execute = mock_execute
+
+        registry = ActiveExecutionRegistry()
+        with patch("app.db.session.async_session_maker", _session_maker(session)):
+            await registry._sync_local_handles()
+
+        # Update was attempted scoped to _WORKER_ID, worker_id was checked, and NO insert occurred
+        kinds = [k for k, _ in executed_stmts]
+        self.assertIn("update", kinds)
+        self.assertNotIn("insert", kinds)
+
+    async def test_unflushed_start_command_drains_after_relinquish_to_create_active_row(
+        self,
+    ) -> None:
+        """Proves that registering an execution and immediately relinquishing preserves
+        the unflushed start command so it drains and creates an ActiveWorkflowExecution row.
+        """
+        from app.services.execution_cancellation import (
+            ActiveExecutionRegistry,
+            _RegistryCommand,
+        )
+
+        ex_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        token = uuid.uuid4()
+        registry = ActiveExecutionRegistry()
+        cmd = _RegistryCommand(
+            action="start",
+            execution_id=ex_id,
+            workflow_id=wf_id,
+            registration_token=token,
+            inputs={"a": 1},
+            trigger_source="api",
+        )
+        registry._commands.put(cmd)
+
+        # Relinquish immediately before draining
+        registry.relinquish(token)
+
+        executed_stmts = []
+
+        def handler(kind: str, execution_id: uuid.UUID | None) -> _FakeResult:
+            executed_stmts.append((kind, execution_id))
+            return _FakeResult(rowcount=1)
+
+        session = _FakeSession(handler, select_rows=[False])  # terminal_check returns False
+        with patch("app.db.session.async_session_maker", _session_maker(session)):
+            await registry._drain_commands()
+
+        # The start command was preserved and drained, inserting the active row
+        self.assertIn(("insert", ex_id), executed_stmts)
+
+
+class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
+    """Deterministic SAME-PROCESS race against real PostgreSQL proving that an
+    in-flight dispatcher heartbeat cannot overwrite worker ownership after handoff.
+    """
+
+    async def asyncSetUp(self) -> None:
+        _flush()
+        from sqlalchemy import select
+
+        from app.db.models import Workflow
+        from app.db.session import async_session_maker
+        from app.services.execution_cancellation import active_execution_registry
+
+        active_execution_registry._running = True
+        self.addCleanup(setattr, active_execution_registry, "_running", False)
+
+        self.ex_id = uuid.uuid4()
+        async with async_session_maker() as session:
+            result = await session.execute(select(Workflow.id).limit(1))
+            self.wf_id = result.scalar_one()
+
+    async def asyncTearDown(self) -> None:
+        from sqlalchemy import delete
+
+        from app.db.models import ActiveWorkflowExecution
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as session:
+            await session.execute(
+                delete(ActiveWorkflowExecution).where(
+                    ActiveWorkflowExecution.execution_id == self.ex_id
+                )
+            )
+            await session.commit()
+        _flush()
+
+    async def test_same_process_in_flight_dispatcher_heartbeat_race_against_real_postgres(
+        self,
+    ) -> None:
+        """Prove that under the exact same-process race:
+        A: Dispatcher H_D cannot update worker-owned state.
+        B: Dispatcher H_D cannot resurrect the row.
+        C: Dispatcher H_D cannot advance heartbeat after H_D was relinquished.
+        D: Dispatcher H_D cannot overwrite worker progress/node state.
+        E: Worker H_W remains the active registration/owner.
+        F: Worker completion still deletes the active row correctly.
+        G: Ordering with worker registration BEFORE dispatcher relinquishment.
+        H: Worker completion happens BEFORE dispatcher cleanup.
+        """
+        from sqlalchemy import func, select, update
+
+        from app.db.models import ActiveWorkflowExecution
+        from app.db.session import async_session_maker
+        from app.services.execution_cancellation import (
+            _WORKER_ID,
+            active_execution_registry,
+            clear_execution,
+            get_active_execution_handle,
+            record_execution_node_started,
+            register_execution,
+            relinquish_execution,
+        )
+
+        # 1. Create a dispatcher execution and obtain dispatcher handle H_D
+        register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"dispatcher_data": 1},
+        )
+        h_d = get_active_execution_handle(self.ex_id)
+        self.assertIsNotNone(h_d)
+        token_d = h_d.registration_token
+
+        # Drain dispatcher's start command to real PostgreSQL
+        await active_execution_registry._drain_commands()
+
+        # Verify initial dispatcher row exists in real PostgreSQL
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(row.worker_id, f"{_WORKER_ID}:{token_d}")
+            self.assertEqual(row.running_node_ids, [])
+
+        # 2 & 3. Make _sync_local_handles() capture H_D in its snapshot, and pause
+        # immediately before the database UPDATE for H_D
+        paused_event = asyncio.Event()
+        resume_event = asyncio.Event()
+
+        real_session_maker = async_session_maker
+
+        @asynccontextmanager
+        async def pausing_session_maker():
+            async with real_session_maker() as session:
+                real_execute = session.execute
+
+                async def intercepted_execute(stmt, *args, **kwargs):
+                    if isinstance(stmt, Update):
+                        paused_event.set()
+                        await resume_event.wait()
+                    return await real_execute(stmt, *args, **kwargs)
+
+                session.execute = intercepted_execute
+                yield session
+
+        with patch("app.db.session.async_session_maker", pausing_session_maker):
+            sync_task = asyncio.create_task(active_execution_registry._sync_local_handles())
+            await paused_event.wait()
+
+            # 4. While paused:
+            # a. simulate worker claim in the SAME OS PROCESS
+            # b. create/register worker handle H_W for the same execution (Ordering G: worker registers BEFORE dispatcher relinquishes)
+            register_execution(
+                workflow_id=self.wf_id,
+                execution_id=self.ex_id,
+                inputs={"worker_data": 2},
+            )
+            h_w = get_active_execution_handle(self.ex_id)
+            self.assertIsNotNone(h_w)
+            token_w = h_w.registration_token
+            self.assertNotEqual(token_d, token_w)
+
+            # c. make worker ownership/heartbeat/progress state current
+            record_execution_node_started(str(self.ex_id), "worker_node_step_1")
+            worker_hb = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
+            async with real_session_maker() as session:
+                await session.execute(
+                    update(ActiveWorkflowExecution)
+                    .where(ActiveWorkflowExecution.execution_id == self.ex_id)
+                    .values(
+                        worker_id=f"{_WORKER_ID}:{token_w}",
+                        heartbeat_at=worker_hb,
+                        running_node_ids=["worker_node_step_1"],
+                    )
+                )
+                await session.commit()
+
+            # d. relinquish H_D (Ordering G: dispatcher relinquishes after worker registers)
+            relinquish_execution(self.ex_id, handle=h_d)
+            self.assertTrue(h_d.relinquished)
+            self.assertFalse(h_w.relinquished)
+
+            # 5. Resume the already-in-flight dispatcher heartbeat
+            resume_event.set()
+            await sync_task
+
+        # 6. Inspect the real PostgreSQL ActiveWorkflowExecution row:
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            count = (
+                await session.execute(
+                    select(func.count(ActiveWorkflowExecution.execution_id)).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+
+            # PROVE A: Dispatcher H_D cannot update worker-owned state
+            self.assertEqual(row.worker_id, f"{_WORKER_ID}:{token_w}")
+            self.assertNotEqual(row.worker_id, f"{_WORKER_ID}:{token_d}")
+
+            # PROVE B: Dispatcher H_D cannot resurrect the row or create duplicate rows
+            self.assertEqual(count, 1)
+
+            # PROVE C: Dispatcher H_D cannot advance heartbeat after H_D was relinquished
+            self.assertEqual(row.heartbeat_at, worker_hb)
+
+            # PROVE D: Dispatcher H_D cannot overwrite worker progress/node state
+            self.assertEqual(row.running_node_ids, ["worker_node_step_1"])
+
+        # PROVE E: Worker H_W remains the active registration/owner
+        self.assertIs(get_active_execution_handle(self.ex_id), h_w)
+        self.assertFalse(h_w.relinquished)
+
+        # PROVE F & H: Worker completion happens BEFORE dispatcher cleanup, and still deletes the active row correctly
+        # Worker completes:
+        worker_cleared = clear_execution(self.ex_id, handle=h_w)
+        self.assertTrue(worker_cleared)
+        await active_execution_registry._drain_commands()
+
+        # Row is deleted from PostgreSQL
+        async with async_session_maker() as session:
+            count_after_worker = (
+                await session.execute(
+                    select(func.count(ActiveWorkflowExecution.execution_id)).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(count_after_worker, 0)
+
+        # PROVE H: Dispatcher cleanup runs AFTER worker completion: safe NO-OP, row stays deleted
+        disp_cleared = clear_execution(self.ex_id, handle=h_d)
+        self.assertFalse(disp_cleared)
+        active_execution_registry.relinquish(token_d)
+        await active_execution_registry._drain_commands()
+        await active_execution_registry._sync_local_handles()
+
+        async with async_session_maker() as session:
+            final_count = (
+                await session.execute(
+                    select(func.count(ActiveWorkflowExecution.execution_id)).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(final_count, 0)
 
 
 if __name__ == "__main__":

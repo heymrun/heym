@@ -237,6 +237,7 @@ class ClaimedRunExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
             return_on_chart_output=True,
         )
         db = MagicMock()
+        db.get = AsyncMock(return_value=None)
         db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
         db.commit = AsyncMock()
         session_factory = MagicMock()
@@ -312,6 +313,7 @@ class ClaimedRunContextTests(unittest.IsolatedAsyncioTestCase):
             return_on_chart_output=False,
         )
         db = MagicMock()
+        db.get = AsyncMock(return_value=None)
         db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
         db.commit = AsyncMock()
         session_factory = MagicMock()
@@ -680,24 +682,32 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
 
 class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        from app.services.execution_cancellation import (
-            _ACTIVE_EXECUTIONS,
-            _RELINQUISHED_EXECUTIONS,
-        )
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
 
         _ACTIVE_EXECUTIONS.clear()
-        _RELINQUISHED_EXECUTIONS.clear()
 
     async def test_dispatch_workflow_relinquishes_execution_after_enqueue(self) -> None:
         from app.services.cluster.dispatch import dispatch_workflow
         from app.services.execution_cancellation import (
             _ACTIVE_EXECUTIONS,
             active_execution_registry,
+            clear_execution,
+            get_active_execution_handle,
+            register_execution,
         )
 
         wf_id = uuid.uuid4()
         run_id = uuid.uuid4()
         nodes = [{"type": "http", "data": {}}]
+
+        # Pre-register dispatcher handle before dispatch
+        cancel_event = register_execution(
+            workflow_id=wf_id,
+            execution_id=run_id,
+            inputs={},
+        )
+        disp_handle = get_active_execution_handle(run_id)
+        self.assertIsNotNone(disp_handle)
 
         with (
             patch("app.services.cluster.dispatch.settings") as s,
@@ -719,13 +729,19 @@ class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 edges=[],
                 inputs={},
                 execution_id=run_id,
+                cancel_event=cancel_event,
                 wait_for_completion=True,
             )
             mock_enqueue.assert_awaited_once()
 
-        # The dispatcher relinquished the execution from local registry
+        # The dispatcher relinquished its handle
+        self.assertTrue(disp_handle.relinquished)
         self.assertNotIn(run_id, _ACTIVE_EXECUTIONS)
-        # Even if caller cleans up, record_finished is NOT called for relinquished execution
+
+        # Dispatcher caller cleaning up its relinquished handle is a safe NO-OP returning False
+        cleared = clear_execution(run_id, handle=disp_handle)
+        self.assertIs(cleared, False)
+        # record_finished was not called for the relinquished dispatcher handle
         mock_finish.assert_not_called()
 
 
@@ -772,7 +788,9 @@ class QueuedRunCancellationWorkerTests(unittest.IsolatedAsyncioTestCase):
 
             mock_session = AsyncMock()
             mock_session.get = AsyncMock(return_value=active_row)
-            mock_session.execute = AsyncMock()
+            exec_result = MagicMock()
+            exec_result.first.return_value = (uuid.uuid4(), "Test Workflow")
+            mock_session.execute = AsyncMock(return_value=exec_result)
             mock_session.commit = AsyncMock()
 
             cm = MagicMock()
@@ -799,6 +817,10 @@ class QueuedRunCancellationWorkerTests(unittest.IsolatedAsyncioTestCase):
                 ) as mock_complete,
                 patch("app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()),
                 patch("app.services.cluster.dispatch.register_execution", side_effect=spy_register),
+                patch(
+                    "app.services.cluster.dispatch.upsert_workflow_analytics_snapshot",
+                    new=AsyncMock(),
+                ) as mock_analytics,
             ):
                 await worker._execute_claimed(queued_row)
 
@@ -813,6 +835,94 @@ class QueuedRunCancellationWorkerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(complete_call.args[0], run_id)
                 self.assertEqual(complete_call.kwargs["result"]["status"], "cancelled")
                 self.assertIsNone(complete_call.kwargs["error"])
-                # Proves history row was inserted
-                mock_session.execute.assert_awaited_once()
+                # Proves analytics snapshot and history row were inserted
+                mock_analytics.assert_awaited_once()
+                self.assertEqual(mock_analytics.await_args.kwargs["status"], "cancelled")
                 mock_session.commit.assert_awaited_once()
+
+
+class InProcessDispatchNoLeakedHandleTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
+
+        _ACTIVE_EXECUTIONS.clear()
+
+    async def test_in_process_dispatch_without_caller_handle_does_not_leak_active_execution(
+        self,
+    ) -> None:
+        """In-process execution without a caller-provided handle must not register a ghost
+        handle in _ACTIVE_EXECUTIONS.
+        """
+        from app.services.cluster.dispatch import dispatch_workflow
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
+
+        wf_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        mock_result = SimpleNamespace(status="success", execution_time_ms=10.0, node_results=[])
+
+        with (
+            patch("app.services.cluster.dispatch.settings") as s,
+            patch("app.services.cluster.dispatch.identity.is_main", return_value=True),
+            patch(
+                "app.services.cluster.dispatch.execute_workflow", return_value=mock_result
+            ) as mock_exec,
+            patch(
+                "app.services.cluster.dispatch.run_error_workflow_for_failed_run",
+                new=AsyncMock(),
+            ),
+        ):
+            s.cluster_enabled = False
+            result = await dispatch_workflow(
+                workflow_id=wf_id,
+                nodes=[{"id": "n1", "type": "textInput", "data": {}}],
+                edges=[],
+                inputs={},
+                execution_id=run_id,
+            )
+
+        mock_exec.assert_called_once()
+        self.assertIs(result, mock_result)
+        # Verify no handle was leaked into _ACTIVE_EXECUTIONS
+        self.assertNotIn(run_id, _ACTIVE_EXECUTIONS)
+        self.assertEqual(len(_ACTIVE_EXECUTIONS), 0)
+
+
+class OffloadDispatchEnqueueFailureCleanupTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
+
+        _ACTIVE_EXECUTIONS.clear()
+
+    async def test_enqueue_failure_cleans_up_locally_registered_handle(self) -> None:
+        """If dispatch_workflow registered a handle locally and enqueue raises,
+        the handle must be cleaned up from _ACTIVE_EXECUTIONS.
+        """
+        from app.services.cluster.dispatch import dispatch_workflow
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
+
+        wf_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+
+        with (
+            patch("app.services.cluster.dispatch.settings") as s,
+            patch("app.services.cluster.dispatch.identity.is_main", return_value=True),
+            patch("app.services.cluster.dispatch.resolve_placement", return_value="worker"),
+            patch("app.services.cluster.dispatch.should_run_in_process", return_value=False),
+            patch(
+                "app.services.cluster.dispatch.run_queue.enqueue",
+                side_effect=RuntimeError("Database connection lost"),
+            ),
+        ):
+            s.cluster_enabled = True
+            with self.assertRaises(RuntimeError):
+                await dispatch_workflow(
+                    workflow_id=wf_id,
+                    nodes=[{"id": "n1", "type": "textInput", "data": {}}],
+                    edges=[],
+                    inputs={},
+                    execution_id=run_id,
+                )
+
+        # Verify handle was cleaned up and not leaked
+        self.assertNotIn(run_id, _ACTIVE_EXECUTIONS)
+        self.assertEqual(len(_ACTIVE_EXECUTIONS), 0)

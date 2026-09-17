@@ -72,19 +72,17 @@ class MarkOwnExecutionsOrphanedTests(unittest.IsolatedAsyncioTestCase):
 
         # Proves it binds the dispatcher's own instance_id as worker_id filter
         self.assertIn(_WORKER_ID, params.values())
-        # Proves it excludes queued and waiting_for_main runs from orphan marking
-        self.assertIn(["queued", "waiting_for_main"], params.values())
+        # Proves it excludes queued, waiting_for_main, and terminal runs from orphan marking
+        self.assertIn(
+            ["queued", "waiting_for_main", "done", "failed", "skipped_late"], params.values()
+        )
 
 
 class RelinquishedDispatcherDoesNotKeepExecutionAliveTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        from app.services.execution_cancellation import (
-            _ACTIVE_EXECUTIONS,
-            _RELINQUISHED_EXECUTIONS,
-        )
+        from app.services.execution_cancellation import _ACTIVE_EXECUTIONS
 
         _ACTIVE_EXECUTIONS.clear()
-        _RELINQUISHED_EXECUTIONS.clear()
 
     async def test_relinquished_execution_is_not_heartbeated_by_dispatcher(self) -> None:
         """Proves a dispatcher waiting on a relinquished run does not keep the row alive."""
@@ -171,6 +169,140 @@ class ClaimOrphanedExecutionsTests(unittest.IsolatedAsyncioTestCase):
             claimed = await claim_orphaned_executions(now=now)
         self.assertEqual([c.execution_id for c in claimed], [ex_won])
         self.assertEqual(claimed[0].attempt, 1)
+
+    async def test_claim_candidates_query_excludes_queued_terminal_and_history_rows(self) -> None:
+        from app.services.execution_cancellation import claim_orphaned_executions
+
+        executed_stmts = []
+
+        async def fake_execute(stmt):
+            executed_stmts.append(stmt)
+            res = MagicMock()
+            res.all.return_value = []
+            return res
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=fake_execute)
+        session.commit = AsyncMock()
+        savepoint = MagicMock()
+        savepoint.__aenter__ = AsyncMock(return_value=savepoint)
+        savepoint.__aexit__ = AsyncMock(return_value=False)
+        session.begin_nested = MagicMock(return_value=savepoint)
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
+            await claim_orphaned_executions()
+
+        self.assertTrue(len(executed_stmts) >= 1)
+        select_stmt = executed_stmts[0]
+        params = select_stmt.compile().params
+        self.assertIn(
+            ["queued", "waiting_for_main", "done", "failed", "skipped_late"], params.values()
+        )
+        self.assertIn("claimed", params.values())
+
+    async def test_claim_candidates_query_excludes_recently_claimed_runs(self) -> None:
+        from app.services.execution_cancellation import claim_orphaned_executions
+
+        executed_stmts = []
+
+        async def fake_execute(stmt):
+            executed_stmts.append(stmt)
+            res = MagicMock()
+            res.all.return_value = []
+            return res
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=fake_execute)
+        session.commit = AsyncMock()
+        savepoint = MagicMock()
+        savepoint.__aenter__ = AsyncMock(return_value=savepoint)
+        savepoint.__aexit__ = AsyncMock(return_value=False)
+        session.begin_nested = MagicMock(return_value=savepoint)
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
+            await claim_orphaned_executions()
+
+        self.assertTrue(len(executed_stmts) >= 1)
+        select_stmt = executed_stmts[0]
+        params = select_stmt.compile().params
+        self.assertIn("claimed", params.values())
+
+
+class CleanupStalePersistedExecutionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cleanup_stale_excludes_queued_and_waiting_runs(self) -> None:
+        from app.services.execution_cancellation import cleanup_stale_persisted_executions
+
+        executed_stmts = []
+
+        async def fake_execute(stmt):
+            executed_stmts.append(stmt)
+            return MagicMock(rowcount=0)
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=fake_execute)
+        session.commit = AsyncMock()
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
+            await cleanup_stale_persisted_executions()
+
+        self.assertEqual(len(executed_stmts), 1)
+        delete_stmt = executed_stmts[0]
+        params = delete_stmt.compile().params
+        self.assertIn(["queued", "waiting_for_main"], params.values())
+
+    async def test_cleanup_completed_active_executions_deletes_rows_with_history(self) -> None:
+        from app.services.execution_cancellation import cleanup_completed_active_executions
+
+        executed_stmts = []
+
+        async def fake_execute(stmt):
+            executed_stmts.append(stmt)
+            return MagicMock(rowcount=3)
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=fake_execute)
+        session.commit = AsyncMock()
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.execution_cancellation.async_session_maker", return_value=cm):
+            deleted = await cleanup_completed_active_executions()
+
+        self.assertEqual(deleted, 3)
+        self.assertEqual(len(executed_stmts), 1)
+        self.assertIn("execution_history", str(executed_stmts[0]))
+
+    async def test_sweep_once_invokes_cleanup_completed_active_executions(self) -> None:
+        from app.services.execution_recovery import ExecutionRecoveryService
+
+        svc = ExecutionRecoveryService()
+        with (
+            patch(
+                "app.services.execution_recovery.cleanup_completed_active_executions",
+                AsyncMock(return_value=1),
+            ) as mock_cleanup,
+            patch(
+                "app.services.execution_recovery.claim_orphaned_executions",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            await svc._sweep_once()
+
+        mock_cleanup.assert_awaited_once()
 
 
 def _orphan(attempt: int = 1, trigger_source: str = "schedule"):

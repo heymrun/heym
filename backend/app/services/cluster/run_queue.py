@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import exists, select, text, update
+from sqlalchemy import delete, exists, select, text, update
 
 from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ClusterDispatchState, WorkflowRunQueue
@@ -215,21 +215,30 @@ async def expire_stranded_claims() -> list[uuid.UUID]:
 
 async def expire_late_rows() -> int:
     """Retire rows past their grace window instead of replaying a backlog."""
+    now = datetime.now(timezone.utc)
     async with async_session_maker() as db:
         result = await db.execute(
             update(WorkflowRunQueue)
             .where(
                 WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]),
-                WorkflowRunQueue.not_after < datetime.now(timezone.utc),
+                WorkflowRunQueue.not_after < now,
             )
             .values(
                 status=STATUS_SKIPPED_LATE,
                 error="Skipped: not claimed inside the misfire grace window",
-                finished_at=datetime.now(timezone.utc),
+                finished_at=now,
             )
+            .returning(WorkflowRunQueue.execution_id)
         )
+        expired_ids = [row[0] for row in result.all()]
+        if expired_ids:
+            await db.execute(
+                delete(ActiveWorkflowExecution).where(
+                    ActiveWorkflowExecution.execution_id.in_(expired_ids)
+                )
+            )
         await db.commit()
-        return result.rowcount or 0
+        return len(expired_ids)
 
 
 async def release_waiting_for_main(main_instance_id: str) -> int:

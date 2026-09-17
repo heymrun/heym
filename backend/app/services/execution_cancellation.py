@@ -69,6 +69,8 @@ class ExecutionCancellationHandle:
     workflow_id: uuid.UUID
     execution_id: uuid.UUID
     event: threading.Event
+    registration_token: uuid.UUID = field(default_factory=uuid.uuid4)
+    relinquished: bool = False
     started_at: datetime = field(default_factory=_utcnow)
     inputs: dict = field(default_factory=dict)
     trigger_source: str | None = None
@@ -137,6 +139,8 @@ class ClaimedOrphan:
 class _RegistryCommand:
     action: Literal["start", "finish"]
     execution_id: uuid.UUID
+    registration_token: uuid.UUID = field(default_factory=uuid.uuid4)
+    enqueued_at: datetime = field(default_factory=_utcnow)
     workflow_id: uuid.UUID | None = None
     started_at: datetime | None = None
     inputs: dict | None = None
@@ -147,7 +151,6 @@ class _RegistryCommand:
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
 _COMPLETED_EXECUTIONS: dict[uuid.UUID, CompletedExecutionResult] = {}
-_RELINQUISHED_EXECUTIONS: set[uuid.UUID] = set()
 _LOCK = threading.Lock()
 
 
@@ -175,6 +178,7 @@ def register_execution(
         actor_user_id=actor_user_id,
         recoverable=recoverable,
     )
+    event._execution_handle = handle  # type: ignore[attr-defined]
     with _LOCK:
         _ACTIVE_EXECUTIONS[execution_id] = handle
         _COMPLETED_EXECUTIONS.pop(execution_id, None)
@@ -197,12 +201,15 @@ def relinquish_execution(
     Stops local heartbeating and prevents subsequent dispatcher cleanup from
     deleting the shared database row or worker registration.
     """
+    if handle is None:
+        return
+    token = handle.registration_token
     with _LOCK:
+        handle.relinquished = True
         current = _ACTIVE_EXECUTIONS.get(execution_id)
-        if handle is None or current is handle:
+        if current is handle:
             _ACTIVE_EXECUTIONS.pop(execution_id, None)
-        _RELINQUISHED_EXECUTIONS.add(execution_id)
-    active_execution_registry.relinquish(execution_id)
+    active_execution_registry.relinquish(token)
 
 
 def cancel_execution(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool:
@@ -218,19 +225,34 @@ def clear_execution(
     execution_id: uuid.UUID,
     *,
     handle: ExecutionCancellationHandle | None = None,
-) -> None:
-    was_relinquished = False
+) -> bool:
+    """Clear active execution state.
+
+    Returns True if an active handle was cleared, False otherwise.
+    """
+    if handle is not None:
+        if handle.relinquished:
+            return False
+        with _LOCK:
+            current = _ACTIVE_EXECUTIONS.get(execution_id)
+            if current is not handle:
+                return False
+            _ACTIVE_EXECUTIONS.pop(execution_id, None)
+            _COMPLETED_EXECUTIONS.pop(execution_id, None)
+            token = handle.registration_token
+        active_execution_registry.record_finished(execution_id, registration_token=token)
+        return True
+
     with _LOCK:
-        if execution_id in _RELINQUISHED_EXECUTIONS:
-            _RELINQUISHED_EXECUTIONS.discard(execution_id)
-            was_relinquished = True
         current = _ACTIVE_EXECUTIONS.get(execution_id)
-        if handle is None or current is handle:
-            if not was_relinquished or (handle is not None and current is handle):
-                _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        if current is None or current.relinquished:
+            _COMPLETED_EXECUTIONS.pop(execution_id, None)
+            return False
+        _ACTIVE_EXECUTIONS.pop(execution_id, None)
         _COMPLETED_EXECUTIONS.pop(execution_id, None)
-    if not was_relinquished:
-        active_execution_registry.record_finished(execution_id)
+        token = current.registration_token
+    active_execution_registry.record_finished(execution_id, registration_token=token)
+    return True
 
 
 def complete_execution(
@@ -238,12 +260,20 @@ def complete_execution(
     *,
     workflow_id: uuid.UUID,
     result: dict[str, Any],
-) -> None:
+    handle: ExecutionCancellationHandle | None = None,
+) -> bool:
     """Finish a non-persisted run while retaining its final SSE payload briefly."""
+    if handle is not None and handle.relinquished:
+        return False
 
     now = time.monotonic()
+    token = handle.registration_token if handle is not None else None
     with _LOCK:
-        _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        current = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or current is handle:
+            _ACTIVE_EXECUTIONS.pop(execution_id, None)
+            if token is None and current is not None:
+                token = current.registration_token
         _purge_expired_completed_executions(now)
         _COMPLETED_EXECUTIONS[execution_id] = CompletedExecutionResult(
             workflow_id=workflow_id,
@@ -253,7 +283,8 @@ def complete_execution(
         while len(_COMPLETED_EXECUTIONS) > MAX_TERMINAL_EXECUTION_RESULTS:
             oldest_execution_id = next(iter(_COMPLETED_EXECUTIONS))
             _COMPLETED_EXECUTIONS.pop(oldest_execution_id, None)
-    active_execution_registry.record_finished(execution_id)
+    active_execution_registry.record_finished(execution_id, registration_token=token)
+    return True
 
 
 def get_completed_execution_result(
@@ -550,6 +581,7 @@ def _build_active_execution_upsert(
     running_node_ids: list[str],
     running_node_started_at_ms: dict[str, float],
     node_results: list[dict[str, Any]],
+    worker_id: str | None = None,
 ) -> Any:
     """Insert-or-refresh one active execution row.
 
@@ -566,7 +598,7 @@ def _build_active_execution_upsert(
 
     shared_values: dict[str, Any] = {
         "workflow_id": workflow_id,
-        "worker_id": _WORKER_ID,
+        "worker_id": worker_id or _WORKER_ID,
         "started_at": started_at,
         "heartbeat_at": heartbeat_at,
         "inputs": inputs,
@@ -672,6 +704,8 @@ class ActiveExecutionRegistry:
             _RegistryCommand(
                 action="start",
                 execution_id=handle.execution_id,
+                registration_token=handle.registration_token,
+                enqueued_at=_utcnow(),
                 workflow_id=handle.workflow_id,
                 started_at=handle.started_at,
                 inputs=handle.inputs,
@@ -682,18 +716,35 @@ class ActiveExecutionRegistry:
         )
         self._wake()
 
-    def record_finished(self, execution_id: uuid.UUID) -> None:
+    def record_finished(
+        self,
+        execution_id: uuid.UUID,
+        *,
+        registration_token: uuid.UUID | None = None,
+    ) -> None:
         if not self._running:
             return
-        self._commands.put(_RegistryCommand(action="finish", execution_id=execution_id))
+        self._commands.put(
+            _RegistryCommand(
+                action="finish",
+                execution_id=execution_id,
+                registration_token=registration_token or uuid.uuid4(),
+                enqueued_at=_utcnow(),
+            )
+        )
         self._wake()
 
-    def relinquish(self, execution_id: uuid.UUID) -> None:
-        """Drop pending finish commands so dispatcher cleanup cannot delete the active row."""
+    def relinquish(self, registration_token: uuid.UUID) -> None:
+        with self._commands.mutex:
+            self._commands.queue = deque(
+                cmd
+                for cmd in self._commands.queue
+                if not (cmd.registration_token == registration_token and cmd.action == "finish")
+            )
         self._pending = [
             cmd
             for cmd in self._pending
-            if not (cmd.execution_id == execution_id and cmd.action == "finish")
+            if not (cmd.registration_token == registration_token and cmd.action == "finish")
         ]
 
     def _wake(self) -> None:
@@ -721,9 +772,14 @@ class ActiveExecutionRegistry:
             self._wakeup.clear()
 
     async def _apply_command(self, session: Any, command: _RegistryCommand, now: datetime) -> None:
-        from sqlalchemy import delete
+        from sqlalchemy import delete, exists, select
 
-        from app.db.models import ActiveWorkflowExecution
+        from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+        from app.services.cluster.run_queue import (
+            STATUS_DONE,
+            STATUS_FAILED,
+            STATUS_SKIPPED_LATE,
+        )
 
         if command.action == "finish":
             await session.execute(
@@ -734,12 +790,35 @@ class ActiveExecutionRegistry:
             return
         if command.workflow_id is None:
             return
+
+        terminal_check = await session.execute(
+            select(
+                exists().where(ExecutionHistory.id == command.execution_id)
+                | exists().where(
+                    WorkflowRunQueue.execution_id == command.execution_id,
+                    WorkflowRunQueue.status.in_([STATUS_DONE, STATUS_FAILED, STATUS_SKIPPED_LATE]),
+                )
+            )
+        )
+        if terminal_check.scalar():
+            logger.info(
+                "Active execution registry: discarding start command for terminal execution %s",
+                command.execution_id,
+            )
+            return
+
+        heartbeat_time = command.enqueued_at or now
+        command_worker_id = (
+            f"{_WORKER_ID}:{command.registration_token}"
+            if command.registration_token
+            else _WORKER_ID
+        )
         await session.execute(
             _build_active_execution_upsert(
                 execution_id=command.execution_id,
                 workflow_id=command.workflow_id,
-                started_at=command.started_at or now,
-                heartbeat_at=now,
+                started_at=command.started_at or heartbeat_time,
+                heartbeat_at=heartbeat_time,
                 inputs=command.inputs or {},
                 trigger_source=command.trigger_source,
                 actor_user_id=command.actor_user_id,
@@ -747,6 +826,7 @@ class ActiveExecutionRegistry:
                 running_node_ids=[],
                 running_node_started_at_ms={},
                 node_results=[],
+                worker_id=command_worker_id,
             )
         )
 
@@ -756,9 +836,6 @@ class ActiveExecutionRegistry:
                 cmd = self._commands.get_nowait()
             except queue.Empty:
                 break
-            with _LOCK:
-                if cmd.action == "finish" and cmd.execution_id in _RELINQUISHED_EXECUTIONS:
-                    continue
             self._pending.append(cmd)
         if not self._pending:
             return
@@ -840,12 +917,15 @@ class ActiveExecutionRegistry:
         Returns the progress version now persisted, or ``None`` if the run has ended.
         """
         with _LOCK:
-            if _ACTIVE_EXECUTIONS.get(execution_id) is not handle:
+            if _ACTIVE_EXECUTIONS.get(execution_id) is not handle or handle.relinquished:
                 return None
             running_node_ids = sorted(handle.running_node_ids)
             running_node_started_at_ms = dict(handle.running_node_started_at_ms)
             node_results = list(handle.node_results)
             version = handle.progress_version
+        handle_worker_id = (
+            f"{_WORKER_ID}:{handle.registration_token}" if handle.registration_token else _WORKER_ID
+        )
         await session.execute(
             _build_active_execution_upsert(
                 execution_id=execution_id,
@@ -859,6 +939,7 @@ class ActiveExecutionRegistry:
                 running_node_ids=running_node_ids,
                 running_node_started_at_ms=running_node_started_at_ms,
                 node_results=node_results,
+                worker_id=handle_worker_id,
             )
         )
         logger.info("Recreated missing active execution registry row for %s", execution_id)
@@ -932,9 +1013,17 @@ class ActiveExecutionRegistry:
                     version,
                     progress_changed,
                 ) = snapshot
+                with _LOCK:
+                    if _ACTIVE_EXECUTIONS.get(execution_id) is not handle or handle.relinquished:
+                        continue
+                handle_worker_id = (
+                    f"{_WORKER_ID}:{handle.registration_token}"
+                    if handle.registration_token
+                    else _WORKER_ID
+                )
                 update_values: dict[str, Any] = {
                     "heartbeat_at": now,
-                    "worker_id": _WORKER_ID,
+                    "worker_id": handle_worker_id,
                 }
                 if progress_changed:
                     update_values.update(
@@ -949,10 +1038,26 @@ class ActiveExecutionRegistry:
                     async with session.begin_nested():
                         result = await session.execute(
                             update(ActiveWorkflowExecution)
-                            .where(ActiveWorkflowExecution.execution_id == execution_id)
+                            .where(
+                                ActiveWorkflowExecution.execution_id == execution_id,
+                                ActiveWorkflowExecution.worker_id == handle_worker_id,
+                            )
                             .values(**update_values)
                         )
                         if (result.rowcount or 0) == 0:
+                            with _LOCK:
+                                if (
+                                    _ACTIVE_EXECUTIONS.get(execution_id) is not handle
+                                    or handle.relinquished
+                                ):
+                                    continue
+                            existing = await session.execute(
+                                select(ActiveWorkflowExecution.worker_id).where(
+                                    ActiveWorkflowExecution.execution_id == execution_id
+                                )
+                            )
+                            if existing.scalar_one_or_none() is not None:
+                                continue
                             version = await self._reinsert_missing_row(
                                 session, execution_id, handle, now
                             )
@@ -1031,17 +1136,42 @@ async def request_persisted_execution_cancel(
     return marked_rows is None or marked_rows > 0
 
 
-async def cleanup_stale_persisted_executions() -> int:
-    """Remove active rows whose worker has stopped heartbeating."""
-    from sqlalchemy import delete
+async def cleanup_completed_active_executions() -> int:
+    """Remove active rows for executions that already have an ExecutionHistory record."""
+    from sqlalchemy import delete, exists
 
-    from app.db.models import ActiveWorkflowExecution
-    from app.db.session import async_session_maker
+    from app.db.models import ActiveWorkflowExecution, ExecutionHistory
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            delete(ActiveWorkflowExecution).where(
+                exists().where(ExecutionHistory.id == ActiveWorkflowExecution.execution_id)
+            )
+        )
+        await session.commit()
+    return result.rowcount or 0
+
+
+async def cleanup_stale_persisted_executions() -> int:
+    """Remove active rows whose worker has stopped heartbeating or completed."""
+    from sqlalchemy import delete, exists
+
+    from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
 
     cutoff = _utcnow() - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
     async with async_session_maker() as session:
         result = await session.execute(
-            delete(ActiveWorkflowExecution).where(ActiveWorkflowExecution.heartbeat_at < cutoff)
+            delete(ActiveWorkflowExecution).where(
+                (
+                    (ActiveWorkflowExecution.heartbeat_at < cutoff)
+                    & ~exists().where(
+                        WorkflowRunQueue.execution_id == ActiveWorkflowExecution.execution_id,
+                        WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]),
+                    )
+                )
+                | exists().where(ExecutionHistory.id == ActiveWorkflowExecution.execution_id)
+            )
         )
         await session.commit()
     return result.rowcount or 0
@@ -1049,25 +1179,43 @@ async def cleanup_stale_persisted_executions() -> int:
 
 async def mark_own_executions_orphaned() -> int:
     """Backdate this worker's recoverable rows so the next leader recovers them now."""
-    from sqlalchemy import exists, update
+    from sqlalchemy import exists, or_, update
 
-    from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
-    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
+    from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+    from app.services.cluster.run_queue import (
+        STATUS_DONE,
+        STATUS_FAILED,
+        STATUS_QUEUED,
+        STATUS_SKIPPED_LATE,
+        STATUS_WAITING_FOR_MAIN,
+    )
 
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     async with async_session_maker() as session:
         result = await session.execute(
             update(ActiveWorkflowExecution)
             .where(
-                ActiveWorkflowExecution.worker_id == _WORKER_ID,
+                or_(
+                    ActiveWorkflowExecution.worker_id == _WORKER_ID,
+                    ActiveWorkflowExecution.worker_id.like(f"{_WORKER_ID}:%"),
+                ),
                 ActiveWorkflowExecution.recoverable.is_(True),
                 # Never hand a cancelled run to recovery on shutdown.
                 ActiveWorkflowExecution.cancel_requested_at.is_(None),
-                # Never mark an unclaimed queued run orphaned on shutdown.
+                # Never mark an unclaimed queued or terminal run orphaned on shutdown.
                 ~exists().where(
                     WorkflowRunQueue.execution_id == ActiveWorkflowExecution.execution_id,
-                    WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]),
+                    WorkflowRunQueue.status.in_(
+                        [
+                            STATUS_QUEUED,
+                            STATUS_WAITING_FOR_MAIN,
+                            STATUS_DONE,
+                            STATUS_FAILED,
+                            STATUS_SKIPPED_LATE,
+                        ]
+                    ),
                 ),
+                ~exists().where(ExecutionHistory.id == ActiveWorkflowExecution.execution_id),
             )
             .values(heartbeat_at=epoch)
         )
@@ -1084,8 +1232,15 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
     """
     from sqlalchemy import exists, select, update
 
-    from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
-    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
+    from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+    from app.services.cluster.run_queue import (
+        STATUS_CLAIMED,
+        STATUS_DONE,
+        STATUS_FAILED,
+        STATUS_QUEUED,
+        STATUS_SKIPPED_LATE,
+        STATUS_WAITING_FOR_MAIN,
+    )
 
     now = now or _utcnow()
     cutoff = now - timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
@@ -1112,12 +1267,27 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                             # than leaving the row for the stale sweep to clear.
                             ActiveWorkflowExecution.cancel_requested_at.is_(None),
                             # An unclaimed queued run is waiting for a worker, not a crashed one.
+                            # A recently claimed run is initializing on a worker; give it time
+                            # to establish its initial heartbeat before treating it as orphaned.
                             ~exists().where(
                                 WorkflowRunQueue.execution_id
                                 == ActiveWorkflowExecution.execution_id,
                                 WorkflowRunQueue.status.in_(
-                                    [STATUS_QUEUED, STATUS_WAITING_FOR_MAIN]
+                                    [
+                                        STATUS_QUEUED,
+                                        STATUS_WAITING_FOR_MAIN,
+                                        STATUS_DONE,
+                                        STATUS_FAILED,
+                                        STATUS_SKIPPED_LATE,
+                                    ]
+                                )
+                                | (
+                                    (WorkflowRunQueue.status == STATUS_CLAIMED)
+                                    & (WorkflowRunQueue.claimed_at >= cutoff)
                                 ),
+                            ),
+                            ~exists().where(
+                                ExecutionHistory.id == ActiveWorkflowExecution.execution_id
                             ),
                         )
                     )

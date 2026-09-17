@@ -368,7 +368,9 @@ class RabbitMQConsumerManager:
                         cancel_event=cancel_event,
                     )
                 finally:
-                    clear_execution(execution_id)
+                    clear_execution(
+                        execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+                    )
 
                 # An offloaded run's history is written where it ran, or by the
                 # dispatcher itself when the queue retired it before it ran.

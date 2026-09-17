@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import logging
+import threading
 import uuid
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ExecutionHistory, Workflow, WorkflowRunQueue
 from app.services.cluster import identity, run_queue
@@ -34,6 +35,8 @@ from app.services.cluster.run_history import (
 )
 from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS, run_result_bus
 from app.services.execution_cancellation import (
+    ExecutionCancellationHandle,
+    clear_execution,
     complete_execution,
     get_active_execution_handle,
     register_execution,
@@ -197,6 +200,8 @@ async def dispatch_workflow(
     run_in_thread: bool = False,
     execution_id: uuid.UUID | None = None,
     run_error_workflow: bool = True,
+    cancel_event: threading.Event | None = None,
+    dispatcher_handle: ExecutionCancellationHandle | None = None,
     **executor_kwargs: Any,
 ) -> Any:
     """Run here, or enqueue and wait for whichever instance takes it.
@@ -204,6 +209,14 @@ async def dispatch_workflow(
     Returns the run result. With `wait_for_completion=False` an offloaded run
     returns None immediately, for callers that ignore the result.
     """
+    run_id = execution_id or uuid.uuid4()
+    # Capture dispatcher handle BEFORE any async gap if provided by caller.
+    handle = (
+        dispatcher_handle
+        or getattr(cancel_event, "_execution_handle", None)
+        or get_active_execution_handle(run_id)
+    )
+
     placement = resolve_placement(nodes, workflow_cache)
     if should_run_in_process(
         cluster_enabled=settings.cluster_enabled,
@@ -223,9 +236,11 @@ async def dispatch_workflow(
             test_run=test_run,
             actor_user_id=actor_user_id,
             timeout_seconds=timeout_seconds,
-            execution_id=str(execution_id) if execution_id else "",
+            execution_id=str(run_id),
             **executor_kwargs,
         )
+        if cancel_event is not None:
+            call_kwargs.setdefault("cancel_event", cancel_event)
         # Each call site keeps the blocking behaviour it already had: cron
         # deliberately runs off the event loop, the webhook triggers do not.
         if run_in_thread:
@@ -235,14 +250,28 @@ async def dispatch_workflow(
         await run_error_workflow_for_failed_run(
             result,
             workflow_id=workflow_id,
-            execution_id=execution_id,
+            execution_id=run_id,
             test_run=test_run,
             enabled=run_error_workflow,
             actor_user_id=actor_user_id or credentials_owner_id,
         )
         return result
 
-    run_id = execution_id or uuid.uuid4()
+    # Offload path: ensure cluster execution ownership handle exists BEFORE any async gap.
+    locally_registered = False
+    if handle is None:
+        cancel_event = register_execution(
+            workflow_id=workflow_id,
+            execution_id=run_id,
+            inputs=inputs,
+            trigger_source=trigger_source,
+            actor_user_id=actor_user_id,
+        )
+        handle = getattr(cancel_event, "_execution_handle", None) or get_active_execution_handle(
+            run_id
+        )
+        locally_registered = True
+
     # Register before enqueueing so a run that finishes first still wakes us.
     if wait_for_completion:
         run_result_bus.register(run_id)
@@ -258,23 +287,21 @@ async def dispatch_workflow(
         timeout_seconds=timeout_seconds,
         return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
     )
-    target = await run_queue.enqueue(queued)
-    if target:
-        await run_queue.notify_queue(target)
-    logger.info(
-        "Dispatched workflow %s as %s to %s", workflow_id, placement, target or "waiting_for_main"
-    )
-    handle = get_active_execution_handle(run_id)
-    if handle is None:
-        register_execution(
-            workflow_id=workflow_id,
-            execution_id=run_id,
-            inputs=inputs,
-            trigger_source=trigger_source,
-            actor_user_id=actor_user_id,
+    try:
+        target = await run_queue.enqueue(queued)
+        if target:
+            await run_queue.notify_queue(target)
+        logger.info(
+            "Dispatched workflow %s as %s to %s",
+            workflow_id,
+            placement,
+            target or "waiting_for_main",
         )
-        handle = get_active_execution_handle(run_id)
-    relinquish_execution(run_id, handle=handle)
+        relinquish_execution(run_id, handle=handle)
+    except Exception:
+        if locally_registered:
+            clear_execution(run_id, handle=handle)
+        raise
     if not wait_for_completion:
         run_result_bus.release(run_id)
         return None
@@ -377,11 +404,7 @@ class RunQueueWorker:
             )
 
             async with async_session_maker() as db:
-                active_row: ActiveWorkflowExecution | None = None
-                if hasattr(db, "get"):
-                    raw = db.get(ActiveWorkflowExecution, row.execution_id)
-                    if inspect.isawaitable(raw):
-                        active_row = await raw
+                active_row = await db.get(ActiveWorkflowExecution, row.execution_id)
                 if (
                     active_row is not None
                     and getattr(active_row, "cancel_requested_at", None) is not None
@@ -469,6 +492,10 @@ class RunQueueWorker:
         except WorkflowCancelledError:
             logger.info("Claimed run was cancelled: %s", row.execution_id)
             async with async_session_maker() as db:
+                wf_res = await db.execute(
+                    select(Workflow.owner_id, Workflow.name).where(Workflow.id == row.workflow_id)
+                )
+                wf_row = wf_res.first()
                 await db.execute(
                     pg_insert(ExecutionHistory)
                     .values(
@@ -484,6 +511,16 @@ class RunQueueWorker:
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
                 )
+                if wf_row is not None:
+                    owner_id, workflow_name = wf_row
+                    await upsert_workflow_analytics_snapshot(
+                        db,
+                        workflow_id=row.workflow_id,
+                        owner_id=owner_id,
+                        workflow_name_snapshot=workflow_name,
+                        status="cancelled",
+                        execution_time_ms=0.0,
+                    )
                 await db.commit()
             await run_queue.complete(
                 row.execution_id,
@@ -503,9 +540,15 @@ class RunQueueWorker:
             logger.exception("Claimed run failed")
             await run_queue.complete(row.execution_id, result=None, error=str(exc))
         finally:
+            worker_handle = getattr(cancel_event, "_execution_handle", None)
             # Never let cleanup failure block notify_done; the caller is waiting.
             with contextlib.suppress(Exception):
-                complete_execution(row.execution_id, workflow_id=row.workflow_id, result={})
+                complete_execution(
+                    row.execution_id,
+                    workflow_id=row.workflow_id,
+                    result={},
+                    handle=worker_handle,
+                )
             await run_queue.notify_done(row.execution_id)
 
 

@@ -1192,7 +1192,9 @@ async def call_mcp_tool(
             isError=True,
         )
     finally:
-        clear_active_execution(execution_id)
+        clear_active_execution(
+            execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+        )
 
 
 async def _dispatch_mcp_jsonrpc(
@@ -1424,7 +1426,9 @@ async def _dispatch_mcp_jsonrpc(
                 "error": {"code": -32603, "message": f"Execution error: {str(e)}"},
             }
         finally:
-            clear_active_execution(execution_id)
+            clear_active_execution(
+                execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+            )
 
     return {
         "jsonrpc": "2.0",
