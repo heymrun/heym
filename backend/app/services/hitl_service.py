@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -458,3 +458,58 @@ def ensure_hitl_request_is_actionable(hitl_request: HITLRequest) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="Review request has already been resolved",
         )
+
+
+async def claim_hitl_request_for_decision(
+    db: AsyncSession,
+    hitl_request: HITLRequest,
+    *,
+    decision: str,
+    edited_text: str | None,
+    refusal_reason: str | None,
+) -> bool:
+    """Atomically claim a pending request for this decision.
+
+    The status/expiry predicates live in the UPDATE itself, so exactly one
+    concurrent caller can win; the loser sees rowcount 0 instead of silently
+    overwriting the winner and scheduling a second resume.
+    """
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(HITLRequest)
+        .where(
+            HITLRequest.id == hitl_request.id,
+            HITLRequest.status == "pending",
+            HITLRequest.expires_at > now,
+        )
+        .values(
+            decision=decision,
+            edited_text=edited_text,
+            refusal_reason=refusal_reason,
+            status="resolved",
+            resolved_at=now,
+            resume_error=None,
+        )
+    )
+    return result.rowcount == 1
+
+
+async def refresh_hitl_request_after_lost_claim(
+    db: AsyncSession, hitl_request: HITLRequest
+) -> HTTPException:
+    """Map a lost claim to the same error a serialized caller would have seen."""
+    request_id = hitl_request.id  # capture before rollback expires the instance
+    await db.rollback()
+    result = await db.execute(select(HITLRequest).where(HITLRequest.id == request_id))
+    fresh = result.scalar_one_or_none()
+    if fresh is None:
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Review request not found"
+        )
+    now = datetime.now(timezone.utc)
+    if fresh.status == "expired" or fresh.expires_at < now:
+        return HTTPException(status_code=status.HTTP_410_GONE, detail="Review link has expired")
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Review request has already been resolved",
+    )
