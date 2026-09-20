@@ -849,7 +849,7 @@ class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
         _flush()
         from sqlalchemy import select
 
-        from app.db.models import Workflow
+        from app.db.models import User, Workflow
         from app.db.session import async_session_maker
         from app.services.execution_cancellation import active_execution_registry
 
@@ -859,12 +859,39 @@ class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
         self.ex_id = uuid.uuid4()
         async with async_session_maker() as session:
             result = await session.execute(select(Workflow.id).limit(1))
-            self.wf_id = result.scalar_one()
+            self.wf_id = result.scalar_one_or_none()
+            if self.wf_id is None:
+                user_res = await session.execute(select(User.id).limit(1))
+                user_id = user_res.scalar_one_or_none()
+                if user_id is None:
+                    user_id = uuid.uuid4()
+                    session.add(
+                        User(
+                            id=user_id,
+                            email=f"test_{user_id.hex[:8]}@example.com",
+                            hashed_password="test_hashed_password",
+                            name="Test User",
+                        )
+                    )
+                self.wf_id = uuid.uuid4()
+                session.add(
+                    Workflow(
+                        id=self.wf_id,
+                        name="Test Heartbeat Race Workflow",
+                        owner_id=user_id,
+                        nodes=[],
+                        edges=[],
+                    )
+                )
+                await session.commit()
+                self._created_wf = True
+            else:
+                self._created_wf = False
 
     async def asyncTearDown(self) -> None:
         from sqlalchemy import delete
 
-        from app.db.models import ActiveWorkflowExecution
+        from app.db.models import ActiveWorkflowExecution, Workflow
         from app.db.session import async_session_maker
 
         async with async_session_maker() as session:
@@ -873,6 +900,8 @@ class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
                     ActiveWorkflowExecution.execution_id == self.ex_id
                 )
             )
+            if getattr(self, "_created_wf", False):
+                await session.execute(delete(Workflow).where(Workflow.id == self.wf_id))
             await session.commit()
         _flush()
 
