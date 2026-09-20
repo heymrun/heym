@@ -14,7 +14,17 @@ from app.api.mcp import (
     mcp_sse_post_endpoint,
 )
 from app.api.mcp_servers import _dispatch_named_server_jsonrpc, named_server_sse_post
+from app.services import hitl_service
 from app.services.mcp_session import mcp_sse_channels
+
+
+def _configured_public_origin():
+    """Capability links follow FRONTEND_URL, never the client's Origin (GHSA-6rv3-wh25-7pg5)."""
+    return patch.object(
+        hitl_service,
+        "settings",
+        SimpleNamespace(frontend_url="https://heym.run", cors_origins_list=[]),
+    )
 
 
 def _make_json_request(path: str, body: dict, query_string: bytes = b"") -> Request:
@@ -30,7 +40,12 @@ def _make_json_request(path: str, body: dict, query_string: bytes = b"") -> Requ
             "type": "http",
             "method": "POST",
             "path": path,
-            "headers": [(b"origin", b"https://heym.run")],
+            # Spoofed on purpose: capability links must ignore them (GHSA-6rv3-wh25-7pg5).
+            "headers": [
+                (b"origin", b"https://evil.tld"),
+                (b"x-forwarded-host", b"evil.tld"),
+                (b"x-forwarded-proto", b"https"),
+            ],
             "query_string": query_string,
         },
         receive,
@@ -108,6 +123,7 @@ class MCPJsonRpcFileUploadTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.api.mcp.file_intake_service.write_audit", AsyncMock()),
             patch("app.services.cluster.dispatch.execute_workflow") as execute_mock,
+            _configured_public_origin(),
         ):
             response = await _dispatch_mcp_jsonrpc(
                 request=_make_json_request("/api/mcp/sse", _tool_call_body()),
@@ -140,6 +156,7 @@ class MCPJsonRpcFileUploadTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.api.mcp.file_intake_service.write_audit", AsyncMock()),
             patch("app.services.cluster.dispatch.execute_workflow") as execute_mock,
+            _configured_public_origin(),
         ):
             response = await _dispatch_named_server_jsonrpc(
                 server_id=server.id,

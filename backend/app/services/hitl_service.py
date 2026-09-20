@@ -21,17 +21,14 @@ HITL_TTL_HOURS = 168
 
 
 def build_public_base_url(request: Request) -> str:
-    origin = request.headers.get("origin")
-    if origin:
-        return origin.rstrip("/")
-    forwarded_host = request.headers.get("x-forwarded-host")
-    if forwarded_host:
-        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
-    default_public_base_url = build_default_public_base_url()
-    if default_public_base_url:
-        return default_public_base_url
-    return str(request.base_url).rstrip("/")
+    """Return the public origin for capability-bearing links (review, download, upload).
+
+    The request never decides it. ``Origin`` and ``X-Forwarded-*`` are client supplied, and
+    a spoofed value would mint a live token on a host the attacker controls
+    (GHSA-6rv3-wh25-7pg5). Deployments behind a reverse proxy configure ``FRONTEND_URL``,
+    which is the same value the request-free triggers (cron, IMAP, queue workers) already use.
+    """
+    return build_default_public_base_url()
 
 
 def build_default_public_base_url() -> str:
@@ -359,7 +356,8 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
         credentials_owner_id = uuid.UUID(str(credentials_owner_value))
         trace_user_value = snapshot.get("trace_user_id")
         trace_user_id = uuid.UUID(str(trace_user_value)) if trace_user_value else None
-        public_base_url = snapshot.get("public_base_url") or ""
+        # Re-derived, never from the snapshot: pre-fix rows can carry a spoofed host.
+        public_base_url = build_default_public_base_url()
         trigger_source = snapshot.get("trigger_source")
         resolved_output = build_hitl_resolved_output(hitl_request)
         hitl_request.resolved_output = copy.deepcopy(resolved_output)

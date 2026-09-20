@@ -6,13 +6,13 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.db.models import CodexFollowupRequest, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
+from app.services.hitl_service import build_default_public_base_url
 from app.services.workflow_executor import (
     ExecutionResult,
     execute_hitl_notification_branch,
@@ -25,23 +25,6 @@ CODEX_FOLLOWUP_TTL_HOURS = 168
 def is_codex_pending_execution(execution_result: ExecutionResult) -> bool:
     pending = execution_result.pending_review or {}
     return isinstance(pending, dict) and pending.get("kind") == "codex"
-
-
-def build_public_base_url(request: Request) -> str:
-    origin = request.headers.get("origin")
-    if origin:
-        return origin.rstrip("/")
-    forwarded_host = request.headers.get("x-forwarded-host")
-    if forwarded_host:
-        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
-    if settings.frontend_url.strip():
-        return settings.frontend_url.rstrip("/")
-    for origin_value in settings.cors_origins_list:
-        cleaned_origin = origin_value.strip()
-        if cleaned_origin:
-            return cleaned_origin.rstrip("/")
-    return "http://localhost:4017"
 
 
 def build_codex_followup_url(base_url: str, token: str) -> str:
@@ -292,7 +275,8 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
         credentials_owner_id = uuid.UUID(str(credentials_owner_value))
         trace_user_value = snapshot.get("trace_user_id")
         trace_user_id = uuid.UUID(str(trace_user_value)) if trace_user_value else None
-        public_base_url = snapshot.get("public_base_url") or ""
+        # Re-derived, never from the snapshot: pre-fix rows can carry a spoofed host.
+        public_base_url = build_default_public_base_url()
         trigger_source = snapshot.get("trigger_source")
         resolved_output = build_codex_answer_output(followup)
         followup.resolved_output = copy.deepcopy(resolved_output)
