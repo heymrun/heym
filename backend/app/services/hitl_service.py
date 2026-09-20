@@ -497,10 +497,18 @@ async def claim_hitl_request_for_decision(
 async def refresh_hitl_request_after_lost_claim(
     db: AsyncSession, hitl_request: HITLRequest
 ) -> HTTPException:
-    """Map a lost claim to the same error a serialized caller would have seen."""
-    request_id = hitl_request.id  # capture before rollback expires the instance
-    await db.rollback()
-    result = await db.execute(select(HITLRequest).where(HITLRequest.id == request_id))
+    """Map a lost claim to the same error a serialized caller would have seen.
+
+    Re-reads only this row (populate_existing) instead of rolling back: the
+    shared request session also holds the chat user, credentials, and any
+    uncommitted work from earlier tool calls in the same turn, and rolling
+    it back would break the rest of the request.
+    """
+    result = await db.execute(
+        select(HITLRequest)
+        .where(HITLRequest.id == hitl_request.id)
+        .execution_options(populate_existing=True)
+    )
     fresh = result.scalar_one_or_none()
     if fresh is None:
         return HTTPException(

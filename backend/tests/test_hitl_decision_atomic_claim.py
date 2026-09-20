@@ -90,6 +90,8 @@ class SubmitHitlDecisionAtomicClaimTest(IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(ctx.exception.detail, "Review request has already been resolved")
         background_tasks.add_task.assert_not_called()
+        # A lost claim must not roll back the shared request session.
+        db.rollback.assert_not_called()
 
     async def test_lost_claim_returns_410_when_request_expired_in_flight(self) -> None:
         request = _make_request()
@@ -128,10 +130,11 @@ class ClaimHitlRequestForDecisionTest(IsolatedAsyncioTestCase):
 
         self.assertTrue(claimed)
         statement = db.execute.call_args.args[0]
-        sql = str(statement)
-        self.assertIn("hitl_requests", sql)
-        self.assertIn("status", sql)
-        self.assertIn("expires_at", sql)
+        # The status/expiry predicates must live in the WHERE clause — asserting
+        # against the raw SQL would also match the SET clause (which mentions
+        # "status" too) and let a dropped predicate slip through.
+        predicate_columns = {expression.left.key for expression in statement.whereclause}
+        self.assertEqual(predicate_columns, {"id", "status", "expires_at"})
 
     async def test_claim_reports_loss_when_rowcount_is_zero(self) -> None:
         from app.services.hitl_service import claim_hitl_request_for_decision
@@ -176,15 +179,45 @@ class ResolveHitlReviewToolAtomicClaimTest(IsolatedAsyncioTestCase):
                 action="accept",
                 request_id=str(request.id),
             )
-        return json.loads(output), create_task
+        return json.loads(output), create_task, db
 
     async def test_lost_claim_reports_error_instead_of_overwriting(self) -> None:
-        data, create_task = await self._run_tool(claim_rowcount=0)
+        data, create_task, db = await self._run_tool(claim_rowcount=0)
         self.assertEqual(data["status"], "error")
         self.assertIn("already been resolved", data["error"])
         create_task.assert_not_called()
+        # A lost claim must not roll back the chat turn's shared session.
+        db.rollback.assert_not_called()
 
     async def test_winner_resumes_exactly_once(self) -> None:
-        data, create_task = await self._run_tool(claim_rowcount=1)
+        data, create_task, _ = await self._run_tool(claim_rowcount=1)
         self.assertEqual(data["status"], "resolved")
         create_task.assert_called_once()
+
+
+class RefreshHitlRequestAfterLostClaimTest(IsolatedAsyncioTestCase):
+    async def _refresh(self, refreshed: HITLRequest | None) -> tuple[AsyncMock, HTTPException]:
+        from app.services.hitl_service import refresh_hitl_request_after_lost_claim
+
+        db = AsyncMock()
+        db.execute.return_value = _result(scalar=refreshed)
+        error = await refresh_hitl_request_after_lost_claim(db, _make_request())
+        return db, error
+
+    async def test_reloads_only_the_hitl_row_without_rolling_back_the_session(self) -> None:
+        db, error = await self._refresh(_make_request(status="resolved"))
+
+        db.rollback.assert_not_called()
+        statement = db.execute.call_args.args[0]
+        self.assertTrue(statement._execution_options.get("populate_existing"))
+        self.assertEqual(error.status_code, 409)
+        self.assertEqual(error.detail, "Review request has already been resolved")
+
+    async def test_maps_expired_row_to_410(self) -> None:
+        _, error = await self._refresh(_make_request(status="expired"))
+        self.assertEqual(error.status_code, 410)
+        self.assertEqual(error.detail, "Review link has expired")
+
+    async def test_maps_missing_row_to_404(self) -> None:
+        _, error = await self._refresh(None)
+        self.assertEqual(error.status_code, 404)
