@@ -59,9 +59,11 @@ from app.services.encryption import decrypt_config
 from app.services.hitl_service import (
     build_hitl_resolved_output,
     build_public_base_url,
+    claim_hitl_request_for_decision,
     ensure_hitl_request_is_actionable,
     get_hitl_request_by_token,
     persist_pending_hitl_execution,
+    refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
 from app.services.llm_provider import is_reasoning_model
@@ -2179,6 +2181,21 @@ async def resolve_hitl_review_tool(
     if normalized_action == "edit" and not (edited_text or "").strip():
         return json.dumps({"status": "error", "error": "edited_text is required for edit action"})
 
+    claimed = await claim_hitl_request_for_decision(
+        db,
+        hitl_request,
+        decision=normalized_action,
+        edited_text=(edited_text or "").strip() or None,
+        refusal_reason=(refusal_reason or "").strip() or None,
+    )
+    if not claimed:
+        # Lost the race against a concurrent decision (or the request expired
+        # mid-flight); report it instead of overwriting the winner.
+        exc = await refresh_hitl_request_after_lost_claim(db, hitl_request)
+        return json.dumps({"status": "error", "error": str(exc.detail)})
+
+    # The claim is exclusive, so persisting the resolved output here cannot
+    # race another decision anymore.
     hitl_request.decision = normalized_action
     hitl_request.edited_text = (edited_text or "").strip() or None
     hitl_request.refusal_reason = (refusal_reason or "").strip() or None
@@ -2186,7 +2203,6 @@ async def resolve_hitl_review_tool(
     hitl_request.resolved_at = datetime.now(timezone.utc)
     hitl_request.resume_error = None
     hitl_request.resolved_output = build_hitl_resolved_output(hitl_request)
-    await db.flush()
     await db.commit()
 
     asyncio.create_task(resume_hitl_request_in_background(hitl_request.id))

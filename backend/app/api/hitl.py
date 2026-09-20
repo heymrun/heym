@@ -11,9 +11,11 @@ from app.models.schemas import (
 )
 from app.services.hitl_service import (
     build_hitl_resolved_output,
+    claim_hitl_request_for_decision,
     ensure_hitl_request_is_actionable,
     ensure_hitl_request_is_viewable,
     get_hitl_request_by_token,
+    refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
 
@@ -73,14 +75,31 @@ async def submit_hitl_decision(
             detail="edited_text is required for edit action",
         )
 
+    edited_text = (payload.edited_text or "").strip() or None
+    refusal_reason = (payload.refusal_reason or "").strip() or None
+
+    claimed = await claim_hitl_request_for_decision(
+        db,
+        hitl_request,
+        decision=payload.action,
+        edited_text=edited_text,
+        refusal_reason=refusal_reason,
+    )
+    if not claimed:
+        # Lost the race: another decision claimed first, or the request expired
+        # between the initial check and the write. Surface the same error a
+        # serialized caller would have seen.
+        raise await refresh_hitl_request_after_lost_claim(db, hitl_request)
+
+    # The claim is exclusive, so mirroring the claimed state onto the session
+    # object and persisting resolved_output can no longer race another decision.
     hitl_request.decision = payload.action
-    hitl_request.edited_text = (payload.edited_text or "").strip() or None
-    hitl_request.refusal_reason = (payload.refusal_reason or "").strip() or None
+    hitl_request.edited_text = edited_text
+    hitl_request.refusal_reason = refusal_reason
     hitl_request.status = "resolved"
     hitl_request.resolved_at = datetime.now(timezone.utc)
     hitl_request.resume_error = None
     hitl_request.resolved_output = build_hitl_resolved_output(hitl_request)
-    await db.flush()
     await db.commit()
 
     background_tasks.add_task(resume_hitl_request_in_background, hitl_request.id)
