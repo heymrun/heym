@@ -112,3 +112,7 @@ vulnerabilities in Heym:
   SSRF in the Slack, Discord, and Crawler nodes, which reached the shared HTTP
   client directly and so were never covered by the egress guard
   (GHSA-39j3-6x3x-8rcr).
+- [@xiaodu55](https://github.com/xiaodu55) for HITL review links built from the
+  request's `Origin` and `X-Forwarded-Host` headers, so a single request could
+  decide which host the workflow's own notification branch delivered a live
+  review token to (GHSA-6rv3-wh25-7pg5).
