@@ -42,6 +42,7 @@ import {
   Terminal,
   Type,
   Upload,
+  Scale,
   Variable,
   XCircle,
 } from "lucide-vue-next";
@@ -86,6 +87,7 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   disableNode: Ban,
   redis: Database,
   rag: Search,
+  decision: Scale,
   grist: Table2,
   github: Github,
   jira: ListTodo,
@@ -151,6 +153,7 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   disableNode: "text-node-disable",
   redis: "text-node-redis",
   rag: "text-node-rag",
+  decision: "text-node-decision",
   grist: "text-node-grist",
   github: "text-node-github",
   jira: "text-node-jira",

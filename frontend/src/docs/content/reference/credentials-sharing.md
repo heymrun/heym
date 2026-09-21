@@ -24,6 +24,8 @@ Sharing a credential grants the recipient everything that credential can do. For
 
 If you need to limit exposure, create a dedicated Google account with access to only the folders the workflow needs, and connect the credential with that account instead of your primary one.
 
+A **Decision Model** credential carries the endpoint and, when set, an API key. Sharing it lets the recipient spend against that key from any workflow they can run, exactly like an LLM credential.
+
 ## Sharing with Workflow Collaborators
 
 When you share a workflow, collaborators can open and run it but cannot use your credentials unless you share those credentials with them too. This applies to credentials in the main workflow and in any sub-workflows it calls. Share each credential with the same users or teams you invited to the workflow. Sub-workflows must also be shared separately from the child workflow's editor. See [Workflow Organization](./workflow-organization.md#sharing-workflows).

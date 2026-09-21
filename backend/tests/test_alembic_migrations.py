@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["122_vsi_metadata_index"])
+        self.assertEqual(self.script.get_heads(), ["123_add_decision_cred_type"])
+
+    def test_decision_credential_revision_follows_vector_store_metadata_index(self) -> None:
+        revision = self.script.get_revision("123_add_decision_cred_type")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "122_vsi_metadata_index")
 
     def test_vector_store_metadata_index_follows_running_node_start_times(self) -> None:
         revision = self.script.get_revision("122_vsi_metadata_index")

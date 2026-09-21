@@ -54,6 +54,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "jira": _ANY,
     "jsonOutputMapper": _ANY,
     "linear": _ANY,
+    "decision": _ANY,  # one outbound HTTP call, no local state
     "llm": _ANY,
     "loop": _ANY,
     "mcpCall": _ANY,

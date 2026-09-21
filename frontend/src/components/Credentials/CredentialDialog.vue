@@ -113,6 +113,12 @@ const ragEmbeddingApiKey = ref("");
 const ragEmbeddingModel = ref("");
 const ragEmbeddingDimensions = ref("1536");
 const ragRequestDimensions = ref(false);
+const decisionBaseUrl = ref("https://api.typesafe.ai");
+const decisionApiKey = ref("");
+const decisionTestModel = ref("jev-latest");
+const decisionTesting = ref(false);
+const decisionTestSuccess = ref<boolean | null>(null);
+const decisionTestMessage = ref("");
 const ragDbType = ref<VectorStoreBackend>("qdrant");
 const ragQdrantHost = ref("");
 const ragQdrantPort = ref("6333");
@@ -250,6 +256,7 @@ const typeOptions = [
   { value: "qdrant", label: CREDENTIAL_TYPE_LABELS.qdrant },
   { value: "pgvector", label: CREDENTIAL_TYPE_LABELS.pgvector },
   { value: "rag", label: CREDENTIAL_TYPE_LABELS.rag },
+  { value: "decision", label: CREDENTIAL_TYPE_LABELS.decision },
   { value: "grist", label: CREDENTIAL_TYPE_LABELS.grist },
   { value: "rabbitmq", label: CREDENTIAL_TYPE_LABELS.rabbitmq },
   { value: "cohere", label: CREDENTIAL_TYPE_LABELS.cohere },
@@ -266,6 +273,13 @@ const typeOptions = [
 
 function isTrustedOAuthMessage(evt: MessageEvent, popup: Window | null): boolean {
   return evt.origin === window.location.origin && evt.source === popup;
+}
+
+function applyDecisionPublicFields(credential: Credential | null | undefined): void {
+  const fields = credential?.type === "decision" ? credential.public_fields : undefined;
+  decisionBaseUrl.value = fields?.base_url ?? "https://api.typesafe.ai";
+  // Never prefilled: the key is write-only, and blank means "keep the stored one".
+  decisionApiKey.value = "";
 }
 
 function applyRagPublicFields(credential: Credential | null | undefined): void {
@@ -371,6 +385,7 @@ watch(
         qdrantOpenaiApiKey.value = "";
         pgvectorOpenaiApiKey.value = "";
         applyRagPublicFields(props.credential);
+        applyDecisionPublicFields(props.credential);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -486,6 +501,7 @@ watch(
         qdrantOpenaiApiKey.value = "";
         pgvectorOpenaiApiKey.value = "";
         applyRagPublicFields(null);
+        applyDecisionPublicFields(null);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -632,6 +648,8 @@ const isValid = computed(() => {
     ) || isEditing.value;
   } else if (type.value === "pgvector") {
     return !!pgvectorOpenaiApiKey.value.trim() || isEditing.value;
+  } else if (type.value === "decision") {
+    return !!decisionBaseUrl.value.trim();
   } else if (type.value === "rag") {
     return (
       !!ragEmbeddingBaseUrl.value.trim() &&
@@ -880,6 +898,11 @@ function buildConfig(): CredentialConfig {
       qdrant_port: qdrantPort.value,
       qdrant_api_key: qdrantApiKey.value,
       openai_api_key: qdrantOpenaiApiKey.value,
+    };
+  } else if (type.value === "decision") {
+    return {
+      base_url: decisionBaseUrl.value.trim(),
+      api_key: decisionApiKey.value.trim(),
     };
   } else if (type.value === "rag") {
     return {
@@ -1390,6 +1413,42 @@ async function testRagConnection(): Promise<void> {
   }
 }
 
+async function testDecisionConnection(): Promise<void> {
+  if (!decisionBaseUrl.value.trim()) {
+    error.value = "Enter a base URL to test the connection.";
+    return;
+  }
+  decisionTesting.value = true;
+  decisionTestSuccess.value = null;
+  decisionTestMessage.value = "";
+  error.value = "";
+  try {
+    const result = await credentialsApi.testConnection({
+      type: "decision",
+      config: {
+        base_url: decisionBaseUrl.value.trim(),
+        // Blank means "use the stored key" when editing an existing credential.
+        api_key: decisionApiKey.value.trim(),
+        // The credential holds no model; the node does. Name one for the probe.
+        model: decisionTestModel.value.trim() || "jev-latest",
+      },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    decisionTestSuccess.value = result.success;
+    decisionTestMessage.value = result.message;
+    if (!result.success) {
+      error.value = result.message;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection test failed";
+    decisionTestSuccess.value = false;
+    decisionTestMessage.value = message;
+    error.value = message;
+  } finally {
+    decisionTesting.value = false;
+  }
+}
+
 async function testSentryConnection(): Promise<void> {
   if (!apiKey.value.trim() && !isEditing.value) {
     error.value = "Enter a Sentry auth token to test the connection.";
@@ -1660,6 +1719,9 @@ async function handleSave(): Promise<void> {
           // RAG fields are prefilled from public_fields, so the config is always
           // resent; the backend keeps stored secrets when their inputs are blank.
           type.value === "rag" ||
+          // Same as RAG: base_url is prefilled from public_fields, and the backend
+          // keeps the stored API key when the input is blank.
+          type.value === "decision" ||
           gristApiKey.value.trim() ||
           gristServerUrl.value.trim() ||
           rabbitmqHost.value.trim() ||
@@ -2905,6 +2967,66 @@ async function handleSave(): Promise<void> {
           <p class="text-xs text-muted-foreground">
             OpenAI API key for text-embedding-3-large embeddings. Vectors are stored
             in Heym's own Postgres database — no external service required.
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'decision'">
+        <div class="space-y-2">
+          <Label for="cred-decision-base-url">Base URL</Label>
+          <Input
+            id="cred-decision-base-url"
+            v-model="decisionBaseUrl"
+            placeholder="https://api.typesafe.ai"
+          />
+          <p class="text-xs text-muted-foreground">
+            The decision model endpoint. Heym appends <code>/v1/systemone</code>. A
+            self-hosted endpoint on a private address needs
+            <code>HEYM_HTTP_ALLOW_PRIVATE_URLS=true</code>.
+          </p>
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-decision-api-key">API Key (optional)</Label>
+          <Input
+            id="cred-decision-api-key"
+            v-model="decisionApiKey"
+            type="password"
+            placeholder="Leave blank for an endpoint that needs no key"
+          />
+          <p class="text-xs text-muted-foreground">
+            Leave blank when editing to keep the stored key.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center gap-3">
+            <Input
+              v-model="decisionTestModel"
+              class="w-44"
+              placeholder="jev-latest"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="decision-test-connection-button"
+              :loading="decisionTesting"
+              :disabled="saving || decisionTesting || !decisionBaseUrl.trim()"
+              @click="testDecisionConnection"
+            >
+              Test Connection
+            </Button>
+          </div>
+          <p
+            v-if="decisionTestMessage"
+            class="text-xs"
+            :class="decisionTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ decisionTestMessage }}
+          </p>
+          <p class="text-xs text-muted-foreground">
+            Sends one tiny question to confirm the endpoint and key work. The model name
+            is only used for this test; each Decision node picks its own.
           </p>
         </div>
       </template>

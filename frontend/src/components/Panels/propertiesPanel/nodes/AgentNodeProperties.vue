@@ -486,6 +486,19 @@ const fallbackBlocksResponses = computed((): boolean => {
       </p>
     </div>
     <div class="space-y-2 pt-2 border-t">
+      <Label>Max Tool Iterations</Label>
+      <Input
+        type="number"
+        :model-value="String(selectedNode.data.maxToolIterations ?? 30)"
+        min="1"
+        placeholder="30"
+        @update:model-value="updateNodeData('maxToolIterations', parseInt($event, 10) || 30)"
+      />
+      <p class="text-xs text-muted-foreground">
+        How many tool-call rounds the agent may take before it must answer
+      </p>
+    </div>
+    <div class="space-y-2 pt-2 border-t">
       <div class="flex items-center justify-between">
         <Label>Tools</Label>
         <Button

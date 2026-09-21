@@ -61,6 +61,7 @@ class CredentialType(str, PyEnum):
     opencode = "opencode"
     google_drive = "google_drive"
     rag = "rag"
+    decision = "decision"
 
 
 class WorkflowAuthType(str, PyEnum):

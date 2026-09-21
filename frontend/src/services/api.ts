@@ -85,6 +85,7 @@ import type {
   WorkflowVersion,
   WorkflowVersionDiff,
   WorkflowShare,
+  DecisionQuestionsSuggestion,
 } from "@/types/workflow";
 import type {
   AnalyticsQueryOptions,
@@ -1329,6 +1330,11 @@ export const credentialsApi = {
 
   listLLM: async (): Promise<CredentialListItem[]> => {
     const response = await api.get<CredentialListItem[]>("/credentials/llm");
+    return response.data;
+  },
+
+  listDecision: async (): Promise<CredentialListItem[]> => {
+    const response = await api.get<CredentialListItem[]>("/credentials/decision");
     return response.data;
   },
 
@@ -3758,6 +3764,26 @@ export const expressionApi = {
   ): Promise<ExpressionGenerateResponse> => {
     const response = await api.post<ExpressionGenerateResponse>(
       "/expressions/generate",
+      request,
+    );
+    return response.data;
+  },
+};
+
+export interface DecisionQuestionsGenerateRequest {
+  prompt: string;
+  credential_id: string;
+  model: string;
+  existing_question_ids?: string[];
+  state_sample?: string;
+}
+
+export const decisionsApi = {
+  generateQuestions: async (
+    request: DecisionQuestionsGenerateRequest,
+  ): Promise<DecisionQuestionsSuggestion> => {
+    const response = await api.post<DecisionQuestionsSuggestion>(
+      "/decisions/generate-questions",
       request,
     );
     return response.data;

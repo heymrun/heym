@@ -85,6 +85,7 @@
     --node-disable: 0 0% 45%;
     --node-redis: 0 85% 52%;
     --node-rag: 252 87% 62%;
+    --node-decision: 300 75% 48%;
     --node-grist: 162 94% 35%;
     --node-github: 222 47% 25%;
     --node-jira: 217 91% 50%;
@@ -181,6 +182,7 @@
     --node-disable: 0 0% 50%;
     --node-redis: 0 83% 58%;
     --node-rag: 252 87% 67%;
+    --node-decision: 300 75% 62%;
     --node-grist: 162 94% 45%;
     --node-github: 210 30% 78%;
     --node-jira: 217 91% 62%;

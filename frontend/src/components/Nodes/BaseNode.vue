@@ -62,6 +62,7 @@ const nodeColorMap = {
   disableNode: "node-disable",
   redis: "node-redis",
   rag: "node-rag",
+  decision: "node-decision",
   grist: "node-grist",
   github: "node-github",
   jira: "node-jira",

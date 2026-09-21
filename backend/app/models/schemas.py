@@ -578,6 +578,7 @@ class CredentialType(str, Enum):
     opencode = "opencode"
     google_drive = "google_drive"
     rag = "rag"
+    decision = "decision"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -587,6 +588,13 @@ class CredentialConfigOpenAI(BaseModel):
 class CredentialConfigOpenCode(BaseModel):
     api_key: str
     base_url: str | None = None
+
+
+class CredentialConfigDecision(BaseModel):
+    """Connection settings for a decision model endpoint (e.g. TypeSafe Jev)."""
+
+    base_url: str
+    api_key: str | None = None
 
 
 class CredentialConfigCodex(BaseModel):
@@ -1640,6 +1648,31 @@ class DataTableSchemaSuggestionResponse(BaseModel):
     name: str
     description: str | None = None
     columns: list[DataTableColumnDef] = Field(default_factory=list)
+
+
+class DecisionQuestionSuggestion(BaseModel):
+    """One drafted decision question, in the shape the node panel stores."""
+
+    id: str
+    type: str
+    instructions: str
+    criteriaTrue: str | None = None  # noqa: N815 - matches the node data shape
+    criteriaFalse: str | None = None  # noqa: N815
+    options: list[dict[str, str]] | None = None
+    levels: list[str] | None = None
+
+
+class DecisionQuestionsGenerateRequest(BaseModel):
+    credential_id: uuid.UUID
+    model: str
+    prompt: str = Field(min_length=1, max_length=10000)
+    existing_question_ids: list[str] = Field(default_factory=list)
+    state_sample: str | None = None
+
+
+class DecisionQuestionsSuggestionResponse(BaseModel):
+    state: str | None = None
+    questions: list[DecisionQuestionSuggestion] = Field(default_factory=list)
 
 
 class DataTableRowCreate(BaseModel):

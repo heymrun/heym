@@ -133,6 +133,7 @@ export function usePropertiesPanelController() {
     disableNode: "node-disable",
     redis: "node-redis",
     rag: "node-rag",
+    decision: "node-decision",
     grist: "node-grist",
     github: "node-github",
     jira: "node-jira",
@@ -197,6 +198,7 @@ export function usePropertiesPanelController() {
     disableNode: "disable-node",
     redis: "redis-node",
     rag: "rag-node",
+    decision: "decision-node",
     grist: "grist-node",
     github: "github-node",
     jira: "jira-node",
@@ -614,6 +616,19 @@ export function usePropertiesPanelController() {
 
   const ragExpressionInputRefs = ref<Map<RagExpressionFieldKey, ExpandableFieldRef>>(new Map());
   const currentRagExpressionFieldIndex = ref(0);
+  /**
+   * Decision question fields are created and removed by the user, so their keys are
+   * built from row positions rather than a fixed union: "state", "customBody",
+   * "q:0:instructions", "q:0:option:1", "q:2:level:0".
+   */
+  interface DecisionExpressionField {
+    key: string;
+    label: string;
+  }
+
+  const decisionExpressionInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
+  const currentDecisionExpressionFieldIndex = ref(0);
+  const decisionCredentials = ref<CredentialListItem[]>([]);
   const rabbitmqExchangeInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqRoutingKeyInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqQueueNameInputRef = ref<ExpandableFieldRef | null>(null);
@@ -994,6 +1009,14 @@ export function usePropertiesPanelController() {
       if (type !== "agent") subWorkflowSearch.value = "";
       if (type === "execute" || type === "agent" || type === "heym") {
         await loadWorkflowOptions();
+      }
+
+      if (type === "decision") {
+        try {
+          decisionCredentials.value = await credentialsApi.listDecision();
+        } catch {
+          decisionCredentials.value = [];
+        }
       }
 
       if (type === "llm" || type === "agent" || type === "playwright") {
@@ -2643,6 +2666,28 @@ export function usePropertiesPanelController() {
         if (attempts > 20) return;
         if (redisKeyInputRef.value) {
           nextTick(() => redisKeyInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "decision") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        const n = workflowStore.selectedNode;
+        if (!n || n.type !== "decision") {
+          return;
+        }
+        const fields = decisionExpressionFields.value;
+        if (fields.length === 0) {
+          return;
+        }
+        const focusField = workflowStore.focusField as string | null;
+        const startIndex = focusField ? decisionExpressionFieldIndex(focusField) : 0;
+        const field = fields[startIndex];
+        if (field && decisionExpressionInputRefs.value.get(field.key)) {
+          currentDecisionExpressionFieldIndex.value = startIndex;
+          nextTick(() => openDecisionExpressionFieldAtIndex(startIndex));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -5957,6 +6002,101 @@ export function usePropertiesPanelController() {
     currentRagExpressionFieldIndex.value = index;
   }
 
+  const decisionExpressionFields = computed<DecisionExpressionField[]>(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "decision") {
+      return [];
+    }
+    if (n.data.customBodyEnabled) {
+      return [{ key: "customBody", label: "Request Body" }];
+    }
+    const fields: DecisionExpressionField[] = [{ key: "state", label: "State" }];
+    (n.data.questions ?? []).forEach((question, index) => {
+      const name = (question.id || "").trim() || `question ${index + 1}`;
+      fields.push({ key: `q:${index}:instructions`, label: `${name} - instructions` });
+      if (question.type === "noul") {
+        fields.push({ key: `q:${index}:criteriaTrue`, label: `${name} - yes means` });
+        fields.push({ key: `q:${index}:criteriaFalse`, label: `${name} - no means` });
+      } else if (question.type === "choice") {
+        (question.options ?? []).forEach((option, optionIndex) => {
+          const optionName = (option.key || "").trim() || `option ${optionIndex + 1}`;
+          fields.push({
+            key: `q:${index}:option:${optionIndex}`,
+            label: `${name} - ${optionName}`,
+          });
+        });
+      } else {
+        (question.levels ?? []).forEach((_level, levelIndex) => {
+          fields.push({
+            key: `q:${index}:level:${levelIndex}`,
+            label: `${name} - level ${levelIndex}`,
+          });
+        });
+      }
+    });
+    return fields;
+  });
+
+  const decisionExpressionFieldCount = computed(
+    (): number => decisionExpressionFields.value.length,
+  );
+
+  function decisionExpressionFieldIndex(key: string): number {
+    const index = decisionExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : 0;
+  }
+
+  function setDecisionExpressionInputRef(key: string, el: unknown): void {
+    if (el) {
+      decisionExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
+    } else {
+      decisionExpressionInputRefs.value.delete(key);
+    }
+  }
+
+  function openDecisionExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "decision") {
+      return;
+    }
+    const field = decisionExpressionFields.value[index];
+    if (!field) {
+      return;
+    }
+    currentDecisionExpressionFieldIndex.value = index;
+    decisionExpressionInputRefs.value.get(field.key)?.openExpandDialog();
+  }
+
+  function closeDecisionExpressionDialogs(): void {
+    for (const input of decisionExpressionInputRefs.value.values()) {
+      input.closeExpandDialog?.();
+    }
+  }
+
+  function handleDecisionExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = decisionExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentDecisionExpressionFieldIndex.value - 1
+        : currentDecisionExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeDecisionExpressionDialogs();
+    currentDecisionExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openDecisionExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onDecisionRegisterExpressionFieldIndex(index: number): void {
+    currentDecisionExpressionFieldIndex.value = index;
+  }
+
+  const decisionCredentialOptions = computed(() =>
+    decisionCredentials.value.map((c) => ({ value: c.id, label: c.name })),
+  );
+
   const heymExpressionFields = computed<HeymExpressionField[]>(() => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "heym") {
@@ -9247,6 +9387,14 @@ export function usePropertiesPanelController() {
     gristColumns,
     ragExpressionFields,
     ragExpressionFieldCount,
+    decisionCredentials,
+    decisionCredentialOptions,
+    decisionExpressionFields,
+    decisionExpressionFieldCount,
+    decisionExpressionFieldIndex,
+    setDecisionExpressionInputRef,
+    handleDecisionExpressionFieldNavigate,
+    onDecisionRegisterExpressionFieldIndex,
     ragExpressionFieldIndex,
     setRagExpressionInputRef,
     handleRagExpressionFieldNavigate,

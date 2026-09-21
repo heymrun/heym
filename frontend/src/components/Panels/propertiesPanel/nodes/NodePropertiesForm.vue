@@ -34,6 +34,7 @@ import VariableNodeProperties from "./VariableNodeProperties.vue";
 import LoopNodeProperties from "./LoopNodeProperties.vue";
 import DisableNodeNodeProperties from "./DisableNodeNodeProperties.vue";
 import RedisNodeProperties from "./RedisNodeProperties.vue";
+import DecisionNodeProperties from "./DecisionNodeProperties.vue";
 import RagNodeProperties from "./RagNodeProperties.vue";
 import GristNodeProperties from "./GristNodeProperties.vue";
 import JiraNodeProperties from "./JiraNodeProperties.vue";
@@ -102,6 +103,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <DisableNodeNodeProperties v-else-if="selectedNode?.type === 'disableNode'" />
   <RedisNodeProperties v-else-if="selectedNode?.type === 'redis'" />
   <RagNodeProperties v-else-if="selectedNode?.type === 'rag'" />
+  <DecisionNodeProperties v-else-if="selectedNode?.type === 'decision'" />
   <GristNodeProperties v-else-if="selectedNode?.type === 'grist'" />
   <JiraNodeProperties v-else-if="selectedNode?.type === 'jira'" />
   <LinearNodeProperties v-else-if="selectedNode?.type === 'linear'" />

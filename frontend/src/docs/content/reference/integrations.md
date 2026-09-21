@@ -19,6 +19,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
+| **Decision Model** | [Decision](../nodes/decision-node.md) | `base_url`, optional `api_key` |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
 | **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
@@ -84,6 +85,29 @@ The GitHub credential stores a GitHub personal access token (PAT) so workflows c
 - [HTTP node](../nodes/http-node.md)
 
 ---
+
+## Decision Model
+
+A decision model answers typed questions about a state and returns probabilities instead of text. TypeSafe's Jev is the reference implementation; any endpoint that accepts the same `{model, state, questions}` body works, and the [Decision](../nodes/decision-node.md) node can send a hand-written body for one that does not.
+
+### Required Fields
+
+- `base_url` – the endpoint, for example `https://api.typesafe.ai`. Heym appends `/v1/systemone`.
+
+### Optional Fields
+
+- `api_key` – sent as `Authorization: Bearer`. Endpoints that need no key can leave this blank.
+
+### Notes
+
+- **Test Connection** sends one tiny question to confirm the endpoint and key work.
+- Editing a credential keeps the stored key when the key field is left blank.
+- Outbound requests to private and loopback addresses are blocked by default, so a self-hosted endpoint on `localhost` or a private range needs `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`.
+- These models are absent from the LLM pricing tables Heym syncs, so the Cost column in [Traces](../tabs/traces-tab.md) stays empty. Token counts are still recorded.
+
+### Used By
+
+- [Decision](../nodes/decision-node.md)
 
 ## OpenAI Codex
 

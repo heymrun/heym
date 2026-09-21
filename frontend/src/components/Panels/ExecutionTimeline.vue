@@ -61,8 +61,13 @@ function closeDetails(): void {
   selectedSpan.value = null;
 }
 
+/**
+ * A span is traceable when it recorded a trace, whatever node produced it. Listing
+ * node types here meant a new node that writes traces (decision) silently lost its
+ * link even though the id was sitting in its metadata.
+ */
 function isTraceableSpan(span: SpanItem): boolean {
-  return Boolean(span.traceId) && (span.nodeType === "llm" || span.nodeType === "agent");
+  return Boolean(span.traceId);
 }
 
 function openTraceInNewTab(span: SpanItem, event: MouseEvent): void {

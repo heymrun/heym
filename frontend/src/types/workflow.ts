@@ -192,6 +192,7 @@ export type NodeType =
   | "disableNode"
   | "redis"
   | "rag"
+  | "decision"
   | "grist"
   | "github"
   | "jira"
@@ -407,6 +408,34 @@ export interface PlaywrightStep {
   aiStepTimeout?: number;
 }
 
+export interface DecisionQuestionOption {
+  key: string;
+  description: string;
+}
+
+/**
+ * One question sent to a decision model. Kept as a flat record rather than a
+ * discriminated union so switching `type` preserves what the user already typed.
+ */
+export interface DecisionQuestion {
+  id: string;
+  type: "noul" | "choice" | "score";
+  instructions: string;
+  /** noul: what a yes means */
+  criteriaTrue?: string;
+  /** noul: what a no means */
+  criteriaFalse?: string;
+  /** choice: the options to pick between */
+  options?: DecisionQuestionOption[];
+  /** score: ordered levels, lowest first */
+  levels?: string[];
+}
+
+export interface DecisionQuestionsSuggestion {
+  state: string | null;
+  questions: DecisionQuestion[];
+}
+
 export interface NodeData {
   label: string;
   value?: string;
@@ -545,6 +574,12 @@ export interface NodeData {
   isSubAgent?: boolean;
   agentProvidedFields?: string[];
   maxToolIterations?: number;
+  /** Decision node: what the model should read. Expression-capable. */
+  state?: string;
+  /** Decision node: ordered question rows, serialised to a map at execution time. */
+  questions?: DecisionQuestion[];
+  customBodyEnabled?: boolean;
+  customBody?: string;
   toolTimeoutSeconds?: number;
   /** Per-node LLM request timeout in seconds (passed to the model client). Default 60. */
   requestTimeoutSeconds?: number;
