@@ -19,6 +19,12 @@ cd "$REPO_ROOT/backend"
 uv run ruff format .
 uv run ruff check .
 
+# Ensure PostgreSQL migrations are applied if DATABASE_URL is explicitly provided
+if [ -n "${DATABASE_URL:-}" ]; then
+    echo "Applying database migrations to ${DATABASE_URL}..."
+    uv run alembic upgrade head
+fi
+
 echo "Running backend tests..."
 cd "$REPO_ROOT"
 ./run_tests.sh

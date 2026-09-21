@@ -776,15 +776,23 @@ class ActiveExecutionRegistry:
 
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
         from app.services.cluster.run_queue import (
+            STATUS_CLAIMED,
             STATUS_DONE,
             STATUS_FAILED,
             STATUS_SKIPPED_LATE,
         )
 
+        command_worker_id = (
+            f"{_WORKER_ID}:{command.registration_token}"
+            if command.registration_token
+            else _WORKER_ID
+        )
+
         if command.action == "finish":
             await session.execute(
                 delete(ActiveWorkflowExecution).where(
-                    ActiveWorkflowExecution.execution_id == command.execution_id
+                    ActiveWorkflowExecution.execution_id == command.execution_id,
+                    ActiveWorkflowExecution.worker_id == command_worker_id,
                 )
             )
             return
@@ -807,12 +815,31 @@ class ActiveExecutionRegistry:
             )
             return
 
-        heartbeat_time = command.enqueued_at or now
-        command_worker_id = (
-            f"{_WORKER_ID}:{command.registration_token}"
-            if command.registration_token
-            else _WORKER_ID
+        active_handle = get_active_execution_handle(command.execution_id)
+        is_active_local_owner = (
+            active_handle is not None
+            and not active_handle.relinquished
+            and active_handle.registration_token == command.registration_token
         )
+
+        # If this run was already claimed in WorkflowRunQueue, only the claiming
+        # worker (which holds the active, un-relinquished handle) may write a start command.
+        # Stale start commands from previous handlers/dispatchers must be discarded.
+        if not is_active_local_owner:
+            claimed_check = await session.execute(
+                select(WorkflowRunQueue.id).where(
+                    WorkflowRunQueue.execution_id == command.execution_id,
+                    WorkflowRunQueue.status == STATUS_CLAIMED,
+                )
+            )
+            if claimed_check.scalar_one_or_none() is not None:
+                logger.info(
+                    "Active execution registry: discarding stale start command for claimed execution %s",
+                    command.execution_id,
+                )
+                return
+
+        heartbeat_time = now if is_active_local_owner else (command.enqueued_at or now)
         await session.execute(
             _build_active_execution_upsert(
                 execution_id=command.execution_id,
@@ -1107,29 +1134,138 @@ async def request_persisted_execution_cancel(
     where the caller can honestly report "not found". A failed update leaves the
     state unknown, and the broadcast has gone out regardless.
     """
-    from sqlalchemy import update
+    from sqlalchemy import select, update
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from app.db.models import ActiveWorkflowExecution
+    from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+    from app.services.cluster import identity, run_queue
+    from app.services.cluster.attribution import attribution_fields
+    from app.services.cluster.run_queue import (
+        STATUS_CLAIMED,
+        STATUS_DONE,
+        STATUS_QUEUED,
+        STATUS_WAITING_FOR_MAIN,
+    )
     from app.services.execution_cancel_bus import publish_execution_cancel
 
+    now = _utcnow()
     marked_rows: int | None = None
+    notified_queue = False
     try:
         async with db.begin_nested():
+            # 1. First, attempt to update ActiveWorkflowExecution if present.
             result = await db.execute(
                 update(ActiveWorkflowExecution)
                 .where(
                     ActiveWorkflowExecution.workflow_id == workflow_id,
                     ActiveWorkflowExecution.execution_id == execution_id,
                 )
-                .values(cancel_requested_at=_utcnow())
+                .values(cancel_requested_at=now)
             )
             marked_rows = result.rowcount or 0
+
+            # 2. Check WorkflowRunQueue during handoff: the active execution row
+            # might not exist yet, or dispatcher may have relinquished its handle
+            # before the worker persisted an active execution row.
+            queue_res = await db.execute(
+                select(WorkflowRunQueue)
+                .where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.execution_id == execution_id,
+                )
+                .with_for_update()
+            )
+            queue_row = queue_res.scalar_one_or_none()
+            if queue_row is not None:
+                if queue_row.status in (STATUS_QUEUED, STATUS_WAITING_FOR_MAIN):
+                    queue_row.status = STATUS_DONE
+                    queue_row.error = "Execution was cancelled"
+                    queue_row.finished_at = now
+                    queue_row.result = {
+                        "execution_id": str(execution_id),
+                        "workflow_id": str(workflow_id),
+                        "status": "cancelled",
+                        "outputs": {"error": "Execution was cancelled"},
+                        "execution_time_ms": 0.0,
+                        "history_written": True,
+                        "error": "Execution was cancelled",
+                        "instance": identity.instance_name(),
+                    }
+                    await db.execute(
+                        pg_insert(ExecutionHistory)
+                        .values(
+                            id=execution_id,
+                            workflow_id=workflow_id,
+                            inputs=queue_row.inputs or {},
+                            outputs={"error": "Execution was cancelled"},
+                            node_results=[],
+                            status="cancelled",
+                            execution_time_ms=0.0,
+                            trigger_source=queue_row.trigger_source,
+                            **attribution_fields(),
+                        )
+                        .on_conflict_do_nothing(index_elements=["id"])
+                    )
+                    notified_queue = True
+                    marked_rows = (marked_rows or 0) + 1
+                    # Ensure ActiveWorkflowExecution exists with cancel_requested_at
+                    await db.execute(
+                        pg_insert(ActiveWorkflowExecution)
+                        .values(
+                            execution_id=execution_id,
+                            workflow_id=workflow_id,
+                            worker_id=queue_row.claimed_by_process or "cancelled_in_queue",
+                            started_at=queue_row.enqueued_at or now,
+                            heartbeat_at=now,
+                            inputs=queue_row.inputs or {},
+                            trigger_source=queue_row.trigger_source,
+                            actor_user_id=queue_row.actor_user_id,
+                            recoverable=False,
+                            running_node_ids=[],
+                            running_node_started_at_ms={},
+                            node_results=[],
+                            cancel_requested_at=now,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["execution_id"],
+                            set_={"cancel_requested_at": now},
+                        )
+                    )
+                elif queue_row.status == STATUS_CLAIMED:
+                    # Worker claimed the row, but may not have persisted ActiveWorkflowExecution yet.
+                    await db.execute(
+                        pg_insert(ActiveWorkflowExecution)
+                        .values(
+                            execution_id=execution_id,
+                            workflow_id=workflow_id,
+                            worker_id=queue_row.claimed_by_process or "claimed",
+                            started_at=queue_row.claimed_at or now,
+                            heartbeat_at=now,
+                            inputs=queue_row.inputs or {},
+                            trigger_source=queue_row.trigger_source,
+                            actor_user_id=queue_row.actor_user_id,
+                            recoverable=True,
+                            running_node_ids=[],
+                            running_node_started_at_ms={},
+                            node_results=[],
+                            cancel_requested_at=now,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["execution_id"],
+                            set_={"cancel_requested_at": now},
+                        )
+                    )
+                    marked_rows = (marked_rows or 0) + 1
     except Exception:
         logger.warning(
             "Could not record cancel for execution %s; broadcasting anyway",
             execution_id,
             exc_info=True,
         )
+
+    if notified_queue:
+        with contextlib.suppress(Exception):
+            await run_queue.notify_done(execution_id)
 
     await publish_execution_cancel(db, workflow_id=workflow_id, execution_id=execution_id)
     await db.commit()

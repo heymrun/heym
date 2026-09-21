@@ -402,13 +402,24 @@ class RunQueueWorker:
                 trigger_source=row.trigger_source,
                 actor_user_id=row.actor_user_id,
             )
-
             async with async_session_maker() as db:
                 active_row = await db.get(ActiveWorkflowExecution, row.execution_id)
-                if (
+                q_id = getattr(row, "id", None)
+                q_row = await db.get(WorkflowRunQueue, q_id) if q_id is not None else None
+                is_cancelled = (
                     active_row is not None
                     and getattr(active_row, "cancel_requested_at", None) is not None
-                ):
+                ) or (
+                    q_row is not None
+                    and (
+                        q_row.error == "Execution was cancelled"
+                        or (
+                            q_row.status == run_queue.STATUS_DONE
+                            and (q_row.result or {}).get("status") == "cancelled"
+                        )
+                    )
+                )
+                if is_cancelled:
                     if cancel_event is not None:
                         cancel_event.set()
                     raise WorkflowCancelledError("Workflow execution cancelled")
