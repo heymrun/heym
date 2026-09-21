@@ -36,6 +36,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
     json_output_schema = node_data.get("jsonOutputSchema", "")
     batch_mode_enabled = bool(node_data.get("batchModeEnabled", False))
+    responses_api_enabled = bool(node_data.get("responsesApiEnabled", False))
     output_type = node_data.get("outputType", "text")
     image_size = node_data.get("imageSize", "1024x1024")
     image_quality = node_data.get("imageQuality", "auto")
@@ -145,6 +146,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         fallback_credential_id=fallback_credential_id,
         fallback_model=fallback_model,
         batch_mode_enabled=batch_mode_enabled,
+        use_responses_api=responses_api_enabled and not batch_mode_enabled,
         on_batch_status_update=batch_status_callback if batch_mode_enabled else None,
         should_abort=batch_should_abort if batch_mode_enabled else None,
         request_timeout=float(node_data.get("requestTimeoutSeconds") or 60),

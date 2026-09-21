@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { AlertTriangle, Braces, Brain, ShieldAlert } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
@@ -9,6 +10,7 @@ import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { GuardrailCategory, ReasoningEffort } from "@/types/workflow";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
+import { useResponsesApiCapability } from "../useResponsesApiCapability";
 
 const {
   workflowStore,
@@ -48,6 +50,9 @@ const {
   llmBatchCapabilityMessage,
   llmBatchCapabilityTone,
   llmBatchModeAvailable,
+  responsesCredentialType,
+  responsesSelectedModel,
+  responsesFallbackCredentialType,
   handleModelChange,
   handleCredentialChange,
   handleLlmOutputTypeChange,
@@ -57,6 +62,22 @@ const {
   formatExtraBody,
   updateNodeData,
 } = usePropertiesPanelContext();
+
+const responsesCapability = useResponsesApiCapability({
+  credentialType: responsesCredentialType,
+  batchModeEnabled: computed(() => !!selectedNode.value?.data.batchModeEnabled),
+  outputType: computed(() => String(selectedNode.value?.data.outputType ?? "text")),
+  selectedModel: responsesSelectedModel,
+});
+
+const fallbackBlocksResponses = computed((): boolean => {
+  if (!selectedNode.value?.data.responsesApiEnabled) return false;
+  return responsesFallbackCredentialType.value === "google";
+});
+
+function handleResponsesApiChange(enabled: boolean): void {
+  updateNodeData("responsesApiEnabled", enabled);
+}
 </script>
 
 <template>
@@ -270,7 +291,7 @@ const {
             type="checkbox"
             class="h-4 w-4 rounded border-input bg-background"
             :checked="!!selectedNode.data.batchModeEnabled"
-            :disabled="!llmBatchModeAvailable"
+            :disabled="!llmBatchModeAvailable || !!selectedNode.data.responsesApiEnabled"
             @change="handleLlmBatchModeChange(($event.target as HTMLInputElement).checked)"
           >
           <Label
@@ -280,6 +301,45 @@ const {
             Use Batch API mode
           </Label>
         </div>
+        <div
+          v-if="responsesCapability.visible.value"
+          class="flex items-center gap-2"
+        >
+          <input
+            id="llm-responses-api"
+            type="checkbox"
+            class="h-4 w-4 rounded border-input bg-background"
+            :checked="!!selectedNode.data.responsesApiEnabled"
+            :disabled="!responsesCapability.available.value"
+            @change="handleResponsesApiChange(($event.target as HTMLInputElement).checked)"
+          >
+          <Label
+            for="llm-responses-api"
+            class="text-sm font-normal"
+          >
+            Use Responses API
+          </Label>
+        </div>
+        <p
+          v-if="responsesCapability.visible.value && responsesCapability.message.value"
+          :class="[
+            'text-xs',
+            responsesCapability.tone.value === 'positive'
+              ? 'text-success'
+              : responsesCapability.tone.value === 'warning'
+                ? 'text-amber-600'
+                : 'text-muted-foreground',
+          ]"
+        >
+          {{ responsesCapability.message.value }}
+        </p>
+        <p
+          v-if="fallbackBlocksResponses"
+          class="text-xs text-amber-600"
+        >
+          The fallback credential does not support the Responses API. This node will fail
+          if it falls back.
+        </p>
         <p
           v-if="llmBatchCapabilityMessage"
           :class="[

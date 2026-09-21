@@ -512,6 +512,7 @@ export interface NodeData {
   systemInstruction?: string;
   userMessage?: string;
   batchModeEnabled?: boolean;
+  responsesApiEnabled?: boolean;
   imageInputEnabled?: boolean;
   imageInput?: string;
   isReasoningModel?: boolean;

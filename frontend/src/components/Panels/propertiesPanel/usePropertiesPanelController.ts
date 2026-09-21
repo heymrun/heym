@@ -7610,6 +7610,32 @@ export function usePropertiesPanelController() {
     return llmCredentials.value.find((c) => c.id === node.data.credentialId)?.type ?? null;
   });
 
+  // Shared by the llm and agent Responses API checkboxes; both nodes draw from the
+  // same credential and model lists.
+  const responsesCredentialType = computed((): string | null => {
+    const node = workflowStore.selectedNode;
+    if (!node || (node.type !== "llm" && node.type !== "agent")) return null;
+    const credentialId = node.data.credentialId as string | undefined;
+    if (!credentialId) return null;
+    return llmCredentials.value.find((c) => c.id === credentialId)?.type ?? null;
+  });
+
+  const responsesSelectedModel = computed((): LLMModel | null => {
+    const node = workflowStore.selectedNode;
+    if (!node || (node.type !== "llm" && node.type !== "agent")) return null;
+    const modelId = node.data.model as string | undefined;
+    if (!modelId) return null;
+    return llmModels.value.find((model) => model.id === modelId) ?? null;
+  });
+
+  const responsesFallbackCredentialType = computed((): string | null => {
+    const node = workflowStore.selectedNode;
+    if (!node || (node.type !== "llm" && node.type !== "agent")) return null;
+    const fallbackId = node.data.fallbackCredentialId as string | undefined;
+    if (!fallbackId) return null;
+    return llmCredentials.value.find((c) => c.id === fallbackId)?.type ?? null;
+  });
+
   const llmBatchCapabilityMessage = computed(() => {
     const node = workflowStore.selectedNode;
     if (node?.type !== "llm") return null;
@@ -9677,6 +9703,9 @@ export function usePropertiesPanelController() {
     llmBatchCapabilityMessage,
     llmBatchCapabilityTone,
     llmBatchModeAvailable,
+    responsesCredentialType,
+    responsesSelectedModel,
+    responsesFallbackCredentialType,
     agentModelContextLimit,
     handleModelChange,
     handleCredentialChange,

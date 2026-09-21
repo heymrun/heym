@@ -161,6 +161,24 @@ Each item in `$nodeLabel.results` includes fields such as:
 
 When **JSON output** is enabled together with batch mode, Heym parses each successful item separately. Parsed objects are exposed per item and collected on `parsedResults`.
 
+## Responses API
+
+A **Use Responses API** checkbox routes the node's call through the
+[Responses API](https://platform.openai.com/docs/api-reference/responses) instead of Chat
+Completions. It is off by default, and the node behaves the same either way: the same prompts,
+the same JSON output schema, the same result shape.
+
+It works with an OpenAI credential, and with a custom credential whose gateway supports the
+endpoint, so a self-hosted or proxied setup can use it too. With a Google credential it stays
+disabled, and it cannot be combined with [Batch mode](#batch-status-branch) - the node panel says
+where a given credential stands before you run anything.
+
+If the endpoint turns out to be unavailable at run time, the node fails with a message naming the
+cause rather than quietly falling back, so a node configured for the Responses API is always
+running on it. To fall back to another credential or model deliberately, use the **Fallback
+Credential** and **Fallback Model** fields; they inherit this checkbox, so a fallback credential
+also needs to support the endpoint.
+
 ## Image Generation
 
 - **Models:** `nanobanana`, `gemini-2.0-flash-exp`

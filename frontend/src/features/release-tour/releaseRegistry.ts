@@ -17,6 +17,58 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.12",
+    publishedAt: new Date("2026-09-20T00:00:00Z"),
+    headline: "Let a reasoning model keep its train of thought",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["responses-api"],
+    },
+    sections: [
+      {
+        id: "responses-api",
+        title: "Route a model call through the Responses API",
+        publishedAt: new Date("2026-09-20T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The **LLM** and **Agent** nodes have a new **Use Responses API** checkbox. It is off by default. When it is on, the node calls the Responses API instead of Chat Completions. Prompts, tools and JSON output behave exactly as before, so a node you already rely on keeps producing what it produced yesterday.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "It matters most on an Agent node running a reasoning model. The Responses API returns the model's reasoning alongside each tool call, and Heym feeds it back on the next turn, so the agent keeps its train of thought across a multi-step tool loop instead of starting over after every tool result. Nothing is stored on the provider's side: the conversation stays in Heym and the reasoning travels as an encrypted blob.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "It works with an OpenAI credential, and with a custom credential whose gateway supports the endpoint, so a self-hosted or proxied setup can use it too. Google credentials do not support it, and it cannot be combined with Batch mode. The node panel tells you where a given credential stands before you run anything, and a node set to use it either runs on it or stops with a message naming the reason.",
+          },
+        ],
+        tour: {
+          description:
+            "Keep a reasoning model's chain of thought across tool calls by switching the node to the Responses API.",
+          useCases: [
+            "Keep a multi-step agent's reasoning intact from one tool call to the next",
+            "Use it with an OpenAI credential or with your own compatible gateway",
+            "Spend fewer tokens when a long tool loop reuses reasoning it already produced",
+          ],
+          tourVisual: "responses-api",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "agent-node",
+            title: "Agent Node",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.11",
     publishedAt: new Date("2026-09-01T00:00:00Z"),
     headline: "Keep a vector store in step with its source",

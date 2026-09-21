@@ -348,10 +348,11 @@ describe("selectPendingReleaseTour", () => {
 });
 
 describe("shipped release registry", () => {
-  it("keeps only the five most recent tours, newest first", () => {
+  it("lists every shipped tour, newest first", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "responses-api",
       "rag-upsert-delete",
       "cluster-load-distribution",
       "span-details-inspector",
