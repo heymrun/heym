@@ -17,6 +17,58 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.13",
+    publishedAt: new Date("2026-09-21T00:00:00Z"),
+    headline: "Ask a model for a decision, not an essay",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["decision-node"],
+    },
+    sections: [
+      {
+        id: "decision-node",
+        title: "Get a typed answer instead of a paragraph",
+        publishedAt: new Date("2026-09-21T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The new **Decision** node asks a decision model typed questions about whatever the run has produced so far. You give it a **state**, such as a ticket, a diff or a form submission, plus a list of questions, and it answers each one with a probability instead of a paragraph you then have to parse.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Questions come in three shapes. **Noul** asks whether a condition holds and returns how likely a yes is. **Choice** picks one option from a set you define and shows the full distribution. **Score** rates the state along levels you write, and can land between them. Choice and score answers carry their own confidence, so a **Switch** can branch on the answer while a **Condition** gates on how certain the model was.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Write the questions yourself, or describe what you want judged and let **Generate with AI** draft them. If your endpoint speaks a different contract, turn on **Custom request body** and send the JSON you need. Connect it with a **Decision Model** credential pointing at a hosted or self-hosted endpoint, and every call shows up in Traces.",
+          },
+        ],
+        tour: {
+          description:
+            "Ask a model typed questions about the run's state and branch on the answer instead of parsing prose.",
+          useCases: [
+            "Route a ticket to the right team and branch on how confident the call was",
+            "Score how risky a change looks before a step that cannot be undone",
+            "Draft the questions from a plain sentence with Generate with AI",
+          ],
+          tourVisual: "decision-node",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "decision-node",
+            title: "Decision",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.12",
     publishedAt: new Date("2026-09-20T00:00:00Z"),
     headline: "Let a reasoning model keep its train of thought",
@@ -163,125 +215,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             slug: "cluster",
             title: "Load Distribution",
           },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.09",
-    publishedAt: new Date("2026-08-26T00:00:00Z"),
-    headline: "Sign in with your own identity provider",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["oidc-sso"],
-    },
-    sections: [
-      {
-        id: "oidc-sso",
-        title: "Sign in with your identity provider",
-        publishedAt: new Date("2026-08-26T19:53:29Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Heym can now authenticate people against any **OpenID Connect** provider. An instance administrator pastes an issuer URL under **Settings → SSO**, and Heym reads the authorization, token, and key endpoints from the provider's own discovery document. No provider is hardcoded, so Keycloak, Okta, Entra ID, Auth0 and Google all connect the same way.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "People who have never signed in get an account on first sign-in, optionally limited to your own email domains. Password sign-in stays available beside SSO, and can be switched off once a connection test has passed - accounts listed in `HEYM_ADMIN_EMAILS` keep password access so a misconfigured provider can never lock you out.",
-          },
-        ],
-        tour: {
-          description:
-            "Configure single sign-on against any OIDC provider from the settings panel. Paste an issuer URL, copy the redirect URI into your provider, and test the connection before you turn it on.",
-          useCases: [
-            "Let your team sign in with the accounts they already have",
-            "Restrict new accounts to your own email domains",
-            "Turn off password sign-in once SSO is verified",
-          ],
-          tourVisual: "sso-login",
-          docTarget: { categoryId: "reference", slug: "sso", title: "Single Sign-On" },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.08",
-    publishedAt: new Date("2026-08-18T00:00:00Z"),
-    headline: "Playwright runs you can actually read",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["playwright-ai-steps"],
-    },
-    sections: [
-      {
-        id: "playwright-ai-steps",
-        title: "Playwright AI steps you can actually read",
-        publishedAt: new Date("2026-08-23T14:09:53Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "AI-written browser steps now report what they attempted and why they failed instead of surfacing a bare stack trace. Screenshots open in a lightbox you can page through, and the generated code carries fewer automation fingerprints.",
-          },
-        ],
-        tour: {
-          description:
-            "Describe a browser step in plain language and Playwright writes it. When a step fails, the error names the step; every screenshot opens full size in a gallery.",
-          useCases: [
-            "Scrape a site that has no API, described in one sentence",
-            "See exactly which step broke when a selector goes stale",
-            "Page through run screenshots to confirm what the browser saw",
-          ],
-          tourVisual: "playwright-ai-steps",
-          docTarget: { categoryId: "nodes", slug: "playwright-node", title: "Playwright Node" },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.08-unreleased",
-    publishedAt: new Date("2026-08-25T00:00:00Z"),
-    headline: "Inspect an execution span without leaving its timeline",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "A closer look at every execution span",
-      introDescription:
-        "See the timing, retries, traces, errors, and outputs behind the selected step.",
-      tourEnabled: true,
-      sectionOrder: ["span-details-inspector"],
-    },
-    sections: [
-      {
-        id: "span-details-inspector",
-        title: "Diagnose a run from the timeline",
-        publishedAt: new Date("2026-08-27T05:23:28Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Select a span in the execution timeline to inspect its status, timing, retries, trace, error, and output in one place.",
-          },
-        ],
-        tour: {
-          description:
-            "Click a timeline span to open its details in place of the rows. Follow a trace or inspect the node output without losing your place in the run.",
-          useCases: [
-            "Find the slow or failed step in a long workflow run",
-            "See the last error and retry attempts without reopening the node",
-            "Connect a trace ID to the output that caused a failure",
-          ],
-          tourVisual: "span-details-inspector",
-          docTarget: { categoryId: "reference", slug: "execution-history", title: "Execution History" },
         },
       },
     ],

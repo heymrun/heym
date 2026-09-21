@@ -29,6 +29,7 @@ from app.api import (
     credentials,
     dashboards,
     data_tables,
+    decisions,
     discord,
     evals,
     expressions,
@@ -390,6 +391,7 @@ app.include_router(code.router, prefix="/api/code", tags=["Code"])
 app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
 app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
 app.include_router(data_tables.router, prefix="/api/data-tables", tags=["Data Tables"])
+app.include_router(decisions.router, prefix="/api/decisions", tags=["Decisions"])
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])

@@ -25,6 +25,7 @@ See [Triggers](./triggers.md) for all entry points.
 | Node | Description | Inputs | Outputs |
 |------|-------------|--------|---------|
 | [LLM](../nodes/llm-node.md) | Process text with a language model | 1 | 1 |
+| [Decision](../nodes/decision-node.md) | Ask a decision model typed questions and branch on the probabilities it returns | 1 | 1 |
 | [AI Agent](../nodes/agent-node.md) | LLM with tool calling, skills, MCP, optional [human review](./human-in-the-loop.md), and optional [persistent memory graph](./agent-persistent-memory.md). See [Agent Architecture](./agent-architecture.md). | 1 | 1, plus optional `review` output |
 | [Codex](../nodes/codex-node.md) | Run the local Codex CLI against a GitHub repository using a ChatGPT/Codex access token | 1 | 1, plus `question` output |
 | [OpenCode Go](../nodes/opencode-go-node.md) | Run the OpenCode CLI against a GitHub repository in a hardened container using an OpenCode Go gateway API key | 1 | 1 |

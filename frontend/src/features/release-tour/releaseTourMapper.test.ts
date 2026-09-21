@@ -352,12 +352,10 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "decision-node",
       "responses-api",
       "rag-upsert-delete",
       "cluster-load-distribution",
-      "span-details-inspector",
-      "oidc-sso",
-      "playwright-ai-steps",
     ]);
   });
 

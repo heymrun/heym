@@ -1048,6 +1048,77 @@ Guardrails block unsafe user messages **before** the LLM or Agent runs. When a v
 }
 ```
 
+### 5b. decision (Decision Model - Typed Judgments)
+Asks a decision model (TypeSafe Jev and compatible endpoints) typed questions about a
+state and gets probabilities back. It does NOT generate text - use `llm` for that.
+Reach for it when the workflow needs a judgment it can branch on: routing, triage,
+ranking, verification, or gating a risky step.
+
+Properties:
+- `credentialId`: a `decision` credential (required). NOT an LLM credential.
+- `model`: model name, e.g. "jev-latest" (required)
+- `state`: what the model should read. Expression-capable, default "$input.text".
+  A field holding exactly one expression keeps its type, so "$input" sends the object
+  itself rather than its text.
+- `questions`: ordered array, at least one entry. Each entry:
+  - `id`: snake_case key. The answer comes back under the same key. It is NEVER sent
+    to the model, so the full meaning must live in `instructions`.
+  - `type`: "noul" | "choice" | "score"
+  - `instructions`: the judgment to make. Expression-capable.
+  - noul only: `criteriaTrue`, `criteriaFalse` - what a yes and a no mean (optional)
+  - choice only: `options`: [{ "key": "...", "description": "..." }] - at least one
+  - score only: `levels`: ordered array of strings, lowest first - at least two
+- `customBodyEnabled` / `customBody`: send a hand-written JSON body instead of the
+  form, for an endpoint whose contract differs. Expression-capable. When enabled,
+  `state` and `questions` are ignored.
+- `requestTimeoutSeconds`: default 60
+
+Which question type to use:
+- "noul" - whether a condition holds. Returns the probability of yes (0 to 1).
+- "choice" - pick one of a set you define. Returns the option plus a distribution.
+- "score" - rate along an ordered rubric. Returns a value that can land between levels.
+
+Output is the provider response verbatim, so downstream nodes read:
+- `$decisionLabel.answers.<id>.noul` (0 to 1)
+- `$decisionLabel.answers.<id>.choice` and `.confidence`
+- `$decisionLabel.answers.<id>.score` and `.confidence`
+
+Example - triage a support ticket and route on the answer:
+```json
+{
+  "id": "triage",
+  "type": "decision",
+  "data": {
+    "label": "triage",
+    "credentialId": "<decision credential id>",
+    "model": "jev-latest",
+    "state": "$input.text",
+    "questions": [
+      {
+        "id": "is_urgent",
+        "type": "noul",
+        "instructions": "Does this message convey urgency?",
+        "criteriaTrue": "Explicitly time-sensitive or blocking work",
+        "criteriaFalse": "No urgency expressed"
+      },
+      {
+        "id": "department",
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "options": [
+          { "key": "billing", "description": "Payments, invoicing, refunds" },
+          { "key": "technical", "description": "Bugs, outages, integrations" },
+          { "key": "other", "description": "Nothing above fits" }
+        ]
+      }
+    ]
+  }
+}
+```
+Then a `switch` node branches on `$triage.answers.department.choice`, and a `condition`
+node can gate on `$triage.answers.department.confidence` to send low-confidence cases
+to a human instead.
+
 ### 6. condition (If/Else Branch)
 - **Purpose**: Branch workflow based on condition
 - **Inputs**: 1 | **Outputs**: 2 (true path: output-0, false path: output-1)

@@ -27,6 +27,9 @@ class NodePlacementTests(unittest.TestCase):
     def test_playwright_node_runs_anywhere(self) -> None:
         self.assertEqual(node_placement({"type": "playwright", "data": {}}), Placement.ANYWHERE)
 
+    def test_decision_node_runs_anywhere(self) -> None:
+        self.assertEqual(node_placement({"type": "decision", "data": {}}), Placement.ANYWHERE)
+
     def test_plain_agent_runs_anywhere(self) -> None:
         self.assertEqual(node_placement({"type": "agent", "data": {}}), Placement.ANYWHERE)
 

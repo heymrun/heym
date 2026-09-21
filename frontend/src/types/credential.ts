@@ -32,7 +32,8 @@ export type CredentialType =
   | "s3"
   | "elevenlabs"
   | "clickhouse"
-  | "rag";
+  | "rag"
+  | "decision";
 
 export interface Credential {
   id: string;
@@ -131,6 +132,13 @@ export interface CredentialConfigCodex {
   id_token?: string;
   account_id?: string;
   expires_at?: string | null;
+}
+
+export interface CredentialConfigDecision {
+  base_url: string;
+  api_key?: string;
+  /** Test-only: the credential holds no model, each Decision node picks its own. */
+  model?: string;
 }
 
 export interface CredentialConfigOpenCode {
@@ -326,6 +334,7 @@ export type CredentialConfig =
   | CredentialConfigOpenAI
   | CredentialConfigCodex
   | CredentialConfigOpenCode
+  | CredentialConfigDecision
   | CredentialConfigGoogle
   | CredentialConfigGitHub
   | CredentialConfigJira
@@ -447,6 +456,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   qdrant: "RAG: Qdrant + OpenAI",
   pgvector: "RAG: Psql + OpenAI",
   rag: "RAG: Custom Embeddings",
+  decision: "Decision Model",
   grist: "Grist",
   rabbitmq: "RabbitMQ",
   cohere: "Cohere Reranker",
@@ -464,6 +474,8 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
 
 export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   openai: "Connect to OpenAI API for GPT models",
+  decision:
+    "Connect to a decision model endpoint that answers typed questions with probabilities",
   codex: "Use a ChatGPT/Codex access token for the local Codex runner",
   opencode: "Use an OpenCode Go gateway API key for the OpenCode Go coding agent",
   google: "Connect to Google AI for Gemini models",

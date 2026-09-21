@@ -86,7 +86,6 @@ onBeforeUnmount(() => {
       >
         <Copy class="h-3 w-3" />
       </button><button
-        v-if="span.nodeType === 'llm' || span.nodeType === 'agent'"
         type="button"
         class="text-primary hover:underline"
         @click="emit('openTrace', $event)"

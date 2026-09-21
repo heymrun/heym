@@ -40,6 +40,11 @@ from app.models.schemas import (
 )
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.codex_usage_service import fetch_codex_usage
+from app.services.decision_models import (
+    DecisionProviderError,
+    DecisionRequestError,
+    call_decision_model,
+)
 from app.services.embedding import (
     EMBEDDING_DIMENSIONS,
     EmbeddingService,
@@ -80,6 +85,18 @@ def merge_credential_config_for_update(
             incoming_value = str(incoming_config.get(key, "") or "").strip()
             if incoming_value:
                 merged_config[key] = incoming_value
+        return merged_config
+
+    if credential_type == CredentialType.decision:
+        # base_url is prefilled from public_fields and always resent; the API key input
+        # is blank unless retyped, so a blank value means "keep the stored one" rather
+        # than "clear it". Without this, saving an edit would wipe the owner's key.
+        merged_config = dict(existing_config)
+        if "base_url" in incoming_config:
+            merged_config["base_url"] = incoming_config["base_url"]
+        incoming_key = str(incoming_config.get("api_key", "") or "").strip()
+        if incoming_key:
+            merged_config["api_key"] = incoming_key
         return merged_config
 
     if credential_type == CredentialType.notion:
@@ -240,6 +257,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
             return mask_api_key(embedding_api_key)
         model = str(config.get("embedding_model", "") or "").strip()
         return model or None
+    elif credential_type == CredentialType.decision:
+        api_key = str(config.get("api_key", "") or "").strip()
+        if api_key:
+            return mask_api_key(api_key)
+        base_url = str(config.get("base_url", "") or "").strip()
+        return urlparse(base_url).hostname or None
     elif credential_type == CredentialType.grist:
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
@@ -362,6 +385,8 @@ def get_public_credential_fields(
             "qdrant_host": str(config.get("qdrant_host", "") or "").strip() or None,
             "qdrant_port": str(config.get("qdrant_port") or 6333),
         }
+    if credential_type == CredentialType.decision:
+        return {"base_url": str(config.get("base_url", "")).strip() or None}
     return {}
 
 
@@ -720,18 +745,22 @@ async def list_credentials_by_type(
     return responses
 
 
-@router.get("/llm", response_model=list[CredentialListResponse])
-async def list_llm_credentials(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+async def _list_credentials_of_types(
+    db: AsyncSession,
+    current_user: User,
+    types: list[CredentialType],
 ) -> list[CredentialListResponse]:
-    llm_types = [CredentialType.openai, CredentialType.google, CredentialType.custom]
+    """List the user's own credentials of these types plus those shared with them.
 
+    A credential can arrive by more than one route (owned, shared directly, shared
+    with a team the user belongs to); the first route wins so the list never repeats
+    an entry, and ownership outranks a share.
+    """
     owned_result = await db.execute(
         select(Credential)
         .where(
             Credential.owner_id == current_user.id,
-            Credential.type.in_(llm_types),
+            Credential.type.in_(types),
         )
         .order_by(Credential.name.asc())
     )
@@ -743,7 +772,7 @@ async def list_llm_credentials(
         .join(User, User.id == Credential.owner_id)
         .where(
             CredentialShare.user_id == current_user.id,
-            Credential.type.in_(llm_types),
+            Credential.type.in_(types),
         )
         .order_by(Credential.name.asc())
     )
@@ -756,79 +785,74 @@ async def list_llm_credentials(
         .join(Team, Team.id == CredentialTeamShare.team_id)
         .where(
             TeamMember.user_id == current_user.id,
-            Credential.type.in_(llm_types),
+            Credential.type.in_(types),
         )
         .order_by(Credential.name.asc())
     )
     shared_team_credentials = shared_team_result.all()
 
-    seen_ids_llm: set[uuid.UUID] = set()
+    seen_ids: set[uuid.UUID] = set()
     responses = []
-    for cred in owned_credentials:
+
+    def _entry(
+        cred: Credential,
+        *,
+        is_shared: bool,
+        shared_by: str | None,
+        shared_by_team: str | None,
+    ) -> CredentialListResponse:
         config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
-        header_key = get_header_key(cred.type, config)
-        responses.append(
-            CredentialListResponse(
-                id=cred.id,
-                name=cred.name,
-                type=cred.type,
-                masked_value=masked,
-                header_key=header_key,
-                public_fields=get_public_credential_fields(cred.type, config),
-                created_at=cred.created_at,
-                is_shared=False,
-                shared_by=None,
-                shared_by_team=None,
-            )
+        return CredentialListResponse(
+            id=cred.id,
+            name=cred.name,
+            type=cred.type,
+            masked_value=get_masked_value(cred.type, config),
+            header_key=get_header_key(cred.type, config),
+            public_fields=get_public_credential_fields(cred.type, config),
+            created_at=cred.created_at,
+            is_shared=is_shared,
+            shared_by=shared_by,
+            shared_by_team=shared_by_team,
         )
-        seen_ids_llm.add(cred.id)
+
+    for cred in owned_credentials:
+        seen_ids.add(cred.id)
+        responses.append(_entry(cred, is_shared=False, shared_by=None, shared_by_team=None))
 
     for cred, owner_email in shared_credentials:
-        if cred.id in seen_ids_llm:
+        if cred.id in seen_ids:
             continue
-        seen_ids_llm.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
-        header_key = get_header_key(cred.type, config)
-        responses.append(
-            CredentialListResponse(
-                id=cred.id,
-                name=cred.name,
-                type=cred.type,
-                masked_value=masked,
-                header_key=header_key,
-                public_fields=get_public_credential_fields(cred.type, config),
-                created_at=cred.created_at,
-                is_shared=True,
-                shared_by=owner_email,
-                shared_by_team=None,
-            )
-        )
+        seen_ids.add(cred.id)
+        responses.append(_entry(cred, is_shared=True, shared_by=owner_email, shared_by_team=None))
 
     for cred, team_name in shared_team_credentials:
-        if cred.id in seen_ids_llm:
+        if cred.id in seen_ids:
             continue
-        seen_ids_llm.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
-        header_key = get_header_key(cred.type, config)
-        responses.append(
-            CredentialListResponse(
-                id=cred.id,
-                name=cred.name,
-                type=cred.type,
-                masked_value=masked,
-                header_key=header_key,
-                public_fields=get_public_credential_fields(cred.type, config),
-                created_at=cred.created_at,
-                is_shared=True,
-                shared_by=None,
-                shared_by_team=team_name,
-            )
-        )
+        seen_ids.add(cred.id)
+        responses.append(_entry(cred, is_shared=True, shared_by=None, shared_by_team=team_name))
 
     return responses
+
+
+@router.get("/llm", response_model=list[CredentialListResponse])
+async def list_llm_credentials(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CredentialListResponse]:
+    return await _list_credentials_of_types(
+        db,
+        current_user,
+        [CredentialType.openai, CredentialType.google, CredentialType.custom],
+    )
+
+
+@router.get("/decision", response_model=list[CredentialListResponse])
+async def list_decision_credentials(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CredentialListResponse]:
+    """Decision models speak their own protocol, so they never mix with LLM pickers."""
+    return await _list_credentials_of_types(db, current_user, [CredentialType.decision])
 
 
 @router.post("", response_model=CredentialResponse, status_code=status.HTTP_201_CREATED)
@@ -888,6 +912,35 @@ async def create_credential(
     )
 
 
+DECISION_TEST_PROBE_STATE = "Heym decision credential connection test."
+
+
+async def _test_decision_endpoint(config: dict, model: str) -> CredentialTestResponse:
+    """Send the smallest possible evaluation so a bad URL, key or model surfaces here."""
+    body = {
+        "model": (model or "").strip() or "jev-latest",
+        "state": DECISION_TEST_PROBE_STATE,
+        "questions": {"probe": {"type": "noul", "instructions": "Is this a connection test?"}},
+    }
+    try:
+        await run_in_threadpool(
+            lambda: call_decision_model(
+                base_url=str(config.get("base_url") or ""),
+                api_key=str(config.get("api_key") or ""),
+                body=body,
+                timeout=15.0,
+                trace_context=None,
+            )
+        )
+    except (DecisionProviderError, DecisionRequestError) as exc:
+        return CredentialTestResponse(success=False, message=str(exc))
+    except Exception as exc:
+        # The endpoint is user-supplied, so an unreachable host or a blocked private
+        # address is an expected outcome of a test rather than a server error.
+        return CredentialTestResponse(success=False, message=f"Connection failed: {exc}")
+    return CredentialTestResponse(success=True, message="Decision endpoint reachable")
+
+
 RAG_TEST_PROBE_TEXT = "Heym RAG credential connection test."
 
 
@@ -932,6 +985,7 @@ async def run_credential_connection_test(
         CredentialType.clickhouse,
         CredentialType.sentry,
         CredentialType.rag,
+        CredentialType.decision,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -983,8 +1037,14 @@ async def run_credential_connection_test(
             config = {**stored_config, **{k: v for k, v in config.items() if v}}
         elif test_data.type == CredentialType.rag:
             config = {**stored_config, **{k: v for k, v in config.items() if v not in (None, "")}}
+        elif test_data.type == CredentialType.decision:
+            config = {**stored_config, **{k: v for k, v in config.items() if v not in (None, "")}}
         else:
             config = _merge_notion_test_config(config, stored_config)
+
+    if test_data.type == CredentialType.decision:
+        validate_credential_config(test_data.type, config)
+        return await _test_decision_endpoint(config, str(config.get("model") or ""))
 
     if test_data.type == CredentialType.rag:
         # Only the embedding half is exercised here. Validating the vector store
@@ -1809,6 +1869,18 @@ def validate_credential_config(
             )
     elif credential_type == CredentialType.rag:
         _validate_rag_config(config)
+    elif credential_type == CredentialType.decision:
+        base_url = str(config.get("base_url", "") or "").strip()
+        if not base_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Decision credential requires base_url",
+            )
+        if not base_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Decision credential base_url must start with http:// or https://",
+            )
     elif credential_type == CredentialType.grist:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(

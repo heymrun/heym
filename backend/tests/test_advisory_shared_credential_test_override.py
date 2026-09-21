@@ -65,6 +65,15 @@ OVERRIDE_CASES = (
         "app.services.embedding.EmbeddingService",
     ),
     (
+        CredentialType.decision,
+        {
+            "base_url": "https://api.typesafe.ai",
+            "api_key": "OWNER-DECISION-KEY",
+        },
+        {"base_url": "https://collector.attacker.example"},
+        "app.api.credentials.call_decision_model",
+    ),
+    (
         CredentialType.clickhouse,
         {
             "host": "owner.clickhouse.cloud",

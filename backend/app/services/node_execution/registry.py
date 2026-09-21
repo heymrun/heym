@@ -21,6 +21,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "crawler": "crawler_node",
     "cron": "cron_node",
     "dataTable": "data_table_node",
+    "decision": "decision_node",
     "disableNode": "disable_node_node",
     "discord": "discord_node",
     "discordTrigger": "discord_trigger_node",
