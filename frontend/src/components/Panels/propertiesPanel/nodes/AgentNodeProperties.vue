@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { AlertTriangle, BookOpen, Braces, Brain, ExternalLink, FileArchive, Loader2, Plus, Server, ShieldAlert, Sparkles, Trash2 } from "lucide-vue-next";
 import AgentSkillCard from "@/components/Panels/AgentSkillCard.vue";
 import Button from "@/components/ui/Button.vue";
@@ -10,6 +11,7 @@ import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { GuardrailCategory, ReasoningEffort } from "@/types/workflow";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
+import { useResponsesApiCapability } from "../useResponsesApiCapability";
 
 const {
   workflowStore,
@@ -84,7 +86,23 @@ const {
   formatJsonSchema,
   formatExtraBody,
   updateNodeData,
+  responsesCredentialType,
+  responsesSelectedModel,
+  responsesFallbackCredentialType,
 } = usePropertiesPanelContext();
+
+const responsesCapability = useResponsesApiCapability({
+  credentialType: responsesCredentialType,
+  // The agent node has no Batch mode and no image output mode.
+  batchModeEnabled: computed(() => false),
+  outputType: computed(() => "text"),
+  selectedModel: responsesSelectedModel,
+});
+
+const fallbackBlocksResponses = computed((): boolean => {
+  if (!selectedNode.value?.data.responsesApiEnabled) return false;
+  return responsesFallbackCredentialType.value === "google";
+});
 </script>
 
 <template>
@@ -210,6 +228,48 @@ const {
         @navigate="handleAgentExpressionFieldNavigate"
         @register-field-index="onAgentRegisterExpressionFieldIndex"
       />
+    </div>
+    <div class="space-y-2 pt-2 border-t">
+      <div class="flex items-center gap-2">
+        <input
+          id="agent-responses-api"
+          type="checkbox"
+          class="h-4 w-4 rounded border-input bg-background"
+          :checked="!!selectedNode.data.responsesApiEnabled"
+          :disabled="!responsesCapability.available.value"
+          @change="updateNodeData('responsesApiEnabled', ($event.target as HTMLInputElement).checked)"
+        >
+        <Label
+          for="agent-responses-api"
+          class="text-sm font-normal"
+        >
+          Use Responses API
+        </Label>
+      </div>
+      <p
+        v-if="responsesCapability.message.value"
+        :class="[
+          'text-xs',
+          responsesCapability.tone.value === 'positive'
+            ? 'text-success'
+            : responsesCapability.tone.value === 'warning'
+              ? 'text-amber-600'
+              : 'text-muted-foreground',
+        ]"
+      >
+        {{ responsesCapability.message.value }}
+      </p>
+      <p
+        v-if="fallbackBlocksResponses"
+        class="text-xs text-amber-600"
+      >
+        The fallback credential does not support the Responses API. This node will fail
+        if it falls back.
+      </p>
+      <p class="text-xs text-muted-foreground">
+        Routes model calls through the Responses API, which keeps the model's
+        reasoning across tool calls.
+      </p>
     </div>
     <div class="space-y-2 pt-2 border-t">
       <Label>Image Input</Label>

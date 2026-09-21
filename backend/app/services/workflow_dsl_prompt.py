@@ -465,6 +465,7 @@ In workflow expressions:
   - `imageInputEnabled`: Boolean to include an image alongside the user message (default: false)
   - `imageInput`: Image input expression (base64 data URL or image URL)
   - `batchModeEnabled`: Boolean to use provider-native Batch API execution for supported text models (default: false)
+  - `responsesApiEnabled`: Boolean to route the model call through the Responses API instead of Chat Completions (default: false). Works with OpenAI and custom credentials; Google credentials do not support it. Cannot be combined with `batchModeEnabled`.
   - `isReasoningModel`: Boolean for reasoning models (o1, o3)
   - `reasoningEffort`: "low" | "medium" | "high" (for reasoning models)
   - `jsonOutputEnabled`: Boolean to enable structured JSON output (default: false) - for text mode only
@@ -484,6 +485,12 @@ In workflow expressions:
 - In batch mode, `userMessage` MUST resolve to an array, not a single string
 - Each array item should resolve to a string or primitive value
 - Batch mode is text-only: do NOT combine it with `outputType: "image"` or `imageInputEnabled: true`
+
+**Responses API (LLM and Agent):**
+- `responsesApiEnabled` is available on **both** `llm` and `agent` nodes, unlike `batchModeEnabled` which is `llm`-only
+- It changes which OpenAI endpoint the call uses; prompts, tools and JSON output behave identically either way
+- On an `agent` node it preserves the model's reasoning across tool calls, which matters for reasoning models
+- Never set both `responsesApiEnabled` and `batchModeEnabled` to true on the same node
 - When batch mode is enabled, the node can expose a secondary source handle named `batchStatus`
 - Use `sourceHandle: "batchStatus"` to build notification or logging branches that react to provider status updates like `pending`, `processing`, and `completed`
 

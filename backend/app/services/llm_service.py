@@ -25,6 +25,12 @@ from app.services.agent_tool_observability import (
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.llm_transport import (
+    ChatCompletionsTransport,
+    RequestOpts,
+    ResponsesTransport,
+    ToolResult,
+)
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
 
@@ -523,6 +529,7 @@ class LLMService:
         base_url: str | None = None,
         trace_context: LLMTraceContext | None = None,
         request_timeout: float = LLM_REQUEST_TIMEOUT,
+        use_responses_api: bool = False,
     ) -> None:
         self.credential_type = credential_type
         self.api_key = api_key
@@ -530,6 +537,7 @@ class LLMService:
         self.trace_context = trace_context
         self.session_id = (trace_context.session_id if trace_context else None) or str(uuid.uuid4())
         self.request_timeout = request_timeout
+        self.use_responses_api = use_responses_api
 
     def _get_client(self) -> tuple[OpenAI, str]:
         """Get OpenAI client configured for the credential type."""
@@ -567,6 +575,11 @@ class LLMService:
                 **client_kwargs,
             ), "OpenAI"
         return create_openai_client(session_id=self.session_id, **client_kwargs), "OpenAI"
+
+    def _get_transport(self) -> ChatCompletionsTransport | ResponsesTransport:
+        if self.use_responses_api:
+            return ResponsesTransport()
+        return ChatCompletionsTransport()
 
     def _record_trace(
         self,
@@ -613,62 +626,42 @@ class LLMService:
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         client, provider = self._get_client()
+        transport = self._get_transport()
 
-        messages = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-
-        if conversation_history:
-            for msg in conversation_history:
-                messages.append({"role": msg["role"], "content": msg["content"]})
-
-        if image_input:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_message},
-                        {"type": "image_url", "image_url": {"url": image_input}},
-                    ],
-                }
-            )
-        else:
-            messages.append({"role": "user", "content": user_message})
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-        }
-
-        is_reasoning = is_reasoning_model(model)
-
-        if max_tokens is not None:
-            if is_reasoning:
-                kwargs["max_completion_tokens"] = max_tokens
-            else:
-                kwargs["max_tokens"] = max_tokens
-
-        if is_reasoning and reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
-        elif temperature is not None:
-            kwargs["temperature"] = temperature
-        if response_format is not None:
-            kwargs["response_format"] = response_format
-        if extra_body is not None:
-            kwargs["extra_body"] = extra_body
+        history = transport.start(
+            system_instruction=system_instruction,
+            conversation_history=conversation_history,
+            user_message=user_message,
+            image_input=image_input,
+        )
+        opts = RequestOpts(
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
+        kwargs = transport.build_kwargs(model=model, history=history, tools=None, opts=opts)
 
         base_url = client.base_url if hasattr(client, "base_url") else self.base_url
         _log_request(provider, str(base_url), kwargs)
 
-        trace_request: dict[str, Any] = {**kwargs, "messages": _sanitize_messages(messages)}
+        trace_request: dict[str, Any] = {**kwargs, **transport.trace_request(history, None)}
         if skills_included:
             trace_request["skills_included"] = skills_included
 
         start_time = time.time()
-        response = None
+        turn = None
         for attempt in range(2):
             try:
-                response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+                turn = await asyncio.to_thread(
+                    transport.create,
+                    client=client,
+                    model=model,
+                    history=history,
+                    tools=None,
+                    opts=opts,
+                )
                 break
             except Exception as exc:
                 elapsed_ms = (time.time() - start_time) * 1000
@@ -683,14 +676,17 @@ class LLMService:
                     and has_disable_reasoning
                     and ("disable_reasoning" in err_msg or "disabling reasoning" in err_msg)
                 ):
-                    kwargs.pop("extra_body", None)
+                    opts.extra_body = None
+                    kwargs = transport.build_kwargs(
+                        model=model, history=history, tools=None, opts=opts
+                    )
                     logger.info(
                         "Retrying without extra_body (disable_reasoning not supported by model %s)",
                         model,
                     )
                     continue
                 self._record_trace(
-                    request_type="chat.completions",
+                    request_type=transport.name,
                     provider=provider,
                     model=model,
                     request=trace_request,
@@ -700,28 +696,29 @@ class LLMService:
                 )
                 raise
         elapsed_ms = (time.time() - start_time) * 1000
-        assert response is not None  # loop exits via break (success) or raise (failure)
+        assert turn is not None  # loop exits via break (success) or raise (failure)
 
-        _log_response(provider, response, elapsed_ms)
+        _log_response(provider, turn.raw_items[0] if turn.raw_items else None, elapsed_ms)
 
-        total_tokens = response.usage.total_tokens if response.usage else 0
+        total_tokens = turn.total_tokens
         tokens_per_sec = round(total_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 else 0
 
-        text = _extract_text_from_response(response, content_only=content_only)
+        # content_only keeps structured JSON out of the provider `reasoning` fallback.
+        text = turn.text if content_only else transport.final_text(turn)
 
         result = {
             "text": text,
             "model": model,
             "usage": {
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                "prompt_tokens": turn.prompt_tokens,
+                "completion_tokens": turn.completion_tokens,
                 "total_tokens": total_tokens,
             },
             "tokens_per_sec": tokens_per_sec,
             "elapsed_ms": round(elapsed_ms, 2),
         }
         self._record_trace(
-            request_type="chat.completions",
+            request_type=transport.name,
             provider=provider,
             model=model,
             request=trace_request,
@@ -1006,37 +1003,20 @@ class LLMService:
         """Execute LLM with tool calling loop."""
         client, provider = self._get_client()
 
-        messages: list[dict[str, Any]] = (
-            copy.deepcopy(initial_messages) if initial_messages is not None else []
-        )
-        if initial_messages is None:
-            if system_instruction:
-                messages.append({"role": "system", "content": system_instruction})
-            if conversation_history:
-                for msg in conversation_history:
-                    messages.append({"role": msg["role"], "content": msg["content"]})
-            if image_input:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_message},
-                            {"type": "image_url", "image_url": {"url": image_input}},
-                        ],
-                    }
-                )
-            else:
-                messages.append({"role": "user", "content": user_message})
-        else:
-            if system_instruction:
-                if messages and messages[0].get("role") == "system":
-                    messages[0] = {"role": "system", "content": system_instruction}
-                else:
-                    messages.insert(0, {"role": "system", "content": system_instruction})
+        transport = self._get_transport()
+        if initial_messages is not None:
+            history = transport.load(initial_messages, system_instruction)
             if system_instruction or user_message:
                 logger.debug(
                     "execute_with_tools resumed from initial_messages; refreshed system prompt"
                 )
+        else:
+            history = transport.start(
+                system_instruction=system_instruction,
+                conversation_history=conversation_history,
+                user_message=user_message,
+                image_input=image_input,
+            )
 
         openai_tools = []
         for t in tools:
@@ -1066,12 +1046,14 @@ class LLMService:
         tool_calls_collected: list[dict[str, Any]] = copy.deepcopy(initial_tool_calls or [])
         last_assistant_turn_had_tool_calls = False
 
-        from app.services.context_compressor import get_context_limit, maybe_compress_messages
+        from app.services.context_compressor import get_context_limit
 
         _context_limit = get_context_limit(model, client)
 
         def _trace_request() -> dict[str, Any]:
-            req: dict[str, Any] = {"messages": messages, "tools": openai_tools}
+            # Must go through the transport: a trace row is stored as JSON and a
+            # transport's own history object is not serializable.
+            req: dict[str, Any] = transport.trace_request(history, openai_tools)
             if skills_included:
                 req["skills_included"] = skills_included
             return req
@@ -1114,7 +1096,7 @@ class LLMService:
                 result["tool_calls"] = combined_tool_calls
             _attach_tool_metrics(result)
             self._record_trace(
-                request_type="chat.completions",
+                request_type=transport.name,
                 provider=provider,
                 model=model,
                 request=_trace_request(),
@@ -1148,8 +1130,8 @@ class LLMService:
                 if abort_reason:
                     return _build_error_result(abort_reason)
 
-            messages, _compression_info = await maybe_compress_messages(
-                messages, model=model, client=client, context_limit_tokens=_context_limit
+            history, _compression_info = await transport.compress(
+                history, model=model, client=client, context_limit_tokens=_context_limit
             )
             if _compression_info is not None:
                 _comp_entry: dict[str, Any] = {
@@ -1195,36 +1177,31 @@ class LLMService:
                     elapsed_ms=_compression_info["elapsed_ms"],
                 )
 
-            kwargs: dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-                "tools": openai_tools,
-                "tool_choice": "auto",
-            }
-            is_reasoning = is_reasoning_model(model)
-            if max_tokens is not None:
-                kwargs["max_completion_tokens" if is_reasoning else "max_tokens"] = max_tokens
-            if is_reasoning and reasoning_effort:
-                kwargs["reasoning_effort"] = reasoning_effort
-            elif temperature is not None:
-                kwargs["temperature"] = temperature
-            if response_format is not None:
-                kwargs["response_format"] = response_format
-            if extra_body:
-                kwargs["extra_body"] = copy.deepcopy(extra_body)
+            opts = RequestOpts(
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                extra_body=extra_body,
+            )
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
-            _log_request(
-                provider, str(base_url), {**kwargs, "messages": _sanitize_messages(messages)}
-            )
+            _log_request(provider, str(base_url), transport.trace_request(history, openai_tools))
 
             start_time = time.time()
             try:
-                response = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+                turn = await asyncio.to_thread(
+                    transport.create,
+                    client=client,
+                    model=model,
+                    history=history,
+                    tools=openai_tools,
+                    opts=opts,
+                )
             except Exception as exc:
                 elapsed_ms = (time.time() - start_time) * 1000
                 self._record_trace(
-                    request_type="chat.completions",
+                    request_type=transport.name,
                     provider=provider,
                     model=model,
                     request=_trace_request(),
@@ -1235,16 +1212,14 @@ class LLMService:
                 raise
             elapsed_ms = (time.time() - start_time) * 1000
             total_elapsed_ms += elapsed_ms
-            if response.usage:
-                total_prompt_tokens += response.usage.prompt_tokens
-                total_completion_tokens += response.usage.completion_tokens
+            total_prompt_tokens += turn.prompt_tokens
+            total_completion_tokens += turn.completion_tokens
 
-            _log_response(provider, response, elapsed_ms)
+            _log_response(provider, turn.raw_items[0] if turn.raw_items else None, elapsed_ms)
 
-            message = response.choices[0].message
-            tool_calls = getattr(message, "tool_calls", None) or []
+            tool_calls = turn.tool_calls
             last_assistant_turn_had_tool_calls = bool(tool_calls)
-            structured_content = message.content if isinstance(message.content, str) else None
+            structured_content = turn.text or None
 
             if (
                 tool_calls
@@ -1265,7 +1240,7 @@ class LLMService:
                     result["tool_calls"] = tool_calls_collected
                 _attach_tool_metrics(result)
                 self._record_trace(
-                    request_type="chat.completions",
+                    request_type=transport.name,
                     provider=provider,
                     model=model,
                     request=_trace_request(),
@@ -1279,7 +1254,7 @@ class LLMService:
                 return result
 
             if not tool_calls:
-                text = _extract_text_from_response(response)
+                text = transport.final_text(turn)
                 result = {
                     "text": text,
                     "model": model,
@@ -1294,7 +1269,7 @@ class LLMService:
                     result["tool_calls"] = tool_calls_collected
                 _attach_tool_metrics(result)
                 self._record_trace(
-                    request_type="chat.completions",
+                    request_type=transport.name,
                     provider=provider,
                     model=model,
                     request=_trace_request(),
@@ -1307,31 +1282,14 @@ class LLMService:
                 )
                 return result
 
-            messages_before_tool_response = copy.deepcopy(messages)
-            assistant_tool_call_message = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            }
+            messages_before_tool_response = copy.deepcopy(transport.dump(history))
             hitl_tcs = [
-                tc
-                for tc in tool_calls
-                if tools_by_name.get(tc.function.name, {}).get("_source") == "hitl"
+                tc for tc in tool_calls if tools_by_name.get(tc.name, {}).get("_source") == "hitl"
             ]
             sub_agent_tcs = [
                 tc
                 for tc in tool_calls
-                if tools_by_name.get(tc.function.name, {}).get("_source") == "sub_agent"
+                if tools_by_name.get(tc.name, {}).get("_source") == "sub_agent"
             ]
             other_tcs = [tc for tc in tool_calls if tc not in sub_agent_tcs and tc not in hitl_tcs]
             # One slot per assistant tool call (index-aligned) so duplicate tool_call ids
@@ -1340,7 +1298,7 @@ class LLMService:
             sub_slots = [
                 i
                 for i, tc in enumerate(tool_calls)
-                if tools_by_name.get(tc.function.name, {}).get("_source") == "sub_agent"
+                if tools_by_name.get(tc.name, {}).get("_source") == "sub_agent"
             ]
             other_slots = [
                 i
@@ -1393,7 +1351,7 @@ class LLMService:
                     result["tool_calls"] = pending_tool_calls
                 _attach_tool_metrics(result)
                 self._record_trace(
-                    request_type="chat.completions",
+                    request_type=transport.name,
                     provider=provider,
                     model=model,
                     request=_trace_request(),
@@ -1409,9 +1367,9 @@ class LLMService:
             async def _run_one_tool(
                 tc: Any,
             ) -> tuple[str, str | None, dict[str, Any] | None, HumanReviewPause | None, str | None]:
-                name = tc.function.name
+                name = tc.name
                 tool_call_id = getattr(tc, "id", None)
-                args_str = tc.function.arguments or "{}"
+                args_str = tc.arguments or "{}"
                 try:
                     args = json.loads(args_str)
                 except json.JSONDecodeError:
@@ -1638,12 +1596,8 @@ class LLMService:
                         continue
                     result_str, entry = packed
                     tool_calls_collected.append(entry)
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result_str,
-                        }
+                    transport.append_tool_results(
+                        history, [ToolResult(call_id=tc.id, output=result_str)]
                     )
                     slot_results[slot] = None
 
@@ -1662,11 +1616,11 @@ class LLMService:
                     paused_tc
                 )
                 if pause_request is not None:
-                    return _build_pending_result(paused_tc.function.name, pause_request, entry)
+                    return _build_pending_result(paused_tc.name, pause_request, entry)
                 if abort_reason:
                     return _build_error_result(abort_reason, entry)
 
-            messages.append(assistant_tool_call_message)
+            transport.append_turn(history, turn)
 
             if len(sub_agent_tcs) >= 2:
                 gathered = await asyncio.gather(*[_run_one_tool(tc) for tc in sub_agent_tcs])
@@ -1691,7 +1645,7 @@ class LLMService:
                 if pause_info is not None:
                     _commit_completed_tool_slots()
                     paused_tc, pause_request, entry = pause_info
-                    return _build_pending_result(paused_tc.function.name, pause_request, entry)
+                    return _build_pending_result(paused_tc.name, pause_request, entry)
                 if abort_reason_for_parallel is not None:
                     _commit_completed_tool_slots()
                     return _build_error_result(abort_reason_for_parallel)
@@ -1700,7 +1654,7 @@ class LLMService:
                     _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                     if pause_request is not None:
                         _commit_completed_tool_slots()
-                        return _build_pending_result(tc.function.name, pause_request, entry)
+                        return _build_pending_result(tc.name, pause_request, entry)
                     if abort_reason:
                         _commit_completed_tool_slots()
                         return _build_error_result(abort_reason, entry)
@@ -1710,7 +1664,7 @@ class LLMService:
                 _tid, result_str, entry, pause_request, abort_reason = await _run_one_tool(tc)
                 if pause_request is not None:
                     _commit_completed_tool_slots()
-                    return _build_pending_result(tc.function.name, pause_request, entry)
+                    return _build_pending_result(tc.name, pause_request, entry)
                 if abort_reason:
                     _commit_completed_tool_slots()
                     return _build_error_result(abort_reason, entry)
@@ -1720,77 +1674,64 @@ class LLMService:
 
         # Final text-only completion when the loop exits immediately after tool results were
         # appended (max_tool_iterations exhausted before a non-tool assistant turn). This uses
-        # successful tool outputs already in `messages` instead of returning a generic limit error.
+        # successful tool outputs already in `history` instead of returning a generic limit error.
         if (
             openai_tools
             and last_assistant_turn_had_tool_calls
             and max_tool_iterations > 0
-            and messages
-            and messages[-1].get("role") == "tool"
+            and transport.last_item_is_tool_result(history)
         ):
-            is_reasoning_grace = is_reasoning_model(model)
-            grace_kwargs: dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-                "tools": openai_tools,
-                "tool_choice": "none",
-            }
-            if max_tokens is not None:
-                grace_kwargs["max_completion_tokens" if is_reasoning_grace else "max_tokens"] = (
-                    max_tokens
-                )
-            if is_reasoning_grace and reasoning_effort:
-                grace_kwargs["reasoning_effort"] = reasoning_effort
-            elif temperature is not None:
-                grace_kwargs["temperature"] = temperature
-            if response_format is not None:
-                grace_kwargs["response_format"] = response_format
+            grace_opts = RequestOpts(
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                tool_choice="none",
+            )
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
-            _log_request(
-                provider,
-                str(base_url),
-                {**grace_kwargs, "messages": _sanitize_messages(messages)},
-            )
+            _log_request(provider, str(base_url), transport.trace_request(history, openai_tools))
             grace_start = time.time()
-            grace_response = None
+            grace_turn = None
             try:
-                grace_response = await asyncio.to_thread(
-                    client.chat.completions.create, **grace_kwargs
+                grace_turn = await asyncio.to_thread(
+                    transport.create,
+                    client=client,
+                    model=model,
+                    history=history,
+                    tools=openai_tools,
+                    opts=grace_opts,
                 )
             except Exception:
-                grace_fallback: dict[str, Any] = {
-                    "model": model,
-                    "messages": messages,
-                }
-                if max_tokens is not None:
-                    grace_fallback[
-                        "max_completion_tokens" if is_reasoning_grace else "max_tokens"
-                    ] = max_tokens
-                if is_reasoning_grace and reasoning_effort:
-                    grace_fallback["reasoning_effort"] = reasoning_effort
-                elif temperature is not None:
-                    grace_fallback["temperature"] = temperature
-                if response_format is not None:
-                    grace_fallback["response_format"] = response_format
                 try:
-                    grace_response = await asyncio.to_thread(
-                        client.chat.completions.create, **grace_fallback
+                    grace_turn = await asyncio.to_thread(
+                        transport.create,
+                        client=client,
+                        model=model,
+                        history=history,
+                        tools=None,
+                        opts=RequestOpts(
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,
+                            max_tokens=max_tokens,
+                            response_format=response_format,
+                        ),
                     )
                 except Exception:
-                    grace_response = None
+                    grace_turn = None
 
-            if grace_response is not None:
+            if grace_turn is not None:
                 grace_elapsed_ms = (time.time() - grace_start) * 1000
                 total_elapsed_ms += grace_elapsed_ms
-                if grace_response.usage:
-                    total_prompt_tokens += grace_response.usage.prompt_tokens
-                    total_completion_tokens += grace_response.usage.completion_tokens
-                _log_response(provider, grace_response, grace_elapsed_ms)
-                grace_message = grace_response.choices[0].message
-                grace_tool_calls = getattr(grace_message, "tool_calls", None) or []
-                if not grace_tool_calls:
-                    grace_text = (_extract_text_from_response(grace_response) or "").strip()
+                total_prompt_tokens += grace_turn.prompt_tokens
+                total_completion_tokens += grace_turn.completion_tokens
+                _log_response(
+                    provider,
+                    grace_turn.raw_items[0] if grace_turn.raw_items else None,
+                    grace_elapsed_ms,
+                )
+                if not grace_turn.tool_calls:
+                    grace_text = (transport.final_text(grace_turn) or "").strip()
                     if grace_text:
                         result = {
                             "text": grace_text,
@@ -1806,7 +1747,7 @@ class LLMService:
                             result["tool_calls"] = tool_calls_collected
                         _attach_tool_metrics(result)
                         self._record_trace(
-                            request_type="chat.completions",
+                            request_type=transport.name,
                             provider=provider,
                             model=model,
                             request=_trace_request(),
@@ -2269,10 +2210,16 @@ async def execute_llm(
     content_only: bool = False,
     extra_body: dict[str, Any] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
+    use_responses_api: bool = False,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
-        cred_type, api_key, base_url, trace_context=trace_context, request_timeout=request_timeout
+        cred_type,
+        api_key,
+        base_url,
+        trace_context=trace_context,
+        request_timeout=request_timeout,
+        use_responses_api=use_responses_api,
     )
     return await service.execute(
         model=model,
@@ -2622,10 +2569,16 @@ async def execute_llm_with_tools(
     should_abort: Callable[[], str | None] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
     extra_body: dict[str, Any] | None = None,
+    use_responses_api: bool = False,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
-        cred_type, api_key, base_url, trace_context=trace_context, request_timeout=request_timeout
+        cred_type,
+        api_key,
+        base_url,
+        trace_context=trace_context,
+        request_timeout=request_timeout,
+        use_responses_api=use_responses_api,
     )
     return await service.execute_with_tools(
         model=model,

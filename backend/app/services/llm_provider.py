@@ -17,6 +17,12 @@ OPENAI_BATCH_SUPPORT_MESSAGE = (
 GOOGLE_BATCH_UNSUPPORTED_MESSAGE = "Batch mode is not available for Google credentials in Heym yet."
 NON_OPENAI_LLM_BATCH_MESSAGE = "Batch mode is only available for OpenAI credentials in Heym."
 
+OPENAI_RESPONSES_SUPPORT_MESSAGE = "The Responses API is available for this credential."
+GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE = "Google credentials do not support the Responses API."
+CUSTOM_RESPONSES_SUPPORT_MESSAGE = (
+    "Your gateway must support the Responses API. If it does not, runs on this node will fail."
+)
+
 REASONING_MODELS = {
     "o1",
     "o1-preview",
@@ -74,6 +80,8 @@ async def fetch_openai_models(api_key: str) -> list[LLMModel]:
                             is_reasoning=is_reasoning_model(model_id),
                             supports_batch=True,
                             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+                            supports_responses=True,
+                            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
                         )
                     )
 
@@ -91,6 +99,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=True,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="o1-mini",
@@ -98,6 +108,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=True,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="o1-preview",
@@ -105,6 +117,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=True,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="o3-mini",
@@ -112,6 +126,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=True,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="gpt-4o",
@@ -119,6 +135,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="gpt-4o-mini",
@@ -126,6 +144,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="gpt-4-turbo",
@@ -133,6 +153,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="gpt-4",
@@ -140,6 +162,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
         LLMModel(
             id="gpt-3.5-turbo",
@@ -147,6 +171,8 @@ def get_default_openai_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=True,
             batch_support_reason=OPENAI_BATCH_SUPPORT_MESSAGE,
+            supports_responses=True,
+            responses_support_reason=OPENAI_RESPONSES_SUPPORT_MESSAGE,
         ),
     ]
 
@@ -175,6 +201,8 @@ async def fetch_google_models(api_key: str) -> list[LLMModel]:
                             is_reasoning=is_reasoning_model(model_name),
                             supports_batch=False,
                             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+                            supports_responses=False,
+                            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
                         )
                     )
 
@@ -192,6 +220,8 @@ def get_default_google_models() -> list[LLMModel]:
             is_reasoning=True,
             supports_batch=False,
             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
         ),
         LLMModel(
             id="gemini-2.0-flash-exp",
@@ -199,6 +229,8 @@ def get_default_google_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=False,
             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
         ),
         LLMModel(
             id="gemini-1.5-pro",
@@ -206,6 +238,8 @@ def get_default_google_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=False,
             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
         ),
         LLMModel(
             id="gemini-1.5-flash",
@@ -213,6 +247,8 @@ def get_default_google_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=False,
             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
         ),
         LLMModel(
             id="gemini-1.0-pro",
@@ -220,6 +256,8 @@ def get_default_google_models() -> list[LLMModel]:
             is_reasoning=False,
             supports_batch=False,
             batch_support_reason=GOOGLE_BATCH_UNSUPPORTED_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
         ),
     ]
 
@@ -251,6 +289,8 @@ async def fetch_custom_models(base_url: str, api_key: str) -> list[LLMModel]:
                         is_reasoning=is_reasoning_model(model_id),
                         supports_batch=False,
                         batch_support_reason=NON_OPENAI_LLM_BATCH_MESSAGE,
+                        supports_responses=True,
+                        responses_support_reason=CUSTOM_RESPONSES_SUPPORT_MESSAGE,
                     )
                 )
 

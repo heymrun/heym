@@ -547,3 +547,25 @@ class ObservabilityStatusEndpointTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LlmTransportSpanAttributeTests(unittest.TestCase):
+    """Bounded identity attribute only; no request content on spans."""
+
+    def test_reports_responses_when_enabled(self) -> None:
+        from app.services.workflow_executor import _llm_transport_attribute
+
+        self.assertEqual(_llm_transport_attribute({"responsesApiEnabled": True}), "responses")
+
+    def test_defaults_to_chat_completions(self) -> None:
+        from app.services.workflow_executor import _llm_transport_attribute
+
+        self.assertEqual(_llm_transport_attribute({}), "chat.completions")
+
+    def test_batch_mode_wins(self) -> None:
+        from app.services.workflow_executor import _llm_transport_attribute
+
+        self.assertEqual(
+            _llm_transport_attribute({"responsesApiEnabled": True, "batchModeEnabled": True}),
+            "chat.completions",
+        )

@@ -355,6 +355,27 @@ Optional **per-agent-node** knowledge graph stored in the database. When enabled
 
 Use the pink **brain** control on the node (when memory is on or the model row is shown) to open the graph editor and optional **memory sharing** (other workflows/agents). Full behavior, REST paths, and JSON export details: [Agent Persistent Memory](../reference/agent-persistent-memory.md).
 
+## Responses API and reasoning continuity
+
+A **Use Responses API** checkbox routes the agent's model calls through the
+[Responses API](https://platform.openai.com/docs/api-reference/responses) instead of Chat
+Completions. It is off by default.
+
+It matters most on a reasoning model such as `gpt-5` or the `o` series. The Responses API returns
+the model's reasoning alongside each tool call, and the agent feeds those reasoning items back on
+the next turn, so the model keeps its chain of thought across a multi-step tool loop instead of
+re-deriving it after every tool result. The whole loop runs on the same path, including
+[human review](#human-review-hitl) pause and resume, [context compression](#context-compression),
+and the final answer.
+
+The conversation itself stays in Heym. Heym sends the full input on every turn and carries the
+reasoning as an encrypted blob, so nothing is retained on the provider's side between calls.
+Reasoning items inside a span that context compression summarises are dropped along with it, since
+an encrypted blob cannot be summarised.
+
+It works with an OpenAI credential, and with a custom credential whose gateway supports the
+endpoint. With a Google credential it stays disabled.
+
 ## Context Compression
 
 When an agent runs many tool iterations with large results (web scraping, document reads, sub-workflow outputs), the accumulated message history can approach the model's context window limit. Heym automatically compresses the conversation history mid-run to prevent context overflow.

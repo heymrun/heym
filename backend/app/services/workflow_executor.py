@@ -3380,6 +3380,7 @@ class WorkflowExecutor:
         fallback_credential_id: str | None = None,
         fallback_model: str | None = None,
         batch_mode_enabled: bool = False,
+        use_responses_api: bool = False,
         on_batch_status_update: Callable[[dict[str, Any]], None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
         request_timeout: float = 60.0,
@@ -3641,6 +3642,7 @@ class WorkflowExecutor:
                             conversation_history=self.conversation_history,
                             request_timeout=request_timeout,
                             extra_body=extra_body,
+                            use_responses_api=use_responses_api,
                         )
                     )
                 out = dict(result)
@@ -5079,6 +5081,7 @@ class WorkflowExecutor:
 
         fallback_credential_id = (node_data.get("fallbackCredentialId") or "").strip() or None
         fallback_model = (node_data.get("fallbackModel") or "").strip() or None
+        agent_use_responses_api = bool(node_data.get("responsesApiEnabled", False))
         attempts: list[tuple[str, str]] = [(credential_id, model)]
         if fallback_credential_id and fallback_model:
             attempts.append((fallback_credential_id, fallback_model))
@@ -5554,6 +5557,7 @@ class WorkflowExecutor:
                             should_abort=should_abort_tool_loop,
                             request_timeout=request_timeout_seconds,
                             extra_body=agent_extra_body,
+                            use_responses_api=agent_use_responses_api,
                         )
                     )
                 else:
@@ -5575,6 +5579,7 @@ class WorkflowExecutor:
                             skills_included=skills_used or None,
                             request_timeout=request_timeout_seconds,
                             extra_body=agent_extra_body,
+                            use_responses_api=agent_use_responses_api,
                         )
                     )
             except Exception as e:
@@ -7056,6 +7061,8 @@ class WorkflowExecutor:
                 span.set_attribute("heym.node.id", str(node_id))
                 span.set_attribute("heym.node.type", node.get("type", "unknown"))
                 span.set_attribute("heym.node.label", node_data.get("label", node_id))
+                if node.get("type") in ("llm", "agent"):
+                    span.set_attribute("heym.llm.transport", _llm_transport_attribute(node_data))
                 if self.workflow_id is not None:
                     span.set_attribute("heym.workflow.id", str(self.workflow_id))
                 result = self._execute_node_inner(node_id, inputs, allow_branch_skip, on_retry)
@@ -8518,6 +8525,13 @@ def resume_workflow_execution(
                 )
 
     return result
+
+
+def _llm_transport_attribute(node_data: dict[str, Any]) -> str:
+    """Which LLM endpoint this node will use, for the heym.node.execute span."""
+    if node_data.get("responsesApiEnabled") and not node_data.get("batchModeEnabled"):
+        return "responses"
+    return "chat.completions"
 
 
 def execute_llm_batch_notification_branch(
