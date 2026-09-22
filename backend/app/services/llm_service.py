@@ -588,6 +588,11 @@ class LLMService:
         self.use_responses_api = use_responses_api
         self.router = router
         self._routed_calls: list[dict[str, Any]] = []
+        # One clock for the whole request. Every routing decision and every provider
+        # turn reports its offset from here, which is what lets the Duration
+        # Breakdown draw a waterfall instead of stacking every bar at zero.
+        self._request_started: float | None = None
+        self._turn_timings: list[dict[str, Any]] = []
 
     def _get_client(self) -> tuple[OpenAI, str]:
         """Get OpenAI client configured for the credential type."""
@@ -687,6 +692,13 @@ class LLMService:
                 credential_id=self.trace_context.credential_id if self.trace_context else None,
             )
 
+        # Most callers build their trace context after the router, so the router is
+        # handed one here rather than at construction. Without this the decision call
+        # writes no trace row at all and routing looks invisible in the Traces tab.
+        if self.router.trace_context is None:
+            self.router.trace_context = self.trace_context
+
+        routing_started_ms = self._offset_ms()
         decision = self.router.route(
             system_instruction=system_instruction,
             message=message,
@@ -713,14 +725,74 @@ class LLMService:
         )
         self._routed_calls.append(
             {
+                "turn": len(self._routed_calls) + 1,
+                "startMs": routing_started_ms,
                 "model": binding.model,
                 "option": binding.option_label,
                 "credentialName": binding.credential_name,
                 "fallback": binding.fallback,
                 "error": binding.routing_error,
+                "decisionMs": decision.decision_ms,
+                "decisionTraceId": decision.trace_id,
+                "reused": decision.reused,
             }
         )
         return binding
+
+    def _offset_ms(self) -> float:
+        """Milliseconds since this request started, starting the clock on first use."""
+        if self._request_started is None:
+            self._request_started = time.time()
+            return 0.0
+        return round((time.time() - self._request_started) * 1000, 2)
+
+    def _record_turn_timing(
+        self,
+        start_offset_ms: float,
+        duration_ms: float,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        turn_result: Any = None,
+        tool_call_count: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record one provider call: when it ran, what it cost, and what it produced.
+
+        The Traces detail shows this per turn, so it carries the same facts the
+        aggregate header does rather than timing alone.
+        """
+        entry: dict[str, Any] = {
+            "turn": len(self._turn_timings) + 1,
+            "startMs": start_offset_ms,
+            "durationMs": round(duration_ms, 2),
+        }
+        if model:
+            entry["model"] = model
+        if provider:
+            entry["provider"] = provider
+        if turn_result is not None:
+            prompt = getattr(turn_result, "prompt_tokens", None)
+            completion = getattr(turn_result, "completion_tokens", None)
+            total = getattr(turn_result, "total_tokens", None)
+            if isinstance(prompt, int):
+                entry["promptTokens"] = prompt
+            if isinstance(completion, int):
+                entry["completionTokens"] = completion
+            if isinstance(total, int):
+                entry["totalTokens"] = total
+            text = getattr(turn_result, "text", None)
+            if isinstance(text, str) and text.strip():
+                entry["textChars"] = len(text)
+        if tool_call_count is not None:
+            entry["toolCalls"] = tool_call_count
+        if error:
+            entry["error"] = error
+        self._turn_timings.append(entry)
+
+    def turn_timings(self) -> list[dict[str, Any]] | None:
+        """Per-turn provider timing, or None when there is nothing to lay out."""
+        return copy.deepcopy(self._turn_timings) if self._turn_timings else None
 
     def model_routing_summary(self) -> dict[str, Any] | None:
         """What the executor writes into node metadata, or None when no router ran."""
@@ -729,6 +801,11 @@ class LLMService:
         return {
             "routerLabel": self.router.label,
             "routerCredentialId": str(self.router.credential_id),
+            "decisionModel": self.router.config.decision_model,
+            "decisionTotalMs": round(
+                sum(float(call.get("decisionMs") or 0.0) for call in self._routed_calls), 2
+            ),
+            "turnTimings": self.turn_timings(),
             "calls": copy.deepcopy(self._routed_calls),
         }
 
@@ -761,6 +838,9 @@ class LLMService:
         if not self.trace_context:
             return
         context = self.trace_context
+        routing_summary = self.model_routing_summary()
+        if routing_summary is not None:
+            context = replace(context, model_routing=routing_summary)
         if binding is not None and binding.router_label is not None:
             # `replace` keeps `trace_ids` as the same list object, which the executor
             # reads back to link the node to its trace. Constructing a fresh
@@ -831,6 +911,7 @@ class LLMService:
         if skills_included:
             trace_request["skills_included"] = skills_included
 
+        turn_started_ms = self._offset_ms()
         start_time = time.time()
         turn = None
         for attempt in range(2):
@@ -879,6 +960,13 @@ class LLMService:
                 raise
         elapsed_ms = (time.time() - start_time) * 1000
         assert turn is not None  # loop exits via break (success) or raise (failure)
+        self._record_turn_timing(
+            turn_started_ms,
+            elapsed_ms,
+            model=model,
+            provider=provider,
+            turn_result=turn,
+        )
 
         _log_response(provider, turn.raw_items[0] if turn.raw_items else None, elapsed_ms)
 
@@ -1407,6 +1495,7 @@ class LLMService:
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
             _log_request(provider, str(base_url), transport.trace_request(history, openai_tools))
 
+            turn_started_ms = self._offset_ms()
             start_time = time.time()
             try:
                 turn = await asyncio.to_thread(
@@ -1419,6 +1508,13 @@ class LLMService:
                 )
             except Exception as exc:
                 elapsed_ms = (time.time() - start_time) * 1000
+                self._record_turn_timing(
+                    turn_started_ms,
+                    elapsed_ms,
+                    model=model,
+                    provider=provider,
+                    error=str(exc),
+                )
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1431,6 +1527,14 @@ class LLMService:
                 )
                 raise
             elapsed_ms = (time.time() - start_time) * 1000
+            self._record_turn_timing(
+                turn_started_ms,
+                elapsed_ms,
+                model=model,
+                provider=provider,
+                turn_result=turn,
+                tool_call_count=len(turn.tool_calls or []),
+            )
             total_elapsed_ms += elapsed_ms
             total_prompt_tokens += turn.prompt_tokens
             total_completion_tokens += turn.completion_tokens
@@ -1620,6 +1724,10 @@ class LLMService:
                     )
                 tool_start = time.monotonic()
                 started_at = int(time.time() * 1000)
+                # Offset on the request clock, so the breakdown can place this tool
+                # where it ran. Parallel tools overlap, which is the point.
+                tool_start_offset_ms = self._offset_ms()
+                tool_trace_id: str | None = None
                 tool_source = tool_def.get("_source") if tool_def else None
                 mcp_server = tool_def.get("_mcp_server") if tool_def else None
                 pending_pause: HumanReviewPause | None = None
@@ -1669,6 +1777,7 @@ class LLMService:
                                         "arguments": args,
                                         "result": None,
                                         "elapsed_ms": 0.0,
+                                        "start_ms": tool_start_offset_ms,
                                         "status": "pending",
                                         "started_at": started_at,
                                         "finished_at": 0,
@@ -1682,6 +1791,15 @@ class LLMService:
                                     tool_span, "heym.agent.tool.result_bytes", 0
                                 )
                             else:
+                                # A tool that ran work of its own (a sub-agent, a
+                                # sub-workflow) hands back the trace it wrote under a
+                                # private key. Take it off before serialising, so the
+                                # model never sees an id it has no use for.
+                                if isinstance(tool_result, dict) and "_trace_id" in tool_result:
+                                    tool_result = dict(tool_result)
+                                    candidate = tool_result.pop("_trace_id", None)
+                                    if isinstance(candidate, str) and candidate:
+                                        tool_trace_id = candidate
                                 result_str = json.dumps(tool_result, default=str)
                         except Exception as exc:
                             tracing.record_agent_tool_exception(tool_span, exc)
@@ -1767,9 +1885,11 @@ class LLMService:
                         "arguments": args,
                         "result": tool_result,
                         "elapsed_ms": tool_elapsed_ms,
+                        "start_ms": tool_start_offset_ms,
                         "status": tool_status,
                         "started_at": started_at,
                         "finished_at": int(time.time() * 1000),
+                        **({"trace_id": tool_trace_id} if tool_trace_id else {}),
                         **({"source": tool_source} if tool_source else {}),
                         **({"mcp_server": mcp_server} if mcp_server else {}),
                     }

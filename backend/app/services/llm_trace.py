@@ -27,6 +27,9 @@ class LLMTraceContext:
     # credential that actually served the request.
     router_credential_id: uuid.UUID | None = None
     router_label: str | None = None
+    # Merged into the recorded response so the routed request's own trace detail can
+    # show routing in Duration Breakdown and Steps, not only as a separate row.
+    model_routing: dict[str, Any] | None = None
     trace_ids: list[uuid.UUID] = field(default_factory=list, compare=False, repr=False)
 
 
@@ -45,6 +48,8 @@ def record_llm_trace(
 ) -> uuid.UUID | None:
     """Persist a single LLM trace entry for later inspection."""
     try:
+        if context.model_routing is not None:
+            response = {**(response or {}), "model_routing": context.model_routing}
         max_chars, max_depth, max_total_chars = get_agent_tool_payload_limits()
         safe_request, safe_response = sanitize_trace_tool_payloads(
             request or {},

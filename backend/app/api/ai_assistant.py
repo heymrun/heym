@@ -70,7 +70,11 @@ from app.services.hitl_service import (
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
-from app.services.model_router import build_router_for_credential, load_option_credential
+from app.services.model_router import (
+    RouteDecision,
+    build_router_for_credential,
+    load_option_credential,
+)
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
@@ -1350,15 +1354,16 @@ def resolve_model_binding(
         return client, provider, model, trace_context
 
     if consult_router:
-        option = router.route(
+        decision = router.route(
             system_instruction=system_prompt,
             message=message,
             tool_names=None,
-        ).option
+        )
     else:
         # Callers that only need a client shape, such as a context-window estimate,
         # must not spend a decision call. The fallback option stands in for the run.
-        option = router.config.default_option or router.config.options[0]
+        decision = RouteDecision(option=router.config.default_option or router.config.options[0])
+    option = decision.option
     bound = load_option_credential(option)
     client, provider = get_openai_client(
         CredentialType(bound.credential_type),
@@ -1372,6 +1377,27 @@ def resolve_model_binding(
             credential_id=bound.credential_uuid,
             router_credential_id=credential.id,
             router_label=credential.name,
+            # Carried on the context so the assistant's own trace shows routing in
+            # Duration Breakdown and Steps without changing every stream signature.
+            model_routing={
+                "routerLabel": credential.name,
+                "routerCredentialId": str(credential.id),
+                "decisionModel": router.config.decision_model,
+                "decisionTotalMs": decision.decision_ms,
+                "calls": [
+                    {
+                        "turn": 1,
+                        "model": option.model,
+                        "option": option.label,
+                        "credentialName": bound.credential_name,
+                        "fallback": decision.fallback,
+                        "error": decision.error,
+                        "decisionMs": decision.decision_ms,
+                        "decisionTraceId": decision.trace_id,
+                        "reused": decision.reused,
+                    }
+                ],
+            },
         )
     return client, provider, option.model, routed_context
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 
 import type { TraceStep } from "@/lib/traceSteps";
 
@@ -20,6 +20,18 @@ function toggle(id: string): void {
   }
   openIds.value = next;
 }
+
+/** Open a step and bring it into view; used when a duration row points at it. */
+async function focusStep(id: string): Promise<void> {
+  if (!openIds.value.has(id)) {
+    openIds.value = new Set(openIds.value).add(id);
+  }
+  await nextTick();
+  const card = document.querySelector(`[data-testid="trace-step-${id}"]`);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+defineExpose({ focusStep });
 
 // Collapse everything when the step set changes (navigating between traces).
 watch(

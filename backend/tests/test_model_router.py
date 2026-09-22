@@ -1,4 +1,6 @@
+import time
 import unittest
+import uuid
 from unittest import mock
 
 from app.services import model_router
@@ -470,6 +472,122 @@ class TestBuildRouterForCredential(unittest.TestCase):
                 credential_type="model_router",
                 config=raw,
             )
+
+
+class TestDecisionTiming(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = parse_router_config(_valid_config())
+
+    def _router(self, trace_context: object | None = None) -> ModelRouter:
+        return ModelRouter(
+            credential_id="99999999-9999-9999-9999-999999999999",
+            label="Auto Model",
+            config=self.config,
+            trace_context=trace_context,
+        )
+
+    def _credential(self) -> dict:
+        return {"base_url": "https://api.typesafe.ai", "api_key": "k"}
+
+    def test_a_real_decision_reports_how_long_it_took(self) -> None:
+        payload = {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
+
+        def slow_call(**_: object) -> dict:
+            time.sleep(0.02)
+            return payload
+
+        with (
+            mock.patch.object(model_router, "call_decision_model", side_effect=slow_call),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            decision = self._router().route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertGreater(decision.decision_ms, 0)
+        self.assertFalse(decision.reused)
+
+    def test_a_reused_decision_costs_nothing_and_says_so(self) -> None:
+        payload = {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
+        router = self._router()
+        with (
+            mock.patch.object(model_router, "call_decision_model", return_value=payload),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            first = router.route(system_instruction=None, message="m", tool_names=None)
+            second = router.route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertFalse(first.reused)
+        self.assertTrue(second.reused)
+        self.assertEqual(second.decision_ms, 0.0)
+        self.assertEqual(second.option.label, first.option.label)
+
+    def test_a_failed_decision_still_reports_its_cost(self) -> None:
+        with (
+            mock.patch.object(
+                model_router,
+                "call_decision_model",
+                side_effect=DecisionProviderError("timed out"),
+            ),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            decision = self._router().route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertTrue(decision.fallback)
+        self.assertGreaterEqual(decision.decision_ms, 0.0)
+
+    def test_the_decision_row_is_attributed_to_the_decision_credential(self) -> None:
+        from app.services.llm_trace import LLMTraceContext
+
+        context = LLMTraceContext(
+            user_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+            credential_id=uuid.UUID("99999999-9999-9999-9999-999999999999"),
+            node_id="n1",
+        )
+        decision_context = self._router(context).decision_trace_context()
+
+        # The call spends the decision credential, so that is what it is billed to;
+        # the router is named beside it so the two group together in the Traces tab.
+        self.assertEqual(
+            str(decision_context.credential_id), "11111111-1111-1111-1111-111111111111"
+        )
+        self.assertEqual(
+            str(decision_context.router_credential_id), "99999999-9999-9999-9999-999999999999"
+        )
+        self.assertEqual(decision_context.router_label, "Auto Model")
+        self.assertIs(decision_context.trace_ids, context.trace_ids)
+
+    def test_no_trace_context_means_no_decision_context(self) -> None:
+        self.assertIsNone(self._router().decision_trace_context())
+
+    def test_the_decision_trace_id_is_carried_back(self) -> None:
+        from app.services.llm_trace import LLMTraceContext
+
+        context = LLMTraceContext(
+            user_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+            credential_id=uuid.UUID("99999999-9999-9999-9999-999999999999"),
+        )
+        written = uuid.uuid4()
+
+        def record(**kwargs: object) -> dict:
+            kwargs["trace_context"].trace_ids.append(written)
+            return {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
+
+        with (
+            mock.patch.object(model_router, "call_decision_model", side_effect=record),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            decision = self._router(context).route(
+                system_instruction=None, message="m", tool_names=None
+            )
+
+        self.assertEqual(decision.trace_id, str(written))
 
 
 if __name__ == "__main__":

@@ -384,8 +384,10 @@ def sanitize_tool_calls(
             "source",
             "mcp_server",
             "elapsed_ms",
+            "start_ms",
             "started_at",
             "finished_at",
+            "trace_id",
         )
         safe_calls = []
         for entry in bounded_calls:

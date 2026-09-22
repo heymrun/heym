@@ -3839,6 +3839,10 @@ class WorkflowExecutor:
             elapsed_ms = round((time.time() * 1000) - start_ms)
             log_output = _build_agent_execution_log_output(result)
             llm_tool_result: dict[str, Any] = {"text": result.get("text", "")}
+            if trace_id:
+                # Private: stripped before the result reaches the model, and kept on the
+                # tool record so the Duration Breakdown can link to the sub-agent's run.
+                llm_tool_result["_trace_id"] = trace_id
             # NodeResult keeps success/error for canvas/Debug UI compatibility.
             # Lifecycle cancelled/timeout belongs only on the tool payload returned
             # to the parent agent loop.

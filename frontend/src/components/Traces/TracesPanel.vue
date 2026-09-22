@@ -22,6 +22,11 @@ import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBac
 import { cn, formatDate } from "@/lib/utils";
 import { credentialsApi, traceApi, workflowApi } from "@/services/api";
 import { buildTraceSteps, type TraceStep } from "@/lib/traceSteps";
+import {
+  formatRoutingCallLabel,
+  readTraceModelRouting,
+  type ModelRoutingTrace,
+} from "@/lib/traceModelRouting";
 
 interface SelectOption {
   value: string;
@@ -112,7 +117,12 @@ interface ToolCallEntry {
   name: string;
   arguments: Record<string, unknown>;
   result: unknown;
+  tool_call_id?: string;
   elapsed_ms?: number;
+  /** Offset from the start of the request, for the waterfall layout. */
+  start_ms?: number;
+  /** Set when the tool ran work of its own, such as a sub-agent, and traced it. */
+  trace_id?: string;
   source?: string;
   mcp_server?: string;
   workflow_name?: string;
@@ -203,6 +213,49 @@ function computeInvocationTotalMs(children: TraceSpan[]): number {
   return total > 0 ? total : 0;
 }
 
+/**
+ * Per-turn rows for a routed request, ordered by when each one actually started.
+ *
+ * The offsets come from the backend and decide the row order only; the bars all
+ * start from the left, because lined up they are easier to compare by length. A
+ * trace with no recorded offsets falls back to the aggregate rows.
+ */
+function buildRoutedTurnSpans(routing: ModelRoutingTrace): TraceSpan[] {
+  const spans: TraceSpan[] = [];
+
+  for (const call of routing.calls) {
+    if (call.decisionMs <= 0) continue;
+    spans.push({
+      id: `model_router_turn_${call.turn}`,
+      label:
+        routing.calls.length > 1
+          ? `model_router · turn ${call.turn} (${formatRoutingCallLabel(call)})`
+          : `model_router (${routing.routerLabel}${routing.decisionModel ? ` · ${routing.decisionModel}` : ""})`,
+      durationMs: call.decisionMs,
+      startMs: call.startMs,
+      icon: "router",
+      // The decision wrote its own trace row; the label opens it.
+      traceId: call.decisionTraceId,
+    });
+  }
+
+  for (const timing of routing.turnTimings) {
+    if (timing.durationMs <= 0) continue;
+    spans.push({
+      id: `call_llm_turn_${timing.turn}`,
+      label:
+        routing.turnTimings.length > 1 ? `call_llm · turn ${timing.turn}` : "call_llm",
+      durationMs: timing.durationMs,
+      startMs: timing.startMs,
+      icon: "llm",
+      // Part of this trace, so there is nothing to open; the row opens its step.
+      stepId: `call_llm_turn_${timing.turn}`,
+    });
+  }
+
+  return spans.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+}
+
 function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
   const response = trace.response as Record<string, unknown> | null | undefined;
   const timingBreakdown = response?.timing_breakdown as
@@ -217,7 +270,6 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
         id: "call_llm",
         label: "call_llm",
         durationMs: timingBreakdown.llm_ms,
-        depth: 1,
         icon: "llm",
       });
     }
@@ -226,7 +278,6 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
         id: "tools",
         label: "tools",
         durationMs: timingBreakdown.tools_ms,
-        depth: 1,
         icon: "tool",
       });
     }
@@ -235,7 +286,6 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
         id: "mcp_list",
         label: "mcp_list",
         durationMs: timingBreakdown.mcp_list_ms,
-        depth: 1,
         icon: "agent",
       });
     }
@@ -250,7 +300,6 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
         id: "call_llm",
         label: "call_llm",
         durationMs: responseElapsed,
-        depth: 1,
         icon: "llm",
       });
     }
@@ -265,28 +314,81 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
             id: `tool_${i}`,
             label: tc.name,
             durationMs: ms,
-            depth: 1,
+            // Parallel tools overlap on the track; that overlap is the run's shape.
+            startMs: typeof tc.start_ms === "number" ? tc.start_ms : undefined,
             icon: "tool",
+            // A sub-agent or sub-workflow wrote its own trace; the row opens it.
+            traceId: typeof tc.trace_id === "string" ? tc.trace_id : null,
+            // Otherwise the row jumps to the tool's own step in this trace.
+            stepId: typeof tc.tool_call_id === "string" ? `tool-${tc.tool_call_id}` : null,
           });
         }
       }
     }
   }
 
-  const totalMs = computeInvocationTotalMs(children) || (trace.elapsed_ms ?? 0);
+  const routing = readTraceModelRouting(response ?? null);
+  // Real offsets exist only when the backend recorded turn timings; otherwise keep
+  // the aggregate view rather than inventing a layout.
+  const turnSpans =
+    routing !== null && routing.turnTimings.length > 0
+      ? buildRoutedTurnSpans(routing)
+      : [];
+
+  if (turnSpans.length > 0) {
+    const totalMs = Math.max(
+      ...turnSpans.map((span) => (span.startMs ?? 0) + span.durationMs),
+      ...children.map((span) => (span.startMs ?? 0) + span.durationMs),
+      trace.elapsed_ms ?? 0,
+    );
+    // The per-turn rows replace the aggregate llm row; everything else keeps its place
+    // in the same timeline, ordered by when it started.
+    const nonLlmChildren = children.filter((span) => span.id !== "call_llm");
+    const laidOut = [...turnSpans, ...nonLlmChildren].sort(
+      (a, b) => (a.startMs ?? 0) - (b.startMs ?? 0),
+    );
+    return [
+      {
+        id: "invocation",
+        label: "invocation",
+        durationMs: totalMs,
+        startMs: 0,
+        icon: "invocation",
+      },
+      ...laidOut,
+    ];
+  }
+
+  const routingTotalMs = routing?.decisionTotalMs ?? 0;
+  const totalMs =
+    (computeInvocationTotalMs(children) || (trace.elapsed_ms ?? 0)) + routingTotalMs;
 
   if (totalMs <= 0 || Number.isNaN(totalMs)) {
     return [];
   }
+
+  const routingSpan: TraceSpan[] =
+    routing !== null && routingTotalMs > 0
+      ? [
+          {
+            id: "model_router",
+            label: `model_router (${routing.routerLabel}${routing.decisionModel ? ` · ${routing.decisionModel}` : ""})`,
+            durationMs: routingTotalMs,
+            icon: "router",
+            traceId: routing.calls.length === 1 ? routing.calls[0].decisionTraceId : null,
+          },
+        ]
+      : [];
 
   return [
     {
       id: "invocation",
       label: "invocation",
       durationMs: totalMs,
-      depth: 0,
       icon: "invocation",
     },
+    // Routing happens before the model call, so it leads the children.
+    ...routingSpan,
     ...children,
   ];
 }
@@ -294,6 +396,13 @@ function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
 const spans = computed(() =>
   selectedTrace.value ? buildTraceSpans(selectedTrace.value) : []
 );
+
+const stepsTimelineRef = ref<{ focusStep: (id: string) => Promise<void> } | null>(null);
+
+/** A duration row that belongs to this trace opens its step rather than navigating. */
+function focusStep(stepId: string): void {
+  void stepsTimelineRef.value?.focusStep(stepId);
+}
 
 const workflowNames = computed<Record<string, string>>(() =>
   Object.fromEntries(workflows.value.map((workflow) => [workflow.id, workflow.name])),
@@ -1099,6 +1208,7 @@ onMounted(async () => {
         <TraceDurationChart
           v-if="spans.length > 0"
           :spans="spans"
+          @focus-step="focusStep"
         />
 
         <div class="grid gap-3 md:grid-cols-3">
@@ -1133,7 +1243,7 @@ onMounted(async () => {
             class="p-3"
           >
             <div class="text-xs text-muted-foreground">
-              Workflow / Node
+              Workflow / Node / Tool
             </div>
             <div class="mt-1 text-sm font-medium">
               {{ selectedTrace.workflow_name || "-" }}
@@ -1234,6 +1344,7 @@ onMounted(async () => {
 
         <TraceStepsTimeline
           v-if="steps.length > 0"
+          ref="stepsTimelineRef"
           :steps="steps"
         />
 

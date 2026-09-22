@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.db.models import Credential, CredentialType
 from app.db.session import SessionLocal
@@ -26,6 +27,7 @@ from app.services.decision_models import (
     load_decision_credential,
 )
 from app.services.encryption import decrypt_config
+from app.services.llm_trace import LLMTraceContext
 
 # The routing state is sent to the decision model on every new turn, so it is
 # truncated rather than unbounded. Platform limits are constants, not settings.
@@ -259,11 +261,19 @@ def read_route_answer(payload: object) -> str | None:
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """The option bound for one provider call, and how it was reached."""
+    """The option bound for one provider call, and how it was reached.
+
+    `decision_ms` is what the decision model cost this call, so the routed request's
+    own trace can show routing next to the model time instead of hiding it in a
+    separate row. A reused decision costs nothing and says so.
+    """
 
     option: RouterOption
     fallback: bool = False
     error: str | None = None
+    decision_ms: float = 0.0
+    trace_id: str | None = None
+    reused: bool = False
 
 
 class ModelRouter:
@@ -275,7 +285,7 @@ class ModelRouter:
         credential_id: str,
         label: str,
         config: RouterConfig,
-        trace_context: object | None = None,
+        trace_context: LLMTraceContext | None = None,
     ) -> None:
         self.credential_id = credential_id
         self.label = label
@@ -305,7 +315,9 @@ class ModelRouter:
         )
         key = f"{self.config.fingerprint()}:{state_hash(state)}"
         if self._cached_key == key and self._cached_decision is not None:
-            return self._cached_decision
+            # Reused, so this turn spent no decision time; saying so keeps the routed
+            # trace honest about which turns actually paid for a decision.
+            return replace(self._cached_decision, decision_ms=0.0, reused=True)
 
         decision = self._decide(state)
         if not decision.fallback:
@@ -313,7 +325,29 @@ class ModelRouter:
             self._cached_decision = decision
         return decision
 
+    def decision_trace_context(self) -> LLMTraceContext | None:
+        """The context the decision call is traced under.
+
+        The row is attributed to the decision credential, because that is what the
+        call spends, with the router named alongside so the two group together.
+        """
+        if self.trace_context is None:
+            return None
+        try:
+            decision_uuid = uuid.UUID(str(self.config.decision_credential_id))
+            router_uuid = uuid.UUID(str(self.credential_id))
+        except ValueError:
+            return self.trace_context
+        return replace(
+            self.trace_context,
+            credential_id=decision_uuid,
+            router_credential_id=router_uuid,
+            router_label=self.label,
+        )
+
     def _decide(self, state: dict[str, object]) -> RouteDecision:
+        context = self.decision_trace_context()
+        started = time.monotonic()
         try:
             credential = load_decision_credential(self.config.decision_credential_id)
             payload = call_decision_model(
@@ -321,26 +355,54 @@ class ModelRouter:
                 api_key=credential["api_key"],
                 body=build_routing_body(self.config, state),
                 timeout=self.config.timeout_seconds,
-                trace_context=self.trace_context,
+                trace_context=context,
             )
         except (DecisionProviderError, DecisionRequestError, OSError) as exc:
-            return self._fallback(str(exc))
+            return self._fallback(str(exc), self._elapsed_ms(started), self._trace_id(context))
 
+        elapsed_ms = self._elapsed_ms(started)
+        trace_id = self._trace_id(context)
         label = read_route_answer(payload)
         if label is None:
-            return self._fallback("Decision model returned no routing answer")
+            return self._fallback("Decision model returned no routing answer", elapsed_ms, trace_id)
         option = self.config.option_by_label(label)
         if option is None:
-            return self._fallback(f"Decision model chose '{label}', which is not a model option")
-        return RouteDecision(option=option)
+            return self._fallback(
+                f"Decision model chose '{label}', which is not a model option",
+                elapsed_ms,
+                trace_id,
+            )
+        return RouteDecision(option=option, decision_ms=elapsed_ms, trace_id=trace_id)
 
-    def _fallback(self, reason: str) -> RouteDecision:
+    @staticmethod
+    def _elapsed_ms(started: float) -> float:
+        return round((time.monotonic() - started) * 1000, 2)
+
+    @staticmethod
+    def _trace_id(context: LLMTraceContext | None) -> str | None:
+        """The row `call_decision_model` just wrote, so the UI can link to it."""
+        if context is None or not context.trace_ids:
+            return None
+        return str(context.trace_ids[-1])
+
+    def _fallback(
+        self,
+        reason: str,
+        decision_ms: float = 0.0,
+        trace_id: str | None = None,
+    ) -> RouteDecision:
         default = self.config.default_option
         if default is None:
             raise ModelRouterError(
                 f"Model Router could not pick a model and has no fallback option: {reason}"
             )
-        return RouteDecision(option=default, fallback=True, error=reason)
+        return RouteDecision(
+            option=default,
+            fallback=True,
+            error=reason,
+            decision_ms=decision_ms,
+            trace_id=trace_id,
+        )
 
 
 @dataclass(frozen=True)
