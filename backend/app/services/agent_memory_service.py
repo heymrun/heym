@@ -800,7 +800,7 @@ def extract_and_merge_memory_sync(
                 credential_type=cred.type.value,
                 config=config,
             )
-            api_key = config.get("api_key")
+            api_key = config.get("api_key") or ""
             base_url = config.get("base_url")
             if not base_url and cred.type.value == "google":
                 from app.services.llm_service import GOOGLE_OPENAI_BASE_URL
@@ -810,7 +810,7 @@ def extract_and_merge_memory_sync(
                 base_url = str(base_url).rstrip("/")
                 if not base_url.endswith("/v1"):
                     base_url = base_url + "/v1"
-            if not api_key:
+            if not api_key and router is None:
                 logger.warning("Agent memory: no API key on credential")
                 return
 

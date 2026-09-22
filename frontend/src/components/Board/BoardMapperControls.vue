@@ -2,12 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
-import type { CredentialType } from "@/types/credential";
 import { credentialsApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-
-// The mapper runs an LLM chat completion, so only chat-capable providers apply.
-const MAPPER_CREDENTIAL_TYPES: CredentialType[] = ["openai", "google", "custom"];
 
 const props = defineProps<{ credentialId: string; model: string }>();
 const emit = defineEmits<{
@@ -51,10 +47,8 @@ async function loadModels(credId: string): Promise<void> {
 }
 
 onMounted(async () => {
-  const creds = await credentialsApi.list();
-  credentials.value = creds
-    .filter((c) => MAPPER_CREDENTIAL_TYPES.includes(c.type))
-    .map((c) => ({ id: c.id, name: c.name }));
+  const creds = await credentialsApi.listLLM();
+  credentials.value = creds.map((c) => ({ id: c.id, name: c.name }));
   // Prefill the user's preferred credential for a new board (no selection yet). The
   // credential/model watch then loads models and fills the preferred model.
   const preferredCredentialId = authStore.user?.preferred_credential_id ?? "";

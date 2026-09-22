@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Credential, CredentialType, MCPServer, User
+from app.db.models import LLM_CREDENTIAL_TYPES, Credential, MCPServer, User
 from app.models.schemas import MCPTool, MCPToolInputProperty, MCPToolInputSchema
 from app.services.credential_access import get_accessible_credential
 
@@ -38,14 +38,6 @@ MCP_CHAT_TOOL_DESCRIPTION = (
     "Every call is recorded in the user's Chat tab history. To continue an earlier "
     "exchange instead of starting a new thread, pass the `conversation_id` returned by a "
     "previous call."
-)
-
-# The credential types the dashboard chat engine accepts, mirroring
-# `POST /api/chats/{id}/messages`.
-_CHAT_CREDENTIAL_TYPES = (
-    CredentialType.openai,
-    CredentialType.google,
-    CredentialType.custom,
 )
 
 _MAX_MCP_CHAT_MESSAGE_LENGTH = 20000
@@ -170,10 +162,10 @@ async def resolve_chat_llm(
             "The LLM credential configured for the Heym chat tool is no longer available. "
             "Pick another one in the MCP tab in Heym."
         )
-    if credential.type not in _CHAT_CREDENTIAL_TYPES:
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise MCPChatError(
             "The credential configured for the Heym chat tool is not an LLM credential "
-            "(OpenAI, Google, or Custom). Pick another one in the MCP tab in Heym."
+            "(OpenAI, Google, Custom, or Model Router). Pick another one in the MCP tab in Heym."
         )
 
     model = settings.model
