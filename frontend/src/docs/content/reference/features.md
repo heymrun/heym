@@ -659,7 +659,19 @@ See also [Settings](./user-settings.md), [Traces](../tabs/traces-tab.md), and [A
 
 ### [Third-Party Integrations](./integrations.md)
 
-Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, Decision Model for the [Decision node](../nodes/decision-node.md), GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Jira for the [Jira node](../nodes/jira-node.md), Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.
+Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, Decision Model for the [Decision node](../nodes/decision-node.md), Model Router for automatic model selection (see below), GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Jira for the [Jira node](../nodes/jira-node.md), Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.
+
+### Model Router (Auto Model)
+
+A **Model Router** credential picks the model per request instead of holding a key. It
+stores a decision model credential plus a list of your existing OpenAI/Google/Custom
+credentials, each with criteria saying when it should be used, and appears in every model
+picker with a single model called **Auto**.
+
+Traces, the canvas Execution Log and the Span View show both halves of the choice, for
+example `Auto Model / GPT-5`, while cost stays attributed to the model that ran. Auto
+Model cannot be combined with the Responses API, Batch mode, or image output. See
+[Credentials](./credentials.md) for the full behaviour.
 
 See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sharing.md), and [Teams](./teams.md).
 

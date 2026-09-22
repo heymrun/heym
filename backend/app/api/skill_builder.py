@@ -16,9 +16,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.ai_assistant import get_credential_for_user, get_openai_client
+from app.api.ai_assistant import (
+    get_credential_for_user,
+    resolve_model_binding,
+)
 from app.api.deps import get_current_user
-from app.db.models import CredentialType, User
+from app.db.models import LLM_CREDENTIAL_TYPES, User
 from app.db.session import get_db
 from app.services.encryption import decrypt_config
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -838,11 +841,7 @@ async def skill_builder_stream(
             detail="Credential not found",
         )
 
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -850,11 +849,6 @@ async def skill_builder_stream(
 
     config = decrypt_config(credential.encrypted_config)
     session_id = str(request.conversation_id or uuid.uuid4())
-    client, provider = get_openai_client(
-        credential.type,
-        config,
-        session_id=session_id,
-    )
 
     trace_context = LLMTraceContext(
         session_id=session_id,
@@ -863,6 +857,15 @@ async def skill_builder_stream(
         workflow_id=None,
         node_label="Skill Builder",
         source="skill_builder",
+    )
+    client, provider, request.model, trace_context = resolve_model_binding(
+        credential,
+        config,
+        request.model,
+        session_id=session_id,
+        trace_context=trace_context,
+        system_prompt=build_skill_builder_prompt(request.existing_skill, request.attachments),
+        message=request.message,
     )
 
     return StreamingResponse(

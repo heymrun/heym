@@ -12,10 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.db.models import User
+from app.db.models import LLM_CREDENTIAL_TYPES, User
 from app.db.session import get_db
 from app.models.schemas import (
-    CredentialType,
     DecisionQuestionsGenerateRequest,
     DecisionQuestionsSuggestionResponse,
 )
@@ -24,6 +23,7 @@ from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import build_router_for_credential
 
 router = APIRouter()
 
@@ -161,17 +161,19 @@ async def generate_decision_questions(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="LLM credential not found"
         )
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     raw_base_url = config.get("base_url")
 
     user_message = f"Intent: {request.prompt.strip()}"
@@ -198,6 +200,7 @@ async def generate_decision_questions(
             node_label="AI Decision Questions",
         ),
         content_only=True,
+        router=router,
     )
 
     payload = extract_questions_payload(str(result.get("text") or ""))

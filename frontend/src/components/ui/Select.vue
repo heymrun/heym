@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils";
 interface Option {
   value: string | undefined;
   label: string;
+  /** Greys the row out while keeping it visible, so the reason can be explained. */
+  disabled?: boolean;
+  title?: string;
 }
 
 interface Props {
@@ -86,6 +89,8 @@ function clearValue(): void {
         v-for="option in options"
         :key="option.value ?? 'undefined'"
         :value="option.value ?? ''"
+        :disabled="option.disabled"
+        :title="option.title"
       >
         {{ option.label }}
       </option>

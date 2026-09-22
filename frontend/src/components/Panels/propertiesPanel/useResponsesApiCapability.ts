@@ -26,6 +26,8 @@ const CUSTOM_CAVEAT_MESSAGE =
 const OPENAI_MESSAGE = "The Responses API is available for this credential.";
 const NO_CREDENTIAL_MESSAGE = "Select a credential to check Responses API support.";
 const GOOGLE_MESSAGE = "Google credentials do not support the Responses API.";
+const MODEL_ROUTER_MESSAGE =
+  "Auto Model does not support the Responses API. Pick a specific credential and model to use it.";
 
 export function useResponsesApiCapability(input: ResponsesCapabilityInput): ResponsesCapability {
   const visible = computed((): boolean => input.outputType.value !== "image");
@@ -37,6 +39,9 @@ export function useResponsesApiCapability(input: ResponsesCapabilityInput): Resp
     if (input.batchModeEnabled.value) return false;
     if (!input.credentialType.value) return false;
     if (input.credentialType.value === "google") return false;
+    // Checked before the model loads too: a router's only model is the synthetic
+    // `auto` row, and the toggle must be off from the moment the router is picked.
+    if (input.credentialType.value === "model_router") return false;
     return !modelRejects.value;
   });
 
@@ -46,6 +51,9 @@ export function useResponsesApiCapability(input: ResponsesCapabilityInput): Resp
     if (!input.credentialType.value) return NO_CREDENTIAL_MESSAGE;
     if (input.credentialType.value === "google") {
       return input.selectedModel.value?.responses_support_reason ?? GOOGLE_MESSAGE;
+    }
+    if (input.credentialType.value === "model_router") {
+      return input.selectedModel.value?.responses_support_reason ?? MODEL_ROUTER_MESSAGE;
     }
     if (modelRejects.value) {
       return (

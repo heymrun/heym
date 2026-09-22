@@ -36,6 +36,7 @@ import {
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isHitlWaitNodeResult, isRetryAttemptNodeResult } from "@/lib/executionLog";
+import { formatModelRoutingLabel, readSpanModelRouting } from "@/components/Panels/executionTimeline";
 import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
 import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
@@ -998,6 +999,18 @@ function shouldShowGenericResultOutput(rawOutput: unknown): boolean {
 }
 
 const resultViewModes = ref<Record<string, "markdown" | "tree" | "plain">>({});
+
+function modelRoutingLabel(result: { metadata?: Record<string, unknown> }): string | null {
+  return formatModelRoutingLabel(readSpanModelRouting(result));
+}
+
+function modelRoutingTitle(result: { metadata?: Record<string, unknown> }): string {
+  const routing = readSpanModelRouting(result);
+  if (!routing) return "";
+  return routing.calls
+    .map((call, index) => `${index + 1}. ${call.model}${call.fallback ? " (fallback)" : ""}`)
+    .join("\n");
+}
 
 function isValidJson(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -2979,6 +2992,14 @@ function renderContent(content: string): string {
                   class="ml-2 text-xs font-normal text-muted-foreground"
                 >
                   #{{ result.occurrence }}
+                </span>
+                <span
+                  v-if="modelRoutingLabel(result)"
+                  class="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-normal text-primary"
+                  :title="modelRoutingTitle(result)"
+                  data-testid="execution-log-model-routing"
+                >
+                  {{ modelRoutingLabel(result) }}
                 </span>
               </span>
               <div class="flex items-center gap-2 shrink-0 pr-2.5">

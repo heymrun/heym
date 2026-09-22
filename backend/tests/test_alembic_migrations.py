@@ -15,7 +15,19 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["123_add_decision_cred_type"])
+        self.assertEqual(self.script.get_heads(), ["125_llm_trace_router_cols"])
+
+    def test_llm_trace_router_columns_follow_model_router(self) -> None:
+        revision = self.script.get_revision("125_llm_trace_router_cols")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "124_add_model_router_cred")
+
+    def test_model_router_revision_follows_decision_credential(self) -> None:
+        revision = self.script.get_revision("124_add_model_router_cred")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "123_add_decision_cred_type")
 
     def test_decision_credential_revision_follows_vector_store_metadata_index(self) -> None:
         revision = self.script.get_revision("123_add_decision_cred_type")

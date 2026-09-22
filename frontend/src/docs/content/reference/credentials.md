@@ -14,6 +14,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 |-----------|--------------------|---------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
 | [Decision](../nodes/decision-node.md) | Decision Model | Base URL of a decision model endpoint, plus an optional API key |
+| [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults | Model Router (Auto Model) | Picks which of your models serves each request, using a decision model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [OpenCode Go](../nodes/opencode-go-node.md) | OpenCode Go + GitHub | An OpenCode Go gateway API key (optional base URL) for the runner, plus a GitHub PAT for repository operations |
 | [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), [GitHub](../nodes/github-node.md) | GitHub | GitHub personal access token (PAT) for GitHub API calls, GitHub node operations, and MCP integrations |
@@ -96,3 +97,37 @@ Use the Notion **node** for native database, page, and block operations. Use `$c
 - [Credentials Sharing](./credentials-sharing.md) – Share with users and teams
 - [Third-Party Integrations](./integrations.md) – Setup guide per credential type
 - [Expression DSL](./expression-dsl.md) – `$credentials` in expressions
+
+## Model Router (Auto Model)
+
+A Model Router holds no key. It holds a **decision model credential**, a list of **model
+options** — each an existing OpenAI, Google or Custom credential plus a model — and, for
+each option, free text saying when that option should be used.
+
+It appears in every picker that offers a model: the [LLM](../nodes/llm-node.md) and
+[Agent](../nodes/agent-node.md) nodes, Chat, AI Defaults, Evals, Dashboards, the
+expression builder and Data Tables. Its only model is **Auto**. Pick it, and the decision
+model reads each request and routes it.
+
+An agent re-routes as its tool loop progresses, so a cheap model can take the early turns
+and a stronger one the turn that needs it. Identical inputs reuse the previous decision,
+so a loop only pays for a decision when the conversation has actually moved.
+
+### What it cannot do
+
+Auto Model cannot be combined with the **Responses API**, **Batch mode**, or **image
+output**. Those toggles disable themselves when a router is selected, and each says why.
+Guardrail checks and the human-review policy classifier are fixed single-model calls and
+never route.
+
+### When routing fails
+
+Mark one option **Use this option when routing fails** and a decision model outage never
+stops a run; the fallback is used and the reason is recorded on the run. Without one, the
+node fails rather than guessing.
+
+### Seeing where a request went
+
+Traces shows `Auto Model / GPT-5` rather than the model alone, and cost stays attributed
+to the model that actually ran. The canvas Execution Log and Span View show the same pair,
+and the Span View lists which turn went where.

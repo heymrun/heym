@@ -26,6 +26,10 @@ If you need to limit exposure, create a dedicated Google account with access to 
 
 A **Decision Model** credential carries the endpoint and, when set, an API key. Sharing it lets the recipient spend against that key from any workflow they can run, exactly like an LLM credential.
 
+A **Model Router** credential shares everything it routes to. The people you share it with can run requests against every credential in its option list, and those requests spend your keys. They cannot read the keys, and the credentials do not appear in their own credential list.
+
+This is the same grant as sharing an OpenAI credential directly, and it is what makes a router useful to a team. If you do not want that, share the individual credentials instead and let each person pick a model.
+
 ## Sharing with Workflow Collaborators
 
 When you share a workflow, collaborators can open and run it but cannot use your credentials unless you share those credentials with them too. This applies to credentials in the main workflow and in any sub-workflows it calls. Share each credential with the same users or teams you invited to the workflow. Sub-workflows must also be shared separately from the child workflow's editor. See [Workflow Organization](./workflow-organization.md#sharing-workflows).

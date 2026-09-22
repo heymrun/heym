@@ -30,6 +30,7 @@ from app.models.schemas import (
     CredentialTestResponse,
     CredentialUpdate,
     LLMModel,
+    ModelRouterConfigResponse,
     NotionDataSourcesResponse,
     NotionPagesResponse,
     OpenCodeUsageResponse,
@@ -52,6 +53,7 @@ from app.services.embedding import (
     embedding_config_from_credential,
 )
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
+from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
 from app.services.ssrf_guard import SsrfBlockedError
 from app.services.vector_store import VECTOR_STORE_BACKENDS
@@ -263,6 +265,9 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
             return mask_api_key(api_key)
         base_url = str(config.get("base_url", "") or "").strip()
         return urlparse(base_url).hostname or None
+    elif credential_type == CredentialType.model_router:
+        # A router holds references, never a key of its own, so there is nothing to mask.
+        return None
     elif credential_type == CredentialType.grist:
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
@@ -387,6 +392,13 @@ def get_public_credential_fields(
         }
     if credential_type == CredentialType.decision:
         return {"base_url": str(config.get("base_url", "")).strip() or None}
+    if credential_type == CredentialType.model_router:
+        options = config.get("options")
+        option_count = len(options) if isinstance(options, list) else 0
+        return {
+            "decision_model": str(config.get("decision_model", "") or "").strip() or None,
+            "option_count": str(option_count),
+        }
     return {}
 
 
@@ -842,7 +854,12 @@ async def list_llm_credentials(
     return await _list_credentials_of_types(
         db,
         current_user,
-        [CredentialType.openai, CredentialType.google, CredentialType.custom],
+        [
+            CredentialType.openai,
+            CredentialType.google,
+            CredentialType.custom,
+            CredentialType.model_router,
+        ],
     )
 
 
@@ -853,6 +870,76 @@ async def list_decision_credentials(
 ) -> list[CredentialListResponse]:
     """Decision models speak their own protocol, so they never mix with LLM pickers."""
     return await _list_credentials_of_types(db, current_user, [CredentialType.decision])
+
+
+ROUTER_OPTION_CREDENTIAL_TYPES = (
+    CredentialType.openai,
+    CredentialType.google,
+    CredentialType.custom,
+)
+
+
+async def validate_model_router_references(
+    db: AsyncSession,
+    config: dict,
+    owner: User,
+) -> None:
+    """Reject a router whose owner cannot reach what it points at.
+
+    This is the only access check in the router's life. At run time the referenced
+    credentials are loaded without re-checking the caller, because using a router is
+    itself the grant. Doing the check here keeps that grant to credentials the owner
+    genuinely held when they built the router.
+    """
+    try:
+        router_config = parse_router_config(config)
+    except ModelRouterConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        decision_uuid = uuid.UUID(router_config.decision_credential_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Model Router needs a valid decision model credential",
+        ) from exc
+
+    decision_credential = await _get_accessible_credential(db, decision_uuid, owner)
+    if decision_credential is None or decision_credential.type != CredentialType.decision:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Model Router needs a decision model credential you can access",
+        )
+
+    for option in router_config.options:
+        try:
+            option_uuid = uuid.UUID(option.credential_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Model option '{option.label}' has an invalid credential",
+            ) from exc
+
+        option_credential = await _get_accessible_credential(db, option_uuid, owner)
+        if option_credential is not None and option_credential.type == CredentialType.model_router:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Model option '{option.label}' points at another Model Router, "
+                    "which is not allowed"
+                ),
+            )
+        if (
+            option_credential is None
+            or option_credential.type not in ROUTER_OPTION_CREDENTIAL_TYPES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Model option '{option.label}' needs an OpenAI, Google or Custom "
+                    "credential you can access"
+                ),
+            )
 
 
 @router.post("", response_model=CredentialResponse, status_code=status.HTTP_201_CREATED)
@@ -877,6 +964,8 @@ async def create_credential(
         credential_data.config,
         allow_pending_oauth=True,
     )
+    if credential_data.type == CredentialType.model_router:
+        await validate_model_router_references(db, credential_data.config, current_user)
     encrypted = encrypt_config(credential_data.config)
 
     credential = Credential(
@@ -1427,6 +1516,8 @@ async def update_credential(
             config,
             allow_pending_oauth=credential.type in {CredentialType.linear, CredentialType.notion},
         )
+        if credential.type == CredentialType.model_router:
+            await validate_model_router_references(db, config, current_user)
         credential.encrypted_config = encrypt_config(config)
 
     await db.flush()
@@ -1492,6 +1583,57 @@ async def delete_credential(
     await db.delete(credential)
 
 
+MODEL_ROUTER_AUTO_MODEL_ID = "auto"
+MODEL_ROUTER_BATCH_MESSAGE = (
+    "Batch mode is not available for Model Router credentials: a batch job runs "
+    "against one fixed model."
+)
+MODEL_ROUTER_RESPONSES_MESSAGE = (
+    "Auto Model does not support the Responses API. Pick a specific credential and model to use it."
+)
+
+
+def build_model_router_models() -> list[LLMModel]:
+    """The one pseudo-model a router offers; the real model is chosen per request."""
+    return [
+        LLMModel(
+            id=MODEL_ROUTER_AUTO_MODEL_ID,
+            name="Auto",
+            is_reasoning=False,
+            supports_batch=False,
+            batch_support_reason=MODEL_ROUTER_BATCH_MESSAGE,
+            supports_responses=False,
+            responses_support_reason=MODEL_ROUTER_RESPONSES_MESSAGE,
+            context_window=None,
+        )
+    ]
+
+
+@router.get("/{credential_id}/model-router", response_model=ModelRouterConfigResponse)
+async def get_model_router_config(
+    credential_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ModelRouterConfigResponse:
+    """Return a router's config so the credential dialog can edit it.
+
+    Returned in full because it contains no secret: only the ids of credentials the
+    caller already has access to through this router, plus the routing criteria.
+    """
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.model_router:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This credential is not a Model Router",
+        )
+    return ModelRouterConfigResponse(**decrypt_config(credential.encrypted_config))
+
+
 @router.get("/{credential_id}/models", response_model=list[LLMModel])
 async def get_credential_models(
     credential_id: uuid.UUID,
@@ -1530,6 +1672,9 @@ async def get_credential_models(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+
+    if credential.type == CredentialType.model_router:
+        return build_model_router_models()
 
     if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
         raise HTTPException(
@@ -1881,6 +2026,14 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Decision credential base_url must start with http:// or https://",
             )
+    elif credential_type == CredentialType.model_router:
+        try:
+            parse_router_config(config)
+        except ModelRouterConfigError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
     elif credential_type == CredentialType.grist:
         if "api_key" not in config or not config["api_key"]:
             raise HTTPException(

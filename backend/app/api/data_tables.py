@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models import (
-    CredentialType,
+    LLM_CREDENTIAL_TYPES,
     DataTable,
     DataTableRow,
     DataTableShare,
@@ -45,6 +45,7 @@ from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import build_router_for_credential
 from app.services.upload_limits import read_upload_file_limited
 
 router = APIRouter()
@@ -1289,11 +1290,7 @@ async def generate_data_table_schema(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="LLM credential not found",
         )
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -1303,6 +1300,12 @@ async def generate_data_table_schema(
     existing_names = {col.name for col in existing_cols}
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = str(config.get("api_key") or "")
     raw_base_url = config.get("base_url")
     base_url = str(raw_base_url) if raw_base_url else None
@@ -1324,6 +1327,7 @@ async def generate_data_table_schema(
         extra_body={"disable_reasoning": True},
         trace_context=trace_context,
         content_only=True,
+        router=router,
     )
     content = str(result.get("text") or "")
 

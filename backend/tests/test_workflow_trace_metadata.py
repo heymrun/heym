@@ -199,7 +199,10 @@ class WorkflowTraceMetadataTests(unittest.TestCase):
                 30,
             )
 
-        self.assertEqual(tool_result, {"text": "ok"})
+        # The sub-agent hands its own trace back under a private key so the Duration
+        # Breakdown can link the tool row to that run. `_run_one_tool` strips it before
+        # serialising the result, so the model still only sees the text.
+        self.assertEqual(tool_result, {"text": "ok", "_trace_id": trace_id})
         delegated_result = executor.delegated_agent_node_results[0]
         self.assertEqual(delegated_result.metadata["invocation"], "sub_agent_tool")
         self.assertEqual(delegated_result.metadata["trace_id"], trace_id)

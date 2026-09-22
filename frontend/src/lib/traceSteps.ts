@@ -1,5 +1,11 @@
 import type { LLMTraceDetail } from "@/types/trace";
 
+import {
+  formatRoutingCallLabel,
+  readTraceModelRouting,
+  type ModelRoutingTrace,
+} from "@/lib/traceModelRouting";
+
 export type TraceStepKind =
   | "system"
   | "user"
@@ -54,6 +60,17 @@ interface RawResponseToolCall {
   mcp_server?: string;
   workflow_name?: string;
   status?: string;
+}
+
+/**
+ * The routing reader fills every field, using null for "not recorded". Those nulls
+ * are an artefact of that shape, not facts about the run, so they are dropped before
+ * the record reaches the Event JSON panel.
+ */
+function withoutNulls(value: object): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined),
+  );
 }
 
 const SUMMARY_MAX = 140;
@@ -202,8 +219,27 @@ function buildConversationSteps(
   response: Record<string, unknown>,
   trace: LLMTraceDetail,
   workflowNames: Record<string, string>,
+  routingBlocks: TraceStep[][] = [],
 ): TraceStep[] {
   const steps: TraceStep[] = [];
+  const pendingRouting = [...routingBlocks];
+
+  /**
+   * Turn N's decision and the model call it produced both precede the model's Nth
+   * reply, so the whole block is emitted just before it.
+   */
+  function emitRoutingBefore(): void {
+    const next = pendingRouting.shift();
+    if (next) steps.push(...next);
+  }
+
+  /**
+   * Everything still pending happened before the final answer: the last turn's
+   * decision produced that answer, and the answer is always the end of the run.
+   */
+  function flushRoutingBeforeAnswer(): void {
+    steps.push(...pendingRouting.splice(0).flat());
+  }
 
   const toolResultById = new Map<string, RawMessage>();
   for (const msg of messages) {
@@ -265,6 +301,7 @@ function buildConversationSteps(
         json: msg,
       });
     } else if (msg.role === "assistant") {
+      emitRoutingBefore();
       const text = asText(msg.content);
       if (text) {
         steps.push({
@@ -326,6 +363,7 @@ function buildConversationSteps(
         answerBadges.push({ label: `${Math.round(metrics.total_duration_ms)}ms tools` });
       }
     }
+    flushRoutingBeforeAnswer();
     steps.push({
       id: "answer",
       kind: "answer",
@@ -399,6 +437,98 @@ export interface BuildTraceStepsOptions {
 }
 
 /** Turn a trace into an ordered list of readable steps for the timeline view. */
+/**
+ * One step per routing decision.
+ *
+ * Each one is placed where it actually happened rather than in a block at the top:
+ * routing turn N runs immediately before the model's Nth reply, so an orchestrator
+ * shows the decision that produced each turn next to that turn.
+ */
+function buildRoutingSteps(routing: ModelRoutingTrace | null): TraceStep[][] {
+  if (routing === null) return [];
+
+  return routing.calls.map((call) => {
+    const badges: TraceStepBadge[] = [{ label: routing.routerLabel }];
+    if (call.reused) badges.push({ label: "reused" });
+    if (call.fallback) badges.push({ label: "fallback" });
+
+    const detailParts = [`Routed to ${call.model}`];
+    if (call.credentialName) detailParts.push(`on ${call.credentialName}`);
+    if (call.reused) {
+      detailParts.push("Reused the previous decision: the routing input had not changed.");
+    }
+    if (call.error) detailParts.push(`Routing failed: ${call.error}`);
+
+    const block: TraceStep[] = [
+      {
+        id: `model_router_turn_${call.turn}`,
+        kind: "request",
+        icon: "request",
+        roleLabel:
+          routing.calls.length > 1 ? `Model Router · turn ${call.turn}` : "Model Router",
+        summary: formatRoutingCallLabel(call),
+        detail: detailParts.join(" · "),
+        json: withoutNulls(call),
+        durationMs: call.decisionMs > 0 ? call.decisionMs : undefined,
+        isError: call.fallback,
+        badges,
+      },
+    ];
+
+    // The model call that decision produced, shown right after it so a turn reads as
+    // "decided this, then called it" instead of the decision standing on its own.
+    const timing = routing.turnTimings.find((entry) => entry.turn === call.turn);
+    if (timing && timing.durationMs > 0) {
+      const detailParts = [
+        call.credentialName
+          ? `Called ${timing.model ?? call.model} on ${call.credentialName}`
+          : `Called ${timing.model ?? call.model}`,
+      ];
+      if (timing.provider) detailParts.push(`Provider: ${timing.provider}`);
+      if (timing.promptTokens !== null || timing.completionTokens !== null) {
+        detailParts.push(
+          `Tokens: ${timing.promptTokens ?? 0} in / ${timing.completionTokens ?? 0} out`,
+        );
+      }
+      if (timing.toolCalls !== null) {
+        detailParts.push(
+          timing.toolCalls === 0
+            ? "Requested no tools"
+            : `Requested ${timing.toolCalls} tool call${timing.toolCalls === 1 ? "" : "s"}`,
+        );
+      }
+      if (timing.textChars !== null) detailParts.push(`Returned ${timing.textChars} characters`);
+      detailParts.push(`Started ${Math.round(timing.startMs)} ms into the request`);
+      if (timing.error) detailParts.push(`Failed: ${timing.error}`);
+
+      const llmBadges: TraceStepBadge[] = [];
+      if (timing.provider) llmBadges.push({ label: timing.provider });
+      if (timing.toolCalls) {
+        llmBadges.push({
+          label: `${timing.toolCalls} tool${timing.toolCalls === 1 ? "" : "s"}`,
+        });
+      }
+
+      block.push({
+        id: `call_llm_turn_${call.turn}`,
+        kind: "response",
+        icon: "response",
+        roleLabel:
+          routing.turnTimings.length > 1 ? `LLM · turn ${call.turn}` : "LLM",
+        summary: timing.model ?? call.model,
+        detail: detailParts.join(" · "),
+        json: withoutNulls(timing),
+        durationMs: timing.durationMs,
+        tokens: timing.totalTokens ?? undefined,
+        isError: Boolean(timing.error),
+        badges: llmBadges.length > 0 ? llmBadges : undefined,
+      });
+    }
+
+    return block;
+  });
+}
+
 export function buildTraceSteps(
   trace: LLMTraceDetail,
   options: BuildTraceStepsOptions = {},
@@ -408,8 +538,29 @@ export function buildTraceSteps(
   const messages = request.messages;
   const workflowNames = options.workflowNames ?? {};
 
+  const routingSteps = buildRoutingSteps(readTraceModelRouting(response));
+
   if (Array.isArray(messages) && messages.length > 0) {
-    return buildConversationSteps(messages as RawMessage[], response, trace, workflowNames);
+    const steps = buildConversationSteps(
+      messages as RawMessage[],
+      response,
+      trace,
+      workflowNames,
+      routingSteps,
+    );
+    // A decision whose turn left no stored reply would otherwise vanish. It belongs
+    // before the answer, which always closes the list.
+    const placed = new Set(steps.map((step) => step.id));
+    const unplaced = routingSteps.flat().filter((step) => !placed.has(step.id));
+    if (unplaced.length === 0) return steps;
+
+    const answerIndex = steps.findIndex((step) => step.kind === "answer");
+    if (answerIndex === -1) return [...steps, ...unplaced];
+    return [
+      ...steps.slice(0, answerIndex),
+      ...unplaced,
+      ...steps.slice(answerIndex),
+    ];
   }
-  return buildFallbackSteps(trace, request, response);
+  return [...routingSteps.flat(), ...buildFallbackSteps(trace, request, response)];
 }

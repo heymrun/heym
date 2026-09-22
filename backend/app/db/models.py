@@ -62,6 +62,18 @@ class CredentialType(str, PyEnum):
     google_drive = "google_drive"
     rag = "rag"
     decision = "decision"
+    model_router = "model_router"
+
+
+# Every credential that can serve a model request. `model_router` belongs here because
+# it resolves to one of the others per request; leaving it out is what makes a surface
+# reject Auto Model, so new model surfaces should guard on this rather than a local tuple.
+LLM_CREDENTIAL_TYPES = (
+    CredentialType.openai,
+    CredentialType.google,
+    CredentialType.custom,
+    CredentialType.model_router,
+)
 
 
 class WorkflowAuthType(str, PyEnum):
@@ -691,6 +703,16 @@ class LLMTrace(Base):
         nullable=True,
         index=True,
     )
+    # The router that chose the model, when one did. `credential_id` above and `model`
+    # below keep holding what actually served the request, because pricing and the
+    # per-model and per-credential stats read those two columns.
+    router_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    router_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workflows.id", ondelete="SET NULL"),
@@ -713,7 +735,10 @@ class LLMTrace(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship("User")
-    credential: Mapped["Credential | None"] = relationship("Credential")
+    # Two foreign keys point at `credentials` now, so the join has to be spelled out.
+    credential: Mapped["Credential | None"] = relationship(
+        "Credential", foreign_keys=[credential_id]
+    )
     workflow: Mapped["Workflow | None"] = relationship("Workflow")
 
 

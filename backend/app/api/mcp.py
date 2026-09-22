@@ -21,6 +21,7 @@ from app.api.workflows import (
 )
 from app.config import settings
 from app.db.models import (
+    LLM_CREDENTIAL_TYPES,
     Credential,
     CredentialType,
     ExecutionHistory,
@@ -550,11 +551,7 @@ async def validate_chat_tool_credential(
     credential = await get_accessible_credential(db, credential_id, user_id)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",

@@ -1048,6 +1048,20 @@ Guardrails block unsafe user messages **before** the LLM or Agent runs. When a v
 }
 ```
 
+### 5a. Auto Model (Model Router credentials)
+A `model_router` credential does not hold a key. It holds a decision model plus a list of
+the user's OpenAI/Google/Custom credentials with criteria saying when each one should be
+used, and it picks per request. It appears in the same credential list as the others, and
+its only model id is `auto`.
+
+Set `credentialId` to the router and `model` to `"auto"` when the user asks for automatic
+model selection, cost-aware routing, or "pick the best model for the job". It works on
+both `llm` and `agent` nodes.
+
+Auto Model CANNOT be combined with `responsesApiEnabled`, `batchModeEnabled`, or
+`outputType: "image"`. If the user wants any of those, use a specific credential and a
+specific model instead.
+
 ### 5b. decision (Decision Model - Typed Judgments)
 Asks a decision model (TypeSafe Jev and compatible endpoints) typed questions about a
 state and gets probabilities back. It does NOT generate text - use `llm` for that.

@@ -14,7 +14,13 @@ from app.api.ai_assistant import (
     get_credential_for_user,
 )
 from app.api.deps import get_current_user
-from app.db.models import CredentialType, Dashboard, DashboardWidget, User, Workflow
+from app.db.models import (
+    LLM_CREDENTIAL_TYPES,
+    Dashboard,
+    DashboardWidget,
+    User,
+    Workflow,
+)
 from app.db.session import get_db
 from app.models.dashboard_schemas import (
     AiRefineRequest,
@@ -38,6 +44,7 @@ from app.services.markdown_task_list import (
     toggle_task_item,
     update_or_remove_task_item,
 )
+from app.services.model_router import build_router_for_credential
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 
 router = APIRouter()
@@ -76,6 +83,12 @@ async def generate_widget_dsl(
     workflow (used by the per-widget AI refine action) instead of building a new one.
     """
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = str(config.get("api_key") or "")
     raw_base_url = config.get("base_url")
     base_url = str(raw_base_url) if raw_base_url else None
@@ -97,6 +110,7 @@ async def generate_widget_dsl(
         user_message=prompt + _AI_WIDGET_SUFFIX,
         temperature=None if is_reasoning_model(model) else WORKFLOW_BUILDER_TEMPERATURE,
         trace_context=trace_context,
+        router=router,
     )
     content = str(result.get("text") or "")
     return _extract_generated_workflow_config(content, prompt)
@@ -504,11 +518,7 @@ async def ai_generate_widget(
     credential = await get_credential_for_user(body.credential_id, current_user, db)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -575,11 +585,7 @@ async def ai_refine_widget(
     credential = await get_credential_for_user(body.credential_id, current_user, db)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    ):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
