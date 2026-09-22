@@ -9,6 +9,14 @@ import type {
   VectorStoreBackend,
 } from "@/types/credential";
 
+import ModelRouterFields from "@/components/Credentials/modelRouter/ModelRouterFields.vue";
+import {
+  buildModelRouterConfig,
+  emptyModelRouterForm,
+  formFromModelRouterConfig,
+  validateModelRouterForm,
+  type ModelRouterForm,
+} from "@/components/Credentials/modelRouter/modelRouterConfig";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -113,6 +121,7 @@ const ragEmbeddingApiKey = ref("");
 const ragEmbeddingModel = ref("");
 const ragEmbeddingDimensions = ref("1536");
 const ragRequestDimensions = ref(false);
+const modelRouterForm = ref<ModelRouterForm>(emptyModelRouterForm());
 const decisionBaseUrl = ref("https://api.typesafe.ai");
 const decisionApiKey = ref("");
 const decisionTestModel = ref("jev-latest");
@@ -257,6 +266,7 @@ const typeOptions = [
   { value: "pgvector", label: CREDENTIAL_TYPE_LABELS.pgvector },
   { value: "rag", label: CREDENTIAL_TYPE_LABELS.rag },
   { value: "decision", label: CREDENTIAL_TYPE_LABELS.decision },
+  { value: "model_router", label: CREDENTIAL_TYPE_LABELS.model_router },
   { value: "grist", label: CREDENTIAL_TYPE_LABELS.grist },
   { value: "rabbitmq", label: CREDENTIAL_TYPE_LABELS.rabbitmq },
   { value: "cohere", label: CREDENTIAL_TYPE_LABELS.cohere },
@@ -280,6 +290,23 @@ function applyDecisionPublicFields(credential: Credential | null | undefined): v
   decisionBaseUrl.value = fields?.base_url ?? "https://api.typesafe.ai";
   // Never prefilled: the key is write-only, and blank means "keep the stored one".
   decisionApiKey.value = "";
+}
+
+async function applyModelRouterCredential(
+  credential: Credential | null | undefined,
+): Promise<void> {
+  // The config is not in `public_fields` and not in the credential detail response, so
+  // it comes from the dedicated read endpoint.
+  modelRouterForm.value = emptyModelRouterForm();
+  if (credential?.type !== "model_router") return;
+  try {
+    modelRouterForm.value = formFromModelRouterConfig(
+      await credentialsApi.getModelRouterConfig(credential.id),
+    );
+  } catch {
+    // Leave the blank form up rather than a half-filled one the user might save over.
+    modelRouterForm.value = emptyModelRouterForm();
+  }
 }
 
 function applyRagPublicFields(credential: Credential | null | undefined): void {
@@ -386,6 +413,7 @@ watch(
         pgvectorOpenaiApiKey.value = "";
         applyRagPublicFields(props.credential);
         applyDecisionPublicFields(props.credential);
+        void applyModelRouterCredential(props.credential);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -502,6 +530,7 @@ watch(
         pgvectorOpenaiApiKey.value = "";
         applyRagPublicFields(null);
         applyDecisionPublicFields(null);
+        void applyModelRouterCredential(null);
         gristApiKey.value = "";
         gristServerUrl.value = "";
         rabbitmqHost.value = "";
@@ -650,6 +679,8 @@ const isValid = computed(() => {
     return !!pgvectorOpenaiApiKey.value.trim() || isEditing.value;
   } else if (type.value === "decision") {
     return !!decisionBaseUrl.value.trim();
+  } else if (type.value === "model_router") {
+    return validateModelRouterForm(modelRouterForm.value) === null;
   } else if (type.value === "rag") {
     return (
       !!ragEmbeddingBaseUrl.value.trim() &&
@@ -904,6 +935,8 @@ function buildConfig(): CredentialConfig {
       base_url: decisionBaseUrl.value.trim(),
       api_key: decisionApiKey.value.trim(),
     };
+  } else if (type.value === "model_router") {
+    return buildModelRouterConfig(modelRouterForm.value);
   } else if (type.value === "rag") {
     return {
       embedding_base_url: ragEmbeddingBaseUrl.value.trim(),
@@ -1786,6 +1819,7 @@ async function handleSave(): Promise<void> {
   <Dialog
     :open="open"
     :title="isEditing ? 'Edit Credential' : 'New Credential'"
+    :size="type === 'model_router' ? '3xl' : undefined"
     @close="emit('close')"
   >
     <form
@@ -2969,6 +3003,13 @@ async function handleSave(): Promise<void> {
             in Heym's own Postgres database — no external service required.
           </p>
         </div>
+      </template>
+
+      <template v-if="type === 'model_router'">
+        <ModelRouterFields
+          :form="modelRouterForm"
+          @update:form="modelRouterForm = $event"
+        />
       </template>
 
       <template v-if="type === 'decision'">

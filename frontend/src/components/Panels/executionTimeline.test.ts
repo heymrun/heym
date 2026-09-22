@@ -233,3 +233,94 @@ describe("summarizeTimelineModel", () => {
     expect(model.rows[0].spans[0].retryLastError).toBe("Rate limit exceeded");
   });
 });
+
+describe("model routing on spans", () => {
+  function routingEntry(metadata: Record<string, unknown>): TimelineEntry {
+    return entry({
+      node_id: "n1",
+      node_label: "Agent",
+      node_type: "agent",
+      status: "success",
+      output: { text: "done" },
+      execution_time_ms: 120,
+      metadata,
+    });
+  }
+
+  it("carries the routing summary from node metadata onto the span", () => {
+    const model = buildTimelineModel(
+      [
+        routingEntry({
+          model_routing: {
+            routerLabel: "Auto Model",
+            routerCredentialId: "cred-1",
+            calls: [
+              { model: "gpt-4o-mini", option: "Fast", credentialName: "OpenAI", fallback: false, error: null },
+              { model: "gpt-5", option: "Deep", credentialName: "OpenAI", fallback: false, error: null },
+            ],
+          },
+        }),
+      ],
+      500,
+      new Map(),
+    );
+
+    const span = model.rows[0].spans[0];
+    expect(span.modelRouting?.routerLabel).toBe("Auto Model");
+    expect(span.modelRouting?.calls).toHaveLength(2);
+  });
+
+  it("leaves modelRouting null when a node did not route", () => {
+    const model = buildTimelineModel([routingEntry({})], 500, new Map());
+    expect(model.rows[0].spans[0].modelRouting).toBeNull();
+  });
+
+  it("ignores a malformed routing blob rather than rendering half of it", () => {
+    const model = buildTimelineModel(
+      [routingEntry({ model_routing: { routerLabel: "Auto" } })],
+      500,
+      new Map(),
+    );
+    expect(model.rows[0].spans[0].modelRouting).toBeNull();
+  });
+});
+
+describe("formatModelRoutingLabel", () => {
+  it("shows router and model for a single model", () => {
+    expect(
+      executionTimeline.formatModelRoutingLabel({
+        routerLabel: "Auto Model",
+        routerCredentialId: "c",
+        calls: [{ model: "gpt-5", option: "Deep", credentialName: "OpenAI", fallback: false, error: null }],
+      }),
+    ).toBe("Auto Model / gpt-5");
+  });
+
+  it("marks extra distinct models with a count", () => {
+    expect(
+      executionTimeline.formatModelRoutingLabel({
+        routerLabel: "Auto Model",
+        routerCredentialId: "c",
+        calls: [
+          { model: "gpt-4o-mini", option: "Fast", credentialName: "OpenAI", fallback: false, error: null },
+          { model: "gpt-5", option: "Deep", credentialName: "OpenAI", fallback: false, error: null },
+          { model: "gpt-5", option: "Deep", credentialName: "OpenAI", fallback: false, error: null },
+        ],
+      }),
+    ).toBe("Auto Model / gpt-5 +1");
+  });
+
+  it("returns null with no calls", () => {
+    expect(
+      executionTimeline.formatModelRoutingLabel({
+        routerLabel: "Auto Model",
+        routerCredentialId: "c",
+        calls: [],
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when nothing routed", () => {
+    expect(executionTimeline.formatModelRoutingLabel(null)).toBeNull();
+  });
+});

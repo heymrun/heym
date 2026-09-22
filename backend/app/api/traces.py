@@ -109,6 +109,7 @@ async def list_traces(
         base_query = base_query.where(
             or_(
                 LLMTrace.model.ilike(pattern),
+                LLMTrace.router_label.ilike(pattern),
                 LLMTrace.node_label.ilike(pattern),
                 Workflow.name.ilike(pattern),
                 Credential.name.ilike(pattern),
@@ -147,6 +148,8 @@ async def list_traces(
                 model=trace.model,
                 credential_id=trace.credential_id,
                 credential_name=credential_name,
+                router_credential_id=trace.router_credential_id,
+                router_label=trace.router_label,
                 workflow_id=trace.workflow_id,
                 workflow_name=workflow_name,
                 node_id=trace.node_id,
@@ -204,6 +207,7 @@ async def get_trace_stats(
             .where(
                 or_(
                     LLMTrace.model.ilike(pattern),
+                    LLMTrace.router_label.ilike(pattern),
                     LLMTrace.node_label.ilike(pattern),
                     Workflow.name.ilike(pattern),
                     Credential.name.ilike(pattern),
@@ -399,6 +403,8 @@ async def get_trace(
         model=trace.model,
         credential_id=trace.credential_id,
         credential_name=credential_name,
+        router_credential_id=trace.router_credential_id,
+        router_label=trace.router_label,
         workflow_id=trace.workflow_id,
         workflow_name=workflow_name,
         node_id=trace.node_id,

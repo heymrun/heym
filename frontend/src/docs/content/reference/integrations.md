@@ -20,6 +20,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
 | **Decision Model** | [Decision](../nodes/decision-node.md) | `base_url`, optional `api_key` |
+| **Model Router (Auto Model)** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults | a decision model credential, plus model options referencing your other credentials |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
 | **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
@@ -898,3 +899,27 @@ Loopback and private addresses are supported here, so running FlareSolverr besid
 - [Credentials Sharing](./credentials-sharing.md) – Share credentials with users and teams
 - [Security](./security.md) – Encryption at rest, access control
 - [Expression DSL](./expression-dsl.md) – `$credentials` syntax for dynamic access
+
+---
+
+## Model Router (Auto Model)
+
+Routes each request to one of your existing model credentials, using a decision model to
+choose. It stores references, never a key of its own.
+
+### Required Fields
+
+- `decision_credential_id` – a **Decision Model** credential you can access.
+- `decision_model` – the model that makes the routing call, for example `jev-latest`.
+- `options` – at least two entries, each with a name, one of your OpenAI/Google/Custom
+  credentials, a model on it, and criteria saying when it should win.
+
+### Optional Fields
+
+- `routing_instructions` – how to weigh the options overall.
+- One option may be marked as the fallback used when routing fails.
+
+### Notes
+
+Option names are what the decision model picks between, so they must be distinct. An
+option cannot point at another Model Router.

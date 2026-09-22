@@ -153,9 +153,15 @@ def execute(ctx: NodeExecutionContext) -> object:
         extra_body=extra_body,
     )
     trace_id = self._pop_internal_trace_id(output)
+    raw_routing = output.get("_model_routing")
+    model_routing = raw_routing if isinstance(raw_routing, dict) else None
     if output.get("error"):
         if trace_id:
-            raise NodeTraceableExecutionError(f"LLM error: {output.get('error')}", trace_id)
+            raise NodeTraceableExecutionError(
+                f"LLM error: {output.get('error')}",
+                trace_id,
+                model_routing=model_routing,
+            )
         raise ValueError(f"LLM error: {output.get('error')}")
     if json_output_enabled:
         llm_output = output
@@ -186,7 +192,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             except Exception as exc:
                 if trace_id:
                     raise NodeTraceableExecutionError(
-                        f"LLM JSON parse error: {exc}", trace_id
+                        f"LLM JSON parse error: {exc}",
+                        trace_id,
+                        model_routing=model_routing,
                     ) from exc
                 raise ValueError(f"LLM JSON parse error: {exc}") from exc
             if isinstance(parsed, dict):
@@ -197,5 +205,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["fallbackUsed"] = llm_output["fallbackUsed"]
         if llm_output.get("model"):
             output["model"] = llm_output["model"]
+        if model_routing is not None:
+            output["_model_routing"] = model_routing
     self._restore_internal_trace_id(output, trace_id)
     return output

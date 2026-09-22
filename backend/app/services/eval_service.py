@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
+    LLM_CREDENTIAL_TYPES,
     CredentialType,
     EvalRun,
     EvalRunResult,
@@ -21,6 +22,7 @@ from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import build_router_for_credential
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +184,7 @@ async def create_run(
     )
     if not credential:
         raise ValueError("Credential not found")
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise ValueError("Credential must be OpenAI, Google, or Custom type")
 
     # LLM-as-Judge uses combined single-request flow with main model; judge credential optional
@@ -289,6 +291,12 @@ async def _run_evals_into_run(
         raise ValueError("Credential not found")
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type == CredentialType.custom else None
 
@@ -335,6 +343,7 @@ async def _run_evals_into_run(
                         "response_format": {"type": "json_object"},
                         "content_only": True,
                         "trace_context": run_trace_ctx,
+                        "router": router,
                     }
                     if is_reasoning_model(model_id):
                         llm_kwargs["reasoning_effort"] = "low"
@@ -431,6 +440,12 @@ async def optimize_prompt(
     if not credential:
         raise ValueError("Credential not found")
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type == CredentialType.custom else None
 
@@ -453,6 +468,7 @@ Return ONLY the improved prompt, no explanations or meta-commentary. Preserve th
         temperature=0.3,
         max_tokens=4000,
         trace_context=trace_ctx,
+        router=router,
     )
     return result.get("text", system_prompt)
 
@@ -473,6 +489,12 @@ async def generate_test_data(
     if not credential:
         raise ValueError("Credential not found")
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type == CredentialType.custom else None
 
@@ -503,6 +525,7 @@ Respond with a JSON array of objects, each with "input" and "expected_output" ke
         temperature=0.7,
         max_tokens=16000,
         trace_context=trace_ctx,
+        router=router,
     )
     text = result.get("text", "[]")
     try:

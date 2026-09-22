@@ -25,13 +25,13 @@ from app.api.ai_assistant import (
     _build_user_message,
     _format_workflows_for_prompt,
     _load_agents_md_content,
-    get_openai_client,
     get_workflows_for_user_with_inputs,
+    resolve_model_binding,
     stream_dashboard_chat,
 )
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.db.models import (
-    CredentialType,
+    LLM_CREDENTIAL_TYPES,
     DashboardChatQueueItem,
     DashboardChatQuickPrompts,
     DashboardConversation,
@@ -315,7 +315,6 @@ async def _run_chat_turn(
                 return ChatTurnResult(False, assistant_message_id, stop_worker=True)
 
             config = decrypt_config(credential.encrypted_config)
-            client, provider = get_openai_client(credential.type, config, session_id=conv_id)
 
             attachment = (
                 FileAttachment(
@@ -355,9 +354,19 @@ async def _run_chat_turn(
                 _cancel_events[conv_id] = cancel_event
             workflow_note_ids: set[str] = set()
 
+            client, provider, model, trace_context = resolve_model_binding(
+                credential,
+                config,
+                turn.model,
+                session_id=conv_id,
+                trace_context=trace_context,
+                system_prompt=parts.full_system_prompt,
+                message=turn.content,
+            )
+
             async for chunk in stream_dashboard_chat(
                 client,
-                turn.model,
+                model,
                 parts.full_system_prompt,
                 list(history),
                 db,
@@ -1031,7 +1040,7 @@ async def send_message(
     credential = await get_accessible_credential(db, uuid.UUID(body.credential_id), current_user.id)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -1303,7 +1312,11 @@ async def get_context_summary(
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
     config = decrypt_config(credential.encrypted_config)
-    client, _provider = get_openai_client(credential.type, config)
+    # A token-count estimate, not a model request, so it must not spend a decision
+    # call; on Auto Model the fallback option stands in for the window size.
+    client, _provider, model, _trace = resolve_model_binding(
+        credential, config, model, consult_router=False
+    )
 
     parts = await _assemble_system_prompt_parts(
         current_user, db, include_attachment_instructions=False

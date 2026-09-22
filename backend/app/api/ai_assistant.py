@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
@@ -32,6 +33,7 @@ from app.api.workflows import (
     get_workflow_for_user,
 )
 from app.db.models import (
+    LLM_CREDENTIAL_TYPES,
     Board,
     BoardCard,
     BoardCardActivity,
@@ -68,6 +70,7 @@ from app.services.hitl_service import (
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.model_router import build_router_for_credential, load_option_credential
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
@@ -1311,6 +1314,68 @@ def get_openai_client(
     return create_openai_client(api_key=config.get("api_key"), session_id=session_id), "OpenAI"
 
 
+def resolve_model_binding(
+    credential: Credential,
+    config: dict,
+    model: str,
+    *,
+    session_id: str | None = None,
+    trace_context: LLMTraceContext | None = None,
+    system_prompt: str | None = None,
+    message: str | None = None,
+    consult_router: bool = True,
+) -> tuple[OpenAI, str, str, LLMTraceContext | None]:
+    """Bind the client, provider, model and trace context for one assistant request.
+
+    The assistant builds its own client instead of going through `LLMService`, so
+    routing has to happen here too; without it a Model Router credential would reach
+    `get_openai_client` with no API key. The returned model and trace context describe
+    what actually ran, which is what keeps Traces honest for the Chat surface.
+    """
+    # Checked before reading id/name so an ordinary credential takes the exact path it
+    # took before routing existed.
+    if credential.type != CredentialType.model_router:
+        client, provider = get_openai_client(credential.type, config, session_id=session_id)
+        return client, provider, model, trace_context
+
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+        trace_context=trace_context,
+    )
+    if router is None:
+        client, provider = get_openai_client(credential.type, config, session_id=session_id)
+        return client, provider, model, trace_context
+
+    if consult_router:
+        option = router.route(
+            system_instruction=system_prompt,
+            message=message,
+            tool_names=None,
+        ).option
+    else:
+        # Callers that only need a client shape, such as a context-window estimate,
+        # must not spend a decision call. The fallback option stands in for the run.
+        option = router.config.default_option or router.config.options[0]
+    bound = load_option_credential(option)
+    client, provider = get_openai_client(
+        CredentialType(bound.credential_type),
+        {"api_key": bound.api_key, "base_url": bound.base_url or ""},
+        session_id=session_id,
+    )
+    routed_context = trace_context
+    if trace_context is not None:
+        routed_context = replace(
+            trace_context,
+            credential_id=bound.credential_uuid,
+            router_credential_id=credential.id,
+            router_label=credential.name,
+        )
+    return client, provider, option.model, routed_context
+
+
 async def get_workflows_for_user_with_inputs(
     db: AsyncSession, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
@@ -1509,11 +1574,7 @@ def _is_placeholder_or_unowned_credential_id(
 
 
 def _selected_credential_is_owned_llm(credential: Credential, user_id: uuid.UUID) -> bool:
-    return credential.owner_id == user_id and credential.type in (
-        CredentialType.openai,
-        CredentialType.google,
-        CredentialType.custom,
-    )
+    return credential.owner_id == user_id and credential.type in LLM_CREDENTIAL_TYPES
 
 
 def _clear_unowned_credential_field(
@@ -4566,14 +4627,13 @@ async def analyze_workflow_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
     config = decrypt_config(credential.encrypted_config)
-    client, provider = get_openai_client(credential.type, config)
 
     workflow_id = None
     if request.current_workflow:
@@ -4603,11 +4663,19 @@ async def analyze_workflow_stream(
         node_label="Workflow Analyze",
         source="workflow_analyze",
     )
+    client, provider, model, trace_context = resolve_model_binding(
+        credential,
+        config,
+        request.model,
+        trace_context=trace_context,
+        system_prompt=system_prompt,
+        message="Analyze this workflow.",
+    )
 
     messages = [{"role": "user", "content": "Analyze this workflow."}]
     assistant_stream = stream_llm_response(
         client,
-        request.model,
+        model,
         system_prompt,
         messages,
         provider,
@@ -4643,7 +4711,7 @@ async def workflow_assistant_stream(
             detail="Credential not found",
         )
 
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -4651,7 +4719,6 @@ async def workflow_assistant_stream(
 
     config = decrypt_config(credential.encrypted_config)
     session_id = str(request.conversation_id or uuid.uuid4())
-    client, provider = get_openai_client(credential.type, config, session_id=session_id)
 
     node_templates = await template_service.list_node_templates(db, current_user, None)
     node_template_payload = [
@@ -4723,10 +4790,19 @@ async def workflow_assistant_stream(
         node_label="AI Ask" if request.ask_mode else "AI Builder",
         source="assistant",
     )
+    client, provider, model, trace_context = resolve_model_binding(
+        credential,
+        config,
+        request.model,
+        session_id=session_id,
+        trace_context=trace_context,
+        system_prompt=system_prompt,
+        message=request.message,
+    )
 
     assistant_stream = stream_llm_response(
         client,
-        request.model,
+        model,
         system_prompt,
         messages,
         provider,
@@ -4761,7 +4837,7 @@ async def dashboard_chat_stream(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -4769,7 +4845,6 @@ async def dashboard_chat_stream(
 
     config = decrypt_config(credential.encrypted_config)
     session_id = str(request.conversation_id or uuid.uuid4())
-    client, provider = get_openai_client(credential.type, config, session_id=session_id)
 
     history = request.conversation_history or []
     if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
@@ -4819,6 +4894,16 @@ async def dashboard_chat_stream(
         )
     if request.attachment:
         system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
+
+    client, provider, model, trace_context = resolve_model_binding(
+        credential,
+        config,
+        request.model,
+        session_id=session_id,
+        trace_context=trace_context,
+        system_prompt=system_prompt,
+        message=request.message,
+    )
     public_base_url = build_public_base_url(http_request)
     cancel_event = Event()
 
@@ -4840,7 +4925,7 @@ async def dashboard_chat_stream(
             try:
                 async for chunk in stream_dashboard_chat(
                     client,
-                    request.model,
+                    model,
                     system_prompt,
                     messages,
                     db,
@@ -4929,20 +5014,26 @@ async def fix_transcription(
             detail="Credential not found",
         )
 
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
     config = decrypt_config(credential.encrypted_config)
-    client, _ = get_openai_client(credential.type, config)
-
-    is_reasoning = is_reasoning_model(request.model)
     system_prompt = f"{FIX_TRANSCRIPTION_PROMPT} /nothink"
+    client, _provider, model, _trace = resolve_model_binding(
+        credential,
+        config,
+        request.model,
+        system_prompt=system_prompt,
+        message=request.text,
+    )
+
+    is_reasoning = is_reasoning_model(model)
 
     kwargs = {
-        "model": request.model,
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": request.text},

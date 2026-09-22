@@ -95,4 +95,37 @@ describe("useResponsesApiCapability", () => {
     });
     expect(cap.available.value).toBe(false);
   });
+
+  it("reports Auto Model as unsupported with the model's own reason", () => {
+    const capability = useResponsesApiCapability({
+      credentialType: ref("model_router"),
+      batchModeEnabled: ref(false),
+      outputType: ref("text"),
+      selectedModel: ref({
+        id: "auto",
+        name: "Auto",
+        is_reasoning: false,
+        supports_batch: false,
+        supports_responses: false,
+        responses_support_reason:
+          "Auto Model does not support the Responses API. Pick a specific credential and model to use it.",
+      }),
+    });
+
+    expect(capability.available.value).toBe(false);
+    expect(capability.message.value).toMatch(/Auto Model does not support/);
+    expect(capability.tone.value).toBe("warning");
+  });
+
+  it("explains Auto Model even before its model row has loaded", () => {
+    const capability = useResponsesApiCapability({
+      credentialType: ref("model_router"),
+      batchModeEnabled: ref(false),
+      outputType: ref("text"),
+      selectedModel: ref(null),
+    });
+
+    expect(capability.available.value).toBe(false);
+    expect(capability.message.value).toMatch(/Auto Model/);
+  });
 });

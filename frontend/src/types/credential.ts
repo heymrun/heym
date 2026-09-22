@@ -33,7 +33,8 @@ export type CredentialType =
   | "elevenlabs"
   | "clickhouse"
   | "rag"
-  | "decision";
+  | "decision"
+  | "model_router";
 
 export interface Credential {
   id: string;
@@ -144,6 +145,23 @@ export interface CredentialConfigDecision {
 export interface CredentialConfigOpenCode {
   api_key: string;
   base_url?: string;
+}
+
+export interface CredentialConfigModelRouterOption {
+  id: string;
+  label: string;
+  credential_id: string;
+  model: string;
+  criteria: string;
+  is_default: boolean;
+}
+
+/** Holds references only: a router has no key of its own, so nothing here is masked. */
+export interface CredentialConfigModelRouter {
+  decision_credential_id: string;
+  decision_model: string;
+  routing_instructions: string;
+  options: CredentialConfigModelRouterOption[];
 }
 
 export interface CredentialConfigGoogle {
@@ -335,6 +353,7 @@ export type CredentialConfig =
   | CredentialConfigCodex
   | CredentialConfigOpenCode
   | CredentialConfigDecision
+  | CredentialConfigModelRouter
   | CredentialConfigGoogle
   | CredentialConfigGitHub
   | CredentialConfigJira
@@ -377,9 +396,17 @@ export interface UpdateCredentialRequest {
   config?: CredentialConfig;
 }
 
+/**
+ * A partial config sent alongside `credential_id` to override one stored field for a
+ * test run. The API merges it onto the stored config, so the rest need not be resent.
+ */
+export interface CredentialTestOverride {
+  model?: string;
+}
+
 export interface CredentialTestRequest {
   type: CredentialType;
-  config?: CredentialConfig;
+  config?: CredentialConfig | CredentialTestOverride;
   credential_id?: string;
 }
 
@@ -457,6 +484,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   pgvector: "RAG: Psql + OpenAI",
   rag: "RAG: Custom Embeddings",
   decision: "Decision Model",
+  model_router: "Model Router (Auto Model)",
   grist: "Grist",
   rabbitmq: "RabbitMQ",
   cohere: "Cohere Reranker",
@@ -476,6 +504,8 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   openai: "Connect to OpenAI API for GPT models",
   decision:
     "Connect to a decision model endpoint that answers typed questions with probabilities",
+  model_router:
+    "Let a decision model pick which of your models serves each request",
   codex: "Use a ChatGPT/Codex access token for the local Codex runner",
   opencode: "Use an OpenCode Go gateway API key for the OpenCode Go coding agent",
   google: "Connect to Google AI for Gemini models",
@@ -512,3 +542,20 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   s3: "Connect to Amazon S3 — manage buckets, folders, and objects",
   elevenlabs: "Text-to-speech and speech-to-text for chat voice features",
 };
+
+export interface ModelRouterOptionResponse {
+  id: string;
+  label: string;
+  credential_id: string;
+  model: string;
+  criteria: string;
+  is_default: boolean;
+}
+
+export interface ModelRouterConfigResponse {
+  decision_credential_id: string;
+  decision_model: string;
+  routing_instructions: string;
+  options: ModelRouterOptionResponse[];
+  timeout_seconds?: number | null;
+}

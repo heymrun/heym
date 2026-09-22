@@ -20,6 +20,7 @@ from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import ModelRouter, build_router_for_credential
 
 logger = logging.getLogger(__name__)
 
@@ -52,15 +53,23 @@ OUTPUT_SYSTEM_PROMPT = (
 )
 
 
-async def _resolve_mapper_credential(db, board: Board) -> tuple[Credential, str, str | None]:
-    """Load the board's mapper credential and decrypt its api key/base url."""
+async def _resolve_mapper_credential(
+    db, board: Board
+) -> tuple[Credential, str, str | None, ModelRouter | None]:
+    """Load the board's mapper credential, its api key/base url, and its router if any."""
     credential = await get_accessible_credential(db, board.mapper_credential_id, board.owner_id)
     if credential is None:
         raise ValueError("Board mapper credential not found")
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type.value == "custom" else None
-    return credential, api_key, base_url
+    return credential, api_key, base_url, router
 
 
 async def humanize_output(
@@ -77,7 +86,7 @@ async def humanize_output(
     Best-effort: returns None on any failure so the caller falls back to the raw snippet.
     """
     try:
-        credential, api_key, base_url = await _resolve_mapper_credential(db, board)
+        credential, api_key, base_url, router = await _resolve_mapper_credential(db, board)
         result = await execute_llm(
             credential_type=credential.type.value,
             api_key=api_key,
@@ -101,6 +110,7 @@ async def humanize_output(
                 source="kanban_ai_mapper",
                 session_id=session_id,
             ),
+            router=router,
         )
         text = (result.get("text") or "").strip()
         return text or None
@@ -168,7 +178,7 @@ async def build_workflow_inputs(
     ``available_context`` is the full fixed payload (from ``build_card_payload``); it is
     the complete context the mapper may draw from. Raises on any failure (strict).
     """
-    credential, api_key, base_url = await _resolve_mapper_credential(db, board)
+    credential, api_key, base_url, router = await _resolve_mapper_credential(db, board)
 
     input_fields = _input_field_keys(workflow.nodes)
     payload_for_llm = {
@@ -197,6 +207,7 @@ async def build_workflow_inputs(
         response_format={"type": "json_object"},
         content_only=True,
         trace_context=trace_context,
+        router=router,
     )
 
     text = (result.get("text") or "").strip()

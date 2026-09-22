@@ -23,6 +23,7 @@ from app.db.session import SessionLocal
 from app.services.encryption import decrypt_config
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import ModelRouter, build_router_for_credential
 
 logger = logging.getLogger(__name__)
 
@@ -729,6 +730,7 @@ async def _run_memory_extraction_llm(
     model: str,
     user_payload: str,
     trace_context: LLMTraceContext | None,
+    router: ModelRouter | None = None,
 ) -> dict[str, Any]:
     """LLM-only coroutine (no DB); safe to run under asyncio.run in a worker thread."""
     common: dict[str, Any] = {
@@ -740,6 +742,7 @@ async def _run_memory_extraction_llm(
         "user_message": user_payload,
         "temperature": 0.2,
         "trace_context": trace_context,
+        "router": router,
     }
     try:
         return await execute_llm(
@@ -791,6 +794,12 @@ def extract_and_merge_memory_sync(
                 return
 
             config = decrypt_config(cred.encrypted_config)
+            router = build_router_for_credential(
+                credential_id=str(cred.id),
+                credential_name=cred.name,
+                credential_type=cred.type.value,
+                config=config,
+            )
             api_key = config.get("api_key")
             base_url = config.get("base_url")
             if not base_url and cred.type.value == "google":
@@ -855,6 +864,7 @@ def extract_and_merge_memory_sync(
                         model=model,
                         user_payload=user_payload,
                         trace_context=trace_context,
+                        router=router,
                     )
                 )
             except Exception:

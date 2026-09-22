@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { Copy, X } from "lucide-vue-next";
 import type { SpanItem } from "@/components/Panels/executionTimeline";
-import { formatTimelineMs } from "@/components/Panels/executionTimeline";
+import { formatModelRoutingLabel, formatTimelineMs } from "@/components/Panels/executionTimeline";
 import JsonTree from "@/components/ui/JsonTree.vue";
 
 const props = defineProps<{ span: SpanItem }>();
@@ -61,6 +61,35 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div><span class="text-muted-foreground">Attempts</span><div>{{ span.retryFinalAttempt ?? 1 }}<span v-if="span.retryMaxAttempts"> / {{ span.retryMaxAttempts }}</span></div></div>
+      <div v-if="span.modelRouting">
+        <span class="text-muted-foreground">Model</span><div
+          class="font-medium"
+          data-testid="span-model-routing"
+        >
+          {{ formatModelRoutingLabel(span.modelRouting) }}
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="span.modelRouting && span.modelRouting.calls.length > 1"
+      class="mx-2 mb-2 space-y-0.5 rounded border border-border/40 px-2 py-1.5 text-[10px]"
+    >
+      <div class="text-muted-foreground">
+        Routed per turn
+      </div>
+      <div
+        v-for="(call, index) in span.modelRouting.calls"
+        :key="index"
+        class="flex items-center gap-2 font-mono"
+      >
+        <span class="text-muted-foreground">{{ index + 1 }}.</span><span>{{ call.model }}</span><span
+          v-if="call.option"
+          class="text-muted-foreground"
+        >{{ call.option }}</span><span
+          v-if="call.fallback"
+          class="text-amber-600"
+        >fallback</span>
+      </div>
     </div>
     <div
       v-if="span.error"

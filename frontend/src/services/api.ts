@@ -29,6 +29,7 @@ import type {
   Credential,
   CredentialForIntellisense,
   CredentialListItem,
+  ModelRouterConfigResponse,
   CredentialShare,
   CredentialType,
   CreateCredentialRequest,
@@ -1335,6 +1336,14 @@ export const credentialsApi = {
 
   listDecision: async (): Promise<CredentialListItem[]> => {
     const response = await api.get<CredentialListItem[]>("/credentials/decision");
+    return response.data;
+  },
+
+  /** A router's stored config, which is not carried by the credential detail response. */
+  getModelRouterConfig: async (id: string): Promise<ModelRouterConfigResponse> => {
+    const response = await api.get<ModelRouterConfigResponse>(
+      `/credentials/${id}/model-router`,
+    );
     return response.data;
   },
 

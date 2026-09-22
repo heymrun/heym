@@ -23,6 +23,10 @@ class LLMTraceContext:
     source: str = "workflow"
     # Provider request correlation only; this is not a credential or a persisted trace ID.
     session_id: str | None = None
+    # Set when a Model Router chose the model. `credential_id` above stays the
+    # credential that actually served the request.
+    router_credential_id: uuid.UUID | None = None
+    router_label: str | None = None
     trace_ids: list[uuid.UUID] = field(default_factory=list, compare=False, repr=False)
 
 
@@ -53,6 +57,8 @@ def record_llm_trace(
             trace = LLMTrace(
                 user_id=context.user_id,
                 credential_id=context.credential_id,
+                router_credential_id=context.router_credential_id,
+                router_label=context.router_label,
                 workflow_id=context.workflow_id,
                 source=context.source,
                 request_type=request_type,

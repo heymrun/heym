@@ -1790,11 +1790,13 @@ export function usePropertiesPanelController() {
         ? (node.data.guardrailCredentialId as string | undefined)
         : undefined;
 
+    // A guardrail check is a fixed classification call, so it never routes.
     return buildCredentialOptions(
       llmCredentials.value,
       selectedCredentialId,
       "Select credential...",
       "Credential not available (re-select)",
+      true,
     );
   });
 
@@ -1881,6 +1883,7 @@ export function usePropertiesPanelController() {
       selectedCredentialId,
       "None (no fallback)",
       "Credential not available (re-select)",
+      Boolean(node?.data.responsesApiEnabled),
     );
   });
 
@@ -6206,12 +6209,19 @@ export function usePropertiesPanelController() {
     selectedCredentialId: string | undefined,
     placeholderLabel: string,
     sharedFallbackLabel: string,
-  ): { value: string; label: string }[] {
-    const options: { value: string; label: string }[] = [
+    disableRouters: boolean = false,
+  ): { value: string; label: string; disabled?: boolean; title?: string }[] {
+    const options: { value: string; label: string; disabled?: boolean; title?: string }[] = [
       { value: "", label: placeholderLabel },
       ...credentials.map((c) => ({
         value: c.id,
         label: c.is_shared ? `${c.name} (${c.type}) - shared` : `${c.name} (${c.type})`,
+        // Kept visible rather than filtered out, so the reason can be read.
+        disabled: disableRouters && c.type === "model_router",
+        title:
+          disableRouters && c.type === "model_router"
+            ? "Auto Model cannot be used with the Responses API"
+            : undefined,
       })),
     ];
 
@@ -6241,6 +6251,7 @@ export function usePropertiesPanelController() {
       selectedCredentialId,
       "Select credential...",
       "Credential not available (re-select)",
+      Boolean(node?.data.responsesApiEnabled),
     );
   });
 

@@ -10,10 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.db.models import Credential, CredentialShare, CredentialType, User
+from app.db.models import LLM_CREDENTIAL_TYPES, Credential, CredentialShare, User
 from app.db.session import get_db
 from app.services.encryption import decrypt_config
 from app.services.llm_service import execute_llm
+from app.services.model_router import build_router_for_credential
 from app.services.playwright_code_generator import (
     generate_playwright_code,
     normalize_playwright_auth_state,
@@ -187,7 +188,7 @@ async def ai_step(
             detail="Credential not found or access denied",
         )
 
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
@@ -199,6 +200,12 @@ async def ai_step(
         return {"steps": saved_steps}
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key")
     base_url = config.get("base_url")
     if not api_key:
@@ -277,6 +284,7 @@ async def ai_step(
             temperature=0.1,
             response_format=response_format,
             image_input=image_input,
+            router=router,
         )
     except UnprocessableEntityError as e:
         err_msg = str(e).lower()
@@ -297,6 +305,7 @@ async def ai_step(
                     temperature=0.1,
                     response_format=response_format,
                     image_input=None,
+                    router=router,
                 )
             except Exception as retry_e:
                 logger.exception("Playwright AI step LLM retry without image failed")
@@ -401,13 +410,19 @@ async def ai_step_heal(
             detail="Credential not found or access denied",
         )
 
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key")
     base_url = config.get("base_url")
     if not api_key:
@@ -481,6 +496,7 @@ async def ai_step_heal(
             temperature=0.1,
             response_format=response_format,
             image_input=image_input,
+            router=router,
         )
     except UnprocessableEntityError as e:
         err_msg = str(e).lower()
@@ -503,6 +519,7 @@ async def ai_step_heal(
                     temperature=0.1,
                     response_format=response_format,
                     image_input=None,
+                    router=router,
                 )
             except Exception as retry_e:
                 logger.exception("Playwright AI step heal LLM retry without image failed")

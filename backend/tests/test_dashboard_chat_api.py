@@ -1206,7 +1206,12 @@ class ContextSummaryEndpointTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=fake_credential),
             ),
             patch("app.api.chats.decrypt_config", return_value={"api_key": "x"}),
-            patch("app.api.chats.get_openai_client", return_value=(MagicMock(), "OpenAI")),
+            # The context summary now binds through resolve_model_binding, so Auto Model
+            # reports a window without spending a decision call.
+            patch(
+                "app.api.chats.resolve_model_binding",
+                return_value=(MagicMock(), "OpenAI", "gpt-4o", None),
+            ),
             patch(
                 "app.api.chats._assemble_system_prompt_parts",
                 new=AsyncMock(return_value=fake_parts),

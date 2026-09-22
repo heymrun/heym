@@ -69,6 +69,10 @@ class ListRangeTests(unittest.IsolatedAsyncioTestCase):
         trace.provider = "openai"
         trace.model = "gpt-4o-mini"
         trace.credential_id = uuid.uuid4()
+        # No Model Router on this trace; a MagicMock would otherwise fail
+        # LLMTraceListItem validation for the two router columns.
+        trace.router_credential_id = None
+        trace.router_label = None
         trace.workflow_id = None
         trace.node_id = None
         trace.node_label = None

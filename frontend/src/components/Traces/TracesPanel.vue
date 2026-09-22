@@ -155,8 +155,10 @@ function isMcpWorkflowServerTrace(trace: {
 }
 
 function traceModelListLabel(trace: LLMTraceListItem): string | null {
-  if (trace.model)
-    return trace.model;
+  if (trace.model) {
+    // Both halves, so a run shows that automatic selection happened and where it went.
+    return trace.router_label ? `${trace.router_label} / ${trace.model}` : trace.model;
+  }
   if (isMcpWorkflowServerTrace(trace))
     return null;
   return "Unknown model";
@@ -1029,7 +1031,7 @@ onMounted(async () => {
               Model
             </div>
             <div class="mt-1 text-sm font-medium">
-              {{ selectedTrace.model || "Unknown" }}
+              {{ traceModelListLabel(selectedTrace) || "Unknown" }}
             </div>
           </Card>
           <Card

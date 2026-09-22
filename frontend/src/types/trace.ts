@@ -7,6 +7,9 @@ export interface LLMTraceListItem {
   model: string | null;
   credential_id: string | null;
   credential_name: string | null;
+  /** Set when a Model Router chose the model; `model` above is what actually ran. */
+  router_credential_id?: string | null;
+  router_label?: string | null;
   workflow_id: string | null;
   workflow_name: string | null;
   node_id: string | null;

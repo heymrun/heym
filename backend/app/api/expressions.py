@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.workflows import get_credentials_context, get_workflow_for_user
-from app.db.models import CredentialType, User, Workflow
+from app.db.models import LLM_CREDENTIAL_TYPES, CredentialType, User, Workflow
 from app.db.session import get_db
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
@@ -30,6 +30,7 @@ from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import build_router_for_credential
 from app.services.workflow_dsl_prompt import (
     DASHBOARD_WIDGET_PROMPT_HINT,
     WORKFLOW_DSL_SYSTEM_PROMPT,
@@ -233,10 +234,16 @@ async def _generate_expression(
     if not credential:
         raise ValueError("Credential not found")
 
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+    if credential.type not in LLM_CREDENTIAL_TYPES:
         raise ValueError("Credential must be OpenAI, Google, or Custom type")
 
     config = decrypt_config(credential.encrypted_config)
+    router = build_router_for_credential(
+        credential_id=str(credential.id),
+        credential_name=credential.name,
+        credential_type=credential.type.value,
+        config=config,
+    )
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type == CredentialType.custom else None
 
@@ -306,6 +313,7 @@ async def _generate_expression(
         temperature=trace_temperature,
         max_tokens=EXPRESSION_GENERATE_MAX_OUTPUT_TOKENS,
         trace_context=trace_ctx,
+        router=router,
     )
     raw = _normalize_generated_expression(result.get("text", ""))
     return _finalize_generated_expression(raw)

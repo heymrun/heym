@@ -517,6 +517,10 @@ class LLMTraceListItem(BaseModel):
     model: str | None = None
     credential_id: uuid.UUID | None = None
     credential_name: str | None = None
+    # Set when a Model Router chose the model. `model` above is what actually ran, so
+    # cost stays attributed to the real model rather than to the router.
+    router_credential_id: uuid.UUID | None = None
+    router_label: str | None = None
     workflow_id: uuid.UUID | None = None
     workflow_name: str | None = None
     node_id: str | None = None
@@ -579,6 +583,7 @@ class CredentialType(str, Enum):
     google_drive = "google_drive"
     rag = "rag"
     decision = "decision"
+    model_router = "model_router"
 
 
 class CredentialConfigOpenAI(BaseModel):
@@ -866,6 +871,29 @@ class GlobalVariableShareResponse(BaseModel):
 
 class GlobalVariableBulkDeleteRequest(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class ModelRouterOptionResponse(BaseModel):
+    id: str
+    label: str
+    credential_id: str
+    model: str
+    criteria: str = ""
+    is_default: bool = False
+
+
+class ModelRouterConfigResponse(BaseModel):
+    """A router's stored config, returned so the dialog can edit it.
+
+    Safe to return in full: a router references credentials by id and holds no key of
+    its own, which is why there is no masked variant of this model.
+    """
+
+    decision_credential_id: str
+    decision_model: str
+    routing_instructions: str = ""
+    options: list[ModelRouterOptionResponse] = Field(default_factory=list)
+    timeout_seconds: float | None = None
 
 
 class LLMModel(BaseModel):

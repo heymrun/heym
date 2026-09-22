@@ -60,6 +60,7 @@ from app.services.expression_evaluator import (
 )
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
+from app.services.model_router import ModelRouterConfigError, build_router_for_credential
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
 from app.services.node_execution.extra_body import resolve_extra_body
 from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
@@ -324,9 +325,15 @@ def _parse_json_text(value: object) -> object:
 class NodeTraceableExecutionError(ValueError):
     """Raised when a node error has a trace entry that should stay linked."""
 
-    def __init__(self, message: str, trace_id: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        trace_id: str,
+        model_routing: dict | None = None,
+    ) -> None:
         super().__init__(message)
         self.trace_id = trace_id
+        self.model_routing = model_routing
 
 
 class WorkflowCancelledError(Exception):
@@ -2429,6 +2436,12 @@ class WorkflowExecutor:
         return trace_id if isinstance(trace_id, str) and trace_id else None
 
     @staticmethod
+    def _pop_model_routing(output: dict[str, Any]) -> dict[str, Any] | None:
+        """Take the router summary off a node output so it lands in metadata instead."""
+        routing = output.pop("_model_routing", None)
+        return routing if isinstance(routing, dict) else None
+
+    @staticmethod
     def _restore_internal_trace_id(output: dict[str, Any], trace_id: str | None) -> None:
         if trace_id:
             output["_trace_id"] = trace_id
@@ -3523,27 +3536,54 @@ class WorkflowExecutor:
         last_trace_id: str | None = None
         for attempt_idx, (cid, mod) in enumerate(attempts):
             credential_type = None
+            credential_name = ""
             api_key = None
             base_url = None
+            credential_config: dict = {}
             try:
                 with SessionLocal() as db:
                     cred = self._get_accessible_credential(db, cid)
                     if cred:
                         credential_type = cred.type
-                        config = decrypt_config(cred.encrypted_config)
-                        api_key = config.get("api_key")
-                        base_url = config.get("base_url")
+                        credential_name = cred.name
+                        credential_config = decrypt_config(cred.encrypted_config)
+                        api_key = credential_config.get("api_key")
+                        base_url = credential_config.get("base_url")
             except Exception as e:
                 last_error = e
                 last_model = mod
                 continue
 
-            if not api_key:
+            trace_context = self._build_llm_trace_context(cid, node_id)
+
+            router = None
+            if credential_type is not None:
+                try:
+                    router = build_router_for_credential(
+                        credential_id=cid,
+                        credential_name=credential_name,
+                        credential_type=credential_type.value,
+                        config=credential_config,
+                        trace_context=trace_context,
+                    )
+                except ModelRouterConfigError as e:
+                    last_error = e
+                    last_model = mod
+                    continue
+
+            # A router has no key of its own; the option it picks supplies one.
+            if not api_key and router is None:
                 last_error = ValueError("Credential has no API key")
                 last_model = mod
                 continue
 
-            trace_context = self._build_llm_trace_context(cid, node_id)
+            if output_type == "image" and router is not None:
+                last_error = ValueError(
+                    "Model Router credentials cannot generate or edit images. "
+                    "Pick a specific credential and image model."
+                )
+                last_model = mod
+                continue
 
             if output_type == "image":
                 try:
@@ -3620,6 +3660,7 @@ class WorkflowExecutor:
                             should_abort=should_abort,
                             request_timeout=request_timeout,
                             extra_body=extra_body,
+                            router=router,
                         )
                     )
                 else:
@@ -3643,6 +3684,7 @@ class WorkflowExecutor:
                             request_timeout=request_timeout,
                             extra_body=extra_body,
                             use_responses_api=use_responses_api,
+                            router=router,
                         )
                     )
                 out = dict(result)
@@ -5454,30 +5496,52 @@ class WorkflowExecutor:
         agent_last_trace_id: str | None = None
         for attempt_idx, (cid, mod) in enumerate(attempts):
             credential_type = None
+            credential_name = ""
             api_key = None
             base_url = None
+            credential_config: dict = {}
             try:
                 with SessionLocal() as db:
                     cred = self._get_accessible_credential(db, cid)
                     if cred:
                         credential_type = cred.type
-                        config = decrypt_config(cred.encrypted_config)
-                        api_key = config.get("api_key")
-                        base_url = config.get("base_url")
+                        credential_name = cred.name
+                        credential_config = decrypt_config(cred.encrypted_config)
+                        api_key = credential_config.get("api_key")
+                        base_url = credential_config.get("base_url")
             except Exception as e:
                 agent_last_error = e
                 agent_last_model = mod
                 continue
 
-            if not api_key:
+            trace_context = self._build_llm_trace_context(cid, node_id)
+
+            router = None
+            if credential_type is not None:
+                try:
+                    router = build_router_for_credential(
+                        credential_id=cid,
+                        credential_name=credential_name,
+                        credential_type=credential_type.value,
+                        config=credential_config,
+                        trace_context=trace_context,
+                    )
+                except ModelRouterConfigError as e:
+                    agent_last_error = e
+                    agent_last_model = mod
+                    continue
+
+            # A router has no key of its own; the option it picks supplies one.
+            if not api_key and router is None:
                 agent_last_error = ValueError("Credential has no API key")
                 agent_last_model = mod
                 continue
 
-            trace_context = self._build_llm_trace_context(cid, node_id)
             effective_hitl_mcp_policy = fallback_hitl_mcp_policy
             attempt_system_instruction = system_instruction
-            if hitl_enabled and mcp_tool_names:
+            # A fixed classification call, so it never routes; on Auto Model the
+            # configured fallback policy is used instead.
+            if hitl_enabled and mcp_tool_names and router is None:
                 classified_hitl_mcp_policy = self._classify_hitl_mcp_policy_with_model(
                     credential_type=credential_type.value,
                     api_key=api_key,
@@ -5558,6 +5622,7 @@ class WorkflowExecutor:
                             request_timeout=request_timeout_seconds,
                             extra_body=agent_extra_body,
                             use_responses_api=agent_use_responses_api,
+                            router=router,
                         )
                     )
                 else:
@@ -5580,6 +5645,7 @@ class WorkflowExecutor:
                             request_timeout=request_timeout_seconds,
                             extra_body=agent_extra_body,
                             use_responses_api=agent_use_responses_api,
+                            router=router,
                         )
                     )
             except Exception as e:
@@ -7155,6 +7221,9 @@ class WorkflowExecutor:
         trace_id = getattr(last_error, "trace_id", None)
         if isinstance(trace_id, str) and trace_id:
             error_metadata["trace_id"] = trace_id
+        error_routing = getattr(last_error, "model_routing", None)
+        if isinstance(error_routing, dict):
+            error_metadata["model_routing"] = error_routing
 
         if on_error_enabled:
             output_base["_errorBranch"] = True
@@ -7296,6 +7365,9 @@ class WorkflowExecutor:
             trace_id = self._pop_internal_trace_id(output)
             if trace_id:
                 metadata["trace_id"] = trace_id
+            model_routing = self._pop_model_routing(output)
+            if model_routing:
+                metadata["model_routing"] = model_routing
 
             return NodeResult(
                 node_id=node_id,

@@ -6,7 +6,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -30,6 +30,11 @@ from app.services.llm_transport import (
     RequestOpts,
     ResponsesTransport,
     ToolResult,
+)
+from app.services.model_router import (
+    ROUTER_STATE_MESSAGE_CHARS,
+    ModelRouter,
+    load_option_credential,
 )
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
@@ -521,6 +526,43 @@ def _has_complete_structured_content(
     return True
 
 
+@dataclass(frozen=True)
+class TurnBinding:
+    """The client, provider and model serving one provider request.
+
+    Without a router this is the credential the caller passed and never changes.
+    With a router it is re-derived before every request, which is what lets an agent
+    tool loop move between models mid-run.
+    """
+
+    client: OpenAI
+    provider: str
+    model: str
+    credential_id: uuid.UUID | None = None
+    credential_name: str | None = None
+    router_credential_id: uuid.UUID | None = None
+    router_label: str | None = None
+    option_label: str | None = None
+    fallback: bool = False
+    routing_error: str | None = None
+
+
+def _routing_message_from_tool_results(tool_entries: list[dict[str, Any]]) -> str:
+    """Condense a turn's tool output into the text the router reads next.
+
+    Only the text matters for a routing decision, and `build_routing_state` truncates
+    it again, so this stays a cheap join rather than a full serialisation.
+    """
+    parts: list[str] = []
+    for entry in tool_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get("result") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)[:ROUTER_STATE_MESSAGE_CHARS]
+
+
 class LLMService:
     def __init__(
         self,
@@ -530,7 +572,13 @@ class LLMService:
         trace_context: LLMTraceContext | None = None,
         request_timeout: float = LLM_REQUEST_TIMEOUT,
         use_responses_api: bool = False,
+        router: ModelRouter | None = None,
     ) -> None:
+        if router is not None and use_responses_api:
+            raise ValueError(
+                "Auto Model does not support the Responses API. Turn the Responses API "
+                "off, or pick a specific credential and model."
+            )
         self.credential_type = credential_type
         self.api_key = api_key
         self.base_url = base_url
@@ -538,6 +586,8 @@ class LLMService:
         self.session_id = (trace_context.session_id if trace_context else None) or str(uuid.uuid4())
         self.request_timeout = request_timeout
         self.use_responses_api = use_responses_api
+        self.router = router
+        self._routed_calls: list[dict[str, Any]] = []
 
     def _get_client(self) -> tuple[OpenAI, str]:
         """Get OpenAI client configured for the credential type."""
@@ -576,6 +626,119 @@ class LLMService:
             ), "OpenAI"
         return create_openai_client(session_id=self.session_id, **client_kwargs), "OpenAI"
 
+    def _client_for(
+        self, credential_type: str, api_key: str, base_url: str | None
+    ) -> tuple[OpenAI, str]:
+        """Build a provider client for an arbitrary credential, not just self's."""
+        if credential_type == CredentialType.google.value:
+            return create_openai_client(
+                api_key=api_key,
+                base_url=GOOGLE_OPENAI_BASE_URL,
+                timeout=self.request_timeout,
+            ), "Google"
+
+        if credential_type == CredentialType.custom.value:
+            if not base_url:
+                raise ValueError("Base URL is required for custom provider")
+            base = base_url.rstrip("/")
+            if not base.endswith("/v1"):
+                base = base + "/v1"
+            return create_guarded_openai_client(
+                api_key=api_key,
+                base_url=base,
+                subject="Custom LLM credential base URL",
+                session_id=self.session_id,
+                timeout=self.request_timeout,
+            ), "Custom"
+
+        if base_url:
+            return create_guarded_openai_client(
+                api_key=api_key,
+                base_url=base_url,
+                subject="LLM credential base URL",
+                session_id=self.session_id,
+                timeout=self.request_timeout,
+            ), "OpenAI"
+        return create_openai_client(
+            api_key=api_key, timeout=self.request_timeout, session_id=self.session_id
+        ), "OpenAI"
+
+    def _resolve_turn(
+        self,
+        *,
+        model: str,
+        system_instruction: str | None,
+        message: str | None,
+        tool_names: list[str] | None,
+    ) -> TurnBinding:
+        """Bind the client, provider and model for the next provider request.
+
+        With no router this is the static credential and the caller's model, which is
+        the behaviour every existing caller already gets. With a router the decision
+        model picks an option first; identical states reuse the previous decision, so
+        a tool loop only pays for a decision when the conversation has moved.
+        """
+        if self.router is None:
+            client, provider = self._get_client()
+            return TurnBinding(
+                client=client,
+                provider=provider,
+                model=model,
+                credential_id=self.trace_context.credential_id if self.trace_context else None,
+            )
+
+        decision = self.router.route(
+            system_instruction=system_instruction,
+            message=message,
+            tool_names=tool_names,
+        )
+        bound = load_option_credential(decision.option)
+        client, provider = self._client_for(bound.credential_type, bound.api_key, bound.base_url)
+        try:
+            router_uuid: uuid.UUID | None = uuid.UUID(str(self.router.credential_id))
+        except ValueError:
+            router_uuid = None
+
+        binding = TurnBinding(
+            client=client,
+            provider=provider,
+            model=bound.option.model,
+            credential_id=bound.credential_uuid,
+            credential_name=bound.credential_name,
+            router_credential_id=router_uuid,
+            router_label=self.router.label,
+            option_label=decision.option.label,
+            fallback=decision.fallback,
+            routing_error=decision.error,
+        )
+        self._routed_calls.append(
+            {
+                "model": binding.model,
+                "option": binding.option_label,
+                "credentialName": binding.credential_name,
+                "fallback": binding.fallback,
+                "error": binding.routing_error,
+            }
+        )
+        return binding
+
+    def model_routing_summary(self) -> dict[str, Any] | None:
+        """What the executor writes into node metadata, or None when no router ran."""
+        if self.router is None or not self._routed_calls:
+            return None
+        return {
+            "routerLabel": self.router.label,
+            "routerCredentialId": str(self.router.credential_id),
+            "calls": copy.deepcopy(self._routed_calls),
+        }
+
+    def _attach_routing_summary(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Hand the executor the routing summary; it pops this into node metadata."""
+        routing_summary = self.model_routing_summary()
+        if routing_summary:
+            result["_model_routing"] = routing_summary
+        return result
+
     def _get_transport(self) -> ChatCompletionsTransport | ResponsesTransport:
         if self.use_responses_api:
             return ResponsesTransport()
@@ -593,11 +756,23 @@ class LLMService:
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
         total_tokens: int | None = None,
+        binding: TurnBinding | None = None,
     ) -> None:
         if not self.trace_context:
             return
+        context = self.trace_context
+        if binding is not None and binding.router_label is not None:
+            # `replace` keeps `trace_ids` as the same list object, which the executor
+            # reads back to link the node to its trace. Constructing a fresh
+            # LLMTraceContext here would give it a new list and break that link.
+            context = replace(
+                context,
+                credential_id=binding.credential_id or context.credential_id,
+                router_credential_id=binding.router_credential_id,
+                router_label=binding.router_label,
+            )
         record_llm_trace(
-            context=self.trace_context,
+            context=context,
             request_type=request_type,
             request=request,
             response=response,
@@ -625,7 +800,13 @@ class LLMService:
         content_only: bool = False,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        client, provider = self._get_client()
+        binding = self._resolve_turn(
+            model=model,
+            system_instruction=system_instruction,
+            message=user_message,
+            tool_names=None,
+        )
+        client, provider, model = binding.client, binding.provider, binding.model
         transport = self._get_transport()
 
         history = transport.start(
@@ -693,6 +874,7 @@ class LLMService:
                     response=None,
                     error=str(exc),
                     elapsed_ms=round(elapsed_ms, 2),
+                    binding=binding,
                 )
                 raise
         elapsed_ms = (time.time() - start_time) * 1000
@@ -728,8 +910,9 @@ class LLMService:
             prompt_tokens=result["usage"]["prompt_tokens"],
             completion_tokens=result["usage"]["completion_tokens"],
             total_tokens=result["usage"]["total_tokens"],
+            binding=binding,
         )
-        return result
+        return self._attach_routing_summary(result)
 
     async def probe_batch_support(self) -> tuple[bool, str]:
         if self.credential_type == CredentialType.openai:
@@ -752,6 +935,11 @@ class LLMService:
         should_abort: Callable[[], str | None] | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self.router is not None:
+            raise ValueError(
+                "Batch mode is not available for Model Router credentials: a batch job "
+                "runs against one fixed model. Pick a specific credential and model."
+            )
         if not user_messages:
             raise ValueError("Batch mode requires at least one item.")
 
@@ -1001,7 +1189,14 @@ class LLMService:
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute LLM with tool calling loop."""
-        client, provider = self._get_client()
+        # With a router there is no credential to bind yet: every turn binds its own
+        # client, provider and model from the decision model's answer. Without one this
+        # is the single static binding every existing caller already gets.
+        binding: TurnBinding | None = None
+        client: Any = None
+        provider = ""
+        if self.router is None:
+            client, provider = self._get_client()
 
         transport = self._get_transport()
         if initial_messages is not None:
@@ -1048,7 +1243,11 @@ class LLMService:
 
         from app.services.context_compressor import get_context_limit
 
-        _context_limit = get_context_limit(model, client)
+        # Recomputed per turn: a routed run can change model between iterations.
+        _context_limit: int | None = None
+        tool_names = [t["name"] for t in tools]
+        routing_message: str | None = user_message
+        routed_tool_cursor = len(tool_calls_collected)
 
         def _trace_request() -> dict[str, Any]:
             # Must go through the transport: a trace row is stored as JSON and a
@@ -1106,8 +1305,9 @@ class LLMService:
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=total_completion_tokens,
                 total_tokens=total_prompt_tokens + total_completion_tokens,
+                binding=binding,
             )
-            return result
+            return self._attach_routing_summary(result)
 
         def _abort_reason_from_tool_result(tool_result: Any) -> str | None:
             """Return an abort reason only for explicit cancelled tool outcomes.
@@ -1129,6 +1329,24 @@ class LLMService:
                 abort_reason = should_abort()
                 if abort_reason:
                     return _build_error_result(abort_reason)
+
+            # Turn one routes on the user's message; later turns route on what the last
+            # turn's tools returned, which is what makes per-turn routing mean anything.
+            # The cursor starts at the current length so a resumed agent does not replay
+            # `initial_tool_calls` as if they were this turn's output.
+            new_tool_entries = tool_calls_collected[routed_tool_cursor:]
+            if new_tool_entries:
+                routing_message = _routing_message_from_tool_results(new_tool_entries)
+                routed_tool_cursor = len(tool_calls_collected)
+
+            binding = self._resolve_turn(
+                model=model,
+                system_instruction=system_instruction,
+                message=routing_message,
+                tool_names=tool_names,
+            )
+            client, provider, model = binding.client, binding.provider, binding.model
+            _context_limit = get_context_limit(model, client)
 
             history, _compression_info = await transport.compress(
                 history, model=model, client=client, context_limit_tokens=_context_limit
@@ -1175,6 +1393,7 @@ class LLMService:
                     },
                     error=None,
                     elapsed_ms=_compression_info["elapsed_ms"],
+                    binding=binding,
                 )
 
             opts = RequestOpts(
@@ -1208,6 +1427,7 @@ class LLMService:
                     response=None,
                     error=str(exc),
                     elapsed_ms=round(elapsed_ms, 2),
+                    binding=binding,
                 )
                 raise
             elapsed_ms = (time.time() - start_time) * 1000
@@ -1250,8 +1470,9 @@ class LLMService:
                     prompt_tokens=total_prompt_tokens,
                     completion_tokens=total_completion_tokens,
                     total_tokens=total_prompt_tokens + total_completion_tokens,
+                    binding=binding,
                 )
-                return result
+                return self._attach_routing_summary(result)
 
             if not tool_calls:
                 text = transport.final_text(turn)
@@ -1279,8 +1500,9 @@ class LLMService:
                     prompt_tokens=total_prompt_tokens,
                     completion_tokens=total_completion_tokens,
                     total_tokens=total_prompt_tokens + total_completion_tokens,
+                    binding=binding,
                 )
-                return result
+                return self._attach_routing_summary(result)
 
             messages_before_tool_response = copy.deepcopy(transport.dump(history))
             hitl_tcs = [
@@ -1361,8 +1583,9 @@ class LLMService:
                     prompt_tokens=total_prompt_tokens,
                     completion_tokens=total_completion_tokens,
                     total_tokens=total_prompt_tokens + total_completion_tokens,
+                    binding=binding,
                 )
-                return result
+                return self._attach_routing_summary(result)
 
             async def _run_one_tool(
                 tc: Any,
@@ -1757,8 +1980,9 @@ class LLMService:
                             prompt_tokens=total_prompt_tokens,
                             completion_tokens=total_completion_tokens,
                             total_tokens=total_prompt_tokens + total_completion_tokens,
+                            binding=binding,
                         )
-                        return result
+                        return self._attach_routing_summary(result)
 
         text = "Tool iteration limit reached."
         result = {
@@ -1783,6 +2007,11 @@ class LLMService:
         quality: str = "auto",
         n: int = 1,
     ) -> dict[str, Any]:
+        if self.router is not None:
+            raise ValueError(
+                "Model Router credentials cannot generate or edit images. Pick a "
+                "specific credential and image model."
+            )
         trace_request = {
             "model": model,
             "prompt": prompt,
@@ -1832,6 +2061,11 @@ class LLMService:
         quality: str = "auto",
         n: int = 1,
     ) -> dict[str, Any]:
+        if self.router is not None:
+            raise ValueError(
+                "Model Router credentials cannot generate or edit images. Pick a "
+                "specific credential and image model."
+            )
         trace_request = {
             "model": model,
             "prompt": prompt,
@@ -2211,6 +2445,7 @@ async def execute_llm(
     extra_body: dict[str, Any] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
     use_responses_api: bool = False,
+    router: ModelRouter | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2220,6 +2455,7 @@ async def execute_llm(
         trace_context=trace_context,
         request_timeout=request_timeout,
         use_responses_api=use_responses_api,
+        router=router,
     )
     return await service.execute(
         model=model,
@@ -2255,10 +2491,16 @@ async def execute_llm_batch(
     should_abort: Callable[[], str | None] | None = None,
     request_timeout: float = LLM_REQUEST_TIMEOUT,
     extra_body: dict[str, Any] | None = None,
+    router: ModelRouter | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
-        cred_type, api_key, base_url, trace_context=trace_context, request_timeout=request_timeout
+        cred_type,
+        api_key,
+        base_url,
+        trace_context=trace_context,
+        request_timeout=request_timeout,
+        router=router,
     )
     return await service.execute_batch(
         model=model,
@@ -2570,6 +2812,7 @@ async def execute_llm_with_tools(
     request_timeout: float = LLM_REQUEST_TIMEOUT,
     extra_body: dict[str, Any] | None = None,
     use_responses_api: bool = False,
+    router: ModelRouter | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2579,6 +2822,7 @@ async def execute_llm_with_tools(
         trace_context=trace_context,
         request_timeout=request_timeout,
         use_responses_api=use_responses_api,
+        router=router,
     )
     return await service.execute_with_tools(
         model=model,

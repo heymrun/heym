@@ -29,6 +29,44 @@ export interface TimelineSelectPayload {
   resultListIndex: number | null;
 }
 
+export interface ModelRoutingCall {
+  model: string;
+  option: string | null;
+  credentialName: string | null;
+  fallback: boolean;
+  error: string | null;
+}
+
+export interface ModelRoutingSummary {
+  routerLabel: string;
+  routerCredentialId: string;
+  calls: ModelRoutingCall[];
+}
+
+/** `Auto Model / gpt-5`, with `+N` when the run moved between models. */
+export function formatModelRoutingLabel(routing: ModelRoutingSummary | null): string | null {
+  if (!routing || routing.calls.length === 0) return null;
+  const last = routing.calls[routing.calls.length - 1].model;
+  const extra = new Set(routing.calls.map((call) => call.model)).size - 1;
+  return extra > 0
+    ? `${routing.routerLabel} / ${last} +${extra}`
+    : `${routing.routerLabel} / ${last}`;
+}
+
+export function readSpanModelRouting(result: {
+  metadata?: Record<string, unknown>;
+}): ModelRoutingSummary | null {
+  const raw = result.metadata?.model_routing;
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Partial<ModelRoutingSummary>;
+  if (typeof value.routerLabel !== "string" || !Array.isArray(value.calls)) return null;
+  return {
+    routerLabel: value.routerLabel,
+    routerCredentialId: String(value.routerCredentialId ?? ""),
+    calls: value.calls as ModelRoutingCall[],
+  };
+}
+
 export interface SpanItem {
   key: string;
   /** Index into the execution `node_results` array for this span (disambiguates multiple runs of the same node). */
@@ -37,6 +75,7 @@ export interface SpanItem {
   nodeLabel: string;
   nodeType: string;
   traceId: string | null;
+  modelRouting: ModelRoutingSummary | null;
   status: string;
   durationMs: number;
   startOffsetMs: number;
@@ -80,6 +119,7 @@ interface RawSpanItem {
   nodeLabel: string;
   nodeType: string;
   traceId: string | null;
+  modelRouting: ModelRoutingSummary | null;
   status: string;
   durationMs: number;
   error: string | null;
@@ -310,6 +350,7 @@ export function buildTimelineModel(
       nodeLabel: result.node_label,
       nodeType: result.node_type,
       traceId: isHitlWait ? null : getTraceId(result),
+      modelRouting: readSpanModelRouting(result),
       status: isHitlWait ? "pending" : result.status,
       durationMs: Math.max(endMs - startMs, isHitlWait ? 0 : result.execution_time_ms, 0),
       error: isHitlWait ? null : result.error,
@@ -473,6 +514,7 @@ export function buildTimelineModel(
             nodeLabel: span.nodeLabel,
             nodeType: span.nodeType,
             traceId: span.traceId,
+            modelRouting: span.modelRouting,
             status: span.status,
             durationMs: span.durationMs,
             startOffsetMs: Math.max(span.startMs - timeWindow.startMs, 0),

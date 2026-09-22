@@ -17,6 +17,58 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.14",
+    publishedAt: new Date("2026-09-22T00:00:00Z"),
+    headline: "Let a model pick the model",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["model-router"],
+    },
+    sections: [
+      {
+        id: "model-router",
+        title: "One credential, the right model every time",
+        publishedAt: new Date("2026-09-22T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The new **Model Router** credential does not hold a key. It holds a decision model, a list of your existing OpenAI, Google and Custom credentials, and a sentence for each one saying when it should be used. Pick the router in any model dropdown, choose **Auto**, and the decision model reads each request and sends it to the model you described.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "It works everywhere a model is chosen: the **LLM** and **Agent** nodes, **Chat**, **AI Defaults**, **Evals**, **Dashboards** and the expression builder. An agent re-routes as its tool loop progresses, so a cheap model can take the early turns and a stronger one can take the turn that actually needs it.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Nothing is hidden. **Traces** shows `Auto Model / GPT-5` rather than just the model, costs are still attributed to the model that ran, and the canvas **Execution Log** and **Span View** show which turn went where. Mark one option as the fallback and a decision model outage never stops a run.",
+          },
+        ],
+        tour: {
+          description:
+            "A credential that picks the model per request, with both the router and the model it chose visible in every trace.",
+          useCases: [
+            "Send short questions to a cheap model and hard ones to a strong one, automatically",
+            "Let an agent start cheap and escalate only on the turn that needs it",
+            "See Auto Model / GPT-5 in Traces, the Execution Log and the Span View",
+          ],
+          tourVisual: "model-router",
+          docTarget: {
+            categoryId: "reference",
+            slug: "credentials",
+            title: "Credentials",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.13",
     publishedAt: new Date("2026-09-21T00:00:00Z"),
     headline: "Ask a model for a decision, not an essay",

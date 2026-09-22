@@ -92,13 +92,18 @@ class TestBuildWorkflowInputs(unittest.IsolatedAsyncioTestCase):
                 return_value={"api_key": "shared-key"},
             ),
         ):
-            resolved, api_key, base_url = await board_mapper_service._resolve_mapper_credential(
-                db, board
-            )
+            (
+                resolved,
+                api_key,
+                base_url,
+                router,
+            ) = await board_mapper_service._resolve_mapper_credential(db, board)
 
         self.assertIs(resolved, credential)
         self.assertEqual(api_key, "shared-key")
         self.assertIsNone(base_url)
+        # A plain OpenAI credential resolves to no router; Auto Model would return one.
+        self.assertIsNone(router)
         get_credential.assert_awaited_once_with(db, board.mapper_credential_id, board.owner_id)
 
     async def test_maps_and_merges_reserved_board_block(self):

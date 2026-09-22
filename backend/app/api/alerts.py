@@ -453,7 +453,7 @@ async def draft_alert_from_prompt(
 ) -> AlertDraftResponse:
     # Imported here rather than at module scope: ai_assistant imports heavily and
     # a top-level import creates a cycle through the chat tooling.
-    from app.api.ai_assistant import get_openai_client
+    from app.api.ai_assistant import resolve_model_binding
     from app.services.alerts.ai_draft import build_draft_system_prompt, parse_draft_response
     from app.services.credential_access import get_accessible_credential
     from app.services.encryption import decrypt_config
@@ -467,10 +467,10 @@ async def draft_alert_from_prompt(
     workflows = [(wid, names.get(wid, "")) for wid in accessible_ids if wid in names]
 
     config = decrypt_config(credential.encrypted_config)
-    client, provider = get_openai_client(credential.type, config)
 
+    system_prompt = build_draft_system_prompt(workflows)
     messages = [
-        {"role": "system", "content": build_draft_system_prompt(workflows)},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": payload.prompt},
     ]
     trace_context = LLMTraceContext(
@@ -478,6 +478,14 @@ async def draft_alert_from_prompt(
         credential_id=payload.credential_id,
         source="alert_builder",
         node_label="Alert Builder",
+    )
+    client, provider, model, trace_context = resolve_model_binding(
+        credential,
+        config,
+        payload.model,
+        trace_context=trace_context,
+        system_prompt=system_prompt,
+        message=payload.prompt,
     )
     started = time.time()
 
@@ -487,7 +495,7 @@ async def draft_alert_from_prompt(
         # directly raises TypeError and surfaces as a 502.
         completion = await asyncio.to_thread(
             client.chat.completions.create,
-            model=payload.model,
+            model=model,
             messages=messages,
         )
         text = completion.choices[0].message.content or ""
@@ -495,9 +503,9 @@ async def draft_alert_from_prompt(
         record_llm_trace(
             context=trace_context,
             request_type="chat.completions",
-            request={"model": payload.model, "messages": messages},
+            request={"model": model, "messages": messages},
             response=None,
-            model=payload.model,
+            model=model,
             provider=provider,
             error=str(exc),
             elapsed_ms=round((time.time() - started) * 1000, 2),
@@ -508,9 +516,9 @@ async def draft_alert_from_prompt(
     record_llm_trace(
         context=trace_context,
         request_type="chat.completions",
-        request={"model": payload.model, "messages": messages},
+        request={"model": model, "messages": messages},
         response={"text": text, "model": payload.model},
-        model=payload.model,
+        model=model,
         provider=provider,
         prompt_tokens=getattr(usage, "prompt_tokens", None),
         completion_tokens=getattr(usage, "completion_tokens", None),
