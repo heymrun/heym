@@ -808,7 +808,8 @@ class TestRoutedRequestWritesBothTraces(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_llm_traces_the_decision_and_the_model(self) -> None:
         from app.db.models import CredentialType
-        from app.services import decision_models, llm_service as llm_service_module
+        from app.services import decision_models
+        from app.services import llm_service as llm_service_module
         from app.services import model_router as model_router_module
         from app.services.model_router import build_router_for_credential
 
