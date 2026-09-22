@@ -206,9 +206,9 @@ async def ai_step(
         credential_type=credential.type.value,
         config=config,
     )
-    api_key = config.get("api_key")
+    api_key = config.get("api_key") or ""
     base_url = config.get("base_url")
-    if not api_key:
+    if not api_key and router is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential has no API key",
@@ -423,9 +423,9 @@ async def ai_step_heal(
         credential_type=credential.type.value,
         config=config,
     )
-    api_key = config.get("api_key")
+    api_key = config.get("api_key") or ""
     base_url = config.get("base_url")
-    if not api_key:
+    if not api_key and router is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential has no API key",

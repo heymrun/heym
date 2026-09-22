@@ -192,6 +192,83 @@ test("requires the model to create a board, then shows the default columns", asy
   await expect(page.getByTestId("board-column-Backlog").getByPlaceholder("Add a card")).toBeEnabled();
 });
 
+test("creates and reopens a board with a Model Router and Auto model", async ({ page }) => {
+  const providerId = await setUpMapperCredential(page);
+  const decisionResponse = await page.request.post("/api/credentials", {
+    data: {
+      name: `Board decision ${Date.now()}`,
+      type: "decision",
+      config: { base_url: "https://decision.example.com" },
+    },
+  });
+  expect(decisionResponse.ok()).toBeTruthy();
+  const decision = (await decisionResponse.json()) as { id: string };
+  let routerId: string | undefined;
+  try {
+    const routerResponse = await page.request.post("/api/credentials", {
+      data: {
+        name: "Board Model Router",
+        type: "model_router",
+        config: {
+          decision_credential_id: decision.id,
+          decision_model: "jev-latest",
+          routing_instructions: "Pick the model that fits the task.",
+          options: [
+            {
+              id: "fast",
+              label: "Fast",
+              credential_id: providerId,
+              model: "gpt-4o-mini",
+              criteria: "Simple tasks",
+              is_default: true,
+            },
+            {
+              id: "deep",
+              label: "Deep",
+              credential_id: providerId,
+              model: "gpt-4o",
+              criteria: "Complex tasks",
+              is_default: false,
+            },
+          ],
+        },
+      },
+    });
+    expect(routerResponse.ok()).toBeTruthy();
+    routerId = ((await routerResponse.json()) as { id: string }).id;
+
+    await page.goto("/?tab=board");
+    await page.getByTestId("board-empty-create").click();
+    await page.getByPlaceholder("Board name").fill("Routed board");
+    await page.getByPlaceholder("Credential", { exact: true }).click();
+    await expect(page.getByRole("option", { name: "Board model", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: /^Board decision/ })).toHaveCount(0);
+    await page.getByRole("option", { name: "Board Model Router", exact: true }).click();
+    await page.getByPlaceholder("Model", { exact: true }).click();
+    await page.getByRole("option", { name: "Auto", exact: true }).click();
+    await page.getByRole("button", { name: "Create board" }).click();
+    await expect(page.getByTestId("board-column-Backlog")).toBeVisible();
+    await expect(page).toHaveURL(/[?&]board=[0-9a-f-]{36}/);
+
+    const boardId = new URL(page.url()).searchParams.get("board");
+    const boardResponse = await page.request.get(`/api/boards/${boardId}`);
+    expect(boardResponse.ok()).toBeTruthy();
+    expect(await boardResponse.json()).toMatchObject({
+      mapper_credential_id: routerId,
+      mapper_model: "auto",
+    });
+
+    await page.reload();
+    await page.getByTestId("board-edit").click();
+    await expect(page.getByPlaceholder("Credential", { exact: true })).toHaveValue("Board Model Router");
+    await expect(page.getByPlaceholder("Model", { exact: true })).toHaveValue("Auto");
+  } finally {
+    await deleteAllBoards(page);
+    if (routerId) await page.request.delete(`/api/credentials/${routerId}`);
+    await page.request.delete(`/api/credentials/${decision.id}`);
+  }
+});
+
 test("blocks board actions until a board has its model", async ({ page }) => {
   // Boards created outside the dialog (here, through the API) can lack a model.
   const { boardId } = await createBoardWithCard(page, "gated");

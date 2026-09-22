@@ -12,7 +12,7 @@ from app.api.mcp import (
     update_mcp_chat_tool,
     validate_chat_tool_credential,
 )
-from app.db.models import CredentialType
+from app.db.models import LLM_CREDENTIAL_TYPES, CredentialType
 from app.models.schemas import MCPChatToolUpdate
 from app.services import mcp_chat_service
 from app.services.mcp_chat_service import (
@@ -150,6 +150,28 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved.credential.id, credential.id)
         self.assertEqual(resolved.model, "gpt-4o")
 
+    async def test_all_llm_credential_types_are_accepted(self) -> None:
+        for credential_type in LLM_CREDENTIAL_TYPES:
+            with self.subTest(credential_type=credential_type):
+                credential = _make_credential(credential_type)
+                model = "auto" if credential_type == CredentialType.model_router else "test-model"
+                settings = MCPChatSettings(enabled=True, credential_id=credential.id, model=model)
+
+                resolved = await self._resolve(_make_user(), settings, credential)
+
+                self.assertIs(resolved.credential, credential)
+                self.assertEqual(resolved.model, model)
+
+    async def test_account_preference_can_select_a_model_router(self) -> None:
+        credential = _make_credential(CredentialType.model_router)
+        user = _make_user(preferred_credential_id=credential.id, preferred_model="auto")
+        settings = MCPChatSettings(enabled=True, credential_id=None, model=None)
+
+        resolved = await self._resolve(user, settings, credential)
+
+        self.assertIs(resolved.credential, credential)
+        self.assertEqual(resolved.model, "auto")
+
     async def test_preferred_model_is_not_reused_for_a_different_credential(self) -> None:
         credential = _make_credential()
         user = _make_user(preferred_credential_id=uuid.uuid4(), preferred_model="gpt-4o")
@@ -277,6 +299,56 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("12 runs today.", response["result"]["content"][0]["text"])
         self.assertIn(str(conversation_id), response["result"]["content"][0]["text"])
 
+    async def test_model_router_dispatch_reaches_the_chat_engine(self) -> None:
+        credential = _make_credential(CredentialType.model_router)
+        user = _make_user()
+        settings = MCPChatSettings(enabled=True, credential_id=credential.id, model="auto")
+        reply_conversation_id = uuid.uuid4()
+        result = MCPChatResult(
+            conversation_id=reply_conversation_id,
+            text="12 runs today.",
+            tool_names=["get_analytics_stats"],
+            awaiting_clarification=False,
+        )
+
+        for conversation_id in (None, reply_conversation_id):
+            with self.subTest(conversation_id=conversation_id):
+                arguments = {"message": "show analytics"}
+                if conversation_id is not None:
+                    arguments["conversation_id"] = str(conversation_id)
+                db = AsyncMock()
+                with (
+                    patch(f"{MODULE}.load_user", AsyncMock(return_value=user)),
+                    patch(
+                        f"{MODULE}.get_accessible_credential", AsyncMock(return_value=credential)
+                    ) as get_credential,
+                    patch(
+                        "app.api.chats.run_mcp_chat_turn", AsyncMock(return_value=result)
+                    ) as run_turn,
+                    patch("app.api.mcp.build_public_base_url", return_value="https://heym.test"),
+                ):
+                    response = await dispatch_chat_tool_call(
+                        request=self.request,
+                        db=db,
+                        msg_id=7,
+                        user_id=user.id,
+                        chat_settings=settings,
+                        arguments=arguments,
+                    )
+
+                self.assertFalse(response["result"]["isError"], response)
+                self.assertIn("12 runs today.", response["result"]["content"][0]["text"])
+                self.assertIn(str(reply_conversation_id), response["result"]["content"][0]["text"])
+                get_credential.assert_awaited_once_with(db, credential.id, user.id)
+                run_turn.assert_awaited_once_with(
+                    user_id=user.id,
+                    message="show analytics",
+                    conversation_id=conversation_id,
+                    credential_id=credential.id,
+                    model="auto",
+                    public_base_url="https://heym.test",
+                )
+
     async def test_config_error_becomes_an_error_result_not_a_500(self) -> None:
         run_chat_tool = AsyncMock(side_effect=MCPChatError("No model is configured."))
 
@@ -295,6 +367,25 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ChatToolConfigEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_router_selection_is_persisted(self) -> None:
+        credential = _make_credential(CredentialType.model_router)
+        user = _make_user()
+        db = AsyncMock()
+
+        with patch("app.api.mcp.get_accessible_credential", AsyncMock(return_value=credential)):
+            result = await update_mcp_chat_tool(
+                body=MCPChatToolUpdate(enabled=True, credential_id=credential.id, model="auto"),
+                current_user=user,
+                db=db,
+            )
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(result.credential_id, credential.id)
+        self.assertEqual(result.model, "auto")
+        self.assertEqual(user.mcp_chat_credential_id, credential.id)
+        self.assertEqual(user.mcp_chat_model, "auto")
+        db.flush.assert_awaited_once()
+
     async def test_enabling_persists_and_returns_the_config(self) -> None:
         credential = _make_credential()
         user = _make_user()
