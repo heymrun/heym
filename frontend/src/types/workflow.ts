@@ -1062,12 +1062,20 @@ export interface WorkflowShare {
   shared_at: string;
 }
 
-export interface ExecutionToken {
+export interface ExecutionTokenMetadata {
   id: string;
-  token: string;
   expires_at: string;
   created_at: string;
   revoked: boolean;
+}
+
+export interface ExecutionTokenListItem extends ExecutionTokenMetadata {
+  creator_id: string;
+  creator_email: string;
+}
+
+export interface ExecutionToken extends ExecutionTokenMetadata {
+  token: string;
 }
 
 export type HighlightRecordKind = "input" | "output" | "agent" | "llm" | "final";

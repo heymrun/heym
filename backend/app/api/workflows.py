@@ -48,6 +48,7 @@ from app.models.schemas import (
     ExecutionHistoryResponse,
     ExecutionHistoryWithWorkflowResponse,
     ExecutionTokenCreate,
+    ExecutionTokenListItem,
     ExecutionTokenResponse,
     HighlightPayloadSchema,
     HistoryListResponse,
@@ -114,7 +115,11 @@ from app.services.hitl_service import (
 )
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.pending_execution import needs_local_pending_persist
-from app.services.workflow_access import workflow_access_clause
+from app.services.workflow_access import (
+    revoke_execution_tokens_without_access,
+    user_has_workflow_access,
+    workflow_access_clause,
+)
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -544,31 +549,6 @@ async def get_workflow_for_user(
         )
     )
     return result.scalar_one_or_none()
-
-
-async def user_has_workflow_access(
-    db: AsyncSession, workflow: Workflow, user_id: uuid.UUID
-) -> bool:
-    if workflow.owner_id == user_id:
-        return True
-    share_result = await db.execute(
-        select(WorkflowShare).where(
-            WorkflowShare.workflow_id == workflow.id,
-            WorkflowShare.user_id == user_id,
-        )
-    )
-    if share_result.scalar_one_or_none() is not None:
-        return True
-
-    team_share_result = await db.execute(
-        select(WorkflowTeamShare)
-        .join(TeamMember, TeamMember.team_id == WorkflowTeamShare.team_id)
-        .where(
-            WorkflowTeamShare.workflow_id == workflow.id,
-            TeamMember.user_id == user_id,
-        )
-    )
-    return team_share_result.scalar_one_or_none() is not None
 
 
 def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSchema]:
@@ -2356,6 +2336,8 @@ async def remove_workflow_share(
         grantee_id=user_id,
     )
     await db.delete(share)
+    await db.flush()
+    await revoke_execution_tokens_without_access(db, workflow)
     await db.commit()
 
 
@@ -2497,6 +2479,8 @@ async def remove_workflow_team_share(
         team_id=team_id,
     )
     await db.delete(share)
+    await db.flush()
+    await revoke_execution_tokens_without_access(db, workflow)
     await db.commit()
 
 
@@ -2602,22 +2586,43 @@ async def create_execution_token_endpoint(
     return ExecutionTokenResponse.model_validate(row)
 
 
-@router.get("/{workflow_id}/execution-tokens", response_model=list[ExecutionTokenResponse])
+@router.get("/{workflow_id}/execution-tokens", response_model=list[ExecutionTokenListItem])
 async def list_execution_tokens_endpoint(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[ExecutionTokenResponse]:
+) -> list[ExecutionTokenListItem]:
+    """List execution tokens as metadata only; the token value is returned once, at creation.
+
+    The workflow owner can see every token minted against their workflow, since the owner is
+    the one able to revoke a collaborator's access. A non-owner collaborator sees only the
+    tokens they minted themselves.
+    """
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    conditions = [WorkflowExecutionToken.workflow_id == workflow_id]
+    if workflow.owner_id != current_user.id:
+        conditions.append(WorkflowExecutionToken.user_id == current_user.id)
+
     result = await db.execute(
-        select(WorkflowExecutionToken)
-        .where(
-            WorkflowExecutionToken.workflow_id == workflow_id,
-            WorkflowExecutionToken.user_id == current_user.id,
-        )
+        select(WorkflowExecutionToken, User)
+        .join(User, User.id == WorkflowExecutionToken.user_id)
+        .where(*conditions)
         .order_by(WorkflowExecutionToken.created_at.desc())
     )
-    rows = result.scalars().all()
-    return [ExecutionTokenResponse.model_validate(r) for r in rows]
+    return [
+        ExecutionTokenListItem(
+            id=token.id,
+            creator_id=token.user_id,
+            creator_email=creator.email,
+            expires_at=token.expires_at,
+            created_at=token.created_at,
+            revoked=token.revoked,
+        )
+        for token, creator in result.all()
+    ]
 
 
 @router.delete(
@@ -2630,13 +2635,23 @@ async def revoke_execution_token_endpoint(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(WorkflowExecutionToken).where(
-            WorkflowExecutionToken.id == token_id,
-            WorkflowExecutionToken.workflow_id == workflow_id,
-            WorkflowExecutionToken.user_id == current_user.id,
-        )
-    )
+    """Revoke an execution token.
+
+    The workflow owner may revoke any token minted against their workflow. A non-owner
+    collaborator may revoke only a token they minted themselves.
+    """
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    conditions = [
+        WorkflowExecutionToken.id == token_id,
+        WorkflowExecutionToken.workflow_id == workflow_id,
+    ]
+    if workflow.owner_id != current_user.id:
+        conditions.append(WorkflowExecutionToken.user_id == current_user.id)
+
+    result = await db.execute(select(WorkflowExecutionToken).where(*conditions))
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
@@ -2648,6 +2663,7 @@ async def revoke_execution_token_endpoint(
         target_type="workflow",
         target_id=workflow_id,
         jti=row.jti,
+        token_owner_id=row.user_id,
     )
 
 
@@ -2715,7 +2731,9 @@ async def validate_workflow_auth(
                                 )
                             )
                             if token_result.scalar_one_or_none() is not None:
-                                return await _resolve_execution_token_actor(db, payload)
+                                actor = await _resolve_execution_token_actor(db, payload)
+                                if await user_has_workflow_access(db, workflow, actor.id):
+                                    return actor
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="JWT authentication required",

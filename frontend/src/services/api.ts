@@ -79,6 +79,7 @@ import type {
   NodeResult,
   ServerExecutionHistory,
   ExecutionToken,
+  ExecutionTokenListItem,
   WebhookBodyMode,
   Workflow,
   WorkflowListItem,
@@ -1163,8 +1164,8 @@ export const workflowApi = {
   },
 
   executionTokens: {
-    list: async (workflowId: string): Promise<ExecutionToken[]> => {
-      const response = await api.get<ExecutionToken[]>(
+    list: async (workflowId: string): Promise<ExecutionTokenListItem[]> => {
+      const response = await api.get<ExecutionTokenListItem[]>(
         `/workflows/${workflowId}/execution-tokens`,
       );
       return response.data;

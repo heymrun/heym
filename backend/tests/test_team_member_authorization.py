@@ -23,6 +23,7 @@ def _result(*, scalar=None, scalar_one=None, all_rows=None) -> MagicMock:
     m.scalar_one_or_none = MagicMock(return_value=scalar_one)
     m.scalar = MagicMock(return_value=scalar)
     m.all = MagicMock(return_value=all_rows or [])
+    m.scalars = MagicMock(return_value=SimpleNamespace(all=lambda: all_rows or []))
     return m
 
 
@@ -156,7 +157,13 @@ class TeamMemberAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         victim_id = uuid.uuid4()
         team = _team(creator.id)
         member_row = SimpleNamespace(id=uuid.uuid4())
-        db = _db([_result(scalar_one=team), _result(scalar_one=member_row)])
+        db = _db(
+            [
+                _result(scalar_one=team),
+                _result(scalar_one=member_row),
+                _result(all_rows=[]),  # WorkflowTeamShare.workflow_id: no shared workflows
+            ]
+        )
 
         sentinel = object()
         with patch("app.api.teams.get_team", new=AsyncMock(return_value=sentinel)):

@@ -116,3 +116,7 @@ vulnerabilities in Heym:
   request's `Origin` and `X-Forwarded-Host` headers, so a single request could
   decide which host the workflow's own notification branch delivered a live
   review token to (GHSA-6rv3-wh25-7pg5).
+- [@Aman-goel-04](https://github.com/Aman-goel-04) for workflow execution tokens
+  that kept working after the minting user's access to the workflow was removed,
+  because validation never rechecked that user's current access
+  (GHSA-pwr6-6377-3cgv).

@@ -1756,6 +1756,17 @@ class ExecutionTokenResponse(BaseModel):
         from_attributes = True
 
 
+class ExecutionTokenListItem(BaseModel):
+    """Execution token metadata only. The token value is returned once, at creation."""
+
+    id: uuid.UUID
+    creator_id: uuid.UUID
+    creator_email: str
+    expires_at: datetime
+    created_at: datetime
+    revoked: bool
+
+
 class LLMPricingRow(BaseModel):
     """Merged view: global pricing rows + this user's overrides applied."""
 

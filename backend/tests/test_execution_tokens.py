@@ -29,17 +29,6 @@ class _ScalarResult:
         return self._value
 
 
-class _ScalarsResult:
-    def __init__(self, values: list) -> None:
-        self._values = values
-
-    def scalars(self) -> "_ScalarsResult":
-        return self
-
-    def all(self) -> list:
-        return self._values
-
-
 class CreateWorkflowExecutionTokenTests(unittest.TestCase):
     def test_jwt_contains_correct_claims(self) -> None:
         user_id = uuid.uuid4()
@@ -153,37 +142,50 @@ class ExecutionTokenEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(ctx.exception.status_code, 404)
 
-    async def test_list_returns_user_tokens(self) -> None:
-        user = self._user()
+    async def test_list_returns_workflow_tokens_as_metadata_only(self) -> None:
+        """The token value is returned once, at creation; list never repeats it."""
+        owner = self._user()
+        workflow = self._workflow(owner.id)
         now = datetime.datetime.now(datetime.timezone.utc)
         token_row = SimpleNamespace(
-            id=uuid.uuid4(), token="tok", expires_at=now, created_at=now, revoked=False
+            id=uuid.uuid4(), user_id=owner.id, expires_at=now, created_at=now, revoked=False
         )
+        creator = SimpleNamespace(email="owner@example.com")
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_ScalarsResult([token_row]))
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarResult(workflow),  # get_workflow_for_user
+                SimpleNamespace(all=lambda: [(token_row, creator)]),  # token/creator join
+            ]
+        )
 
-        with unittest.mock.patch(
-            "app.api.workflows.ExecutionTokenResponse.model_validate",
-            side_effect=lambda r: r,
-        ):
-            result = await list_execution_tokens_endpoint(
-                workflow_id=uuid.uuid4(),
-                current_user=user,
-                db=db,
-            )
+        result = await list_execution_tokens_endpoint(
+            workflow_id=workflow.id,
+            current_user=owner,
+            db=db,
+        )
 
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].token, "tok")
+        self.assertEqual(result[0].creator_email, "owner@example.com")
+        self.assertFalse(hasattr(result[0], "token"))
 
     async def test_revoke_sets_revoked_true(self) -> None:
         user = self._user()
-        token_row = SimpleNamespace(id=uuid.uuid4(), jti=uuid.uuid4(), revoked=False)
+        workflow = self._workflow(user.id)
+        token_row = SimpleNamespace(
+            id=uuid.uuid4(), jti=uuid.uuid4(), user_id=user.id, revoked=False
+        )
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_ScalarResult(token_row))
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarResult(workflow),  # get_workflow_for_user
+                _ScalarResult(token_row),  # token lookup
+            ]
+        )
         db.commit = AsyncMock()
 
         await revoke_execution_token_endpoint(
-            workflow_id=uuid.uuid4(),
+            workflow_id=workflow.id,
             token_id=token_row.id,
             current_user=user,
             db=db,
@@ -203,6 +205,44 @@ class ExecutionTokenEndpointTests(unittest.IsolatedAsyncioTestCase):
                 current_user=SimpleNamespace(id=uuid.uuid4()),
                 db=db,
             )
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_owner_can_revoke_a_token_minted_by_a_collaborator(self) -> None:
+        owner = self._user()
+        collaborator_id = uuid.uuid4()
+        workflow = self._workflow(owner.id)
+        token_row = SimpleNamespace(
+            id=uuid.uuid4(), jti=uuid.uuid4(), user_id=collaborator_id, revoked=False
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_ScalarResult(workflow), _ScalarResult(token_row)])
+        db.commit = AsyncMock()
+
+        await revoke_execution_token_endpoint(
+            workflow_id=workflow.id,
+            token_id=token_row.id,
+            current_user=owner,
+            db=db,
+        )
+
+        self.assertTrue(token_row.revoked)
+
+    async def test_non_owner_cannot_revoke_another_users_token(self) -> None:
+        """The token lookup filters by user_id for a non-owner, so a collaborator's own
+        token never matches a different user's row and the endpoint reports 404."""
+        collaborator = self._user()
+        workflow = self._workflow(uuid.uuid4())
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_ScalarResult(workflow), _ScalarResult(None)])
+
+        with self.assertRaises(HTTPException) as ctx:
+            await revoke_execution_token_endpoint(
+                workflow_id=workflow.id,
+                token_id=uuid.uuid4(),
+                current_user=collaborator,
+                db=db,
+            )
+
         self.assertEqual(ctx.exception.status_code, 404)
 
 
@@ -235,11 +275,16 @@ class ValidateWorkflowAuthScopedTokenTests(unittest.IsolatedAsyncioTestCase):
         token_str, _, _ = create_workflow_execution_token(uuid.uuid4(), workflow_id, 900)
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_ScalarResult(SimpleNamespace(revoked=False)))
-
-        await validate_workflow_auth(
-            _jwt_workflow(workflow_id), _request_with_bearer(token_str), None, db
+        db.execute = AsyncMock(
+            return_value=_ScalarResult(SimpleNamespace(revoked=False, id=uuid.uuid4()))
         )
+
+        with unittest.mock.patch(
+            "app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)
+        ):
+            await validate_workflow_auth(
+                _jwt_workflow(workflow_id), _request_with_bearer(token_str), None, db
+            )
 
     async def test_revoked_scoped_token_raises_401(self) -> None:
         workflow_id = uuid.uuid4()

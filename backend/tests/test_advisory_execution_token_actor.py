@@ -52,7 +52,8 @@ class ExecutionTokenActorTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(scalar_one_or_none=lambda: actor),
             ]
         )
-        return await validate_workflow_auth(workflow, _request(token), None, db)
+        with patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)):
+            return await validate_workflow_auth(workflow, _request(token), None, db)
 
     async def test_token_runs_as_its_minter_not_the_owner(self) -> None:
         owner_id = uuid.uuid4()

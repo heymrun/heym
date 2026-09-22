@@ -35,8 +35,27 @@ from app.models.schemas import (
     TeamUpdate,
 )
 from app.services.audit_log import OUTCOME_DENIED, audit
+from app.services.workflow_access import revoke_execution_tokens_without_access
 
 router = APIRouter(tags=["teams"])
+
+
+async def _revoke_execution_tokens_for_team_workflows(
+    db: AsyncSession, workflow_ids: list[uuid.UUID]
+) -> None:
+    """Revoke execution tokens minted by users who lost access through a team change.
+
+    ``workflow_ids`` must be captured before the team, its membership row, or its workflow
+    shares are deleted: a team deletion cascades onto ``WorkflowTeamShare``, so querying that
+    table by ``team_id`` after the delete has already flushed would find nothing. Call this
+    after the delete has been flushed so ``user_has_workflow_access`` sees the post-removal
+    state when it decides whether a token's minter still belongs.
+    """
+    if not workflow_ids:
+        return
+    result = await db.execute(select(Workflow).where(Workflow.id.in_(workflow_ids)))
+    for workflow in result.scalars().all():
+        await revoke_execution_tokens_without_access(db, workflow)
 
 
 async def _ensure_team_member(
@@ -408,6 +427,16 @@ async def delete_team(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator can delete")
 
+    team_workflow_ids = (
+        (
+            await db.execute(
+                select(WorkflowTeamShare.workflow_id).where(WorkflowTeamShare.team_id == team_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     audit(
         action="team.delete",
         actor=current_user,
@@ -416,6 +445,8 @@ async def delete_team(
         target_name=team.name,
     )
     await db.delete(team)
+    await db.flush()
+    await _revoke_execution_tokens_for_team_workflows(db, team_workflow_ids)
     await db.commit()
 
 
@@ -496,6 +527,16 @@ async def remove_team_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
+    team_workflow_ids = (
+        (
+            await db.execute(
+                select(WorkflowTeamShare.workflow_id).where(WorkflowTeamShare.team_id == team.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     audit(
         action="team.member_remove",
         actor=current_user,
@@ -505,5 +546,7 @@ async def remove_team_member(
         member_id=user_id,
     )
     await db.delete(member)
+    await db.flush()
+    await _revoke_execution_tokens_for_team_workflows(db, team_workflow_ids)
     await db.commit()
     return await get_team(team.id, db, current_user)

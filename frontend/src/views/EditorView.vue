@@ -7,7 +7,6 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Glob
 import axios from "axios";
 
 import type {
-  ExecutionToken,
   SseNodeConfig,
   WebhookBodyMode,
   WorkflowAuthType,
@@ -49,6 +48,7 @@ import { buildExecutionLogForAssistant } from "@/lib/executionLog";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
+import { useExecutionTokens } from "@/composables/useExecutionTokens";
 import { useToast } from "@/composables/useToast";
 import { templatesApi, teamsApi, workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -102,11 +102,9 @@ const isAuthHeaderValueHidden = computed(
     !workflowStore.currentWorkflow?.auth_header_value,
 );
 const curlCopied = ref(false);
-const executionTokens = ref<ExecutionToken[]>([]);
-const selectedTokenId = ref<string | null>(null);
 const tokenTtlSeconds = ref<number>(900);
 const tokenMode = ref<"short" | "long">("long");
-const tokenVisibility = ref<Record<string, boolean>>({});
+const tokensLoading = ref(false);
 const tokenCreating = ref(false);
 const tokenRevoking = ref<string | null>(null);
 const sseEnabled = ref(false);
@@ -145,6 +143,10 @@ let pendingExecutionReconnectId: number | null = null;
 let pendingExecutionStreamHistoryId: string | null = null;
 
 const workflowId = computed(() => route.params.id as string);
+const {
+  executionTokens, selectedTokenId, tokenVisibility, bearerToken, tokenValue, canUseToken,
+  selectToken, replaceTokens, rememberCreatedToken, markRevoked,
+} = useExecutionTokens(workflowId);
 const workflowName = computed(() => workflowStore.currentWorkflow?.name || "Workflow");
 const workflowDescription = computed(() => workflowStore.currentWorkflow?.description || "");
 const isDashboardWidget = computed(
@@ -939,11 +941,14 @@ watch(curlOpen, async (open) => {
     editingNodeId.value = null;
     editingNodeMessage.value = "";
     if (authType.value === "jwt") {
-      executionTokens.value = await workflowApi.executionTokens.list(workflowId.value);
-      const firstActive = executionTokens.value.find(
-        (t) => !t.revoked && new Date(t.expires_at) > new Date(),
-      );
-      selectedTokenId.value = firstActive?.id ?? null;
+      const requestedWorkflowId = workflowId.value;
+      tokensLoading.value = true;
+      try {
+        const tokens = await workflowApi.executionTokens.list(requestedWorkflowId);
+        if (workflowId.value === requestedWorkflowId) replaceTokens(tokens);
+      } finally {
+        tokensLoading.value = false;
+      }
     }
   }
 });
@@ -1126,8 +1131,7 @@ const curlCommand = computed(() => {
     headerLines.push('  -H "Accept: text/event-stream" \\');
   }
   if (authType.value === "jwt") {
-    const activeToken = executionTokens.value.find((t) => t.id === selectedTokenId.value);
-    const bearer = activeToken ? activeToken.token : "<your-execution-token>";
+    const bearer = bearerToken.value;
     headerLines.push(`  -H "Authorization: Bearer ${bearer}" \\`);
   } else if (authType.value === "header_auth") {
     const key = authHeaderKey.value || "X-API-Key";
@@ -1170,29 +1174,23 @@ function formatCurlJson(): void {
 }
 
 async function createExecutionToken(): Promise<void> {
+  const requestedWorkflowId = workflowId.value;
   tokenCreating.value = true;
   try {
     const ttl = tokenMode.value === "long" ? 315360000 : Math.max(60, Math.floor(Number(tokenTtlSeconds.value)));
-    const token = await workflowApi.executionTokens.create(workflowId.value, ttl);
-    executionTokens.value.unshift(token);
-    selectedTokenId.value = token.id;
+    const token = await workflowApi.executionTokens.create(requestedWorkflowId, ttl);
+    if (workflowId.value === requestedWorkflowId) rememberCreatedToken(token);
   } finally {
     tokenCreating.value = false;
   }
 }
 
 async function revokeExecutionToken(tokenId: string): Promise<void> {
+  const requestedWorkflowId = workflowId.value;
   tokenRevoking.value = tokenId;
   try {
-    await workflowApi.executionTokens.revoke(workflowId.value, tokenId);
-    const token = executionTokens.value.find((t) => t.id === tokenId);
-    if (token) token.revoked = true;
-    if (selectedTokenId.value === tokenId) {
-      const nextActive = executionTokens.value.find(
-        (t) => !t.revoked && new Date(t.expires_at) > new Date(),
-      );
-      selectedTokenId.value = nextActive?.id ?? null;
-    }
+    await workflowApi.executionTokens.revoke(requestedWorkflowId, tokenId);
+    if (workflowId.value === requestedWorkflowId) markRevoked(tokenId);
   } finally {
     tokenRevoking.value = null;
   }
@@ -2009,13 +2007,16 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               size="sm"
               variant="outline"
               class="ml-auto text-xs h-7"
-              :disabled="tokenCreating"
+              :disabled="tokenCreating || tokensLoading"
               @click="createExecutionToken"
             >
               {{ tokenCreating ? "Creating…" : "+ New Token" }}
             </Button>
           </div>
 
+          <p class="text-xs text-muted-foreground">
+            Token values are available only in this page session. Save new tokens before reloading or leaving this page.
+          </p>
           <div
             v-if="executionTokens.length > 0"
             class="divide-y rounded border text-xs"
@@ -2023,19 +2024,17 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <div
               v-for="token in executionTokens"
               :key="token.id"
+              :data-testid="`execution-token-${token.id}`"
               :class="[
-                'flex flex-col gap-1 px-3 py-2 cursor-pointer transition-colors',
+                'flex flex-col gap-1 px-3 py-2 transition-colors',
+                canUseToken(token) ? 'cursor-pointer' : '',
                 token.revoked || isTokenExpired(token.expires_at)
                   ? 'opacity-50'
                   : selectedTokenId === token.id
                     ? 'bg-muted'
-                    : 'hover:bg-muted/50',
+                    : canUseToken(token) ? 'hover:bg-muted/50' : '',
               ]"
-              @click="
-                !token.revoked &&
-                  !isTokenExpired(token.expires_at) &&
-                  (selectedTokenId = token.id)
-              "
+              @click="selectToken(token)"
             >
               <div class="flex items-center justify-between gap-2">
                 <span class="text-muted-foreground">
@@ -2060,6 +2059,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 </span>
                 <div class="flex items-center gap-1 shrink-0">
                   <button
+                    v-if="canUseToken(token)"
                     class="p-0.5 hover:text-foreground text-muted-foreground"
                     :title="tokenVisibility[token.id] ? 'Hide token' : 'Show token'"
                     @click.stop="
@@ -2128,10 +2128,10 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
                 </div>
               </div>
               <div
-                v-if="tokenVisibility[token.id]"
+                v-if="tokenVisibility[token.id] && canUseToken(token)"
                 class="font-mono text-[10px] break-all text-muted-foreground select-all"
               >
-                {{ token.token }}
+                {{ tokenValue(token) }}
               </div>
             </div>
           </div>
