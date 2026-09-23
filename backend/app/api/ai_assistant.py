@@ -68,6 +68,7 @@ from app.services.hitl_service import (
     refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
+from app.services.http_credential_catalog import build_http_credentials_prompt
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.model_router import (
@@ -1838,6 +1839,9 @@ async def create_and_run_generated_workflow_tool(
             user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
+            http_credentials_prompt=await build_http_credentials_prompt(
+                db, user.id, interactive=False
+            ),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
@@ -1961,6 +1965,9 @@ async def edit_and_run_generated_workflow_tool(
             user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
+            http_credentials_prompt=await build_http_credentials_prompt(
+                db, user.id, interactive=False
+            ),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
@@ -4780,6 +4787,9 @@ async def workflow_assistant_stream(
             current_user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
+            http_credentials_prompt=await build_http_credentials_prompt(
+                db, current_user.id, interactive=True
+            ),
         )
 
     if is_dashboard_widget_workflow(request.current_workflow):
@@ -4906,6 +4916,7 @@ async def dashboard_chat_stream(
             + "\n\nAvailable workflows (always check these first when user asks for information):\n"
             + workflows_block
         )
+    system_prompt += await build_http_credentials_prompt(db, current_user.id, interactive=True)
     if request.user_rules and request.user_rules.strip():
         system_prompt = (
             system_prompt

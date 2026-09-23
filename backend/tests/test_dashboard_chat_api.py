@@ -29,7 +29,40 @@ def _normalize_chunks(chunks: list[str | bytes]) -> list[str]:
     return normalized
 
 
+_HTTP_CREDENTIALS_SECTION = "\n\n## Credentials for HTTP requests\n\n- `google` (google)\n"
+
+_MINIMAL_BUILDER_CONTENT = """
+```json
+{
+  "name": "Google Lookup",
+  "description": "Calls a Google API.",
+  "nodes": [
+    {
+      "id": "input",
+      "type": "textInput",
+      "position": {"x": 0, "y": 0},
+      "data": {"label": "request", "inputFields": [{"key": "text"}]}
+    }
+  ],
+  "edges": []
+}
+```
+"""
+
+
+def _stub_http_credentials_prompt(test: unittest.TestCase) -> AsyncMock:
+    """Stub the credential catalog query, which a bare AsyncMock db cannot answer."""
+    patcher = patch(
+        "app.api.ai_assistant.build_http_credentials_prompt", AsyncMock(return_value="")
+    )
+    test.addCleanup(patcher.stop)
+    return patcher.start()
+
+
 class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+
     def test_append_date_to_user_messages_only_changes_llm_copy(self) -> None:
         messages = [
             {"role": "assistant", "content": "Earlier answer"},
@@ -535,8 +568,66 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(StopAsyncIteration):
                 await stream.__anext__()
 
+    async def test_dashboard_chat_appends_http_credentials_section(self) -> None:
+        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.type = CredentialType.openai
+        credential.encrypted_config = "encrypted-config"
+        current_user = MagicMock()
+        current_user.id = uuid.uuid4()
+        http_request = MagicMock()
+        http_request.is_disconnected = AsyncMock(return_value=False)
+        db = AsyncMock()
+        captured: dict[str, str] = {}
+
+        async def fake_stream_dashboard_chat(
+            _client: object, _model: str, system_prompt: str, *_args: object, **_kwargs: object
+        ):
+            captured["system_prompt"] = system_prompt
+            yield 'data: {"type":"done"}\n\n'
+
+        with (
+            patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                AsyncMock(return_value=credential),
+            ),
+            patch("app.api.ai_assistant.decrypt_config", return_value={"api_key": "test"}),
+            patch(
+                "app.api.ai_assistant.get_openai_client",
+                return_value=(MagicMock(), "openai"),
+            ),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
+            patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
+            patch(
+                "app.api.ai_assistant.stream_dashboard_chat",
+                side_effect=fake_stream_dashboard_chat,
+            ),
+        ):
+            response = await dashboard_chat_stream(
+                http_request=http_request,
+                request=DashboardChatRequest(
+                    credential_id=credential.id,
+                    model="gpt-4o-mini",
+                    message="Build a workflow that calls the Google Maps API",
+                ),
+                current_user=current_user,
+                db=db,
+            )
+            _ = [chunk async for chunk in response.body_iterator]
+
+        self.assertIn(_HTTP_CREDENTIALS_SECTION, captured["system_prompt"])
+        self.http_credentials_prompt.assert_awaited_once_with(db, current_user.id, interactive=True)
+
 
 class DashboardChatWorkflowBuilderTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+
     def test_extract_generated_workflow_config_from_json_block(self) -> None:
         content = """
 Here is the workflow:
@@ -767,6 +858,113 @@ Here is the workflow:
         builder_kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(builder_kwargs["temperature"], 0.0)
 
+    async def test_create_generated_workflow_builder_gets_http_credentials_without_asking(
+        self,
+    ) -> None:
+        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        user.user_rules = None
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.owner_id = user.id
+        credential.type = CredentialType.openai
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(content=_MINIMAL_BUILDER_CONTENT))]
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+        db = MagicMock()
+        credential_result = MagicMock()
+        credential_result.scalars.return_value.all.return_value = [credential.id]
+        db.execute = AsyncMock(return_value=credential_result)
+        db.flush = AsyncMock()
+
+        with (
+            patch(
+                "app.api.ai_assistant.template_service.list_node_templates",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.ai_assistant.run_execute_workflow_tool", AsyncMock()),
+        ):
+            await create_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=client,
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                goal="Call the Google Maps API with credential google",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+            )
+
+        messages = client.chat.completions.create.call_args.kwargs["messages"]
+        self.assertIn(_HTTP_CREDENTIALS_SECTION, messages[0]["content"])
+        self.http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=False)
+
+    async def test_edit_generated_workflow_builder_gets_http_credentials_without_asking(
+        self,
+    ) -> None:
+        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        user.user_rules = None
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.owner_id = user.id
+        credential.type = CredentialType.openai
+        workflow = MagicMock()
+        workflow.id = uuid.uuid4()
+        workflow.name = "Google Lookup"
+        workflow.description = "Calls a Google API."
+        workflow.nodes = []
+        workflow.edges = []
+        workflow.auth_type = WorkflowAuthType.anonymous
+        workflow.auth_header_key = None
+        workflow.auth_header_value = None
+        workflow.webhook_body_mode = WebhookBodyMode.generic
+        workflow.cache_ttl_seconds = None
+        workflow.rate_limit_requests = None
+        workflow.rate_limit_window_seconds = None
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(content=_MINIMAL_BUILDER_CONTENT))]
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+        db = MagicMock()
+        credential_result = MagicMock()
+        credential_result.scalars.return_value.all.return_value = [credential.id]
+        max_version_result = MagicMock()
+        max_version_result.scalar.return_value = 1
+        db.execute = AsyncMock(side_effect=[credential_result, max_version_result])
+        db.flush = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.ai_assistant.template_service.list_node_templates",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.ai_assistant.run_execute_workflow_tool", AsyncMock()),
+        ):
+            await edit_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=client,
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                workflow_id=str(workflow.id),
+                instructions="Authenticate the Google call with credential google",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+            )
+
+        messages = client.chat.completions.create.call_args.kwargs["messages"]
+        self.assertIn(_HTTP_CREDENTIALS_SECTION, messages[0]["content"])
+        self.http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=False)
+
     def test_workflow_builder_prompt_requires_discovery_for_current_web_sources(self) -> None:
         prompt = _build_workflow_builder_user_message(
             "Notify Slack when n8n, Needle, or Activepieces releases new features",
@@ -839,6 +1037,9 @@ class BuildUserMessageTests(unittest.TestCase):
 
 
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+
     async def test_dashboard_chat_injects_routing_instructions_when_attachment_present(
         self,
     ) -> None:

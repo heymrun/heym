@@ -69,3 +69,57 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(trailing, ": heartbeat\n\n")
             else:
                 self.fail("the stream kept emitting heartbeats after the source finished")
+
+
+class WorkflowAssistantHttpCredentialsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_builder_prompt_includes_http_credentials_section(self) -> None:
+        section = "\n\n## Credentials for HTTP requests\n\n- `google` (google)\n"
+        credential_id = uuid.uuid4()
+        user = SimpleNamespace(id=uuid.uuid4(), user_rules=None)
+        credential = SimpleNamespace(
+            id=credential_id,
+            type=CredentialType.openai,
+            encrypted_config={},
+        )
+        db = AsyncMock()
+        captured: dict[str, str] = {}
+
+        async def fake_stream_llm_response(
+            _client: object, _model: str, system_prompt: str, *_args: object, **_kwargs: object
+        ):
+            captured["system_prompt"] = system_prompt
+            yield 'data: {"type": "done"}\n\n'
+
+        with (
+            patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                AsyncMock(return_value=credential),
+            ),
+            patch("app.api.ai_assistant.decrypt_config", return_value={"api_key": "test"}),
+            patch("app.api.ai_assistant.get_openai_client", return_value=(object(), "openai")),
+            patch(
+                "app.api.ai_assistant.template_service.list_node_templates",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.ai_assistant._load_installed_plugins", AsyncMock(return_value=[])),
+            patch(
+                "app.api.ai_assistant.build_http_credentials_prompt",
+                AsyncMock(return_value=section),
+            ) as http_credentials_prompt,
+            patch("app.api.ai_assistant.stream_llm_response", fake_stream_llm_response),
+        ):
+            response = await workflow_assistant_stream(
+                request=AIAssistantRequest(
+                    credential_id=credential_id,
+                    model="gpt-test",
+                    message="Call the Google Maps API",
+                ),
+                current_user=user,
+                db=db,
+            )
+            async for chunk in response.body_iterator:
+                if chunk == 'data: {"type": "done"}\n\n':
+                    break
+
+        self.assertIn(section, captured["system_prompt"])
+        http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=True)

@@ -920,6 +920,10 @@ export function useExpressionCompletion(
     }
 
     if (nodeLabel === "credentials") {
+      // Resolves to the secret itself; offer nothing to chain after the name.
+      if (propertyPath.length > 0) {
+        return [];
+      }
       const credentialSuggestions: CompletionSuggestion[] =
         credentialsCache.value.map((cred) => ({
           label: cred.name,

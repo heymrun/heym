@@ -18,6 +18,13 @@ class TestClarifyProtocolConstant(unittest.TestCase):
         self.assertIn("do not emit", text.lower())
         self.assertRegex(text.lower(), r"workflow json block")
 
+    def test_constant_documents_editable_prefill_options(self) -> None:
+        """The answer format must match what the frontend ClarifyCard serializes."""
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn('{"label": "...", "prefill": "..."}', text)
+        self.assertIn("`prefillLabel`", text)
+        self.assertIn('`label (<prefillLabel>: "<edited value>")`', text)
+
     def test_synced_dsl_prompt_stays_clean(self) -> None:
         # heymweb sync extracts only WORKFLOW_DSL_SYSTEM_PROMPT; it must NOT
         # contain the clarify protocol, or /convert would start asking questions.

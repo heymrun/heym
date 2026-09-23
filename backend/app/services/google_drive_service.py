@@ -131,6 +131,10 @@ class GoogleDriveService:
             )
         return token
 
+    def access_token(self) -> str:
+        """Return a valid access token for callers outside this service."""
+        return self._get_valid_token()
+
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._get_valid_token()}"}
 

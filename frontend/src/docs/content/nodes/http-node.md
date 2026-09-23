@@ -59,6 +59,23 @@ Quotes and spaces inside an expression belong to the expression, not to the cURL
 curl "https://r.jina.ai/$url.text.replaceAll("\n", "").strip()" -H "Authorization: $credentials.Jina"
 ```
 
+## Authenticating with Credentials
+
+`$credentials.Name` resolves to a different value for each [credential](../reference/credentials.md) type, so the header line depends on the type:
+
+| Credential type | `$credentials.Name` resolves to | Header |
+|-----------------|---------------------------------|--------|
+| Bearer | `Bearer <token>` | `-H "Authorization: $credentials.Name"` |
+| Header | `<Header-Name>: <value>` | `-H "$credentials.Name"` |
+| OpenAI, Custom, Cohere | The raw API key | `-H "Authorization: Bearer $credentials.Name"` |
+| Google | The raw API key | `-H "x-goog-api-key: $credentials.Name"` |
+| ElevenLabs | The raw API key | `-H "xi-api-key: $credentials.Name"` |
+| Google Sheets, Google Drive | A fresh OAuth access token, refreshed when it expires | `-H "Authorization: Bearer $credentials.Name"` |
+
+A Bearer credential already carries the `Bearer ` prefix, so adding another one sends `Bearer Bearer …`. Google Sheets and Google Drive credentials let you call Google APIs their node does not cover, such as adding a tab to a spreadsheet, within the scopes the credential was granted. When a name is not a plain identifier (it contains `-`, starts with a digit, or is a reserved word), use the bracket form: `-H "Authorization: $credentials["my-api-key"]"`.
+
+When the [AI Assistant](../reference/ai-assistant.md) or [Chat](../tabs/chat-tab.md) builds an HTTP request that needs authentication and no dedicated node covers the service, it asks which credential to use. Pick one, change the prefilled header name if the API expects a different one, and it writes the header line for you. The assistant sees credential names and types, never their values. Secrets that reach the node's output, such as the sent `request.headers`, are masked in run results.
+
 ## Egress Safety
 
 - By default, the URL must use `http://` or `https://` and resolve only to public addresses. Loopback, private, link-local, multicast, and cloud-metadata destinations are blocked.

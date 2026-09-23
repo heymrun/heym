@@ -22,6 +22,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Kanban task creation** – Ask naturally to add a task or create a card. Chat adds it to the first column of the requested board; when you have multiple boards and do not name one, Chat presents a board picker before creating the card
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
+- **Credentials in HTTP requests** – When a workflow needs an authenticated HTTP call that no dedicated node covers, Chat asks which credential to use before building it, with the header name prefilled and editable. See [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials)
 - **Streaming responses** – See the model's output as it streams
 - **Stop response** – Interrupt the current streaming answer at any time; stopping also clears queued messages for that conversation
 - **Markdown rendering** – Responses support markdown formatting, including inline images
