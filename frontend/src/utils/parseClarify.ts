@@ -2,13 +2,34 @@ import { jsonrepair } from "jsonrepair";
 
 import type {
   ClarifyAnswer,
+  ClarifyOption,
   ClarifyPayload,
   ClarifyQuestion,
+  ClarifyQuestionType,
 } from "@/types/clarify";
 
 const FENCE = "```heym-clarify";
 
-function isValidQuestion(q: unknown): q is ClarifyQuestion {
+// Options arrive as plain strings or `{label, prefill}` objects.
+interface RawClarifyQuestion {
+  id: string;
+  text: string;
+  type: ClarifyQuestionType;
+  options?: unknown[];
+  allowOther?: boolean;
+  prefillLabel?: string;
+}
+
+function isValidOption(option: unknown): boolean {
+  if (!option || typeof option !== "object") return true;
+  const obj = option as Record<string, unknown>;
+  return (
+    typeof obj.label === "string" &&
+    (obj.prefill === undefined || typeof obj.prefill === "string")
+  );
+}
+
+function isValidQuestion(q: unknown): q is RawClarifyQuestion {
   if (!q || typeof q !== "object") return false;
   const obj = q as Record<string, unknown>;
   const validType =
@@ -17,9 +38,17 @@ function isValidQuestion(q: unknown): q is ClarifyQuestion {
     typeof obj.id === "string" &&
     typeof obj.text === "string" &&
     validType &&
-    (obj.options === undefined || Array.isArray(obj.options)) &&
-    (obj.allowOther === undefined || typeof obj.allowOther === "boolean")
+    (obj.options === undefined ||
+      (Array.isArray(obj.options) && obj.options.every(isValidOption))) &&
+    (obj.allowOther === undefined || typeof obj.allowOther === "boolean") &&
+    (obj.prefillLabel === undefined || typeof obj.prefillLabel === "string")
   );
+}
+
+function normalizeOption(option: unknown, allowPrefill: boolean): ClarifyOption {
+  if (!option || typeof option !== "object") return { label: String(option) };
+  const { label, prefill } = option as ClarifyOption;
+  return allowPrefill && prefill !== undefined ? { label, prefill } : { label };
 }
 
 function validate(parsed: unknown): ClarifyQuestion[] | null {
@@ -31,8 +60,9 @@ function validate(parsed: unknown): ClarifyQuestion[] | null {
     id: q.id,
     text: q.text,
     type: q.type,
-    options: q.options,
+    options: q.options?.map((option) => normalizeOption(option, q.type === "single")),
     allowOther: q.allowOther,
+    prefillLabel: q.prefillLabel,
   }));
 }
 
@@ -75,6 +105,17 @@ export function stripClarifyBlock(content: string): string {
   return (content.slice(0, start) + tail).trim();
 }
 
+function withPrefill(
+  q: ClarifyQuestion,
+  label: string,
+  edited: string | undefined,
+): string {
+  const option = q.options?.find((o) => o.label === label);
+  const value = edited?.trim();
+  if (option?.prefill === undefined || !value) return label;
+  return `${label} (${q.prefillLabel?.trim() || "Value"}: "${value}")`;
+}
+
 export function serializeAnswers(
   questions: ClarifyQuestion[],
   answers: ClarifyAnswer[],
@@ -84,7 +125,9 @@ export function serializeAnswers(
     const a = byId.get(q.id);
     const parts: string[] = [];
     if (a) {
-      if (a.selected.length > 0) parts.push(...a.selected);
+      if (a.selected.length > 0) {
+        parts.push(...a.selected.map((label) => withPrefill(q, label, a.prefill)));
+      }
       if (a.other.trim()) parts.push(`Other: "${a.other.trim()}"`);
     }
     const value = parts.length > 0 ? parts.join(", ") : "(no answer)";

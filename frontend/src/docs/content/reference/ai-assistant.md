@@ -81,7 +81,10 @@ The AI Assistant is powered by a **workflow DSL** (domain-specific language) tha
    - Your User Rules appended as "User Custom Rules"
    - The current workflow JSON when you are editing an existing workflow
    - The list of available workflows if you use the Execute node
+   - The names and types of your credentials that an HTTP node can send (never their values)
 3. The model returns a single workflow JSON block (with `nodes` and `edges`). The frontend parses it and applies it to the canvas.
+
+When a request needs an authenticated HTTP call, the assistant uses a dedicated node if one covers the service. Otherwise it asks which credential to use, with the header name prefilled and editable, and writes the header line into the node's cURL command. See [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials).
 
 The DSL enforces camelCase labels, unified expression rules, and node-specific fields. If a field value is a single `$expr`, the backend preserves the native type; if the value mixes prose with `$refs`, the result is a string. The one-`$` rule still applies: no `$` inside parentheses. [Settings](./user-settings.md) User Rules are injected into this system prompt so your preferences apply to every AI-generated workflow.
 

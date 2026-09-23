@@ -44,6 +44,8 @@ $credentials.MyBearerToken
 $credentials.MyNotionWorkspace
 ```
 
+Names that are not plain identifiers (they contain `-`, start with a digit, or are reserved words) use the bracket form: `$credentials["my-api-key"]`.
+
 ### Global Variables
 
 Use `$global.variableName` to reference [Global Variables](./global-variables.md) – persistent, user-scoped key-value data managed in the [Variables tab](../tabs/global-variables-tab.md).

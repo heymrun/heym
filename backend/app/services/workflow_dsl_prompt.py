@@ -5291,6 +5291,11 @@ Rules for the clarify block:
 - Use `single` for one choice, `multi` for several, `text` for free input.
 - Provide `options` whenever sensible; set `allowOther: true` when a genuine free-form
   answer is plausible.
+- When a `single` choice needs one editable value (for example a header key), an option
+  can be an object `{"label": "...", "prefill": "..."}` instead of a string, and the
+  question's `prefillLabel` names that value. The selected option's `prefill` appears in
+  an input the user can edit, and the answer comes back as
+  `label (<prefillLabel>: "<edited value>")`.
 
 Example:
 
@@ -5338,6 +5343,7 @@ def build_assistant_prompt(
     user_rules: str | None = None,
     available_node_templates: list[dict] | None = None,
     installed_plugins: list[dict] | None = None,
+    http_credentials_prompt: str = "",
 ) -> str:
     import json
 
@@ -5492,6 +5498,7 @@ def build_assistant_prompt(
                     )
                     prompt += f"    config fields: {field_list}\n"
 
+    prompt += http_credentials_prompt
     prompt += CLARIFY_PROTOCOL_PROMPT
 
     return prompt

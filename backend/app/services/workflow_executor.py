@@ -7965,6 +7965,19 @@ class WorkflowExecutor:
         )
 
 
+def _credential_secret_parts(value: str) -> list[str]:
+    """Return a credential value plus the bare secret inside a composite value.
+
+    Header credentials resolve to `Name: secret` and bearer ones to `Bearer <token>`;
+    a sent request stores only the secret part, so masking the full value misses it.
+    """
+    if value.startswith("Bearer "):
+        return [value, value[len("Bearer ") :]]
+    if ": " in value:
+        return [value, value.split(": ", 1)[1]]
+    return [value]
+
+
 def mask_sensitive_output(output: dict, credentials_context: dict[str, str]) -> dict:
     safe_output = _to_json_compatible(output)
     if not credentials_context:
@@ -7972,10 +7985,10 @@ def mask_sensitive_output(output: dict, credentials_context: dict[str, str]) -> 
 
     output_str = json.dumps(safe_output, ensure_ascii=False)
 
-    for name, value in credentials_context.items():
-        if value and len(value) > 7:
-            masked = value[:7] + "**"
-            output_str = output_str.replace(value, masked)
+    for value in credentials_context.values():
+        for secret in _credential_secret_parts(value or ""):
+            if len(secret) > 7:
+                output_str = output_str.replace(secret, secret[:7] + "**")
 
     return json.loads(output_str)
 

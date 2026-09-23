@@ -1807,6 +1807,64 @@ class CredentialContextTeamShareTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context, {"GitHub Token": "github_pat_123"})
 
+    async def test_workflow_credentials_context_resolves_a_fresh_google_sheets_token(
+        self,
+    ) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="sheet",
+            type=CredentialType.google_sheets,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with (
+            patch("app.api.workflows.decrypt_config", return_value={"access_token": "stale"}),
+            patch(
+                "app.services.credential_context._fresh_google_access_token",
+                return_value="ya29.fresh",
+            ),
+        ):
+            context = await get_credentials_context(db, user_id)
+
+        self.assertEqual(context, {"sheet": "ya29.fresh"})
+
+    async def test_mcp_credentials_context_resolves_a_fresh_google_drive_token(self) -> None:
+        user_id = uuid.uuid4()
+        credential = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="drive",
+            type=CredentialType.google_drive,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _ScalarsResult([credential]),
+                _ScalarsResult([]),
+                _ScalarsResult([]),
+            ]
+        )
+
+        with (
+            patch("app.api.mcp.decrypt_config", return_value={"access_token": "stale"}),
+            patch(
+                "app.services.credential_context._fresh_google_access_token",
+                return_value="ya29.fresh",
+            ),
+        ):
+            context = await get_credentials_context_for_user(db, user_id)
+
+        self.assertEqual(context, {"drive": "ya29.fresh"})
+
 
 class ParseExecuteBodyXTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
     """X-Trigger-Source header support in parse_execute_body."""

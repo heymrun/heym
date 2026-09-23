@@ -78,6 +78,7 @@ from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
 )
+from app.services.credential_context import credential_context_value
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -2521,30 +2522,11 @@ async def get_credentials_context(
     context: dict[str, str] = {}
     for cred in all_credentials:
         try:
-            config = decrypt_config(cred.encrypted_config)
-            if cred.type == CredentialType.bearer:
-                token = config.get("bearer_token", "")
-                context[cred.name] = f"Bearer {token}" if token else ""
-            elif cred.type == CredentialType.header:
-                header_key = config.get("header_key", "")
-                header_value = config.get("header_value", "")
-                context[cred.name] = f"{header_key}: {header_value}" if header_key else header_value
-            elif cred.type == CredentialType.discord:
-                context[cred.name] = config.get("webhook_url", "")
-            elif cred.type == CredentialType.slack:
-                context[cred.name] = config.get("webhook_url", "")
-            elif cred.type == CredentialType.notion:
-                from app.services.notion_service import NotionService
-
-                context[cred.name] = NotionService.resolve_bearer_token(config)
-            elif cred.type == CredentialType.sentry:
-                context[cred.name] = config.get("api_token", "")
-            elif cred.type == CredentialType.codex:
-                continue
-            else:
-                context[cred.name] = config.get("api_key", "")
+            value = await credential_context_value(cred, decrypt_config(cred.encrypted_config))
         except Exception:
-            pass
+            continue
+        if value is not None:
+            context[cred.name] = value
     return context
 
 

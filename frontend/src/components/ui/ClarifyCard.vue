@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
 
-import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
+import type { ClarifyAnswer, ClarifyOption, ClarifyQuestion } from "@/types/clarify";
 
 const props = defineProps<{
   questions: ClarifyQuestion[];
@@ -15,33 +15,42 @@ const emit = defineEmits<{
 const state = reactive<Record<string, ClarifyAnswer>>({});
 
 for (const q of props.questions) {
-  state[q.id] = { id: q.id, text: q.text, selected: [], other: "" };
+  state[q.id] = { id: q.id, text: q.text, selected: [], other: "", prefill: "" };
 }
 
-function selectSingle(q: ClarifyQuestion, option: string): void {
+function selectSingle(q: ClarifyQuestion, option: ClarifyOption): void {
   if (props.disabled) return;
   // Single choice and free-text are mutually exclusive: picking a chip clears Other.
-  state[q.id].selected = [option];
+  state[q.id].selected = [option.label];
   state[q.id].other = "";
+  state[q.id].prefill = option.prefill ?? "";
 }
 
-function toggleMulti(q: ClarifyQuestion, option: string): void {
+function toggleMulti(q: ClarifyQuestion, option: ClarifyOption): void {
   if (props.disabled) return;
   const sel = state[q.id].selected;
-  const idx = sel.indexOf(option);
+  const idx = sel.indexOf(option.label);
   if (idx >= 0) sel.splice(idx, 1);
-  else sel.push(option);
+  else sel.push(option.label);
 }
 
 function onOtherFocus(q: ClarifyQuestion): void {
   if (props.disabled) return;
   // Focusing Other on a single-choice question deselects the chip
   // (multi keeps its selections so Other can add to them).
-  if (q.type !== "multi") state[q.id].selected = [];
+  if (q.type !== "multi") {
+    state[q.id].selected = [];
+    state[q.id].prefill = "";
+  }
 }
 
-function isSelected(q: ClarifyQuestion, option: string): boolean {
-  return state[q.id].selected.includes(option);
+function isSelected(q: ClarifyQuestion, option: ClarifyOption): boolean {
+  return state[q.id].selected.includes(option.label);
+}
+
+function selectedPrefillOption(q: ClarifyQuestion): ClarifyOption | undefined {
+  if (q.type !== "single") return undefined;
+  return q.options?.find((o) => o.prefill !== undefined && isSelected(q, o));
 }
 
 const canSubmit = computed(() => {
@@ -81,16 +90,30 @@ function submit(): void {
       >
         <button
           v-for="opt in q.options ?? []"
-          :key="opt"
+          :key="opt.label"
           type="button"
           class="clarify-option"
           :class="{ active: isSelected(q, opt) }"
           :disabled="props.disabled"
           @click="q.type === 'single' ? selectSingle(q, opt) : toggleMulti(q, opt)"
         >
-          {{ opt }}
+          {{ opt.label }}
         </button>
       </div>
+
+      <label
+        v-if="selectedPrefillOption(q)"
+        class="clarify-prefill"
+      >
+        <span class="clarify-prefill-label">{{ q.prefillLabel || "Value" }}</span>
+        <input
+          v-model="state[q.id].prefill"
+          type="text"
+          class="clarify-other clarify-prefill-input"
+          spellcheck="false"
+          :disabled="props.disabled"
+        >
+      </label>
 
       <input
         v-if="q.type === 'text' || q.allowOther"
@@ -182,6 +205,20 @@ function submit(): void {
   outline: none;
   border-color: hsl(var(--primary));
   box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
+}
+.clarify-prefill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clarify-prefill-label {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.clarify-prefill-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .clarify-submit {
   align-self: flex-start;

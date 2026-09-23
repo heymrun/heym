@@ -62,7 +62,7 @@ OpenCode Go credentials are listed there too, but marked **"usage unavailable"**
 
 ## In Expressions
 
-Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression.
+Some nodes allow expressions for auth. Use [Expression DSL](./expression-dsl.md) with `$credentials.CredentialName` to reference a credential's resolved secret inside an expression. For the header line each credential type needs in an HTTP request, see [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials).
 
 Codex credentials are intentionally excluded from `$credentials`. Whether you sign in with ChatGPT (subscription, no per-token API cost) or paste a Codex `access_token`, the tokens are only passed to the local Codex runner process. ChatGPT sign-in tokens are refreshed automatically as they expire.
 
