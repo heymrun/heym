@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { Plus, Trash2 } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
@@ -11,7 +11,12 @@ import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import { credentialsApi } from "@/services/api";
-import { createEmptyOption, type ModelRouterOptionForm } from "./modelRouterConfig";
+import {
+  buildOptionModelChoices,
+  createEmptyOption,
+  type ModelRouterOptionForm,
+  type ModelSelectOption,
+} from "./modelRouterConfig";
 
 const props = defineProps<{
   options: ModelRouterOptionForm[];
@@ -35,11 +40,8 @@ const credentialOptions = computed((): { value: string; label: string }[] => [
   })),
 ]);
 
-function modelOptionsFor(credentialId: string): { value: string; label: string }[] {
-  return (modelsByCredential.value[credentialId] ?? []).map((model) => ({
-    value: model.id,
-    label: model.name,
-  }));
+function modelOptionsFor(option: ModelRouterOptionForm): ModelSelectOption[] {
+  return buildOptionModelChoices(option.model, modelsByCredential.value[option.credentialId]);
 }
 
 async function loadModels(credentialId: string): Promise<void> {
@@ -86,11 +88,18 @@ function removeOption(index: number): void {
   );
 }
 
-onMounted(() => {
-  props.options.forEach((option) => {
-    if (option.credentialId) void loadModels(option.credentialId);
-  });
-});
+// Watched, not loaded on mount: editing an existing router mounts this with a blank
+// form and fills it once the stored config arrives, so a mount-time load would run
+// before any option had a credential and the model dropdowns would stay empty.
+watch(
+  () => props.options.map((option) => option.credentialId).join("|"),
+  () => {
+    props.options.forEach((option) => {
+      if (option.credentialId) void loadModels(option.credentialId);
+    });
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -156,7 +165,7 @@ onMounted(() => {
           <Label>Model</Label>
           <SearchableSelect
             :model-value="option.model"
-            :options="modelOptionsFor(option.credentialId)"
+            :options="modelOptionsFor(option)"
             placeholder="Select model..."
             search-placeholder="Search models..."
             empty-text="No models found."

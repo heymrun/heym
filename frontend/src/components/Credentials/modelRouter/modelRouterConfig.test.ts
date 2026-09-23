@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildModelRouterConfig,
+  buildOptionModelChoices,
   createEmptyOption,
   emptyModelRouterForm,
   formFromModelRouterConfig,
@@ -153,5 +154,42 @@ describe("formFromModelRouterConfig", () => {
     const config = buildModelRouterConfig(validForm());
     config.routing_instructions = "";
     expect(formFromModelRouterConfig(config).routingInstructions.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildOptionModelChoices", () => {
+  const models = [
+    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+    { id: "gpt-5", name: "GPT-5" },
+  ];
+
+  it("lists the credential's models", () => {
+    expect(buildOptionModelChoices("gpt-5", models)).toEqual([
+      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+      { value: "gpt-5", label: "GPT-5" },
+    ]);
+  });
+
+  it("keeps a stored model the credential no longer offers", () => {
+    const choices = buildOptionModelChoices("gpt-4-turbo", models);
+
+    expect(choices).toHaveLength(3);
+    expect(choices[2]).toEqual({
+      value: "gpt-4-turbo",
+      label: "gpt-4-turbo (not offered by this credential)",
+    });
+  });
+
+  it("adds nothing while the models are still loading", () => {
+    // undefined means "not fetched yet"; an empty array means "fetched, none offered".
+    expect(buildOptionModelChoices("gpt-5", undefined)).toEqual([]);
+    expect(buildOptionModelChoices("gpt-5", [])).toEqual([
+      { value: "gpt-5", label: "gpt-5 (not offered by this credential)" },
+    ]);
+  });
+
+  it("adds nothing for a row with no model chosen yet", () => {
+    expect(buildOptionModelChoices("", models)).toHaveLength(2);
+    expect(buildOptionModelChoices("   ", models)).toHaveLength(2);
   });
 });
