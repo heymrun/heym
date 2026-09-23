@@ -7,7 +7,7 @@ Heym is an AI-native low-code automation platform with a visual workflow editor.
 - **Visual workflows** – Drag and drop [nodes](../reference/node-types.md) to create automation flows in the [Workflows](../tabs/workflows-tab.md) tab
 - **AI-powered nodes** – [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), and [RAG](../nodes/rag-node.md) nodes for intelligent automation
 - **AI Assistant** – Build workflows with natural language via the [AI Assistant](../reference/ai-assistant.md) panel in the editor
-- **Chat with Docs** – Ask page-aware product questions from the [Chat with Docs](../reference/chat-with-docs.md) dialog in documentation
+- **Chat with Heym** – Ask page-aware product questions from the [Chat with Heym](../reference/chat-with-heym.md) dialog in documentation
 - **Integrations** – HTTP, Slack, email, and more via dedicated nodes
 - **Scheduling** – Trigger workflows on a cron schedule
 - **Chat portals** – Expose workflows as chat interfaces for end users; use the [Chat](../tabs/chat-tab.md) tab to test models directly
@@ -27,7 +27,7 @@ Heym is an AI-native low-code automation platform with a visual workflow editor.
 - [Quick Start](./quick-start.md) – Build your first workflow
 - [Running & Deployment](./running-and-deployment.md) – Start locally with `run.sh` or deploy with `deploy.sh`
 - [AI Assistant](../reference/ai-assistant.md) – Create workflows with natural language
-- [Chat with Docs](../reference/chat-with-docs.md) – Ask follow-up questions while reading docs
+- [Chat with Heym](../reference/chat-with-heym.md) – Ask follow-up questions while reading docs
 - [Core Concepts](./core-concepts.md) – Workflows, nodes, and execution flow
 - [Workflows Tab](../tabs/workflows-tab.md) – Manage workflows and folders
 - [Credentials Tab](../tabs/credentials-tab.md) – Add API keys for nodes

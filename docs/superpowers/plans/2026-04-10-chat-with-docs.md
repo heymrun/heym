@@ -1,8 +1,8 @@
-# Chat with Docs Implementation Plan
+# Chat with Heym Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a "Chat with Docs" magic wand button to the DocsView header that opens a centered dialog where users can select credentials/model and chat with the AI assistant, context-aware of the currently open doc page.
+**Goal:** Add a "Chat with Heym" magic wand button to the DocsView header that opens a centered dialog where users can select credentials/model and chat with the AI assistant, context-aware of the currently open doc page.
 
 **Architecture:** Single new component `DocsChatDialog.vue` (self-contained: credential/model selection + streaming chat). `DocsView.vue` gets a purple wand button in the `#actions` slot and mounts the dialog. Backend unchanged — reuses `POST /api/ai/dashboard-chat`. Active `docPath` injected via `userRules` param.
 
@@ -281,7 +281,7 @@ onUnmounted(() => {
 <template>
   <Dialog
     :open="open"
-    title="Chat with Docs"
+    title="Chat with Heym"
     size="2xl"
     :allow-fullscreen="true"
     @close="handleClose"
@@ -506,7 +506,7 @@ Expected: 0 errors, 0 warnings. Fix any reported issues before continuing.
 
 ```bash
 git add frontend/src/components/Docs/DocsChatDialog.vue
-git commit -m "feat: add DocsChatDialog component for Chat with Docs"
+git commit -m "feat: add DocsChatDialog component for Chat with Heym"
 ```
 
 ---
@@ -562,7 +562,7 @@ const unsub = onDismissOverlays(() => {
 });
 ```
 
-- [ ] **Step 4: Add the purple "Chat with Docs" button in the `#actions` slot**
+- [ ] **Step 4: Add the purple "Chat with Heym" button in the `#actions` slot**
 
 In `DocsView.vue` template, find the `<template #actions>` block (around lines 135–156). It currently starts with the GitHub `<a>` link. Add the wand button **before** the GitHub link:
 
@@ -570,12 +570,12 @@ In `DocsView.vue` template, find the `<template #actions>` block (around lines 1
 <template #actions>
   <button
     class="inline-flex items-center justify-center gap-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-all duration-250 active:scale-[0.97] min-h-[44px] min-w-[44px] md:min-h-[36px] md:h-9 px-3"
-    title="Chat with Docs"
-    aria-label="Chat with Docs"
+    title="Chat with Heym"
+    aria-label="Chat with Heym"
     @click="docsChatOpen = true; pushOverlayState()"
   >
     <Wand2 class="w-4 h-4 shrink-0" />
-    <span class="hidden sm:inline text-xs font-medium">Chat with Docs</span>
+    <span class="hidden sm:inline text-xs font-medium">Chat with Heym</span>
   </button>
   <a
     href="https://github.com/heymrun/heym"
@@ -629,9 +629,9 @@ cd frontend && bun run dev
 ```
 
 Navigate to `http://localhost:4017/docs`. Check:
-- [ ] Purple "Chat with Docs" button visible in header (icon-only on mobile <640px, icon + text on desktop)
+- [ ] Purple "Chat with Heym" button visible in header (icon-only on mobile <640px, icon + text on desktop)
 - [ ] Clicking button opens dialog centered on screen
-- [ ] Dialog has "Chat with Docs" title
+- [ ] Dialog has "Chat with Heym" title
 - [ ] Credential and model dropdowns populate
 - [ ] Backdrop click closes dialog (messages cleared)
 - [ ] Escape key closes dialog (messages cleared)
@@ -646,7 +646,7 @@ Navigate to `http://localhost:4017/docs`. Check:
 
 ```bash
 git add frontend/src/views/DocsView.vue
-git commit -m "feat: wire Chat with Docs button and dialog into DocsView"
+git commit -m "feat: wire Chat with Heym button and dialog into DocsView"
 ```
 
 ---

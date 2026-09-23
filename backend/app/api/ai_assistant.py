@@ -57,7 +57,22 @@ from app.models.board_schemas import CardCreateRequest
 from app.services import template_service
 from app.services.active_execution_overview import build_active_execution_overview
 from app.services.credential_access import get_accessible_credential
+from app.services.credential_catalog import (
+    CredentialPromptMode,
+    build_credentials_prompt,
+    format_credentials_prompt,
+    load_credential_catalog,
+)
 from app.services.encryption import decrypt_config
+from app.services.generated_credentials import (
+    CredentialChoice,
+    CredentialPassResult,
+    apply_generated_credentials,
+    credentials_to_assign_payload,
+    format_credential_choices,
+    parse_credential_choices,
+    requires_credentials_payload,
+)
 from app.services.hitl_service import (
     build_hitl_resolved_output,
     build_public_base_url,
@@ -68,7 +83,6 @@ from app.services.hitl_service import (
     refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
-from app.services.http_credential_catalog import build_http_credentials_prompt
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.model_router import (
@@ -444,6 +458,29 @@ When the user asks for something you cannot do with your tools (e.g. console log
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
+_CREDENTIAL_CHOICES_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": "The user's credential answers from the heym-clarify card, one per service. Use an empty credential_name when the user chose to continue without a credential. Add header_key for http calls.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "credential_type": {
+                "type": "string",
+                "description": "Credential type, for example github or google_sheets.",
+            },
+            "credential_name": {
+                "type": "string",
+                "description": "Name of the chosen or created credential; empty for none.",
+            },
+            "header_key": {
+                "type": "string",
+                "description": "Header key for http requests, for example Authorization.",
+            },
+        },
+        "required": ["credential_type", "credential_name"],
+    },
+}
+
 DASHBOARD_CHAT_TOOLS = [
     {
         "type": "function",
@@ -490,6 +527,7 @@ DASHBOARD_CHAT_TOOLS = [
                         "type": "object",
                         "description": "Values to prefill on the generated workflow's input fields when known, keyed by expected input field names.",
                     },
+                    "credential_choices": _CREDENTIAL_CHOICES_SCHEMA,
                 },
                 "required": ["goal"],
             },
@@ -515,6 +553,7 @@ DASHBOARD_CHAT_TOOLS = [
                         "type": "object",
                         "description": "Values to prefill on the edited workflow's input fields when known.",
                     },
+                    "credential_choices": _CREDENTIAL_CHOICES_SCHEMA,
                 },
                 "required": ["workflow_id", "instructions"],
             },
@@ -1480,25 +1519,6 @@ _PLACEHOLDER_CREDENTIAL_PATTERNS = (
     "google-drive-credential-uuid",
 )
 
-_INTEGRATION_CREDENTIAL_NODE_TYPES = {
-    "discord",
-    "discordTrigger",
-    "slack",
-    "telegram",
-    "imapTrigger",
-    "telegramTrigger",
-    "sendEmail",
-    "redis",
-    "grist",
-    "rabbitmq",
-    "crawler",
-    "googleSheets",
-    "googleDrive",
-    "slackTrigger",
-    "bigquery",
-    "supabase",
-}
-
 
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
     """Parse a JSON object, accepting one common LLM error: trailing commas."""
@@ -1620,7 +1640,10 @@ def _sanitize_generated_workflow_nodes(
     selected_model: str,
     user_id: uuid.UUID,
 ) -> list[dict[str, Any]]:
-    """Clear unsafe generated credentials and fill LLM nodes from the selected owned credential."""
+    """Clear unsafe generated LLM credentials and fill LLM nodes from the selected credential.
+
+    Integration credential fields go through `apply_generated_credentials` instead.
+    """
     selected_llm_credential_id = (
         str(selected_credential.id)
         if _selected_credential_is_owned_llm(selected_credential, user_id)
@@ -1649,10 +1672,8 @@ def _sanitize_generated_workflow_nodes(
             if not data.get("guardrailCredentialId"):
                 data["guardrailModel"] = ""
 
-        if node_type in _INTEGRATION_CREDENTIAL_NODE_TYPES or node_type == "playwright":
-            _clear_unowned_credential_field(data, "credentialId", owned_credential_ids)
-
         if node_type == "playwright":
+            _clear_unowned_credential_field(data, "credentialId", owned_credential_ids)
             for steps_field in ("playwrightSteps", "playwrightAuthFallbackSteps"):
                 steps = data.get(steps_field)
                 if not isinstance(steps, list):
@@ -1668,11 +1689,6 @@ def _sanitize_generated_workflow_nodes(
 
     _normalize_agent_tool_parameters(sanitized)
     return sanitized
-
-
-async def _get_owned_credential_ids(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
-    result = await db.execute(select(Credential.id).where(Credential.owner_id == user_id))
-    return {str(credential_id) for credential_id in result.scalars().all()}
 
 
 async def _load_installed_plugins(db: AsyncSession) -> list[dict]:
@@ -1706,6 +1722,7 @@ def _build_workflow_builder_user_message(
     goal: str,
     inputs: dict[str, Any],
     attachment: FileAttachment | None,
+    credential_choices: list[CredentialChoice] | None = None,
 ) -> str:
     parts = [
         "Create a complete Heym workflow for this dashboard chat request.",
@@ -1726,6 +1743,9 @@ def _build_workflow_builder_user_message(
             f"Name: {attachment.name}. Kind: {attachment.kind}. "
             "Use an input field suitable for this attachment if the workflow needs it."
         )
+    choices_text = format_credential_choices(credential_choices or [])
+    if choices_text:
+        parts.append("\n" + choices_text)
     return "\n".join(parts)
 
 
@@ -1734,6 +1754,7 @@ def _build_workflow_editor_user_message(
     instructions: str,
     inputs: dict[str, Any],
     attachment: FileAttachment | None,
+    credential_choices: list[CredentialChoice] | None = None,
 ) -> str:
     current_workflow = {
         "id": str(workflow.id),
@@ -1763,6 +1784,9 @@ def _build_workflow_editor_user_message(
             f"Name: {attachment.name}. Kind: {attachment.kind}. "
             "Use an input field suitable for this attachment if the workflow needs it."
         )
+    choices_text = format_credential_choices(credential_choices or [])
+    if choices_text:
+        parts.append("\n" + choices_text)
     return "\n".join(parts)
 
 
@@ -1775,6 +1799,7 @@ def _build_saved_workflow_payload(
     execution_payload: Any = None,
     *,
     status_value: str,
+    extra: dict[str, Any] | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "status": status_value,
@@ -1798,7 +1823,24 @@ def _build_saved_workflow_payload(
     }
     if execution_payload is not None:
         payload["execution"] = execution_payload
+    if extra:
+        payload.update(extra)
     return json.dumps(payload, default=str)
+
+
+def _builder_credential_mode(turn_mode: CredentialPromptMode) -> CredentialPromptMode:
+    """The builder inside a chat tool never asks: it applies choices, or uses none on MCP."""
+    if turn_mode is CredentialPromptMode.OFF:
+        return CredentialPromptMode.OFF
+    return CredentialPromptMode.APPLY_CHOICES
+
+
+def _unassigned_credentials_extra(
+    result: CredentialPassResult, builder_mode: CredentialPromptMode
+) -> dict[str, Any] | None:
+    if builder_mode is not CredentialPromptMode.OFF:
+        return None
+    return credentials_to_assign_payload(result.needs) or None
 
 
 async def create_and_run_generated_workflow_tool(
@@ -1815,6 +1857,8 @@ async def create_and_run_generated_workflow_tool(
     public_base_url: str,
     attachment: FileAttachment | None = None,
     cancel_event: Event | None = None,
+    credential_choices: list[CredentialChoice] | None = None,
+    credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
 ) -> str:
     """Generate a workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -1833,21 +1877,22 @@ async def create_and_run_generated_workflow_tool(
             }
             for t in node_templates
         ]
+        catalog = await load_credential_catalog(db, user.id)
+        builder_mode = _builder_credential_mode(credential_mode)
+        choices = [] if builder_mode is CredentialPromptMode.OFF else list(credential_choices or [])
         system_prompt = build_assistant_prompt(
             None,
             available_workflows,
             user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
-            http_credentials_prompt=await build_http_credentials_prompt(
-                db, user.id, interactive=False
-            ),
+            credentials_prompt=format_credentials_prompt(catalog, builder_mode),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": _build_workflow_builder_user_message(goal, inputs, attachment),
+                "content": _build_workflow_builder_user_message(goal, inputs, attachment, choices),
             },
         ]
         builder_kwargs: dict[str, Any] = {
@@ -1864,14 +1909,19 @@ async def create_and_run_generated_workflow_tool(
         builder_content = builder_choice.message.content if builder_choice else ""
         workflow_config = _extract_generated_workflow_config(builder_content or "", goal)
 
-        owned_credential_ids = await _get_owned_credential_ids(db, user.id)
         nodes = _sanitize_generated_workflow_nodes(
             workflow_config["nodes"],
-            owned_credential_ids=owned_credential_ids,
+            owned_credential_ids={str(credential.id) for credential in catalog},
             selected_credential=selected_credential,
             selected_model=selected_model,
             user_id=user.id,
         )
+        credential_pass = apply_generated_credentials(
+            nodes, catalog=catalog, choices=choices, previous_nodes=None, mode=builder_mode
+        )
+        if credential_pass.needs and builder_mode is not CredentialPromptMode.OFF:
+            return json.dumps(requires_credentials_payload(credential_pass.needs))
+        nodes = credential_pass.nodes
         edges = workflow_config["edges"]
         workflow = Workflow(
             id=uuid.uuid4(),
@@ -1902,6 +1952,7 @@ async def create_and_run_generated_workflow_tool(
             run_inputs,
             None,
             status_value="created",
+            extra=_unassigned_credentials_extra(credential_pass, builder_mode),
         )
     except Exception as exc:
         logger.exception("Dashboard chat create_workflow failed")
@@ -1923,6 +1974,8 @@ async def edit_and_run_generated_workflow_tool(
     public_base_url: str,
     attachment: FileAttachment | None = None,
     cancel_event: Event | None = None,
+    credential_choices: list[CredentialChoice] | None = None,
+    credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
 ) -> str:
     """Edit a saved workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -1959,22 +2012,23 @@ async def edit_and_run_generated_workflow_tool(
         }
         old_nodes = copy.deepcopy(workflow.nodes or [])
         old_edges = copy.deepcopy(workflow.edges or [])
+        catalog = await load_credential_catalog(db, user.id)
+        builder_mode = _builder_credential_mode(credential_mode)
+        choices = [] if builder_mode is CredentialPromptMode.OFF else list(credential_choices or [])
         system_prompt = build_assistant_prompt(
             current_workflow,
             available_workflows,
             user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
-            http_credentials_prompt=await build_http_credentials_prompt(
-                db, user.id, interactive=False
-            ),
+            credentials_prompt=format_credentials_prompt(catalog, builder_mode),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": _build_workflow_editor_user_message(
-                    workflow, instructions, inputs, attachment
+                    workflow, instructions, inputs, attachment, choices
                 ),
             },
         ]
@@ -1994,14 +2048,19 @@ async def edit_and_run_generated_workflow_tool(
             builder_content or "", f"{workflow.name}: {instructions}"
         )
 
-        owned_credential_ids = await _get_owned_credential_ids(db, user.id)
         nodes = _sanitize_generated_workflow_nodes(
             workflow_config["nodes"],
-            owned_credential_ids=owned_credential_ids,
+            owned_credential_ids={str(credential.id) for credential in catalog},
             selected_credential=selected_credential,
             selected_model=selected_model,
             user_id=user.id,
         )
+        credential_pass = apply_generated_credentials(
+            nodes, catalog=catalog, choices=choices, previous_nodes=old_nodes, mode=builder_mode
+        )
+        if credential_pass.needs and builder_mode is not CredentialPromptMode.OFF:
+            return json.dumps(requires_credentials_payload(credential_pass.needs))
+        nodes = credential_pass.nodes
         edges = workflow_config["edges"]
         workflow.name = workflow_config["name"]
         workflow.description = workflow_config["description"]
@@ -2035,6 +2094,7 @@ async def edit_and_run_generated_workflow_tool(
             run_inputs,
             None,
             status_value="edited",
+            extra=_unassigned_credentials_extra(credential_pass, builder_mode),
         )
     except Exception as exc:
         logger.exception("Dashboard chat edit_workflow failed")
@@ -2772,6 +2832,15 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
             return str(data)[:200]
         if data.get("error"):
             return f"Error: {str(data.get('error'))[:150]}"
+        if data.get("status") == "requires_credentials":
+            types = sorted(
+                {
+                    credential_type
+                    for need in data.get("needs") or []
+                    for credential_type in need.get("credential_types") or []
+                }
+            )
+            return f"Needs credentials: {', '.join(types)}"[:200]
         workflow_name = str(data.get("workflow_name") or "").strip()
         if workflow_name:
             return f"Created workflow: {workflow_name}"
@@ -2781,6 +2850,15 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
             return str(data)[:200]
         if data.get("error"):
             return f"Error: {str(data.get('error'))[:150]}"
+        if data.get("status") == "requires_credentials":
+            types = sorted(
+                {
+                    credential_type
+                    for need in data.get("needs") or []
+                    for credential_type in need.get("credential_types") or []
+                }
+            )
+            return f"Needs credentials: {', '.join(types)}"[:200]
         workflow_name = str(data.get("workflow_name") or "").strip()
         if workflow_name:
             return f"Updated workflow: {workflow_name}"
@@ -3041,6 +3119,7 @@ async def stream_dashboard_chat(
     selected_credential: Credential | None = None,
     *,
     system_prompt_parts: Any | None = None,
+    credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
 ) -> AsyncGenerator[str, None]:
     """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content."""
     user_id = user.id
@@ -3082,7 +3161,8 @@ async def stream_dashboard_chat(
             }
         else:
             breakdown = _context_breakdown(
-                base_system_prompt=system_prompt_parts.base_system_prompt,
+                base_system_prompt=system_prompt_parts.base_system_prompt
+                + getattr(system_prompt_parts, "credentials_block", ""),
                 agents_md=system_prompt_parts.agents_md,
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,
@@ -3504,6 +3584,7 @@ async def stream_dashboard_chat(
                     else:
                         goal = str(args.get("goal") or "").strip() or last_user_message
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
+                        choices = parse_credential_choices(args.get("credential_choices"))
                         step_label = "Building a new workflow..."
                         yield (
                             "data: "
@@ -3533,8 +3614,14 @@ async def stream_dashboard_chat(
                             public_base_url=public_base_url,
                             attachment=attachment,
                             cancel_event=cancel_event,
+                            credential_choices=choices,
+                            credential_mode=credential_mode,
                         )
-                        tool_request = {"goal": goal, "inputs": inputs}
+                        tool_request = {
+                            "goal": goal,
+                            "inputs": inputs,
+                            "credential_choices": args.get("credential_choices") or [],
+                        }
                         if cancel_event is not None and cancel_event.is_set():
                             yield _cancelled_tool_end_yield(
                                 tc.id,
@@ -3655,6 +3742,7 @@ async def stream_dashboard_chat(
                             str(args.get("instructions") or "").strip() or last_user_message
                         )
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
+                        choices = parse_credential_choices(args.get("credential_choices"))
                         step_label = "Updating the workflow..."
                         try:
                             wid = uuid.UUID(workflow_id_str)
@@ -3692,11 +3780,14 @@ async def stream_dashboard_chat(
                             public_base_url=public_base_url,
                             attachment=attachment,
                             cancel_event=cancel_event,
+                            credential_choices=choices,
+                            credential_mode=credential_mode,
                         )
                         tool_request = {
                             "workflow_id": workflow_id_str,
                             "instructions": instructions,
                             "inputs": inputs,
+                            "credential_choices": args.get("credential_choices") or [],
                         }
                         if cancel_event is not None and cancel_event.is_set():
                             yield _cancelled_tool_end_yield(
@@ -4787,8 +4878,8 @@ async def workflow_assistant_stream(
             current_user.user_rules,
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
-            http_credentials_prompt=await build_http_credentials_prompt(
-                db, current_user.id, interactive=True
+            credentials_prompt=await build_credentials_prompt(
+                db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
             ),
         )
 
@@ -4916,7 +5007,9 @@ async def dashboard_chat_stream(
             + "\n\nAvailable workflows (always check these first when user asks for information):\n"
             + workflows_block
         )
-    system_prompt += await build_http_credentials_prompt(db, current_user.id, interactive=True)
+    system_prompt += await build_credentials_prompt(
+        db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
+    )
     if request.user_rules and request.user_rules.strip():
         system_prompt = (
             system_prompt

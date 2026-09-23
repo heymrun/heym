@@ -13,12 +13,15 @@ from app.api.ai_assistant import (
     _build_workflow_builder_user_message,
     _build_workflow_editor_user_message,
     _extract_generated_workflow_config,
+    _summarize_tool_result,
     create_and_run_generated_workflow_tool,
     dashboard_chat_stream,
     edit_and_run_generated_workflow_tool,
     stream_dashboard_chat,
 )
 from app.db.models import CredentialType, WebhookBodyMode, WorkflowAuthType, WorkflowVersion
+from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
+from app.services.generated_credentials import CredentialChoice
 from app.services.llm_trace import LLMTraceContext
 
 
@@ -50,18 +53,22 @@ _MINIMAL_BUILDER_CONTENT = """
 """
 
 
-def _stub_http_credentials_prompt(test: unittest.TestCase) -> AsyncMock:
-    """Stub the credential catalog query, which a bare AsyncMock db cannot answer."""
-    patcher = patch(
-        "app.api.ai_assistant.build_http_credentials_prompt", AsyncMock(return_value="")
+def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncMock]:
+    """Stub the credential catalog queries, which a bare AsyncMock db cannot answer."""
+    prompt_patcher = patch(
+        "app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")
     )
-    test.addCleanup(patcher.stop)
-    return patcher.start()
+    catalog_patcher = patch(
+        "app.api.ai_assistant.load_credential_catalog", AsyncMock(return_value=[])
+    )
+    test.addCleanup(prompt_patcher.stop)
+    test.addCleanup(catalog_patcher.stop)
+    return prompt_patcher.start(), catalog_patcher.start()
 
 
 class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+        self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
 
     def test_append_date_to_user_messages_only_changes_llm_copy(self) -> None:
         messages = [
@@ -568,8 +575,8 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(StopAsyncIteration):
                 await stream.__anext__()
 
-    async def test_dashboard_chat_appends_http_credentials_section(self) -> None:
-        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+    async def test_dashboard_chat_appends_credentials_section(self) -> None:
+        self.credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
         credential = MagicMock()
         credential.id = uuid.uuid4()
         credential.type = CredentialType.openai
@@ -621,12 +628,14 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _ = [chunk async for chunk in response.body_iterator]
 
         self.assertIn(_HTTP_CREDENTIALS_SECTION, captured["system_prompt"])
-        self.http_credentials_prompt.assert_awaited_once_with(db, current_user.id, interactive=True)
+        self.credentials_prompt.assert_awaited_once_with(
+            db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
+        )
 
 
 class DashboardChatWorkflowBuilderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+        self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
 
     def test_extract_generated_workflow_config_from_json_block(self) -> None:
         content = """
@@ -796,11 +805,9 @@ Here is the workflow:
         client.chat.completions.create.return_value = response
 
         db = MagicMock()
-        credential_result = MagicMock()
-        credential_result.scalars.return_value.all.return_value = [credential.id]
         max_version_result = MagicMock()
         max_version_result.scalar.return_value = 3
-        db.execute = AsyncMock(side_effect=[credential_result, max_version_result])
+        db.execute = AsyncMock(side_effect=[max_version_result])
         db.flush = AsyncMock()
 
         with (
@@ -858,10 +865,12 @@ Here is the workflow:
         builder_kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(builder_kwargs["temperature"], 0.0)
 
-    async def test_create_generated_workflow_builder_gets_http_credentials_without_asking(
+    async def test_create_generated_workflow_builder_gets_the_catalog_without_asking(
         self,
     ) -> None:
-        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        self.credential_catalog.return_value = [
+            CatalogCredential(uuid.uuid4(), "google", CredentialType.google)
+        ]
         user = MagicMock()
         user.id = uuid.uuid4()
         user.user_rules = None
@@ -874,9 +883,7 @@ Here is the workflow:
         client = MagicMock()
         client.chat.completions.create.return_value = response
         db = MagicMock()
-        credential_result = MagicMock()
-        credential_result.scalars.return_value.all.return_value = [credential.id]
-        db.execute = AsyncMock(return_value=credential_result)
+        db.execute = AsyncMock()
         db.flush = AsyncMock()
 
         with (
@@ -899,14 +906,17 @@ Here is the workflow:
                 public_base_url="http://localhost",
             )
 
-        messages = client.chat.completions.create.call_args.kwargs["messages"]
-        self.assertIn(_HTTP_CREDENTIALS_SECTION, messages[0]["content"])
-        self.http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=False)
+        system_prompt = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("`$credentials.google`", system_prompt)
+        self.assertIn("You cannot ask questions in this step", system_prompt)
+        self.credential_catalog.assert_awaited_once_with(db, user.id)
 
-    async def test_edit_generated_workflow_builder_gets_http_credentials_without_asking(
+    async def test_edit_generated_workflow_builder_gets_the_catalog_without_asking(
         self,
     ) -> None:
-        self.http_credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        self.credential_catalog.return_value = [
+            CatalogCredential(uuid.uuid4(), "google", CredentialType.google)
+        ]
         user = MagicMock()
         user.id = uuid.uuid4()
         user.user_rules = None
@@ -932,11 +942,9 @@ Here is the workflow:
         client = MagicMock()
         client.chat.completions.create.return_value = response
         db = MagicMock()
-        credential_result = MagicMock()
-        credential_result.scalars.return_value.all.return_value = [credential.id]
         max_version_result = MagicMock()
         max_version_result.scalar.return_value = 1
-        db.execute = AsyncMock(side_effect=[credential_result, max_version_result])
+        db.execute = AsyncMock(side_effect=[max_version_result])
         db.flush = AsyncMock()
 
         with (
@@ -961,9 +969,10 @@ Here is the workflow:
                 public_base_url="http://localhost",
             )
 
-        messages = client.chat.completions.create.call_args.kwargs["messages"]
-        self.assertIn(_HTTP_CREDENTIALS_SECTION, messages[0]["content"])
-        self.http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=False)
+        system_prompt = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("`$credentials.google`", system_prompt)
+        self.assertIn("You cannot ask questions in this step", system_prompt)
+        self.credential_catalog.assert_awaited_once_with(db, user.id)
 
     def test_workflow_builder_prompt_requires_discovery_for_current_web_sources(self) -> None:
         prompt = _build_workflow_builder_user_message(
@@ -1038,7 +1047,7 @@ class BuildUserMessageTests(unittest.TestCase):
 
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.http_credentials_prompt = _stub_http_credentials_prompt(self)
+        self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
 
     async def test_dashboard_chat_injects_routing_instructions_when_attachment_present(
         self,
@@ -1445,3 +1454,245 @@ class ContextSummaryEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.limit, 128_000)
         self.assertEqual(result.used, 1)
         self.assertEqual(result.breakdown.system, 1)
+
+
+_GITHUB_BUILDER_CONTENT = """
+```json
+{
+  "name": "List My Repositories",
+  "description": "Lists the user's GitHub repositories.",
+  "nodes": [
+    {
+      "id": "repos",
+      "type": "github",
+      "position": {"x": 0, "y": 0},
+      "data": {"label": "fetchRepos", "credentialId": "", "githubOperation": "listUserRepositories"}
+    }
+  ],
+  "edges": []
+}
+```
+"""
+
+
+def _builder_client(content: str) -> MagicMock:
+    response = MagicMock()
+    response.choices = [MagicMock(message=MagicMock(content=content))]
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+    return client
+
+
+def _owner_and_llm_credential() -> tuple[MagicMock, MagicMock]:
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.user_rules = None
+    credential = MagicMock()
+    credential.id = uuid.uuid4()
+    credential.owner_id = user.id
+    credential.type = CredentialType.openai
+    return user, credential
+
+
+class DashboardChatCredentialChoiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        self.github_work = CatalogCredential(uuid.uuid4(), "github-work", CredentialType.github)
+        self.credential_catalog.return_value = [self.github_work]
+
+    async def _create(self, client: MagicMock, **kwargs: object) -> tuple[dict, MagicMock]:
+        user, credential = _owner_and_llm_credential()
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.flush = AsyncMock()
+        with patch(
+            "app.api.ai_assistant.template_service.list_node_templates",
+            AsyncMock(return_value=[]),
+        ):
+            raw = await create_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=client,
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                goal="List my GitHub repositories",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+                **kwargs,
+            )
+        return json.loads(raw), db
+
+    async def test_undecided_new_node_is_not_saved(self) -> None:
+        payload, db = await self._create(_builder_client(_GITHUB_BUILDER_CONTENT))
+
+        self.assertEqual(payload["status"], "requires_credentials")
+        self.assertEqual(payload["needs"][0]["node"], "fetchRepos")
+        self.assertEqual(payload["needs"][0]["existing"], ["github-work"])
+        db.add.assert_not_called()
+
+    async def test_chosen_credential_is_wired_into_the_node(self) -> None:
+        client = _builder_client(_GITHUB_BUILDER_CONTENT)
+
+        payload, db = await self._create(
+            client,
+            credential_choices=[CredentialChoice(CredentialType.github, "github-work")],
+        )
+
+        self.assertEqual(payload["status"], "created")
+        saved = db.add.call_args.args[0]
+        self.assertEqual(saved.nodes[0]["data"]["credentialId"], str(self.github_work.id))
+        user_message = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("- github: use `github-work`", user_message)
+
+    async def test_declined_credential_saves_the_node_empty(self) -> None:
+        payload, db = await self._create(
+            _builder_client(_GITHUB_BUILDER_CONTENT),
+            credential_choices=[CredentialChoice(CredentialType.github, "")],
+        )
+
+        self.assertEqual(payload["status"], "created")
+        self.assertEqual(db.add.call_args.args[0].nodes[0]["data"]["credentialId"], "")
+
+    async def test_mcp_turn_saves_without_credentials_and_lists_them_for_the_ui(self) -> None:
+        client = _builder_client(_GITHUB_BUILDER_CONTENT)
+
+        payload, db = await self._create(
+            client,
+            credential_choices=[CredentialChoice(CredentialType.github, "github-work")],
+            credential_mode=CredentialPromptMode.OFF,
+        )
+
+        self.assertEqual(payload["status"], "created")
+        self.assertEqual(db.add.call_args.args[0].nodes[0]["data"]["credentialId"], "")
+        self.assertEqual(
+            payload["credentials_to_assign_in_ui"],
+            [{"node": "fetchRepos", "node_type": "github", "credential_types": ["github"]}],
+        )
+        system_prompt = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("You cannot use credentials in this step", system_prompt)
+        self.assertNotIn("github-work", system_prompt)
+
+    async def test_edit_does_not_ask_again_for_a_node_that_already_existed(self) -> None:
+        user, credential = _owner_and_llm_credential()
+        workflow = MagicMock()
+        workflow.id = uuid.uuid4()
+        workflow.name = "List My Repositories"
+        workflow.description = "Lists the user's GitHub repositories."
+        workflow.nodes = [
+            {
+                "id": "repos",
+                "type": "github",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "fetchRepos", "credentialId": ""},
+            }
+        ]
+        workflow.edges = []
+        workflow.auth_type = WorkflowAuthType.anonymous
+        workflow.auth_header_key = None
+        workflow.auth_header_value = None
+        workflow.webhook_body_mode = WebhookBodyMode.generic
+        workflow.cache_ttl_seconds = None
+        workflow.rate_limit_requests = None
+        workflow.rate_limit_window_seconds = None
+        max_version_result = MagicMock()
+        max_version_result.scalar.return_value = 1
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[max_version_result])
+        db.flush = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.ai_assistant.template_service.list_node_templates",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            raw = await edit_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=_builder_client(_GITHUB_BUILDER_CONTENT),
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                workflow_id=str(workflow.id),
+                instructions="Rename it",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+            )
+
+        self.assertEqual(json.loads(raw)["status"], "edited")
+
+    async def test_stream_hands_choices_and_mode_to_create_workflow(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        tool_message = MagicMock(content=None)
+        tool_call = MagicMock()
+        tool_call.id = "create-call"
+        tool_call.function.name = "create_workflow"
+        tool_call.function.arguments = json.dumps(
+            {
+                "goal": "List my GitHub repositories",
+                "credential_choices": [
+                    {"credential_type": "github", "credential_name": "github-work"}
+                ],
+            }
+        )
+        tool_message.tool_calls = [tool_call]
+        final_message = MagicMock(content="Added github-work, building it.", tool_calls=None)
+        usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=tool_message)], usage=usage),
+            MagicMock(choices=[MagicMock(message=final_message)], usage=usage),
+        ]
+        selected = MagicMock(id=uuid.uuid4(), owner_id=user.id, type=CredentialType.openai)
+
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.api.ai_assistant.create_and_run_generated_workflow_tool",
+                AsyncMock(return_value=json.dumps({"status": "requires_credentials", "needs": []})),
+            ) as create_tool,
+        ):
+            _ = [
+                chunk
+                async for chunk in stream_dashboard_chat(
+                    client,
+                    "gpt-4o-mini",
+                    "system",
+                    [{"role": "user", "content": "list my GitHub repositories"}],
+                    AsyncMock(),
+                    user,
+                    "OpenAI",
+                    "http://localhost",
+                    selected_credential=selected,
+                    credential_mode=CredentialPromptMode.OFF,
+                )
+            ]
+
+        kwargs = create_tool.await_args.kwargs
+        self.assertEqual(kwargs["credential_mode"], CredentialPromptMode.OFF)
+        self.assertEqual(
+            kwargs["credential_choices"],
+            [CredentialChoice(CredentialType.github, "github-work")],
+        )
+
+    def test_requires_credentials_result_is_summarized_by_type(self) -> None:
+        summary = _summarize_tool_result(
+            "create_workflow",
+            json.dumps(
+                {
+                    "status": "requires_credentials",
+                    "needs": [{"credential_types": ["github"]}, {"credential_types": ["slack"]}],
+                }
+            ),
+        )
+
+        self.assertEqual(summary, "Needs credentials: github, slack")

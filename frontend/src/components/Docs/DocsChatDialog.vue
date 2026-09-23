@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { Check, Copy, FileText, Loader2, Send, Square, Trash2, Wand2 } from "lucide-vue-next";
 
+import type { ClarifyAnswer } from "@/types/clarify";
+
 import { useDocsChatDialog } from "@/components/Docs/useDocsChatDialog";
 import Button from "@/components/ui/Button.vue";
+import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 
@@ -28,7 +31,10 @@ const {
   copiedMessageId,
   messagesContainer,
   chatInputRef,
-  renderMarkdown,
+  answeredClarify,
+  clarifyFor,
+  renderAssistantMarkdown,
+  handleClarifySubmit,
   clearChat,
   copyMessageContent,
   handleSubmit,
@@ -41,7 +47,7 @@ const {
 <template>
   <Dialog
     :open="open"
-    title="Chat with Docs"
+    title="Chat with Heym"
     size="4xl"
     @close="handleClose"
   >
@@ -154,7 +160,7 @@ const {
                 <div
                   v-if="message.content"
                   class="markdown-content max-w-none break-words"
-                  v-html="renderMarkdown(message.content)"
+                  v-html="renderAssistantMarkdown(message)"
                 />
                 <!-- eslint-enable vue/no-v-html -->
                 <div
@@ -164,6 +170,12 @@ const {
                   <Loader2 class="h-4 w-4 shrink-0 animate-spin" />
                   <span>{{ steps.length > 0 ? "Preparing response..." : "Thinking..." }}</span>
                 </div>
+                <ClarifyCard
+                  v-if="clarifyFor(message)"
+                  :questions="clarifyFor(message)!"
+                  :disabled="answeredClarify.has(message.id) || streaming"
+                  @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(message, answers)"
+                />
               </template>
               <p
                 v-else

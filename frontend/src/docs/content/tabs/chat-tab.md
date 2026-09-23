@@ -22,7 +22,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Kanban task creation** – Ask naturally to add a task or create a card. Chat adds it to the first column of the requested board; when you have multiple boards and do not name one, Chat presents a board picker before creating the card
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
-- **Credentials in HTTP requests** – When a workflow needs an authenticated HTTP call that no dedicated node covers, Chat asks which credential to use before building it, with the header name prefilled and editable. See [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials)
+- **Credentials** – When a workflow Chat creates or edits needs a credential, Chat asks which one to use, offers to create a new one in the conversation, or lets you continue without. You can also ask Chat to create a credential or to update one you own; it opens the credential form in the conversation. The model sees the credential's name and type, never its values. See [AI Assistant › Credentials](../reference/ai-assistant.md#credentials)
 - **Streaming responses** – See the model's output as it streams
 - **Stop response** – Interrupt the current streaming answer at any time; stopping also clears queued messages for that conversation
 - **Markdown rendering** – Responses support markdown formatting, including inline images
@@ -38,6 +38,8 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 The Chat engine can also be reached from outside the browser. Enable the **Heym Chat Tool** in the [MCP tab](./mcp-tab.md) and MCP clients — Claude, Cursor, and anything else that speaks MCP — get a single `heym_chat` tool that runs this same engine with all of its capabilities.
 
 Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
+
+Over MCP, Chat does not list, pick or create credentials. Workflows it builds leave credential fields empty, and the reply names the nodes that need a credential so you can set them in the editor.
 
 ## Context Limit
 

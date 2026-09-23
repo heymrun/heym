@@ -42,6 +42,7 @@ const TABS = [
   { id: "workflows", label: "Workflows", icon: Workflow },
   { id: "board", label: "Kanban Board", icon: SquareKanban },
   { id: "globalvariables", label: "Variables", icon: Variable },
+  { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "drive", label: "Drive", icon: HardDrive },
   { id: "credentials", label: "Credentials", icon: Key },

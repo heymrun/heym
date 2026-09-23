@@ -2,6 +2,9 @@
 import { computed, reactive } from "vue";
 
 import type { ClarifyAnswer, ClarifyOption, ClarifyQuestion } from "@/types/clarify";
+import type { Credential } from "@/types/credential";
+
+import CredentialFormButton from "@/components/Credentials/CredentialFormButton.vue";
 
 const props = defineProps<{
   questions: ClarifyQuestion[];
@@ -10,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "submit", answers: ClarifyAnswer[]): void;
+  (e: "credential-saved", credential: Credential): void;
 }>();
 
 const state = reactive<Record<string, ClarifyAnswer>>({});
@@ -20,6 +24,8 @@ for (const q of props.questions) {
 
 function selectSingle(q: ClarifyQuestion, option: ClarifyOption): void {
   if (props.disabled) return;
+  // A credential saved through another option does not answer this one.
+  if (!state[q.id].selected.includes(option.label)) state[q.id].credential = undefined;
   // Single choice and free-text are mutually exclusive: picking a chip clears Other.
   state[q.id].selected = [option.label];
   state[q.id].other = "";
@@ -53,12 +59,25 @@ function selectedPrefillOption(q: ClarifyQuestion): ClarifyOption | undefined {
   return q.options?.find((o) => o.prefill !== undefined && isSelected(q, o));
 }
 
+function selectedCredentialOption(q: ClarifyQuestion): ClarifyOption | undefined {
+  if (q.type !== "single") return undefined;
+  return q.options?.find((o) => (o.create || o.edit) && isSelected(q, o));
+}
+
+function isAnswered(q: ClarifyQuestion): boolean {
+  const a = state[q.id];
+  if (selectedCredentialOption(q)) return a.credential !== undefined;
+  return a.selected.length > 0 || a.other.trim().length > 0;
+}
+
+function otherPlaceholder(q: ClarifyQuestion): string {
+  if (q.type === "text") return q.optional ? "Optional" : "Your answer";
+  return q.optional ? "Other… (optional)" : "Other…";
+}
+
 const canSubmit = computed(() => {
   if (props.disabled) return false;
-  return props.questions.every((q) => {
-    const a = state[q.id];
-    return a.selected.length > 0 || a.other.trim().length > 0;
-  });
+  return props.questions.every((q) => q.optional || isAnswered(q));
 });
 
 function submit(): void {
@@ -67,6 +86,11 @@ function submit(): void {
     "submit",
     props.questions.map((q) => ({ ...state[q.id] })),
   );
+}
+
+function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
+  state[q.id].credential = { type: credential.type, name: credential.name };
+  emit("credential-saved", credential);
 }
 </script>
 
@@ -115,12 +139,22 @@ function submit(): void {
         >
       </label>
 
+      <CredentialFormButton
+        v-if="selectedCredentialOption(q)"
+        :key="selectedCredentialOption(q)!.label"
+        :create="selectedCredentialOption(q)!.create"
+        :edit-id="selectedCredentialOption(q)!.edit?.id"
+        :saved="state[q.id].credential"
+        :disabled="props.disabled"
+        @saved="(credential: Credential) => onCredentialSaved(q, credential)"
+      />
+
       <input
         v-if="q.type === 'text' || q.allowOther"
         v-model="state[q.id].other"
         type="text"
         class="clarify-other"
-        :placeholder="q.type === 'text' ? 'Your answer' : 'Other…'"
+        :placeholder="otherPlaceholder(q)"
         :disabled="props.disabled"
         @focus="onOtherFocus(q)"
       >

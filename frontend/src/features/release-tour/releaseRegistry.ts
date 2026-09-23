@@ -17,6 +17,58 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.15",
+    publishedAt: new Date("2026-09-23T00:00:00Z"),
+    headline: "Add a credential without leaving the conversation",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["chat-credentials"],
+    },
+    sections: [
+      {
+        id: "chat-credentials",
+        title: "Create the credential a workflow needs, right in chat",
+        publishedAt: new Date("2026-09-23T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "When a workflow you ask for needs a credential, the assistant asks which one to use. If you have a fitting credential it is listed next to **Create a new credential**; if you have none, the assistant asks whether to create one. You can always continue without one. Creating opens the credential form in the conversation, preset to the right type and a suggested name. You can also ask for a credential on its own, or ask to update one you own, and the same form opens on it.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "The values go straight to Heym. The model only learns the name and type, says it added the credential, and carries on building. OAuth credentials such as Google Sheets connect in a popup, with a link to open the authorization page yourself if the popup is blocked.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "It works in the canvas **AI Assistant**, the **Chat** tab (including the workflows Chat creates and edits for you) and **Chat with Heym**. When no node covers an operation, such as adding a tab to a Google Sheet, the assistant sends the same credential in an **HTTP** request.",
+          },
+        ],
+        tour: {
+          description:
+            "Pick, create or update a credential inside the conversation; the model sees only its name and type.",
+          useCases: [
+            "Ask for a GitHub workflow and add the missing token without leaving chat",
+            "Connect or reconnect a Google Sheets account through OAuth from the assistant's question",
+            "Reach operations a node lacks through HTTP with the same credential",
+          ],
+          tourVisual: "chat-credentials",
+          docTarget: {
+            categoryId: "reference",
+            slug: "credentials",
+            title: "Credentials",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.14",
     publishedAt: new Date("2026-09-22T00:00:00Z"),
     headline: "Let a model pick the model",
@@ -219,53 +271,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "rag-node",
             title: "RAG / Vector Store",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.10",
-    publishedAt: new Date("2026-08-27T00:00:00Z"),
-    headline: "Share the load across more than one instance",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["cluster-load-distribution"],
-    },
-    sections: [
-      {
-        id: "cluster-load-distribution",
-        title: "Split execution across instances",
-        publishedAt: new Date("2026-08-29T10:12:49Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Point a second Heym instance at the same database and it joins as a worker. Background runs - cron, webhooks, MCP tool calls, chat triggers - are shared between the instances by a percentage you set under **Settings \u2192 Instances**. The instances never talk to each other: Postgres carries the work, so a worker needs no open port and no route back to the main instance.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Work that touches local files, a coding-agent workspace or an installed plugin always runs on the main instance, and the settings panel shows how much of your last 24 hours that was - so you can tell when percentages cannot help. Every run in History now names the instance that executed it, and both history dialogs let you filter down to one.",
-          },
-        ],
-        tour: {
-          description:
-            "Add worker instances against the same database and split background execution between them by percentage, with each instance's status, latency and version in one table.",
-          useCases: [
-            "Keep heavy agent and crawler runs off the machine serving the UI",
-            "Take an instance out of rotation for maintenance without stopping work",
-            "See which instance executed any run, and filter history down to one",
-          ],
-          tourVisual: "cluster-instances",
-          docTarget: {
-            categoryId: "reference",
-            slug: "cluster",
-            title: "Load Distribution",
           },
         },
       },

@@ -39,7 +39,7 @@ View past runs in **History** (toolbar) and use **Bring to Canvas** to re-run wi
 
 On Docs, Evals, and other non-canvas internal pages, you can also use the [Quick Drawer](../reference/quick-drawer.md) to pick a pinned workflow and run it without going back to the editor.
 
-If you are reading the docs and want clarification before building, open [Chat with Docs](../reference/chat-with-docs.md) from the Docs header to ask page-aware questions.
+If you are reading the docs and want clarification before building, open [Chat with Heym](../reference/chat-with-heym.md) from the Docs header to ask page-aware questions.
 
 Alternatively, use the [AI Assistant](../reference/ai-assistant.md) from the Debug panel to create workflows with natural language—describe what you want and the AI generates nodes and edges.
 
@@ -59,7 +59,7 @@ Already building automations in another tool? [Migrate to Heym](./migrate-to-hey
 - [Triggers](../reference/triggers.md) – All workflow entry points ([webhook](../reference/webhooks.md), portal, cron, etc.)
 - [Execution History](../reference/execution-history.md) – View past runs and Bring to Canvas
 - [Quick Drawer](../reference/quick-drawer.md) – Run pinned workflows from non-canvas pages
-- [Chat with Docs](../reference/chat-with-docs.md) – Ask contextual questions from the docs header
+- [Chat with Heym](../reference/chat-with-heym.md) – Ask contextual questions from the docs header
 - [Workflows Tab](../tabs/workflows-tab.md) – Create and manage workflows
 - [Credentials Tab](../tabs/credentials-tab.md) – Add API keys for LLM nodes
 - [AI Assistant](../reference/ai-assistant.md) – Create workflows with natural language

@@ -2,7 +2,7 @@
 
 The **AI Assistant** is a chat panel that opens from the Debug panel and appears fixed at the bottom-right of the editor. Use natural language to create or modify workflows—describe what you want, and the AI generates nodes and edges that are applied to the canvas.
 
-For documentation questions outside the editor, use [Chat with Docs](./chat-with-docs.md). That surface is optimized for page-aware product help instead of workflow generation.
+For documentation questions outside the editor, use [Chat with Heym](./chat-with-heym.md). That surface is optimized for page-aware product help instead of workflow generation.
 
 ## Opening the Panel
 
@@ -81,10 +81,20 @@ The AI Assistant is powered by a **workflow DSL** (domain-specific language) tha
    - Your User Rules appended as "User Custom Rules"
    - The current workflow JSON when you are editing an existing workflow
    - The list of available workflows if you use the Execute node
-   - The names and types of your credentials that an HTTP node can send (never their values)
+   - The names, types and ids of your own credentials (never their values)
 3. The model returns a single workflow JSON block (with `nodes` and `edges`). The frontend parses it and applies it to the canvas.
 
-When a request needs an authenticated HTTP call, the assistant uses a dedicated node if one covers the service. Otherwise it asks which credential to use, with the header name prefilled and editable, and writes the header line into the node's cURL command. See [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials).
+### Credentials
+
+When a workflow needs a credential, the assistant asks before building it. If you have credentials of a fitting type it lists them together with **Create a new credential**; if you have none it asks whether to create one. Every question also lets you continue without a credential.
+
+Choosing to create one opens the credential form in the panel, preset to the right type and a suggested name. The values go straight to Heym; the assistant only learns the name and type. OAuth credentials (Google Sheets, Google Drive, BigQuery, Linear, Notion) connect in a popup, and a link to the authorization page appears in case the popup is blocked. Once the credential is saved, the card shows its name and the create button turns off; press **Submit answers** and the assistant puts the new credential on the node.
+
+You can also ask for a credential on its own ("create a GitHub credential") or ask to change one you own ("update my sheet credential", "reconnect my Google Sheets"). The assistant answers with the same card: creating opens an empty form, updating opens the form on that credential with its secrets masked.
+
+The assistant prefers a dedicated node. When no node covers an operation, such as adding a tab to a Google Sheet, it uses an HTTP request and writes the header line for the chosen credential. See [HTTP › Authenticating with Credentials](../nodes/http-node.md#authenticating-with-credentials).
+
+Clarification questions that the workflow can do without say **Optional** in their input and can be skipped.
 
 The DSL enforces camelCase labels, unified expression rules, and node-specific fields. If a field value is a single `$expr`, the backend preserves the native type; if the value mixes prose with `$refs`, the result is a string. The one-`$` rule still applies: no `$` inside parentheses. [Settings](./user-settings.md) User Rules are injected into this system prompt so your preferences apply to every AI-generated workflow.
 
@@ -95,7 +105,7 @@ If the current workflow contains Agent skills, the AI Assistant includes only ea
 - [Why Heym](../getting-started/why-heym.md) – Natural language workflow building vs other platforms
 - [Quick Start](../getting-started/quick-start.md) – Build your first workflow
 - [Settings](./user-settings.md) – User Rules injected into AI Assistant system prompt
-- [Chat with Docs](./chat-with-docs.md) – Page-aware assistant inside the documentation area
+- [Chat with Heym](./chat-with-heym.md) – Page-aware assistant inside the documentation area
 - [Core Concepts](../getting-started/core-concepts.md) – Workflows, nodes, and execution flow
 - [Agent Node](../nodes/agent-node.md) – LLM node with tools and MCP
 - [Credentials Tab](../tabs/credentials-tab.md) – Add API keys for the AI Assistant

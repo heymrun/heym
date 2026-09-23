@@ -71,10 +71,11 @@ curl "https://r.jina.ai/$url.text.replaceAll("\n", "").strip()" -H "Authorizatio
 | Google | The raw API key | `-H "x-goog-api-key: $credentials.Name"` |
 | ElevenLabs | The raw API key | `-H "xi-api-key: $credentials.Name"` |
 | Google Sheets, Google Drive | A fresh OAuth access token, refreshed when it expires | `-H "Authorization: Bearer $credentials.Name"` |
+| GitHub, Notion, Sentry | The token | `-H "Authorization: Bearer $credentials.Name"` |
 
 A Bearer credential already carries the `Bearer ` prefix, so adding another one sends `Bearer Bearer …`. Google Sheets and Google Drive credentials let you call Google APIs their node does not cover, such as adding a tab to a spreadsheet, within the scopes the credential was granted. When a name is not a plain identifier (it contains `-`, starts with a digit, or is a reserved word), use the bracket form: `-H "Authorization: $credentials["my-api-key"]"`.
 
-When the [AI Assistant](../reference/ai-assistant.md) or [Chat](../tabs/chat-tab.md) builds an HTTP request that needs authentication and no dedicated node covers the service, it asks which credential to use. Pick one, change the prefilled header name if the API expects a different one, and it writes the header line for you. The assistant sees credential names and types, never their values. Secrets that reach the node's output, such as the sent `request.headers`, are masked in run results.
+When the [AI Assistant](../reference/ai-assistant.md) or [Chat](../tabs/chat-tab.md) builds an HTTP request that needs authentication and no dedicated node covers the service, it asks which credential to use. Pick one, change the prefilled header name if the API expects a different one, and it writes the header line for you. The assistant sees credential names and types, never their values. If you have no fitting credential, the question offers to create one. Secrets that reach the node's output, such as the sent `request.headers`, are masked in run results.
 
 ## Egress Safety
 

@@ -8,6 +8,7 @@ import type {
   CredentialType,
   VectorStoreBackend,
 } from "@/types/credential";
+import type { OAuthPopup } from "@/components/Credentials/useOAuthPopup";
 
 import ModelRouterFields from "@/components/Credentials/modelRouter/ModelRouterFields.vue";
 import {
@@ -17,6 +18,8 @@ import {
   validateModelRouterForm,
   type ModelRouterForm,
 } from "@/components/Credentials/modelRouter/modelRouterConfig";
+import OAuthAuthorizeLink from "@/components/Credentials/OAuthAuthorizeLink.vue";
+import { useOAuthPopup } from "@/components/Credentials/useOAuthPopup";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -34,6 +37,9 @@ interface Props {
   open: boolean;
   credential?: Credential | null;
   presetType?: CredentialType;
+  presetName?: string;
+  // Chat: finish as soon as an OAuth connection succeeds instead of waiting for Done.
+  completeOnConnect?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -56,6 +62,7 @@ const codexRedirectUrl = ref("");
 const codexSigningIn = ref(false);
 const codexSignInError = ref("");
 const codexSignedInAccount = ref("");
+const codexAuthorizeUrl = ref("");
 const baseUrl = ref("");
 const jiraEmail = ref("");
 const jiraDeployment = ref<"cloud" | "data_center">("cloud");
@@ -196,6 +203,104 @@ const showApiKey = ref(false);
 const saving = ref(false);
 const error = ref("");
 
+function completeOAuthConnection(credential: Credential): void {
+  if (!props.completeOnConnect) return;
+  emit("saved", credential);
+  emit("close");
+}
+
+const googleFlowConfig = {
+  features: "width=520,height=620",
+  successType: "google-oauth-success",
+  errorType: "google-oauth-error",
+  failureMessage: "OAuth authorization failed",
+  onConnected: completeOAuthConnection,
+};
+
+const gsOAuth = useOAuthPopup(
+  {
+    connecting: gsOAuthConnecting,
+    connected: gsOAuthConnected,
+    connectedCredential: gsConnectedCredential,
+    error,
+  },
+  { ...googleFlowConfig, windowName: "google-oauth" },
+);
+const gdOAuth = useOAuthPopup(
+  {
+    connecting: gdOAuthConnecting,
+    connected: gdOAuthConnected,
+    connectedCredential: gdConnectedCredential,
+    error,
+  },
+  { ...googleFlowConfig, windowName: "google-oauth" },
+);
+const bqOAuth = useOAuthPopup(
+  {
+    connecting: bqOAuthConnecting,
+    connected: bqOAuthConnected,
+    connectedCredential: bqConnectedCredential,
+    error,
+  },
+  { ...googleFlowConfig, windowName: "bq-oauth" },
+);
+const linearOAuth = useOAuthPopup(
+  {
+    connecting: linearOAuthConnecting,
+    connected: linearOAuthConnected,
+    connectedCredential: linearConnectedCredential,
+    error,
+  },
+  {
+    windowName: "linear-oauth",
+    features: "width=520,height=680",
+    successType: "linear-oauth-success",
+    errorType: "linear-oauth-error",
+    failureMessage: "Linear OAuth authorization failed",
+    onConnected: completeOAuthConnection,
+  },
+);
+const notionOAuth = useOAuthPopup(
+  {
+    connecting: notionOAuthConnecting,
+    connected: notionOAuthConnected,
+    connectedCredential: notionConnectedCredential,
+    error,
+  },
+  {
+    windowName: "notion-oauth",
+    features: "width=520,height=680",
+    successType: "notion-oauth-success",
+    errorType: "notion-oauth-error",
+    failureMessage: "Notion OAuth authorization failed",
+    onConnected: completeOAuthConnection,
+  },
+);
+
+function resetOAuthFlows(): void {
+  for (const flow of [gsOAuth, gdOAuth, bqOAuth, linearOAuth, notionOAuth]) flow.reset();
+}
+
+// Reuse the credential an earlier attempt in this dialog created: a second create fails
+// on the unique name.
+async function saveOAuthCredential(
+  credentialType: CredentialType,
+  flow: OAuthPopup,
+): Promise<string> {
+  const credentialId = props.credential?.id ?? flow.sessionCredentialId.value;
+  if (credentialId) {
+    await credentialsApi.update(credentialId, { name: name.value, config: buildConfig() });
+    return credentialId;
+  }
+  const saved = await credentialsApi.create({
+    name: name.value,
+    type: credentialType,
+    config: buildConfig(),
+  });
+  flow.sessionCredentialId.value = saved.id;
+  return saved.id;
+}
+
 function parseS3RegionFromMaskedValue(maskedValue: string | null): string {
   if (!maskedValue) {
     return "";
@@ -281,10 +386,6 @@ const typeOptions = [
   { value: "s3", label: CREDENTIAL_TYPE_LABELS.s3 },
 ];
 
-function isTrustedOAuthMessage(evt: MessageEvent, popup: Window | null): boolean {
-  return evt.origin === window.location.origin && evt.source === popup;
-}
-
 function applyDecisionPublicFields(credential: Credential | null | undefined): void {
   const fields = credential?.type === "decision" ? credential.public_fields : undefined;
   decisionBaseUrl.value = fields?.base_url ?? "https://api.typesafe.ai";
@@ -348,6 +449,7 @@ watch(ragDbType, (dbType) => {
 watch(
   () => props.open,
   (open) => {
+    resetOAuthFlows();
     if (open) {
       if (props.credential) {
         name.value = props.credential.name;
@@ -484,7 +586,7 @@ watch(
             : "";
         s3SessionToken.value = "";
       } else {
-        name.value = "";
+        name.value = props.presetName ?? "";
         type.value = props.presetType ?? "openai";
         apiKey.value = "";
         codexAccessToken.value = "";
@@ -783,6 +885,7 @@ const canTestJiraConnection = computed((): boolean => {
 });
 
 function resetCodexOAuthState(): void {
+  codexAuthorizeUrl.value = "";
   codexOAuthConfig.value = null;
   codexOAuthState.value = "";
   codexRedirectUrl.value = "";
@@ -796,6 +899,7 @@ async function startCodexSignIn(): Promise<void> {
   try {
     const { authorize_url, state } = await credentialsApi.codexOAuthStart();
     codexOAuthState.value = state;
+    codexAuthorizeUrl.value = authorize_url;
     window.open(authorize_url, "_blank", "noopener,noreferrer");
   } catch {
     codexSignInError.value = "Could not start ChatGPT sign-in. Try again.";
@@ -1029,71 +1133,10 @@ async function startGoogleDriveOAuth(): Promise<void> {
     return;
   }
 
-  gdOAuthConnecting.value = true;
-  error.value = "";
-
-  try {
-    // Save or update the credential first so the backend has client_id / client_secret
-    let credId: string;
-    if (isEditing.value && props.credential) {
-      await credentialsApi.update(props.credential.id, {
-        name: name.value,
-        config: buildConfig(),
-      });
-      credId = props.credential.id;
-    } else {
-      const saved = await credentialsApi.create({
-        name: name.value,
-        type: "google_drive",
-        config: buildConfig(),
-      });
-      credId = saved.id;
-    }
-
-    const { auth_url } = await credentialsApi.googleDriveOAuthAuthorize(credId);
-
-    const popup = window.open(auth_url, "google-oauth", "width=520,height=620");
-    if (!popup) {
-      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
-    }
-
-    const onMessage = (evt: MessageEvent): void => {
-      if (!isTrustedOAuthMessage(evt, popup)) {
-        return;
-      }
-      if (evt.data?.type === "google-oauth-success" && evt.data.credentialId === credId) {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        popup?.close();
-        credentialsApi.get(credId).then((cred) => {
-          gdConnectedCredential.value = cred;
-          gdOAuthConnected.value = true;
-          gdOAuthConnecting.value = false;
-        }).catch(() => {
-          gdOAuthConnected.value = true;
-          gdOAuthConnecting.value = false;
-        });
-      } else if (evt.data?.type === "google-oauth-error") {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        gdOAuthConnecting.value = false;
-        error.value = evt.data.message || "OAuth authorization failed";
-      }
-    };
-
-    const pollClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(pollClosed);
-        window.removeEventListener("message", onMessage);
-        gdOAuthConnecting.value = false;
-      }
-    }, 500);
-
-    window.addEventListener("message", onMessage);
-  } catch (err) {
-    gdOAuthConnecting.value = false;
-    error.value = err instanceof Error ? err.message : "OAuth authorization failed";
-  }
+  await gdOAuth.start(
+    () => saveOAuthCredential("google_drive", gdOAuth),
+    credentialsApi.googleDriveOAuthAuthorize,
+  );
 }
 
 async function startGoogleSheetsOAuth(): Promise<void> {
@@ -1106,72 +1149,10 @@ async function startGoogleSheetsOAuth(): Promise<void> {
     return;
   }
 
-  gsOAuthConnecting.value = true;
-  error.value = "";
-
-  try {
-    // Save or update the credential first so the backend has client_id / client_secret
-    let credId: string;
-    if (isEditing.value && props.credential) {
-      await credentialsApi.update(props.credential.id, {
-        name: name.value,
-        config: buildConfig(),
-      });
-      credId = props.credential.id;
-    } else {
-      const saved = await credentialsApi.create({
-        name: name.value,
-        type: "google_sheets",
-        config: buildConfig(),
-      });
-      credId = saved.id;
-    }
-
-    const { auth_url } = await credentialsApi.googleSheetsOAuthAuthorize(credId);
-
-    const popup = window.open(auth_url, "google-oauth", "width=520,height=620");
-    if (!popup) {
-      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
-    }
-
-    const onMessage = (evt: MessageEvent): void => {
-      if (!isTrustedOAuthMessage(evt, popup)) {
-        return;
-      }
-      if (evt.data?.type === "google-oauth-success" && evt.data.credentialId === credId) {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        popup?.close();
-        // Fetch the fully-updated credential (with tokens) — stay open so user sees "Connected"
-        credentialsApi.get(credId).then((cred) => {
-          gsConnectedCredential.value = cred;
-          gsOAuthConnected.value = true;
-          gsOAuthConnecting.value = false;
-        }).catch(() => {
-          gsOAuthConnected.value = true;
-          gsOAuthConnecting.value = false;
-        });
-      } else if (evt.data?.type === "google-oauth-error") {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        gsOAuthConnecting.value = false;
-        error.value = evt.data.message || "OAuth authorization failed";
-      }
-    };
-
-    const pollClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(pollClosed);
-        window.removeEventListener("message", onMessage);
-        gsOAuthConnecting.value = false;
-      }
-    }, 500);
-
-    window.addEventListener("message", onMessage);
-  } catch (err) {
-    gsOAuthConnecting.value = false;
-    error.value = err instanceof Error ? err.message : "OAuth authorization failed";
-  }
+  await gsOAuth.start(
+    () => saveOAuthCredential("google_sheets", gsOAuth),
+    credentialsApi.googleSheetsOAuthAuthorize,
+  );
 }
 
 async function startBigQueryOAuth(): Promise<void> {
@@ -1184,69 +1165,10 @@ async function startBigQueryOAuth(): Promise<void> {
     return;
   }
 
-  bqOAuthConnecting.value = true;
-  error.value = "";
-
-  try {
-    let credId: string;
-    if (isEditing.value && props.credential) {
-      await credentialsApi.update(props.credential.id, {
-        name: name.value,
-        config: buildConfig(),
-      });
-      credId = props.credential.id;
-    } else {
-      const saved = await credentialsApi.create({
-        name: name.value,
-        type: "bigquery",
-        config: buildConfig(),
-      });
-      credId = saved.id;
-    }
-
-    const { auth_url } = await credentialsApi.bigQueryOAuthAuthorize(credId);
-    const popup = window.open(auth_url, "bq-oauth", "width=520,height=620");
-    if (!popup) {
-      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
-    }
-
-    const onMessage = (evt: MessageEvent): void => {
-      if (!isTrustedOAuthMessage(evt, popup)) {
-        return;
-      }
-      if (evt.data?.type === "google-oauth-success" && evt.data.credentialId === credId) {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        popup?.close();
-        credentialsApi.get(credId).then((cred) => {
-          bqConnectedCredential.value = cred;
-          bqOAuthConnected.value = true;
-          bqOAuthConnecting.value = false;
-        }).catch(() => {
-          bqOAuthConnected.value = true;
-          bqOAuthConnecting.value = false;
-        });
-      } else if (evt.data?.type === "google-oauth-error") {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        bqOAuthConnecting.value = false;
-        error.value = evt.data.message || "OAuth authorization failed";
-      }
-    };
-
-    const pollClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(pollClosed);
-        window.removeEventListener("message", onMessage);
-        bqOAuthConnecting.value = false;
-      }
-    }, 500);
-
-    window.addEventListener("message", onMessage);
-  } catch (err) {
-    bqOAuthConnecting.value = false;
-    error.value = err instanceof Error ? err.message : "OAuth authorization failed";
-  }
+  await bqOAuth.start(
+    () => saveOAuthCredential("bigquery", bqOAuth),
+    credentialsApi.bigQueryOAuthAuthorize,
+  );
 }
 
 async function testSupabaseConnection(): Promise<void> {
@@ -1559,67 +1481,10 @@ async function startLinearOAuth(): Promise<void> {
     error.value = "Enter a name for this credential before connecting.";
     return;
   }
-  linearOAuthConnecting.value = true;
-  error.value = "";
-  try {
-    let credentialId: string;
-    if (isEditing.value && props.credential) {
-      await credentialsApi.update(props.credential.id, {
-        name: name.value,
-        config: buildConfig(),
-      });
-      credentialId = props.credential.id;
-    } else {
-      const saved = await credentialsApi.create({
-        name: name.value,
-        type: "linear",
-        config: buildConfig(),
-      });
-      credentialId = saved.id;
-    }
-    const { auth_url } = await credentialsApi.linearOAuthAuthorize(credentialId);
-    const popup = window.open(auth_url, "linear-oauth", "width=520,height=680");
-    if (!popup) {
-      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
-    }
-    const onMessage = (event: MessageEvent): void => {
-      if (!isTrustedOAuthMessage(event, popup)) {
-        return;
-      }
-      if (
-        event.data?.type === "linear-oauth-success" &&
-        event.data.credentialId === credentialId
-      ) {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        popup.close();
-        credentialsApi.get(credentialId).then((credential) => {
-          linearConnectedCredential.value = credential;
-          linearOAuthConnected.value = true;
-          linearOAuthConnecting.value = false;
-        }).catch(() => {
-          linearOAuthConnected.value = true;
-          linearOAuthConnecting.value = false;
-        });
-      } else if (event.data?.type === "linear-oauth-error") {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        linearOAuthConnecting.value = false;
-        error.value = event.data.message || "Linear OAuth authorization failed";
-      }
-    };
-    const pollClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(pollClosed);
-        window.removeEventListener("message", onMessage);
-        linearOAuthConnecting.value = false;
-      }
-    }, 500);
-    window.addEventListener("message", onMessage);
-  } catch (err) {
-    linearOAuthConnecting.value = false;
-    error.value = err instanceof Error ? err.message : "Linear OAuth authorization failed";
-  }
+  await linearOAuth.start(
+    () => saveOAuthCredential("linear", linearOAuth),
+    credentialsApi.linearOAuthAuthorize,
+  );
 }
 
 async function startNotionOAuth(): Promise<void> {
@@ -1631,67 +1496,10 @@ async function startNotionOAuth(): Promise<void> {
     error.value = "Enter a name for this credential before connecting.";
     return;
   }
-  notionOAuthConnecting.value = true;
-  error.value = "";
-  try {
-    let credentialId: string;
-    if (isEditing.value && props.credential) {
-      await credentialsApi.update(props.credential.id, {
-        name: name.value,
-        config: buildConfig(),
-      });
-      credentialId = props.credential.id;
-    } else {
-      const saved = await credentialsApi.create({
-        name: name.value,
-        type: "notion",
-        config: buildConfig(),
-      });
-      credentialId = saved.id;
-    }
-    const { auth_url } = await credentialsApi.notionOAuthAuthorize(credentialId);
-    const popup = window.open(auth_url, "notion-oauth", "width=520,height=680");
-    if (!popup) {
-      throw new Error("OAuth popup was blocked. Allow popups for Heym and try again.");
-    }
-    const onMessage = (event: MessageEvent): void => {
-      if (!isTrustedOAuthMessage(event, popup)) {
-        return;
-      }
-      if (
-        event.data?.type === "notion-oauth-success" &&
-        event.data.credentialId === credentialId
-      ) {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        popup.close();
-        credentialsApi.get(credentialId).then((credential) => {
-          notionConnectedCredential.value = credential;
-          notionOAuthConnected.value = true;
-          notionOAuthConnecting.value = false;
-        }).catch(() => {
-          notionOAuthConnected.value = true;
-          notionOAuthConnecting.value = false;
-        });
-      } else if (event.data?.type === "notion-oauth-error") {
-        window.removeEventListener("message", onMessage);
-        clearInterval(pollClosed);
-        notionOAuthConnecting.value = false;
-        error.value = event.data.message || "Notion OAuth authorization failed";
-      }
-    };
-    const pollClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(pollClosed);
-        window.removeEventListener("message", onMessage);
-        notionOAuthConnecting.value = false;
-      }
-    }, 500);
-    window.addEventListener("message", onMessage);
-  } catch (err) {
-    notionOAuthConnecting.value = false;
-    error.value = err instanceof Error ? err.message : "Notion OAuth authorization failed";
-  }
+  await notionOAuth.start(
+    () => saveOAuthCredential("notion", notionOAuth),
+    credentialsApi.notionOAuthAuthorize,
+  );
 }
 
 async function handleSave(): Promise<void> {
@@ -1970,6 +1778,18 @@ async function handleSave(): Promise<void> {
               <code class="bg-muted px-1 rounded">localhost:1455</code> page (it may fail to load —
               that is expected). Copy that full URL from the address bar and paste it below.
             </p>
+            <p
+              v-if="codexAuthorizeUrl"
+              class="text-xs text-muted-foreground"
+            >
+              Sign-in tab didn't open?
+              <a
+                :href="codexAuthorizeUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary underline"
+              >Open the OpenAI sign-in page</a>
+            </p>
             <Input
               v-model="codexRedirectUrl"
               placeholder="http://localhost:1455/auth/callback?code=..."
@@ -2195,10 +2015,10 @@ async function handleSave(): Promise<void> {
               variant="outline"
               size="sm"
               :loading="linearOAuthConnecting"
-              :disabled="saving || linearOAuthConnecting || !linearClientId.trim() || !linearClientSecret.trim()"
+              :disabled="saving || linearOAuthConnecting || !linearClientId.trim() || !linearClientSecret.trim() || (linearOAuthConnected && !isEditing)"
               @click="startLinearOAuth"
             >
-              {{ linearOAuthConnected ? "Reconnect" : "Connect" }}
+              {{ linearOAuthConnected ? (isEditing ? "Reconnect" : "Connected") : "Connect" }}
             </Button>
             <span
               v-if="linearOAuthStatusLabel"
@@ -2208,6 +2028,11 @@ async function handleSave(): Promise<void> {
               {{ linearOAuthStatusLabel }}
             </span>
           </div>
+          <OAuthAuthorizeLink
+            v-if="linearOAuth.authUrl.value && !linearOAuthConnected"
+            :auth-url="linearOAuth.authUrl.value"
+            @open="linearOAuth.openAuthPage()"
+          />
           <p class="text-xs text-muted-foreground">
             Register
             <code>/api/credentials/linear/oauth/callback</code>
@@ -3502,12 +3327,17 @@ async function handleSave(): Promise<void> {
               variant="outline"
               size="sm"
               :loading="gsOAuthConnecting"
-              :disabled="saving || gsOAuthConnecting || !gsClientId.trim() || !gsClientSecret.trim()"
+              :disabled="saving || gsOAuthConnecting || !gsClientId.trim() || !gsClientSecret.trim() || (gsOAuthConnected && !isEditing)"
               @click="startGoogleSheetsOAuth"
             >
-              {{ gsOAuthConnected ? 'Reconnect' : 'Connect' }}
+              {{ gsOAuthConnected ? (isEditing ? 'Reconnect' : 'Connected') : 'Connect' }}
             </Button>
           </div>
+          <OAuthAuthorizeLink
+            v-if="gsOAuth.authUrl.value && !gsOAuthConnected"
+            :auth-url="gsOAuth.authUrl.value"
+            @open="gsOAuth.openAuthPage()"
+          />
         </div>
       </template>
 
@@ -3588,12 +3418,17 @@ async function handleSave(): Promise<void> {
               variant="outline"
               size="sm"
               :loading="gdOAuthConnecting"
-              :disabled="saving || gdOAuthConnecting || !gdClientId.trim() || !gdClientSecret.trim()"
+              :disabled="saving || gdOAuthConnecting || !gdClientId.trim() || !gdClientSecret.trim() || (gdOAuthConnected && !isEditing)"
               @click="startGoogleDriveOAuth"
             >
-              {{ gdOAuthConnected ? 'Reconnect' : 'Connect' }}
+              {{ gdOAuthConnected ? (isEditing ? 'Reconnect' : 'Connected') : 'Connect' }}
             </Button>
           </div>
+          <OAuthAuthorizeLink
+            v-if="gdOAuth.authUrl.value && !gdOAuthConnected"
+            :auth-url="gdOAuth.authUrl.value"
+            @open="gdOAuth.openAuthPage()"
+          />
         </div>
       </template>
 
@@ -3666,12 +3501,17 @@ async function handleSave(): Promise<void> {
               variant="outline"
               size="sm"
               :loading="bqOAuthConnecting"
-              :disabled="saving || bqOAuthConnecting || !bqClientId.trim() || !bqClientSecret.trim()"
+              :disabled="saving || bqOAuthConnecting || !bqClientId.trim() || !bqClientSecret.trim() || (bqOAuthConnected && !isEditing)"
               @click="startBigQueryOAuth"
             >
-              {{ bqOAuthConnected ? 'Reconnect' : 'Connect' }}
+              {{ bqOAuthConnected ? (isEditing ? 'Reconnect' : 'Connected') : 'Connect' }}
             </Button>
           </div>
+          <OAuthAuthorizeLink
+            v-if="bqOAuth.authUrl.value && !bqOAuthConnected"
+            :auth-url="bqOAuth.authUrl.value"
+            @open="bqOAuth.openAuthPage()"
+          />
         </div>
       </template>
 
@@ -3834,10 +3674,10 @@ async function handleSave(): Promise<void> {
               variant="outline"
               size="sm"
               :loading="notionOAuthConnecting"
-              :disabled="saving || notionOAuthConnecting || !notionClientId.trim() || !notionClientSecret.trim()"
+              :disabled="saving || notionOAuthConnecting || !notionClientId.trim() || !notionClientSecret.trim() || (notionOAuthConnected && !isEditing)"
               @click="startNotionOAuth"
             >
-              {{ notionOAuthConnected ? "Reconnect" : "Connect" }}
+              {{ notionOAuthConnected ? (isEditing ? "Reconnect" : "Connected") : "Connect" }}
             </Button>
             <span
               v-if="notionOAuthStatusLabel"
@@ -3851,6 +3691,11 @@ async function handleSave(): Promise<void> {
               {{ notionOAuthStatusLabel }}
             </span>
           </div>
+          <OAuthAuthorizeLink
+            v-if="notionOAuth.authUrl.value && !notionOAuthConnected"
+            :auth-url="notionOAuth.authUrl.value"
+            @open="notionOAuth.openAuthPage()"
+          />
           <p class="text-xs text-muted-foreground">
             Register
             <code>/api/credentials/notion/oauth/callback</code>
