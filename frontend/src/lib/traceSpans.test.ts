@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTraceSpans } from "@/lib/traceSpans";
+import { buildTraceSpans, hasToolCallArguments } from "@/lib/traceSpans";
 import type { LLMTraceDetail } from "@/types/trace";
 
 function makeTrace(response: Record<string, unknown>, elapsedMs = 10856): LLMTraceDetail {
@@ -92,5 +92,19 @@ describe("buildTraceSpans for a chat turn", () => {
     );
 
     expect(spans.map((span) => span.id)).toEqual(["invocation", "call_llm", "tool_0"]);
+  });
+});
+
+describe("hasToolCallArguments", () => {
+  it("treats a call made with nothing as having no arguments", () => {
+    for (const empty of [undefined, null, {}, [], "", "  ", "{}"]) {
+      expect(hasToolCallArguments(empty)).toBe(false);
+    }
+  });
+
+  it("keeps any recorded argument, falsy values included", () => {
+    for (const value of [{ limit: 30 }, { flag: false }, ["a"], '{"limit":30}', 0]) {
+      expect(hasToolCallArguments(value)).toBe(true);
+    }
   });
 });

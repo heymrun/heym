@@ -32,6 +32,15 @@ export function getToolCallsFromResponse(
   return Array.isArray(arr) ? (arr as ToolCallEntry[]) : undefined;
 }
 
+/** False for a call made with no arguments, so the panel can show `{}` for any empty form. */
+export function hasToolCallArguments(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim() !== "" && value.trim() !== "{}";
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
 function computeInvocationTotalMs(children: TraceSpan[]): number {
   if (children.length === 0) return 0;
   const llmSpan = children.find((s) => s.id === "call_llm" || s.label === "call_llm");

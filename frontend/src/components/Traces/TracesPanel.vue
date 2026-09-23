@@ -21,7 +21,12 @@ import Select from "@/components/ui/Select.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { cn, formatDate } from "@/lib/utils";
 import { credentialsApi, traceApi, workflowApi } from "@/services/api";
-import { buildTraceSpans, getToolCallsFromResponse, type ToolCallEntry } from "@/lib/traceSpans";
+import {
+  buildTraceSpans,
+  getToolCallsFromResponse,
+  hasToolCallArguments,
+  type ToolCallEntry,
+} from "@/lib/traceSpans";
 import { buildTraceSteps, type TraceStep } from "@/lib/traceSteps";
 
 interface SelectOption {
@@ -1069,7 +1074,7 @@ onMounted(async () => {
               class="rounded-md border border-border/50 bg-muted/20 p-3 text-sm"
             >
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-primary">
+                <span class="font-medium text-primary dark:text-brand-primary-soft">
                   {{ tc.name }}
                 </span>
                 <span
@@ -1092,27 +1097,27 @@ onMounted(async () => {
                 </span>
               </div>
               <div class="mt-2 space-y-2">
-                <div class="space-y-1">
-                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Arguments
-                  </div>
-                  <TraceJsonContent
-                    :value="tc.arguments"
-                    max-height="small"
-                  />
-                </div>
-                <div
-                  v-if="tc.result !== undefined"
-                  class="space-y-1"
+                <TraceJsonContent
+                  :value="hasToolCallArguments(tc.arguments) ? tc.arguments : {}"
+                  max-height="small"
                 >
-                  <div class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Result
-                  </div>
-                  <TraceJsonContent
-                    :value="tc.result"
-                    max-height="small"
-                  />
-                </div>
+                  <template #title>
+                    <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arguments
+                    </span>
+                  </template>
+                </TraceJsonContent>
+                <TraceJsonContent
+                  v-if="tc.result !== undefined"
+                  :value="tc.result"
+                  max-height="small"
+                >
+                  <template #title>
+                    <span class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Result
+                    </span>
+                  </template>
+                </TraceJsonContent>
               </div>
             </div>
           </div>

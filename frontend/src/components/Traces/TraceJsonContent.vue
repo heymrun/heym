@@ -16,6 +16,12 @@ const props = withDefaults(defineProps<Props>(), {
 const slots = useSlots();
 const viewMode = ref<"tree" | "raw">("tree");
 const content = computed(() => getTraceJsonContent(props.value));
+// The tree draws no rows for `{}` or `[]`, which reads as a blank box; show the text.
+const isEmptyContainer = computed(() => {
+  const tree = content.value.treeValue;
+  if (!content.value.isJson || tree === null || typeof tree !== "object") return false;
+  return Array.isArray(tree) ? tree.length === 0 : Object.keys(tree).length === 0;
+});
 const showToolbar = computed(
   () => content.value.isJson || Boolean(slots.actions) || Boolean(slots.title),
 );
@@ -92,7 +98,7 @@ watch(
       :class="maxHeightClass"
     >
       <div
-        v-if="content.isJson && viewMode === 'tree'"
+        v-if="content.isJson && viewMode === 'tree' && !isEmptyContainer"
         class="p-3 text-xs font-mono"
       >
         <JsonTree
