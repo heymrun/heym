@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-FROM oven/bun:1 AS frontend-builder
+FROM node:22-bookworm-slim AS frontend-builder
+
+# Keep vue-tsc on real Node.js, as in PR checks. Bun-only images alias node to bun.
+COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 

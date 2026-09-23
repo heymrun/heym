@@ -7,11 +7,31 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  publish:
+  verify-source:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag and main history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag belongs to main and matches VERSION
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: sh ./scripts/verify-release-ref.sh "$RELEASE_TAG"
+
+  verify:
+    needs: verify-source
+    uses: ./.github/workflows/pr-checks.yml
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -80,5 +100,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           sbom: false
-          cache-from: type=gha,scope=release
+          cache-from: |
+            type=gha,scope=release
+            type=gha,scope=release-frontend
           cache-to: type=gha,mode=max,scope=release

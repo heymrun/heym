@@ -4,6 +4,13 @@ on:
   pull_request:
     branches:
       - "**"
+  push:
+    branches:
+      - main
+  workflow_call:
+    secrets:
+      ENCRYPTION_KEY:
+        required: false
 
 concurrency:
   group: pr-checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -25,7 +32,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.2"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -46,6 +58,28 @@ jobs:
       - name: Frontend build
         working-directory: frontend
         run: bun run build
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Part of the existing check job so required-check rules cover this build too.
+      - name: Release frontend build (amd64 and arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/release.Dockerfile
+          target: frontend-builder
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VITE_HEYM_WEB_URL=${{ vars.HEYM_WEB_URL || 'https://heym.run' }}
+          cache-from: type=gha,scope=release-frontend
+          cache-to: type=gha,mode=max,scope=release-frontend
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -98,7 +132,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.2"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
       - name: Install frontend dependencies
         working-directory: frontend

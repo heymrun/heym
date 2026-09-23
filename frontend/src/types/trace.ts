@@ -1,3 +1,16 @@
+export interface TraceSpan {
+  id: string;
+  label: string;
+  durationMs: number;
+  icon: "invocation" | "agent" | "llm" | "tool" | "router";
+  /** Offset from the start of the request; where the bar begins on the track. */
+  startMs?: number;
+  /** When set, the row opens that trace in a new tab. */
+  traceId?: string | null;
+  /** When there is no separate trace, the row jumps to this step instead. */
+  stepId?: string | null;
+}
+
 export interface LLMTraceListItem {
   id: string;
   created_at: string;

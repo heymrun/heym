@@ -3,18 +3,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowRight, MessageSquare, Split, User, Wrench } from "lucide-vue-next";
 
-export interface TraceSpan {
-  id: string;
-  label: string;
-  durationMs: number;
-  icon: "invocation" | "agent" | "llm" | "tool" | "router";
-  /** Offset from the start of the request; where the bar begins on the track. */
-  startMs?: number;
-  /** When set, the row opens that trace in a new tab. */
-  traceId?: string | null;
-  /** When there is no separate trace, the row jumps to this step instead. */
-  stepId?: string | null;
-}
+import type { TraceSpan } from "@/types/trace";
 
 const props = defineProps<{
   spans: TraceSpan[];
