@@ -56,6 +56,7 @@ from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
 from app.services import template_service
 from app.services.active_execution_overview import build_active_execution_overview
+from app.services.agent_tool_observability import summarize_tool_calls
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import (
@@ -3059,7 +3060,16 @@ async def stream_dashboard_chat(
     response_parts: list[str] = []
     run_steps: list[dict[str, Any]] = []
     last_user_message = messages[-1].get("content", "") if messages else ""
-    last_trace_request: dict[str, Any] | None = None
+
+    # The whole turn is one trace, shaped like an agent run, so Traces can lay every
+    # model call and tool out in order. Offsets start at the routing decision, which
+    # ran just before this stream.
+    routing = trace_context.model_routing if trace_context else None
+    trace_offset_ms = float((routing or {}).get("decisionTotalMs") or 0.0)
+    trace_turns: list[dict[str, Any]] = []
+    trace_tools: list[dict[str, Any]] = []
+    llm_call_started: float | None = None
+    turn_trace_recorded = False
 
     from app.services.context_compressor import (
         _estimate_tokens,
@@ -3117,7 +3127,97 @@ async def stream_dashboard_chat(
             + "\n\n"
         )
 
-    def _record_dashboard_run(status: str, elapsed_ms: float) -> None:
+    def _offset_ms(moment: float) -> float:
+        return round(trace_offset_ms + (moment - start_time) * 1000, 2)
+
+    def _record_llm_turn(
+        started: float,
+        duration_ms: float,
+        *,
+        usage: Any = None,
+        tool_calls: int = 0,
+        text: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        entry: dict[str, Any] = {
+            "turn": len(trace_turns) + 1,
+            "startMs": _offset_ms(started),
+            "durationMs": round(duration_ms, 2),
+            "model": model,
+            "provider": provider,
+            "toolCalls": tool_calls,
+        }
+        for key, attr in (
+            ("promptTokens", "prompt_tokens"),
+            ("completionTokens", "completion_tokens"),
+            ("totalTokens", "total_tokens"),
+        ):
+            value = getattr(usage, attr, None)
+            if isinstance(value, int):
+                entry[key] = value
+        if text:
+            entry["textChars"] = len(text)
+        if error:
+            entry["error"] = error
+        trace_turns.append(entry)
+
+    def _turn_token_total(key: str) -> int | None:
+        values = [turn[key] for turn in trace_turns if isinstance(turn.get(key), int)]
+        return sum(values) if values else None
+
+    def _record_turn_trace(error: str | None = None, *, cancelled: bool = False) -> None:
+        nonlocal turn_trace_recorded, llm_call_started
+        if turn_trace_recorded or trace_context is None:
+            return
+        if error and llm_call_started is not None:
+            _record_llm_turn(llm_call_started, (time.time() - llm_call_started) * 1000, error=error)
+        llm_call_started = None
+        # A turn stopped before the model answered anything cost nothing to trace.
+        if not trace_turns and error is None:
+            return
+        turn_trace_recorded = True
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        prompt_tokens = _turn_token_total("promptTokens")
+        completion_tokens = _turn_token_total("completionTokens")
+        total_tokens = _turn_token_total("totalTokens")
+        response: dict[str, Any] = {
+            "text": "".join(response_parts),
+            "model": model,
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+            "elapsed_ms": elapsed_ms,
+            "turn_timings": trace_turns,
+        }
+        if trace_tools:
+            response["tool_calls"] = trace_tools
+            response["tool_metrics"] = summarize_tool_calls(trace_tools)
+        if cancelled:
+            response["cancelled"] = True
+        record_llm_trace(
+            context=trace_context,
+            request_type="chat.completions",
+            request={
+                **base_kwargs,
+                "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
+            },
+            response=response,
+            model=model,
+            provider=provider,
+            error=error,
+            elapsed_ms=elapsed_ms,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+
+    def _record_dashboard_run(
+        status: str, elapsed_ms: float, trace_error: str | None = None
+    ) -> None:
+        # Every exit passes through here, so the turn's one trace is written here too.
+        _record_turn_trace(trace_error, cancelled=status == "cancelled")
         record_run_history(
             user_id=user_id,
             run_type="dashboard_chat",
@@ -3169,8 +3269,8 @@ async def stream_dashboard_chat(
                 **base_kwargs,
                 "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
             }
-            last_trace_request = {**kwargs, "messages": kwargs["messages"]}
             round_start = time.time()
+            llm_call_started = round_start
             try:
                 response = await _await_chat_completions(client, cancel_event, **kwargs)
                 if response is None:
@@ -3198,14 +3298,15 @@ async def stream_dashboard_chat(
                     **base_kwargs,
                     "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
                 }
-                last_trace_request = {**kwargs, "messages": kwargs["messages"]}
                 round_start = time.time()
+                llm_call_started = round_start
                 response = await _await_chat_completions(client, cancel_event, **kwargs)
                 if response is None:
                     elapsed_ms = (time.time() - start_time) * 1000
                     _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                     return
             round_elapsed_ms = (time.time() - round_start) * 1000
+            llm_call_started = None
             usage = getattr(response, "usage", None)
             used_tokens = (
                 usage.prompt_tokens
@@ -3218,41 +3319,19 @@ async def stream_dashboard_chat(
             choice = response.choices[0] if response.choices else None
             if not choice:
                 elapsed_ms = (time.time() - start_time) * 1000
-                if trace_context:
-                    record_llm_trace(
-                        context=trace_context,
-                        request_type="chat.completions",
-                        request=last_trace_request,
-                        response={"model": model},
-                        model=model,
-                        provider=provider,
-                        error="No response",
-                        elapsed_ms=round(round_elapsed_ms, 2),
-                    )
-                _record_dashboard_run("error", round(elapsed_ms, 2))
+                _record_llm_turn(round_start, round_elapsed_ms, usage=usage, error="No response")
+                _record_dashboard_run("error", round(elapsed_ms, 2), trace_error="No response")
                 yield f"data: {json.dumps({'type': 'error', 'message': 'No response'})}\n\n"
                 return
 
             msg = choice.message
-            if trace_context:
-                usage = getattr(response, "usage", None)
-                record_llm_trace(
-                    context=trace_context,
-                    request_type="chat.completions",
-                    request=last_trace_request,
-                    response={
-                        "content": msg.content or "",
-                        "tool_calls": len(msg.tool_calls) if msg.tool_calls else 0,
-                        "model": model,
-                    },
-                    model=model,
-                    provider=provider,
-                    error=None,
-                    elapsed_ms=round(round_elapsed_ms, 2),
-                    prompt_tokens=usage.prompt_tokens if usage else None,
-                    completion_tokens=usage.completion_tokens if usage else None,
-                    total_tokens=usage.total_tokens if usage else None,
-                )
+            _record_llm_turn(
+                round_start,
+                round_elapsed_ms,
+                usage=usage,
+                tool_calls=len(msg.tool_calls) if msg.tool_calls else 0,
+                text=msg.content,
+            )
             if not msg.tool_calls:
                 if cancel_event is not None and cancel_event.is_set():
                     elapsed_ms = (time.time() - start_time) * 1000
@@ -3298,6 +3377,8 @@ async def stream_dashboard_chat(
             )
             for tc in msg.tool_calls:
                 name = tc.function.name
+                tool_started = time.time()
+                steps_before_tool = len(run_steps)
                 if cancel_event is not None and cancel_event.is_set():
                     elapsed_ms = (time.time() - start_time) * 1000
                     _record_dashboard_run("cancelled", round(elapsed_ms, 2))
@@ -4469,24 +4550,26 @@ async def stream_dashboard_chat(
                         run_steps[-1]["execution_time_ms"],
                         status=_chat_tool_lifecycle_status(name, result),
                     )
+                tool_steps = run_steps[steps_before_tool:]
+                trace_tools.append(
+                    {
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "arguments": args,
+                        "status": _chat_tool_lifecycle_status(name, result),
+                        "start_ms": _offset_ms(tool_started),
+                        "elapsed_ms": float(tool_steps[-1]["execution_time_ms"])
+                        if tool_steps
+                        else round((time.time() - tool_started) * 1000, 2),
+                    }
+                )
                 content_for_llm = _sanitize_tool_result_for_llm(result, name)
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )
 
         elapsed_ms = (time.time() - start_time) * 1000
-        if trace_context:
-            record_llm_trace(
-                context=trace_context,
-                request_type="chat.completions",
-                request=last_trace_request,
-                response={"text": "".join(response_parts), "model": model},
-                model=model,
-                provider=provider,
-                error="Too many tool rounds",
-                elapsed_ms=round(elapsed_ms, 2),
-            )
-        _record_dashboard_run("error", round(elapsed_ms, 2))
+        _record_dashboard_run("error", round(elapsed_ms, 2), trace_error="Too many tool rounds")
         yield f"data: {json.dumps({'type': 'error', 'message': 'Too many tool rounds'})}\n\n"
     except Exception as e:
         if cancel_event is not None and cancel_event.is_set():
@@ -4495,19 +4578,11 @@ async def stream_dashboard_chat(
             return
         logger.exception("Dashboard chat stream failed")
         elapsed_ms = (time.time() - start_time) * 1000
-        if trace_context:
-            record_llm_trace(
-                context=trace_context,
-                request_type="chat.completions",
-                request=last_trace_request,
-                response={"text": "".join(response_parts), "model": model},
-                model=model,
-                provider=provider,
-                error=str(e),
-                elapsed_ms=round(elapsed_ms, 2),
-            )
-        _record_dashboard_run("error", round(elapsed_ms, 2))
+        _record_dashboard_run("error", round(elapsed_ms, 2), trace_error=str(e))
         yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    finally:
+        # A task cancelled mid-call skips every exit above; keep the calls it finished.
+        _record_turn_trace(cancelled=True)
 
 
 async def stream_llm_response(

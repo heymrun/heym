@@ -126,6 +126,20 @@ export function readTraceModelRouting(
   };
 }
 
+/**
+ * Every model call of the request, in order. Chat writes these at the top level
+ * whether or not it routed; a routed agent keeps them inside its routing block.
+ */
+export function readTraceTurnTimings(
+  response: Record<string, unknown> | null | undefined,
+): ModelRoutingTurnTiming[] {
+  const topLevel = readTurnTimings(response?.turn_timings);
+  if (topLevel.length > 0) return topLevel;
+  const routing = response?.model_routing;
+  if (!routing || typeof routing !== "object") return [];
+  return readTurnTimings((routing as Record<string, unknown>).turnTimings);
+}
+
 /** `Fast → gpt-4o-mini`, or just the model when the option has no name. */
 export function formatRoutingCallLabel(call: ModelRoutingTraceCall): string {
   return call.option ? `${call.option} → ${call.model}` : call.model;

@@ -546,3 +546,151 @@ describe("event json hides unrecorded fields", () => {
     expect(json.reused).toBe(false);
   });
 });
+
+describe("dashboard chat turn", () => {
+  function chatTrace(
+    overrides: { messages?: unknown[]; routed?: boolean; response?: Record<string, unknown> } = {},
+  ): LLMTraceDetail {
+    const response: Record<string, unknown> = {
+      text: "Here are your most recent runs.",
+      elapsed_ms: 10856,
+      turn_timings: [
+        { turn: 1, startMs: 402.64, durationMs: 6009, model: "qwen3.8-flash", toolCalls: 1 },
+        { turn: 2, startMs: 6500, durationMs: 4700, model: "qwen3.8-flash", toolCalls: 0 },
+      ],
+      tool_calls: [
+        {
+          tool_call_id: "call-1",
+          name: "get_recent_executions",
+          arguments: { limit: 30 },
+          status: "success",
+          start_ms: 6411,
+          elapsed_ms: 80,
+        },
+      ],
+      ...overrides.response,
+    };
+    if (overrides.routed) {
+      response.model_routing = {
+        routerLabel: "model-router",
+        routerCredentialId: "router-1",
+        decisionModel: "jev-latest",
+        decisionTotalMs: 402.64,
+        calls: [
+          {
+            turn: 1,
+            model: "qwen3.8-flash",
+            option: "fast-json",
+            credentialName: "opencode",
+            decisionMs: 402.64,
+          },
+        ],
+      };
+    }
+    return makeTrace({
+      source: "dashboard_chat",
+      request: {
+        messages: overrides.messages ?? [
+          { role: "system", content: "Heym platform context" },
+          { role: "user", content: "Show recent runs" },
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-1",
+                type: "function",
+                function: { name: "get_recent_executions", arguments: '{"limit":30}' },
+              },
+            ],
+          },
+          { role: "tool", tool_call_id: "call-1", content: '{"runs":[]}' },
+        ],
+      },
+      response,
+    });
+  }
+
+  it("shows every model call between the tools and ends on the answer", () => {
+    const ids = buildTraceSteps(chatTrace({ routed: true })).map((step) => step.id);
+
+    expect(ids).toEqual([
+      "msg-0",
+      "msg-1",
+      "model_router_turn_1",
+      "call_llm_turn_1",
+      "tool-call-1",
+      "call_llm_turn_2",
+      "answer",
+    ]);
+  });
+
+  it("shows the model calls when nothing routed", () => {
+    const ids = buildTraceSteps(chatTrace()).map((step) => step.id);
+
+    expect(ids).toEqual([
+      "msg-0",
+      "msg-1",
+      "call_llm_turn_1",
+      "tool-call-1",
+      "call_llm_turn_2",
+      "answer",
+    ]);
+  });
+
+  it("names a later call after the decision it reused", () => {
+    const steps = buildTraceSteps(chatTrace({ routed: true }));
+    const second = steps.find((step) => step.id === "call_llm_turn_2");
+
+    expect(second?.roleLabel).toBe("LLM · turn 2");
+    expect(second?.detail).toContain("on opencode");
+  });
+
+  it("leaves earlier messages of the conversation alone", () => {
+    const ids = buildTraceSteps(
+      chatTrace({
+        messages: [
+          { role: "system", content: "Heym platform context" },
+          { role: "user", content: "Hi" },
+          { role: "assistant", content: "Hello, how can I help?" },
+          { role: "user", content: "Show recent runs" },
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-1",
+                type: "function",
+                function: { name: "get_recent_executions", arguments: '{"limit":30}' },
+              },
+            ],
+          },
+          { role: "tool", tool_call_id: "call-1", content: '{"runs":[]}' },
+        ],
+      }),
+    ).map((step) => step.id);
+
+    expect(ids).toEqual([
+      "msg-0",
+      "msg-1",
+      "msg-2",
+      "msg-3",
+      "call_llm_turn_1",
+      "tool-call-1",
+      "call_llm_turn_2",
+      "answer",
+    ]);
+  });
+
+  it("reads the answer from a chat row recorded before turns were traced", () => {
+    const steps = buildTraceSteps(
+      makeTrace({
+        request: { messages: [{ role: "user", content: "Show recent runs" }] },
+        response: { content: "Here are your runs.", tool_calls: 0, model: "qwen3.8-flash" },
+      }),
+    );
+
+    expect(steps[steps.length - 1].kind).toBe("answer");
+    expect(steps[steps.length - 1].detail).toBe("Here are your runs.");
+  });
+});
