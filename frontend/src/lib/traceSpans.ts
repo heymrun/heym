@@ -1,5 +1,4 @@
-import type { TraceSpan } from "@/components/Traces/TraceDurationChart.vue";
-import type { LLMTraceDetail } from "@/types/trace";
+import type { LLMTraceDetail, TraceSpan } from "@/types/trace";
 
 import {
   formatRoutingCallLabel,

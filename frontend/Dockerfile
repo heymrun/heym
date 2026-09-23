@@ -1,4 +1,6 @@
-FROM oven/bun:1 AS builder
+FROM node:22-bookworm-slim AS builder
+
+COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 

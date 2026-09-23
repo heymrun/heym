@@ -4,6 +4,13 @@ on:
   pull_request:
     branches:
       - "**"
+  push:
+    branches:
+      - main
+  workflow_call:
+    secrets:
+      ENCRYPTION_KEY:
+        required: false
 
 concurrency:
   group: pr-checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -25,7 +32,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.2"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -98,7 +110,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.2"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
       - name: Install frontend dependencies
         working-directory: frontend
