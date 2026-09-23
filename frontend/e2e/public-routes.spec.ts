@@ -80,7 +80,7 @@ test("browses documentation articles", async ({ page }) => {
   await expect(page.getByText("Delete an issue:", { exact: true })).toBeVisible();
 });
 
-test("filters Chat with Docs credentials and models with searchable selectors", async ({ page }) => {
+test("filters Chat with Heym credentials and models with searchable selectors", async ({ page }) => {
   const openAiCredentialId = "22222222-2222-4222-8222-222222222225";
   const cerebrasCredentialId = "22222222-2222-4222-8222-222222222226";
   const now = new Date().toISOString();
@@ -153,8 +153,8 @@ test("filters Chat with Docs credentials and models with searchable selectors", 
   });
 
   await page.goto("/docs/getting-started/introduction");
-  await page.getByRole("button", { name: "Chat with Docs" }).click();
-  await expect(page.getByRole("heading", { name: "Chat with Docs" })).toBeVisible();
+  await page.getByRole("button", { name: "Chat with Heym" }).click();
+  await expect(page.getByRole("heading", { name: "Chat with Heym" })).toBeVisible();
 
   const credentialField = page.getByTestId("docs-chat-credential-selector");
   const modelField = page.getByTestId("docs-chat-model-selector");

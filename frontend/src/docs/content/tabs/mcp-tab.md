@@ -49,6 +49,8 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
 
+Credentials stay in the UI: `heym_chat` never lists, chooses or creates them. When it builds or edits a workflow, new nodes that need a credential are left empty and the reply names them, so you can set them in the editor.
+
 ### Credential and model
 
 `heym_chat` runs the engine on your Heym account, so it needs an LLM credential of its own:

@@ -164,12 +164,12 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent | Keyb
           <button
             type="button"
             class="inline-flex items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-3 text-sm font-medium text-white transition-all duration-250 hover:bg-purple-700 active:scale-[0.97] min-h-[44px] min-w-[44px] md:h-9 md:min-h-[36px]"
-            title="Chat with Docs"
-            aria-label="Chat with Docs"
+            title="Chat with Heym"
+            aria-label="Chat with Heym"
             @click="docsChatOpen = true; pushOverlayState()"
           >
             <Wand2 class="h-4 w-4 shrink-0" />
-            <span class="hidden sm:inline text-xs font-medium">Chat with Docs</span>
+            <span class="hidden sm:inline text-xs font-medium">Chat with Heym</span>
           </button>
           <GitHubStarButton />
           <Button

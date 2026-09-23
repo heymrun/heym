@@ -47,6 +47,7 @@ import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
+import { sanitizeGeneratedCredentialFields } from "@/utils/generatedCredentialFields";
 
 const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
@@ -2465,55 +2466,34 @@ function shouldClearIntegrationCredentialId(credentialId: string | undefined): b
 }
 
 function sanitizeIntegrationCredentialFields(node: WorkflowNode): WorkflowNode {
-  const t = node.type;
-  const integrationTypes = new Set([
-    "slack",
-    "discord",
-    "telegram",
-    "imapTrigger",
-    "telegramTrigger",
-    "sendEmail",
-    "redis",
-    "grist",
-    "rabbitmq",
-    "crawler",
-    "googleSheets",
-    "googleDrive",
-    "slackTrigger",
-    "discordTrigger",
-    "bigquery",
-    "supabase",
-    "notion",
-  ]);
-  if (!integrationTypes.has(t) && t !== "playwright") {
-    return node;
+  const sanitized = sanitizeGeneratedCredentialFields(
+    node,
+    allCredentialsForSanitize.value,
+    findMatchingExistingNode(node),
+  );
+  if (sanitized.type !== "playwright") {
+    return sanitized;
   }
-  const data = { ...node.data };
-  const credId = data.credentialId as string | undefined;
-  if (credId && shouldClearIntegrationCredentialId(credId)) {
-    data.credentialId = "";
-  }
-  if (t === "playwright") {
-    const sanitizePlaywrightSteps = (
-      steps: PlaywrightStep[] | undefined,
-    ): PlaywrightStep[] | undefined => {
-      if (!Array.isArray(steps)) return steps;
-      return steps.map((step) => {
-        const s = step as { action?: string; credentialId?: string; model?: string };
-        if (
-          s.action === "aiStep" &&
-          s.credentialId &&
-          shouldClearIntegrationCredentialId(s.credentialId)
-        ) {
-          return { ...step, credentialId: "", model: "" };
-        }
-        return step;
-      });
-    };
-    data.playwrightSteps = sanitizePlaywrightSteps(data.playwrightSteps);
-    data.playwrightAuthFallbackSteps = sanitizePlaywrightSteps(data.playwrightAuthFallbackSteps);
-  }
-  return { ...node, data };
+  const data = { ...sanitized.data };
+  const sanitizePlaywrightSteps = (
+    steps: PlaywrightStep[] | undefined,
+  ): PlaywrightStep[] | undefined => {
+    if (!Array.isArray(steps)) return steps;
+    return steps.map((step) => {
+      const s = step as { action?: string; credentialId?: string; model?: string };
+      if (
+        s.action === "aiStep" &&
+        s.credentialId &&
+        shouldClearIntegrationCredentialId(s.credentialId)
+      ) {
+        return { ...step, credentialId: "", model: "" };
+      }
+      return step;
+    });
+  };
+  data.playwrightSteps = sanitizePlaywrightSteps(data.playwrightSteps);
+  data.playwrightAuthFallbackSteps = sanitizePlaywrightSteps(data.playwrightAuthFallbackSteps);
+  return { ...sanitized, data };
 }
 
 function isPlaceholderOrInvalidModel(modelId: string | undefined): boolean {
@@ -3858,6 +3838,7 @@ function renderContent(content: string): string {
               :questions="msg.clarify"
               :disabled="msg.clarifyAnswered || aiStreaming"
               @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(msg, answers)"
+              @credential-saved="() => void loadAllCredentialsForSanitize()"
             />
             <div
               v-if="msg.workflowJson"

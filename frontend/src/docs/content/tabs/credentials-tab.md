@@ -50,6 +50,8 @@ Client Secret from your Notion public integration; Heym stores them encrypted in
 Use **Test Connection** to verify Supabase, Linear, or Notion credentials before saving a workflow. See
 [Third-Party Integrations](../reference/integrations.md#notion) for Notion setup details.
 
+OAuth credentials open the provider's authorization page in a popup. If the browser blocks it, use the **Open the authorization page** link under the Connect button; the dialog notices when the connection completes. Once a new credential is connected, the button shows **Connected**.
+
 ## Editing and Deleting
 
 - **Edit** – Update credential values (sensitive values are masked)

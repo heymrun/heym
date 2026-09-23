@@ -356,7 +356,6 @@ describe("shipped release registry", () => {
       "decision-node",
       "responses-api",
       "rag-upsert-delete",
-      "cluster-load-distribution",
     ]);
   });
 

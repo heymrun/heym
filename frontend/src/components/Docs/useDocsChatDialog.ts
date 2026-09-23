@@ -1,10 +1,12 @@
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from "vue";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
+import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { aiApi, credentialsApi } from "@/services/api";
+import { extractClarifyBlock, serializeAnswers, stripClarifyBlock } from "@/utils/parseClarify";
 
 export interface DocsChatDialogProps {
   open: boolean;
@@ -33,6 +35,7 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   const loadingModels = ref(false);
   const modelsLoadFailed = ref(false);
   const messages = ref<ChatMessage[]>([]);
+  const answeredClarify = reactive(new Set<string>());
   const conversationId = ref(crypto.randomUUID());
   const inputText = ref("");
   const streaming = ref(false);
@@ -150,6 +153,7 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     bumpStreamSequence();
     activeAbortController.value?.abort();
     messages.value = [];
+    answeredClarify.clear();
     conversationId.value = crypto.randomUUID();
     inputText.value = "";
     streaming.value = false;
@@ -167,11 +171,12 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     return messages.value.filter((message) => message.role === "user" || message.role === "assistant").slice(0, -2).slice(-MAX_CONTEXT_MESSAGES).map((message) => ({ role: message.role, content: message.content }));
   }
 
-  function handleSubmit(): void {
-    const text = inputText.value.trim();
-    if (!text || streaming.value || !selectedCredentialId.value || !selectedModel.value) return;
+  function canSend(): boolean {
+    return !streaming.value && !!selectedCredentialId.value && !!selectedModel.value;
+  }
+
+  function sendText(text: string): void {
     messages.value.push({ id: crypto.randomUUID(), role: "user", content: text });
-    inputText.value = "";
     const assistantId = crypto.randomUUID();
     messages.value.push({ id: assistantId, role: "assistant", content: "" });
     activeAssistantMessageId.value = assistantId;
@@ -214,6 +219,31 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
       abortController.signal,
       (label) => { steps.value = [...steps.value, label]; },
     );
+  }
+
+  function handleSubmit(): void {
+    const text = inputText.value.trim();
+    if (!text || !canSend()) return;
+    inputText.value = "";
+    sendText(text);
+  }
+
+  function clarifyFor(message: ChatMessage): ClarifyQuestion[] | null {
+    if (message.role !== "assistant" || !message.content) return null;
+    // A half-streamed block would render a half-built card.
+    if (streaming.value && activeAssistantMessageId.value === message.id) return null;
+    return extractClarifyBlock(message.content);
+  }
+
+  function renderAssistantMarkdown(message: ChatMessage): string {
+    return renderMarkdown(clarifyFor(message) ? stripClarifyBlock(message.content) : message.content);
+  }
+
+  function handleClarifySubmit(message: ChatMessage, answers: ClarifyAnswer[]): void {
+    const questions = clarifyFor(message);
+    if (!questions || answeredClarify.has(message.id) || !canSend()) return;
+    answeredClarify.add(message.id);
+    sendText(serializeAnswers(questions, answers));
   }
 
   function stopStreaming(): void {
@@ -291,6 +321,10 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     messagesContainer,
     chatInputRef,
     renderMarkdown,
+    answeredClarify,
+    clarifyFor,
+    renderAssistantMarkdown,
+    handleClarifySubmit,
     clearChat,
     copyMessageContent,
     handleSubmit,

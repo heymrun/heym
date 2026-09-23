@@ -481,11 +481,11 @@ The AI Assistant is a chat panel opened from the Debug panel that lets you creat
 
 When the current workflow contains [Agent Node](../nodes/agent-node.md) skills, the assistant sends only each skill's `SKILL.md` into the workflow context. Attached `.py` files and binary skill assets are excluded before the request so large skill bundles do not overflow the model context window.
 
-Pairs well with [Chat with Docs](./chat-with-docs.md), [Agent Architecture](./agent-architecture.md), and [Expression DSL](./expression-dsl.md).
+Pairs well with [Chat with Heym](./chat-with-heym.md), [Agent Architecture](./agent-architecture.md), and [Expression DSL](./expression-dsl.md).
 
-### [Chat with Docs](./chat-with-docs.md)
+### [Chat with Heym](./chat-with-heym.md)
 
-Chat with Docs is a documentation-header assistant for product questions. It opens in a centered dialog, keeps credential and model selection visible at the top, injects the active docs page path as context, and clears message history when the dialog closes. It complements the broader [AI Assistant](./ai-assistant.md) and the lighter-weight [Contextual Showcase](./contextual-showcase.md).
+Chat with Heym is a documentation-header assistant for product questions. It opens in a centered dialog, keeps credential and model selection visible at the top, injects the active docs page path as context, and clears message history when the dialog closes. It complements the broader [AI Assistant](./ai-assistant.md) and the lighter-weight [Contextual Showcase](./contextual-showcase.md).
 
 See also [AI Assistant](./ai-assistant.md), [Contextual Showcase](./contextual-showcase.md), and [Node Types](./node-types.md).
 
@@ -505,7 +505,7 @@ See also [Workflow Organization](./workflow-organization.md), [Keyboard Shortcut
 
 The Contextual Showcase is a compact in-app guide rail for authenticated main surfaces such as dashboard tabs, [Evals](../tabs/evals-tab.md), Docs, and the workflow editor. It stays closed by default, gives a short page summary first, offers a little extra detail on demand, and links to the full docs article when you want deeper guidance.
 
-Pairs with [Chat with Docs](./chat-with-docs.md), [Quick Drawer](./quick-drawer.md), and [AI Assistant](./ai-assistant.md) for in-app guidance flows.
+Pairs with [Chat with Heym](./chat-with-heym.md), [Quick Drawer](./quick-drawer.md), and [AI Assistant](./ai-assistant.md) for in-app guidance flows.
 
 ### [Credentials](./credentials.md)
 

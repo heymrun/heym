@@ -57,6 +57,7 @@ from app.models.chat_schemas import (
 )
 from app.services import chat_task_registry as registry
 from app.services.credential_access import get_accessible_credential
+from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext
@@ -88,6 +89,8 @@ class ChatTurn:
     model: str
     attachment_data: dict | None
     should_generate_title: bool
+    # MCP turns never list, pick or create credentials; turns typed in the UI do.
+    credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,7 @@ class SystemPromptParts:
     agents_md: str
     workflows_block: str
     user_rules: str
+    credentials_block: str = ""
 
 
 async def _assemble_system_prompt_parts(
@@ -207,11 +211,17 @@ async def _assemble_system_prompt_parts(
     db: AsyncSession,
     *,
     include_attachment_instructions: bool,
+    credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
 ) -> SystemPromptParts:
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
     agents_md = _load_agents_md_content() or ""
     user_rules = (user.user_rules or "").strip()
+    credentials_block = (
+        ""
+        if credential_mode is CredentialPromptMode.OFF
+        else await build_credentials_prompt(db, user.id, credential_mode)
+    )
 
     system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
     if agents_md:
@@ -228,6 +238,7 @@ async def _assemble_system_prompt_parts(
             + "\n\nAvailable workflows (always check these first when user asks for information):\n"
             + workflows_block
         )
+    system_prompt += credentials_block
     if user_rules:
         system_prompt = (
             system_prompt
@@ -243,6 +254,7 @@ async def _assemble_system_prompt_parts(
         agents_md=agents_md,
         workflows_block=workflows_block,
         user_rules=user_rules,
+        credentials_block=credentials_block,
     )
 
 
@@ -345,7 +357,10 @@ async def _run_chat_turn(
                 session_id=conv_id,
             )
             parts = await _assemble_system_prompt_parts(
-                user, db, include_attachment_instructions=turn.attachment_data is not None
+                user,
+                db,
+                include_attachment_instructions=turn.attachment_data is not None,
+                credential_mode=turn.credential_mode,
             )
 
             cancel_event = _cancel_events.get(conv_id)
@@ -378,6 +393,7 @@ async def _run_chat_turn(
                 attachment,
                 credential,
                 system_prompt_parts=parts,
+                credential_mode=turn.credential_mode,
             ):
                 if chunk.startswith("data: "):
                     try:
@@ -753,6 +769,7 @@ async def run_mcp_chat_turn(
         model=model,
         attachment_data=None,
         should_generate_title=should_generate_title,
+        credential_mode=CredentialPromptMode.OFF,
     )
     await registry.create_task(conv_id)
     try:
@@ -1322,7 +1339,7 @@ async def get_context_summary(
         current_user, db, include_attachment_instructions=False
     )
     breakdown = _context_breakdown(
-        base_system_prompt=parts.base_system_prompt,
+        base_system_prompt=parts.base_system_prompt + parts.credentials_block,
         agents_md=parts.agents_md,
         workflows_block=parts.workflows_block,
         user_rules=parts.user_rules,

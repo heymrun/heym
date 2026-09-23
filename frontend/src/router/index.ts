@@ -121,6 +121,11 @@ const router = createRouter({
       path: "/docs",
       redirect: "/docs/getting-started/introduction",
     },
+    // Renamed from "Chat with Docs"; keeps old links and bookmarks working.
+    {
+      path: "/docs/reference/chat-with-docs",
+      redirect: "/docs/reference/chat-with-heym",
+    },
     {
       path: "/docs/:pathMatch(.*)*",
       name: "docs",

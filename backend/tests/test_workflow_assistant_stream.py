@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.api.ai_assistant import AIAssistantRequest, workflow_assistant_stream
 from app.db.models import CredentialType
+from app.services.credential_catalog import CredentialPromptMode
 
 
 class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
@@ -71,8 +72,8 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 self.fail("the stream kept emitting heartbeats after the source finished")
 
 
-class WorkflowAssistantHttpCredentialsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_builder_prompt_includes_http_credentials_section(self) -> None:
+class WorkflowAssistantCredentialsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_builder_prompt_includes_credentials_section(self) -> None:
         section = "\n\n## Credentials for HTTP requests\n\n- `google` (google)\n"
         credential_id = uuid.uuid4()
         user = SimpleNamespace(id=uuid.uuid4(), user_rules=None)
@@ -103,9 +104,9 @@ class WorkflowAssistantHttpCredentialsTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.api.ai_assistant._load_installed_plugins", AsyncMock(return_value=[])),
             patch(
-                "app.api.ai_assistant.build_http_credentials_prompt",
+                "app.api.ai_assistant.build_credentials_prompt",
                 AsyncMock(return_value=section),
-            ) as http_credentials_prompt,
+            ) as credentials_prompt,
             patch("app.api.ai_assistant.stream_llm_response", fake_stream_llm_response),
         ):
             response = await workflow_assistant_stream(
@@ -122,4 +123,6 @@ class WorkflowAssistantHttpCredentialsTests(unittest.IsolatedAsyncioTestCase):
                     break
 
         self.assertIn(section, captured["system_prompt"])
-        http_credentials_prompt.assert_awaited_once_with(db, user.id, interactive=True)
+        credentials_prompt.assert_awaited_once_with(
+            db, user.id, CredentialPromptMode.ASK_AND_CREATE
+        )

@@ -5287,7 +5287,8 @@ and wait. The `heym-clarify` block must be plain assistant text, not a tool call
 Rules for the clarify block:
 - Ask at most 3-4 questions. Only ask about things that materially change the workflow.
 - Each question: `id` (short slug), `text`, `type` ("single" | "multi" | "text"),
-  optional `options` (string array), optional `allowOther` (boolean).
+  optional `options` (strings, or the option objects below), optional `allowOther`
+  (boolean), optional `optional` (boolean).
 - Use `single` for one choice, `multi` for several, `text` for free input.
 - Provide `options` whenever sensible; set `allowOther: true` when a genuine free-form
   answer is plausible.
@@ -5296,6 +5297,15 @@ Rules for the clarify block:
   question's `prefillLabel` names that value. The selected option's `prefill` appears in
   an input the user can edit, and the answer comes back as
   `label (<prefillLabel>: "<edited value>")`.
+- A `single` question can offer to create a credential with an option
+  `{"label": "...", "create": {"type": "<credential type>", "name": "<suggested name>"}}`.
+  The user fills in a form you never see, and the answer comes back as
+  `Created credential "<name>" (<type>)`.
+- A `single` question can offer to update an existing credential with an option
+  `{"label": "...", "edit": {"id": "<credential id>"}}`. The form opens with that credential
+  loaded, and the answer comes back as `Updated credential "<name>" (<type>)`.
+- Set `"optional": true` on a question the workflow can be built without. Its input says
+  "Optional", the user may skip it, and a skipped question comes back as `(skipped)`.
 
 Example:
 
@@ -5343,7 +5353,7 @@ def build_assistant_prompt(
     user_rules: str | None = None,
     available_node_templates: list[dict] | None = None,
     installed_plugins: list[dict] | None = None,
-    http_credentials_prompt: str = "",
+    credentials_prompt: str = "",
 ) -> str:
     import json
 
@@ -5498,7 +5508,7 @@ def build_assistant_prompt(
                     )
                     prompt += f"    config fields: {field_list}\n"
 
-    prompt += http_credentials_prompt
+    prompt += credentials_prompt
     prompt += CLARIFY_PROTOCOL_PROMPT
 
     return prompt

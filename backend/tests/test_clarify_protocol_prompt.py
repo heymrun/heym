@@ -25,6 +25,22 @@ class TestClarifyProtocolConstant(unittest.TestCase):
         self.assertIn("`prefillLabel`", text)
         self.assertIn('`label (<prefillLabel>: "<edited value>")`', text)
 
+    def test_constant_documents_credential_create_options(self) -> None:
+        """The answer format must match what ClarifyCard serializes for a created credential."""
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn('"create": {"type": "<credential type>", "name": "<suggested name>"}', text)
+        self.assertIn('`Created credential "<name>" (<type>)`', text)
+
+    def test_constant_documents_credential_edit_options(self) -> None:
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn('"edit": {"id": "<credential id>"}', text)
+        self.assertIn('`Updated credential "<name>" (<type>)`', text)
+
+    def test_constant_documents_optional_questions(self) -> None:
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn('`"optional": true`', text)
+        self.assertIn("`(skipped)`", text)
+
     def test_synced_dsl_prompt_stays_clean(self) -> None:
         # heymweb sync extracts only WORKFLOW_DSL_SYSTEM_PROMPT; it must NOT
         # contain the clarify protocol, or /convert would start asking questions.

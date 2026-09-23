@@ -1,10 +1,10 @@
-# Chat with Docs — Design Spec
+# Chat with Heym — Design Spec
 **Date:** 2026-04-10  
 **Status:** Approved
 
 ## Summary
 
-Add a "Chat with Docs" button to the documentation page header. Pressing it opens a centered dialog where users can select credentials and a model, then chat with an AI assistant that is context-aware of the currently open documentation page.
+Add a "Chat with Heym" button to the documentation page header. Pressing it opens a centered dialog where users can select credentials and a model, then chat with an AI assistant that is context-aware of the currently open documentation page.
 
 ## Goals
 
@@ -45,7 +45,7 @@ emit: ['close']
 
 **`frontend/src/views/DocsView.vue`**
 - Add `docsChatOpen = ref(false)` state
-- Add "Chat with Docs" button in `#actions` slot of `AppHeader`
+- Add "Chat with Heym" button in `#actions` slot of `AppHeader`
 - Mount `<DocsChatDialog :open="docsChatOpen" :doc-path="docPath" @close="docsChatOpen = false" />`
 - Register `docsChatOpen` with `onDismissOverlays` so overlay back-handler also closes it
 
@@ -57,7 +57,7 @@ emit: ['close']
 
 ```
 [Wand2 icon]                     ← mobile: icon only, purple bg
-[Wand2 icon] Chat with Docs      ← desktop: icon + label
+[Wand2 icon] Chat with Heym      ← desktop: icon + label
 ```
 
 - Classes: `bg-purple-600 hover:bg-purple-700 text-white rounded-xl`
@@ -68,7 +68,7 @@ emit: ['close']
 
 ```
 ┌─────────────────────────────────────────────┐
-│ [Wand2] Chat with Docs          [⤢] [✕]    │  ← Dialog header
+│ [Wand2] Chat with Heym          [⤢] [✕]    │  ← Dialog header
 │─────────────────────────────────────────────│
 │ [Credential ▾]  [Model ▾]                   │  ← Always-visible selects
 │─────────────────────────────────────────────│
