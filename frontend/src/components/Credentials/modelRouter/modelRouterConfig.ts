@@ -115,3 +115,26 @@ export function formFromModelRouterConfig(config: ModelRouterConfig): ModelRoute
     })),
   };
 }
+
+export interface ModelSelectOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * The model dropdown for one option row.
+ *
+ * A stored model that the provider no longer lists is kept in the list rather than
+ * dropped: the select renders a value it cannot find as the placeholder, so the row
+ * would look unset while still holding that model, and a save would quietly keep it.
+ */
+export function buildOptionModelChoices(
+  storedModel: string,
+  models: { id: string; name: string }[] | undefined,
+): ModelSelectOption[] {
+  const choices = (models ?? []).map((model) => ({ value: model.id, label: model.name }));
+  const stored = storedModel.trim();
+  if (!stored || models === undefined) return choices;
+  if (choices.some((choice) => choice.value === stored)) return choices;
+  return [...choices, { value: stored, label: `${stored} (not offered by this credential)` }];
+}
