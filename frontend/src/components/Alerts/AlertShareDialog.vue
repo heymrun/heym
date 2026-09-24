@@ -7,6 +7,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { alertsApi, teamsApi } from "@/services/api";
 import type { Alert, AlertShareEntry, AlertTeamShareEntry } from "@/types/alerts";
 
@@ -128,7 +129,14 @@ async function removeTeamShare(share: AlertTeamShareEntry): Promise<void> {
             :key="share.id"
             class="flex items-center justify-between rounded-md border border-border px-3 py-1.5 text-sm"
           >
-            <span class="truncate">{{ share.user_email }}</span>
+            <span class="flex min-w-0 items-center gap-2">
+              <UserAvatar
+                :user-id="share.user_id"
+                :email="share.user_email"
+                class="h-6 w-6 bg-primary/10 text-[11px] font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+              />
+              <span class="truncate">{{ share.user_email }}</span>
+            </span>
             <Button
               variant="ghost"
               size="sm"

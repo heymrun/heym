@@ -30,6 +30,7 @@ import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Tooltip from "@/components/ui/Tooltip.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
 import {
   extractClarifyBlock,
@@ -265,10 +266,6 @@ const canFocusInput = computed(
     Boolean(selectedCredentialId.value) &&
     Boolean(selectedModel.value),
 );
-const userInitial = computed(() => {
-  const source = authStore.user?.name?.trim() || authStore.user?.email?.trim() || "?";
-  return source.charAt(0).toUpperCase();
-});
 const chatScrollbarThumbStyle = computed(() => ({
   height: `${chatScrollbarThumbHeight.value}px`,
   transform: `translateY(${chatScrollbarThumbTop.value}px)`,
@@ -1145,12 +1142,13 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div
+          <UserAvatar
             v-if="msg.role === 'user'"
-            class="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5 text-xs font-semibold text-muted-foreground"
-          >
-            {{ userInitial }}
-          </div>
+            :user-id="authStore.user?.id"
+            :name="authStore.user?.name"
+            :email="authStore.user?.email"
+            class="w-7 h-7 bg-muted mt-0.5 text-xs font-semibold text-muted-foreground"
+          />
         </div>
 
         <div

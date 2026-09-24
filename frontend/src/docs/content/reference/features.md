@@ -605,7 +605,7 @@ Each workflow can record an **estimated time saved per run** (in minutes), set i
 
 ### [Settings](./user-settings.md)
 
-The Settings dialog (opened from the gear icon in the header) has four tabs: Profile (display name, User Rules), [Security](./security.md) (change password), Voice ([ElevenLabs TTS/STT](./chat-voice.md)), and Observability (read-only [OpenTelemetry](./opentelemetry.md) status). User Rules are custom instructions injected into every AI request, including the workflow builder and [Chat](../tabs/chat-tab.md), so you can set language, tone, coding style, or workflow conventions once. Password policy and [MCP](../tabs/mcp-tab.md) API key management are also available.
+The Settings dialog (opened from your avatar in the header) has four tabs: Profile (Gravatar picture, display name, User Rules), [Security](./security.md) (change password), Voice ([ElevenLabs TTS/STT](./chat-voice.md)), and Observability (read-only [OpenTelemetry](./opentelemetry.md) status). User Rules are custom instructions injected into every AI request, including the workflow builder and [Chat](../tabs/chat-tab.md), so you can set language, tone, coding style, or workflow conventions once. Password policy and [MCP](../tabs/mcp-tab.md) API key management are also available.
 
 See also [Security](./security.md), [Chat Voice](./chat-voice.md), [OpenTelemetry Tracing](./opentelemetry.md), and [AI Assistant](./ai-assistant.md).
 

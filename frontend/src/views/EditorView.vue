@@ -41,6 +41,7 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import Tooltip from "@/components/ui/Tooltip.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
@@ -1827,12 +1828,20 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               :key="share.user_id"
               class="flex items-center justify-between rounded-md border px-3 py-2"
             >
-              <div>
-                <div class="text-sm font-medium">
-                  {{ share.name }}
-                </div>
-                <div class="text-xs text-muted-foreground">
-                  {{ share.email }}
+              <div class="flex min-w-0 items-center gap-2.5">
+                <UserAvatar
+                  :user-id="share.user_id"
+                  :name="share.name"
+                  :email="share.email"
+                  class="h-8 w-8 bg-primary/10 text-xs font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+                />
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium">
+                    {{ share.name }}
+                  </div>
+                  <div class="truncate text-xs text-muted-foreground">
+                    {{ share.email }}
+                  </div>
                 </div>
               </div>
               <Button

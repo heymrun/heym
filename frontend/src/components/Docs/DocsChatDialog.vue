@@ -8,11 +8,14 @@ import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
+import { useAuthStore } from "@/stores/auth";
 
 interface Props { open: boolean; docPath: string | null }
 
 const props = defineProps<Props>();
 const emit = defineEmits<{ (e: "close"): void }>();
+const authStore = useAuthStore();
 
 const {
   selectedCredentialId,
@@ -116,7 +119,7 @@ const {
           <div
             v-for="message in messages"
             :key="message.id"
-            :class="['flex', message.role === 'user' ? 'justify-end' : 'justify-start']"
+            :class="['flex items-start gap-2', message.role === 'user' ? 'justify-end' : 'justify-start']"
           >
             <div :class="['relative max-w-[85%] break-words rounded-2xl px-4 py-3 pr-12 text-sm', message.role === 'user' ? 'bg-primary text-primary-foreground' : 'border border-border/50 bg-muted/80']">
               <button
@@ -184,6 +187,13 @@ const {
                 {{ message.content }}
               </p>
             </div>
+            <UserAvatar
+              v-if="message.role === 'user' && authStore.user"
+              :user-id="authStore.user.id"
+              :name="authStore.user.name"
+              :email="authStore.user.email"
+              class="mt-0.5 h-7 w-7 bg-muted text-xs font-semibold text-muted-foreground"
+            />
           </div>
         </template>
       </div>

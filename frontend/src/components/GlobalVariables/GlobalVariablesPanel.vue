@@ -16,6 +16,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { refreshGlobalVariablesCache } from "@/composables/useExpressionCompletion";
 import { formatDate } from "@/lib/utils";
 import { globalVariablesApi, teamsApi } from "@/services/api";
@@ -581,13 +582,21 @@ async function removeVariableTeamShare(teamId: string): Promise<void> {
               :key="share.id"
               class="flex items-center justify-between p-2 rounded bg-muted/50"
             >
-              <div>
-                <p class="text-sm font-medium">
-                  {{ share.name }}
-                </p>
-                <p class="text-xs text-muted-foreground">
-                  {{ share.email }}
-                </p>
+              <div class="flex min-w-0 items-center gap-2.5">
+                <UserAvatar
+                  :user-id="share.user_id"
+                  :name="share.name"
+                  :email="share.email"
+                  class="h-8 w-8 bg-primary/10 text-xs font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+                />
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium">
+                    {{ share.name }}
+                  </p>
+                  <p class="truncate text-xs text-muted-foreground">
+                    {{ share.email }}
+                  </p>
+                </div>
               </div>
               <Button
                 variant="ghost"

@@ -26,7 +26,7 @@ HEYM_OTEL_ENABLED=true
 HEYM_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
-You can confirm the active configuration in the app under **Settings → Observability** (open it from the gear icon in the header). That panel is read-only and never displays exporter secrets.
+You can confirm the active configuration in the app under **Settings → Observability** (open it from your avatar in the header). That panel is read-only and never displays exporter secrets.
 
 ## What Gets Traced
 

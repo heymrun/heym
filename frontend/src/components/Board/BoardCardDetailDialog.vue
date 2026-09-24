@@ -19,6 +19,7 @@ import {
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import type { CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
 import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
@@ -494,10 +495,13 @@ async function openLiveRun(run: CardRun): Promise<void> {
               :class="activity.kind === 'output' ? 'bg-primary/5' : ''"
             >
               <div class="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <UserIcon
+                <UserAvatar
                   v-if="activity.author_type === 'user'"
-                  class="h-3.5 w-3.5"
-                />
+                  :user-id="activity.author_user_id"
+                  class="h-4 w-4"
+                >
+                  <UserIcon class="h-3.5 w-3.5" />
+                </UserAvatar>
                 <Bot
                   v-else-if="activity.author_type === 'agent'"
                   class="h-3.5 w-3.5"

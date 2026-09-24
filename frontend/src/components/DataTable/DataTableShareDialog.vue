@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { dataTablesApi, teamsApi } from "@/services/api";
 
 const props = defineProps<{ tableId: string }>();
@@ -140,10 +141,16 @@ onMounted(load);
           :key="share.id"
           class="flex items-center justify-between rounded border px-3 py-2 text-sm"
         >
-          <div>
-            <span class="font-medium">{{ share.name }}</span>
-            <span class="ml-2 text-muted-foreground">{{ share.email }}</span>
-            <span class="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">{{ share.permission }}</span>
+          <div class="flex min-w-0 items-center gap-2">
+            <UserAvatar
+              :user-id="share.user_id"
+              :name="share.name"
+              :email="share.email"
+              class="h-6 w-6 bg-primary/10 text-[11px] font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+            />
+            <span class="shrink-0 font-medium">{{ share.name }}</span>
+            <span class="min-w-0 truncate text-muted-foreground">{{ share.email }}</span>
+            <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs">{{ share.permission }}</span>
           </div>
           <button
             class="rounded p-1 hover:bg-destructive/10"

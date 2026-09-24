@@ -1,12 +1,18 @@
 # Settings
 
-The Settings dialog lets you manage your profile, set persistent AI instructions, update your account password, configure chat voice, set your default AI credential and model, and review observability status. Open it by clicking the **gear icon / your name** in the top-right corner of the header.
+The Settings dialog lets you manage your profile, set persistent AI instructions, update your account password, configure chat voice, set your default AI credential and model, and review observability status. Open it by clicking **your avatar and name** in the top-right corner of the header.
 
 ## Opening the Dialog
 
-Click the **gear (Settings) badge** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**. Instance administrators also see an **SSO** tab.
+Click **your avatar and name** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**. Instance administrators also see an **SSO** tab.
 
 ## Profile Tab
+
+### Profile Picture
+
+Heym shows your [Gravatar](https://gravatar.com) picture for your account email in the header, next to your messages in [Chat](../tabs/chat-tab.md) and **Chat with Heym**, on [Board](../tabs/board-tab.md) comments, and next to your name in share dialogs and team member lists. To change it, update the picture on Gravatar; Heym picks up the new one within a few hours. Without a Gravatar picture, Heym shows the first letter of your name.
+
+The picture is fetched by the Heym server and cached there, so your browser never contacts Gravatar. If the server cannot reach Gravatar, everyone keeps seeing initials.
 
 ### Name
 

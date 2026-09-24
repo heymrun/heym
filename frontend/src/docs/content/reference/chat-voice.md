@@ -4,7 +4,7 @@ The Chat tab can read messages aloud and run a hands-free interactive voice mode
 
 ## Setup
 
-1. Open **Settings** (gear icon, top right) → **Voice** tab.
+1. Open **Settings** (your avatar, top right) → **Voice** tab.
 2. Pick an **ElevenLabs credential**, or click **Add credential** to create one. The API key needs the **Text to Speech**, **Speech to Text**, and **Voices** permissions enabled in your ElevenLabs account.
 3. Choose a **Voice** from your ElevenLabs account.
 4. Click **Save Voice Settings**.
