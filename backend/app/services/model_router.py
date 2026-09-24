@@ -28,11 +28,13 @@ from app.services.decision_models import (
 )
 from app.services.encryption import decrypt_config
 from app.services.llm_trace import LLMTraceContext
+from app.services.text_truncation import TRUNCATED_MARKER, keep_head_and_tail
 
 # The routing state is sent to the decision model on every new turn, so it is
 # truncated rather than unbounded. Platform limits are constants, not settings.
 ROUTER_STATE_SYSTEM_CHARS = 2000
 ROUTER_STATE_MESSAGE_CHARS = 4000
+ROUTER_STATE_TOOL_OUTPUT_CHARS = 2000
 ROUTER_STATE_MAX_TOOLS = 40
 DEFAULT_ROUTER_TIMEOUT_SECONDS = 10.0
 ROUTING_QUESTION_ID = "route"
@@ -187,9 +189,47 @@ def parse_router_config(config: dict) -> RouterConfig:
 
 
 def _truncate(value: str, limit: int) -> str:
-    if len(value) <= limit:
-        return value
-    return value[:limit] + "…[truncated]"
+    # Both ends survive: a long paste often puts the instruction last.
+    return keep_head_and_tail(value, limit, TRUNCATED_MARKER)
+
+
+def _fair_shares(lengths: list[int], budget: int) -> list[int]:
+    """Max-min fair split: no one gets more than it needs, the rest is shared evenly."""
+    shares = [0] * len(lengths)
+    remaining = budget
+    pending = sorted(range(len(lengths)), key=lambda index: lengths[index])
+    while pending:
+        even = remaining // len(pending)
+        smallest = pending[0]
+        if lengths[smallest] > even:
+            for index in pending:
+                shares[index] = even
+            break
+        shares[smallest] = lengths[smallest]
+        remaining -= lengths[smallest]
+        pending.pop(0)
+    return shares
+
+
+def fit_tool_outputs_to_budget(
+    texts: list[str], budget: int = ROUTER_STATE_TOOL_OUTPUT_CHARS
+) -> str:
+    """Join one turn's tool outputs within the budget, each output keeping a fair share.
+
+    Without the split, the first long output of a parallel turn filled the whole budget
+    and the router never saw the others.
+    """
+    items = [text for text in (raw.strip() for raw in texts) if text]
+    if not items:
+        return ""
+    # Separators count against the budget, so the joined text never exceeds it.
+    shares = _fair_shares([len(item) for item in items], max(0, budget - (len(items) - 1)))
+    parts = [
+        keep_head_and_tail(item, share, TRUNCATED_MARKER)
+        for item, share in zip(items, shares, strict=True)
+        if share > 0
+    ]
+    return "\n".join(parts)
 
 
 def build_routing_state(
@@ -197,12 +237,13 @@ def build_routing_state(
     system_instruction: str | None,
     message: str | None,
     tool_names: list[str] | None,
+    latest_tool_output: str | None = None,
 ) -> dict[str, object]:
     """Describe the request to the decision model, bounded in size.
 
-    Only what a routing decision needs travels: the system instruction, the current
-    message and the names of the attached tools. Tool schemas never go, and neither
-    does conversation history.
+    The user's request always travels. On later turns of a tool loop the last tool
+    output travels beside it, never in place of it. Tool schemas and conversation
+    history never go.
     """
     state: dict[str, object] = {}
     system = _text(system_instruction)
@@ -211,6 +252,9 @@ def build_routing_state(
     body = _text(message)
     if body:
         state["message"] = _truncate(body, ROUTER_STATE_MESSAGE_CHARS)
+    tool_output = _text(latest_tool_output)
+    if tool_output:
+        state["latest_tool_output"] = _truncate(tool_output, ROUTER_STATE_TOOL_OUTPUT_CHARS)
     names = [_text(name) for name in (tool_names or []) if _text(name)]
     if names:
         state["tools"] = names[:ROUTER_STATE_MAX_TOOLS]
@@ -300,6 +344,7 @@ class ModelRouter:
         system_instruction: str | None,
         message: str | None,
         tool_names: list[str] | None,
+        latest_tool_output: str | None = None,
     ) -> RouteDecision:
         """Pick the option for this request.
 
@@ -312,6 +357,7 @@ class ModelRouter:
             system_instruction=system_instruction,
             message=message,
             tool_names=tool_names,
+            latest_tool_output=latest_tool_output,
         )
         key = f"{self.config.fingerprint()}:{state_hash(state)}"
         if self._cached_key == key and self._cached_decision is not None:

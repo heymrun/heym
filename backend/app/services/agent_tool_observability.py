@@ -7,6 +7,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.text_truncation import (
+    TRUNCATED_MARKER,
+    Marker,
+    keep_ends,
+    keep_head_and_tail,
+    omitted_characters_marker,
+)
+
 _SENSITIVE_KEY_PATTERN = re.compile(
     r"(?:api[_-]?key|authorization|cookie|password|secret|private[_-]?key|access[_-]?key|"
     r"access[_-]?token|refresh[_-]?token|client[_-]?secret)",
@@ -46,11 +54,15 @@ _SENSITIVE_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 )
 _REDACTED = "[REDACTED]"
-_TRUNCATED = "...(truncated)"
 _PAYLOAD_TRUNCATED = "[PAYLOAD_TRUNCATED]"
 _MAX_DICT_KEYS = 200
 _MAX_LIST_ITEMS = 100
 _MAX_REDACTION_LOOKAHEAD_CHARS = 512
+# Scanned ahead of a kept tail, so a secret that starts before it is still matched from
+# its start. Longer than a 4096-bit PEM key or any realistic token.
+_MAX_REDACTION_LOOKBEHIND_CHARS = 8192
+# Below this budget a character count would crowd out the text it describes.
+_COUNTED_MARKER_MIN_CHARS = 80
 _MAX_JSON_PARSE_CHARS = 65_536
 DEFAULT_MAX_PAYLOAD_CHARS = 4096
 DEFAULT_MAX_PAYLOAD_DEPTH = 6
@@ -220,14 +232,14 @@ class _PayloadBudget:
         return False
 
 
+def _truncation_marker(max_chars: int) -> Marker:
+    if max_chars >= _COUNTED_MARKER_MIN_CHARS:
+        return omitted_characters_marker
+    return TRUNCATED_MARKER
+
+
 def _truncate_text(value: str, max_chars: int) -> str:
-    if max_chars <= 0:
-        return ""
-    if len(value) <= max_chars:
-        return value
-    if max_chars <= len(_TRUNCATED):
-        return _TRUNCATED[:max_chars]
-    return value[: max(0, max_chars - len(_TRUNCATED))] + _TRUNCATED
+    return keep_head_and_tail(value, max_chars, _truncation_marker(max_chars))
 
 
 def _redact_sensitive_text(value: str) -> str:
@@ -243,12 +255,18 @@ def _redact_sensitive_text(value: str) -> str:
 
 
 def _bounded_redact_text(value: str, max_chars: int) -> str:
-    """Redact and truncate without scanning arbitrarily large payload strings."""
+    """Redact and fit a string, keeping its start and its end, without scanning all of it."""
     if max_chars <= 0:
         return ""
-    scan_limit = max_chars + _MAX_REDACTION_LOOKAHEAD_CHARS
-    bounded_input = value[:scan_limit]
-    return _truncate_text(_redact_sensitive_text(bounded_input), max_chars)
+    head_scan = max_chars + _MAX_REDACTION_LOOKAHEAD_CHARS
+    tail_scan = max_chars + _MAX_REDACTION_LOOKBEHIND_CHARS
+    if len(value) <= head_scan + tail_scan:
+        return _truncate_text(_redact_sensitive_text(value), max_chars)
+    # Only the two ends can survive the cut, so only they are scanned.
+    head = _redact_sensitive_text(value[:head_scan])
+    tail = _redact_sensitive_text(value[-tail_scan:])
+    total_chars = len(head) + (len(value) - head_scan - tail_scan) + len(tail)
+    return keep_ends(head, tail, total_chars, max_chars, _truncation_marker(max_chars))
 
 
 def sanitize_tool_payload(

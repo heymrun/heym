@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Any
 
+from app.services.text_truncation import keep_head_and_tail
+
 logger = logging.getLogger(__name__)
 
 _CHARS_PER_TOKEN = 4
@@ -97,14 +99,8 @@ def _chunk_text(text: str, max_chars: int) -> list[str]:
 
 def _fit_text_to_token_budget(text: str, token_budget: int) -> str:
     max_chars = max(1, token_budget * _CHARS_PER_TOKEN)
-    if len(text) <= max_chars:
-        return text
-
     marker = "\n\n[... content omitted during hard context compression ...]\n\n"
-    available = max(1, max_chars - len(marker))
-    head_chars = max(1, int(available * 0.65))
-    tail_chars = max(1, available - head_chars)
-    return text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
+    return keep_head_and_tail(text, max_chars, marker)
 
 
 def _serialize_messages_for_summary(messages: list[dict[str, Any]]) -> str:

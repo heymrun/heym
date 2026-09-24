@@ -148,7 +148,7 @@ class TestResolveTurn(unittest.TestCase):
             )
 
         service.router.route.assert_called_once_with(
-            system_instruction="s", message="m", tool_names=["search"]
+            system_instruction="s", message="m", tool_names=["search"], latest_tool_output=None
         )
         self.assertEqual(binding.model, "gpt-5")
         self.assertEqual(binding.provider, "OpenAI")
@@ -401,8 +401,11 @@ class TestExecuteWithToolsRoutesEachTurn(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resolve.call_count, 2)
         # Turn one routes on the user message; turn two routes on the tool result.
+        # Every turn routes on the user's request; later turns add the tool output beside it.
         self.assertEqual(resolve.call_args_list[0].kwargs["message"], "go")
-        self.assertIn("tool output", str(resolve.call_args_list[1].kwargs["message"]))
+        self.assertIsNone(resolve.call_args_list[0].kwargs["latest_tool_output"])
+        self.assertEqual(resolve.call_args_list[1].kwargs["message"], "go")
+        self.assertIn("tool output", resolve.call_args_list[1].kwargs["latest_tool_output"])
         self.assertEqual(resolve.call_args_list[0].kwargs["tool_names"], ["search"])
         self.assertEqual(result["model"], "gpt-5")
 
@@ -1133,6 +1136,316 @@ class TestToolTraceCorrelation(unittest.IsolatedAsyncioTestCase):
     async def test_a_non_dict_tool_result_is_left_alone(self) -> None:
         result = await self._run_tool("just text")
         self.assertNotIn("trace_id", result["tool_calls"][0])
+
+
+REQUEST = "Refactor the billing module and explain every tradeoff in detail."
+
+
+def _status_ok_call() -> mock.Mock:
+    call = mock.Mock()
+    call.id = "call_1"
+    call.name = "read_status"
+    call.arguments = "{}"
+    return call
+
+
+def _summarising_client(summarised_by: list[str]) -> mock.Mock:
+    """A client whose only real call is the context compressor's summary request."""
+    client = mock.Mock()
+
+    def create(**kwargs: object) -> object:
+        summarised_by.append(str(kwargs.get("model")))
+        message = mock.Mock()
+        message.content = "summary of the earlier conversation"
+        choice = mock.Mock()
+        choice.message = message
+        response = mock.Mock()
+        response.choices = [choice]
+        return response
+
+    client.chat.completions.create.side_effect = create
+    return client
+
+
+def _long_conversation() -> list[dict[str, str]]:
+    # About 30k characters: past 80% of an 8k window, far below a 200k one.
+    history: list[dict[str, str]] = []
+    for index in range(6):
+        history.append({"role": "user", "content": f"question {index} " + "q" * 2500})
+        history.append({"role": "assistant", "content": f"answer {index} " + "a" * 2500})
+    return history
+
+
+class TestRoutingKeepsTheRequest(unittest.IsolatedAsyncioTestCase):
+    """Reported against #571: after turn 1 the router saw only the last tool output."""
+
+    async def test_the_second_decision_reads_the_request_and_the_tool_output(self) -> None:
+        from app.db.models import CredentialType
+        from app.services import llm_service as llm_service_module
+        from app.services import model_router as model_router_module
+        from app.services.llm_service import LLMService
+        from app.services.model_router import BoundOption, build_router_for_credential
+
+        router = build_router_for_credential(
+            credential_id=str(uuid.uuid4()),
+            credential_name="Auto Model",
+            credential_type="model_router",
+            config={
+                "decision_credential_id": str(uuid.uuid4()),
+                "decision_model": "jev-latest",
+                "options": [
+                    {
+                        "label": "Fast",
+                        "credential_id": str(uuid.uuid4()),
+                        "model": "small-model",
+                        "criteria": "Short factual answers.",
+                        "is_default": True,
+                    },
+                    {
+                        "label": "Deep",
+                        "credential_id": str(uuid.uuid4()),
+                        "model": "big-model",
+                        "criteria": "Multi-step reasoning and long explanations.",
+                    },
+                ],
+            },
+        )
+        bodies: list[dict] = []
+
+        def decide(**kwargs: object) -> dict:
+            bodies.append(kwargs["body"])
+            return {"answers": {"route": {"type": "choice", "choice": "Deep"}}}
+
+        def bind(option: object) -> BoundOption:
+            return BoundOption(
+                option=option,
+                credential_type="openai",
+                api_key="sk",
+                base_url=None,
+                credential_name="OpenAI prod",
+                credential_uuid=uuid.uuid4(),
+            )
+
+        service = LLMService(credential_type=CredentialType.model_router, api_key="", router=router)
+        with (
+            mock.patch.object(
+                model_router_module,
+                "load_decision_credential",
+                return_value={"base_url": "https://api.typesafe.ai", "api_key": "k"},
+            ),
+            mock.patch.object(model_router_module, "call_decision_model", side_effect=decide),
+            mock.patch.object(llm_service_module, "load_option_credential", side_effect=bind),
+            mock.patch.object(llm_service_module, "create_openai_client", return_value=mock.Mock()),
+            mock.patch.object(service, "_record_trace"),
+            mock.patch.object(
+                llm_service_module.ChatCompletionsTransport,
+                "create",
+                side_effect=[_chat_turn(None, [_status_ok_call()]), _chat_turn("done", [])],
+            ),
+        ):
+            await service.execute_with_tools(
+                model="auto",
+                system_instruction="You are an engineer.",
+                user_message=REQUEST,
+                tools=[{"name": "read_status", "description": "", "parameters": {}}],
+                tool_executor=lambda *args, **kwargs: {"status": "ok"},
+                max_tool_iterations=4,
+            )
+
+        self.assertEqual(len(bodies), 2)
+        first, second = bodies[0]["state"], bodies[1]["state"]
+        self.assertEqual(first["message"], REQUEST)
+        self.assertNotIn("latest_tool_output", first)
+        # The request survives the tool call, instead of `{"status": "ok"}` replacing it.
+        self.assertEqual(second["message"], REQUEST)
+        self.assertEqual(second["latest_tool_output"], '{"status": "ok"}')
+
+
+class TestLatestToolOutputForRouting(unittest.TestCase):
+    def test_structured_results_are_sent_as_json(self) -> None:
+        from app.services.llm_service import _latest_tool_output_for_routing
+
+        text = _latest_tool_output_for_routing([{"name": "t", "result": {"status": "ok"}}])
+        self.assertEqual(text, '{"status": "ok"}')
+
+    def test_compression_bookkeeping_is_not_tool_output(self) -> None:
+        from app.services.llm_service import _latest_tool_output_for_routing
+
+        text = _latest_tool_output_for_routing(
+            [
+                {"name": "_context_compression", "result": {"tokens_before": 9000}},
+                {"name": "search", "result": "found it"},
+            ]
+        )
+        self.assertEqual(text, "found it")
+
+    def test_parallel_sub_agent_results_all_reach_the_router(self) -> None:
+        from app.services.llm_service import _latest_tool_output_for_routing
+        from app.services.model_router import ROUTER_STATE_TOOL_OUTPUT_CHARS
+
+        # The Frankfurt run: two sub-agents, each longer than the whole budget.
+        food = {"text": "# Frankfurt Food Guide\n" + "f" * 2200 + "\nTry the Grüne Soße."}
+        directions = {
+            "text": "## Berlin to Frankfurt am Main\n" + "d" * 3700 + "\nBook the ICE early."
+        }
+        text = _latest_tool_output_for_routing(
+            [
+                {"name": "call_sub_agent", "result": food},
+                {"name": "call_sub_agent", "result": directions},
+            ]
+        )
+
+        self.assertIn("Frankfurt Food Guide", text)
+        self.assertIn("Berlin to Frankfurt am Main", text)
+        # The ends survive the squeeze as well, not only the first ~1000 characters.
+        self.assertIn("Try the Grüne Soße.", text)
+        self.assertIn("Book the ICE early.", text)
+        self.assertLessEqual(len(text), ROUTER_STATE_TOOL_OUTPUT_CHARS)
+
+    def test_a_long_result_reaches_the_router_with_its_real_ending(self) -> None:
+        from app.services.agent_tool_observability import sanitize_persisted_tool_entry
+        from app.services.llm_service import _latest_tool_output_for_routing
+
+        # The router reads the persisted record, which used to keep only the first 4096
+        # characters, so a longer answer reached routing without its ending.
+        text = "# Frankfurt Food Guide\n" + "f" * 6000 + "\nEnjoy your culinary tour."
+        entry = sanitize_persisted_tool_entry(
+            {"name": "call_sub_agent", "arguments": {}, "result": {"text": text}}
+        )
+        routed = _latest_tool_output_for_routing([entry])
+
+        self.assertIn("Frankfurt Food Guide", routed)
+        self.assertTrue(routed.endswith('Enjoy your culinary tour."}'))
+
+    def test_it_is_bounded(self) -> None:
+        from app.services.llm_service import _latest_tool_output_for_routing
+        from app.services.model_router import ROUTER_STATE_TOOL_OUTPUT_CHARS
+
+        text = _latest_tool_output_for_routing([{"name": "t", "result": "x" * 50_000}])
+        self.assertEqual(len(text), ROUTER_STATE_TOOL_OUTPUT_CHARS)
+
+
+class TestRoutedCompression(unittest.IsolatedAsyncioTestCase):
+    """Reported against #571: a turn squeezed for a small window shrank every later turn."""
+
+    LIMITS = {"small-model": 8_000, "big-model": 200_000}
+
+    def _binding(self, model: str, client: object) -> object:
+        from app.services.llm_service import TurnBinding
+
+        return TurnBinding(
+            client=client,
+            provider="OpenAI",
+            model=model,
+            credential_id=uuid.uuid4(),
+            router_credential_id=uuid.uuid4(),
+            router_label="Auto Model",
+            option_label=model,
+        )
+
+    async def _run(
+        self, *, routed_models: list[str] | None, max_tool_iterations: int = 4
+    ) -> tuple[list[int], list[str]]:
+        """Run a two-turn loop and return the history size each provider call received."""
+        from app.db.models import CredentialType
+        from app.services import llm_service as llm_service_module
+        from app.services.llm_service import LLMService
+
+        summarised_by: list[str] = []
+        client = _summarising_client(summarised_by)
+        sent: list[int] = []
+        turns = iter([_chat_turn(None, [_status_ok_call()]), _chat_turn("done", [])])
+
+        def create(_transport: object, *, client, model, history, tools, opts):  # noqa: ANN001
+            sent.append(len(history))
+            return next(turns)
+
+        if routed_models is None:
+            service = LLMService(credential_type=CredentialType.openai, api_key="sk")
+            resolve_patch = mock.patch.object(
+                service, "_get_client", return_value=(client, "OpenAI")
+            )
+            model = "small-model"
+        else:
+            service = LLMService(
+                credential_type=CredentialType.model_router, api_key="", router=mock.Mock()
+            )
+            service.router.label = "Auto Model"
+            service.router.credential_id = str(uuid.uuid4())
+            bindings = iter([self._binding(name, client) for name in routed_models])
+            resolve_patch = mock.patch.object(
+                service, "_resolve_turn", side_effect=lambda **_: next(bindings)
+            )
+            model = "auto"
+
+        with (
+            resolve_patch,
+            mock.patch.object(service, "_record_trace"),
+            mock.patch.object(llm_service_module.ChatCompletionsTransport, "create", create),
+            mock.patch(
+                "app.services.context_compressor.get_context_limit",
+                side_effect=lambda name, _client: self.LIMITS[name],
+            ),
+        ):
+            await service.execute_with_tools(
+                model=model,
+                system_instruction="You are an engineer.",
+                user_message=REQUEST,
+                tools=[{"name": "read_status", "description": "", "parameters": {}}],
+                tool_executor=lambda *args, **kwargs: {"status": "ok"},
+                conversation_history=_long_conversation(),
+                max_tool_iterations=max_tool_iterations,
+            )
+        return sent, summarised_by
+
+    async def test_a_big_window_turn_gets_the_full_history_back(self) -> None:
+        sent, summarised_by = await self._run(routed_models=["small-model", "big-model"])
+
+        # Turn 1: system, first question, summary, request. Turn 2: all 14 original
+        # messages plus turn 1's tool call and result, not the summary.
+        self.assertEqual(sent, [4, 16])
+        self.assertEqual(summarised_by, ["small-model"])
+
+    async def test_without_a_router_the_compressed_history_carries_forward(self) -> None:
+        sent, summarised_by = await self._run(routed_models=None)
+
+        # One window for the whole run: compress once and keep it, as before.
+        self.assertEqual(sent, [4, 6])
+        self.assertEqual(summarised_by, ["small-model"])
+
+    async def test_the_closing_call_sends_what_the_last_model_can_fit(self) -> None:
+        # One iteration, so the loop ends on a tool result and the grace call runs.
+        sent, _ = await self._run(routed_models=["small-model"], max_tool_iterations=1)
+
+        # The full history would overflow the small model; the compressed view plus
+        # the turn's tool call and result is what it gets.
+        self.assertEqual(sent, [4, 6])
+
+
+class TestRoutedHistoryView(unittest.IsolatedAsyncioTestCase):
+    async def test_each_window_keeps_its_own_compressed_copy(self) -> None:
+        from app.services.llm_service import _RoutedHistoryView
+
+        history = [{"role": "user", "content": str(index)} for index in range(6)]
+        view = _RoutedHistoryView(history)
+        transport = mock.Mock()
+
+        async def compress(messages, *, model, client, context_limit_tokens):  # noqa: ANN001
+            if context_limit_tokens == 10:
+                return [messages[0], {"role": "assistant", "content": "summary"}], {"x": 1}
+            return messages, None
+
+        transport.compress = compress
+        small, _ = await view.for_turn(transport, model="m", client=None, limit=10)
+        history.append({"role": "tool", "content": "new"})
+
+        self.assertEqual(len(small), 2)
+        # The small window sees its summary plus what came after it.
+        self.assertEqual(view.sent(), [*small, {"role": "tool", "content": "new"}])
+        # A large window still sees everything, and the source list was never replaced.
+        big, _ = await view.for_turn(transport, model="m", client=None, limit=1000)
+        self.assertIs(big, history)
+        self.assertEqual(len(big), 7)
 
 
 if __name__ == "__main__":

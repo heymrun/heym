@@ -32,8 +32,8 @@ from app.services.llm_transport import (
     ToolResult,
 )
 from app.services.model_router import (
-    ROUTER_STATE_MESSAGE_CHARS,
     ModelRouter,
+    fit_tool_outputs_to_budget,
     load_option_credential,
 )
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
@@ -547,20 +547,58 @@ class TurnBinding:
     routing_error: str | None = None
 
 
-def _routing_message_from_tool_results(tool_entries: list[dict[str, Any]]) -> str:
-    """Condense a turn's tool output into the text the router reads next.
-
-    Only the text matters for a routing decision, and `build_routing_state` truncates
-    it again, so this stays a cheap join rather than a full serialisation.
-    """
-    parts: list[str] = []
+def _latest_tool_output_for_routing(tool_entries: list[dict[str, Any]]) -> str:
+    """What the last turn's tools returned, as the router reads it beside the request."""
+    texts: list[str] = []
     for entry in tool_entries or []:
-        if not isinstance(entry, dict):
+        # The compressor records itself as a tool entry; it is bookkeeping, not output.
+        if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
             continue
-        text = str(entry.get("result") or "").strip()
-        if text:
-            parts.append(text)
-    return "\n".join(parts)[:ROUTER_STATE_MESSAGE_CHARS]
+        value = entry.get("result")
+        if value is None:
+            continue
+        texts.append(
+            value if isinstance(value, str) else json.dumps(value, default=str, ensure_ascii=False)
+        )
+    return fit_tool_outputs_to_budget(texts)
+
+
+class _RoutedHistoryView:
+    """Per-window history for a routed loop, where each turn can land on another model.
+
+    The full history stays the source of truth and every append goes to it. A window
+    that needed compression keeps its own compressed copy plus whatever came after, so
+    squeezing a turn for a small model never shrinks a later turn on a larger one.
+    """
+
+    def __init__(self, history: list[dict[str, Any]]) -> None:
+        self.history = history
+        self._compressed: dict[int, tuple[list[dict[str, Any]], int]] = {}
+        self._last_limit: int | None = None
+
+    def working(self, limit: int | None) -> list[dict[str, Any]]:
+        """The history as a model with this context window sees it."""
+        cached = self._compressed.get(limit) if limit is not None else None
+        if cached is None:
+            return self.history
+        compressed, covered = cached
+        return [*compressed, *self.history[covered:]]
+
+    async def for_turn(
+        self, transport: Any, *, model: str, client: Any, limit: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Fit the history to this turn's window, compressing a copy when it overflows."""
+        self._last_limit = limit
+        turn_history, info = await transport.compress(
+            self.working(limit), model=model, client=client, context_limit_tokens=limit
+        )
+        if info is not None:
+            self._compressed[limit] = (turn_history, len(self.history))
+        return turn_history, info
+
+    def sent(self) -> list[dict[str, Any]]:
+        """What the latest turn's model is working with, later appends included."""
+        return self.working(self._last_limit)
 
 
 class LLMService:
@@ -675,6 +713,7 @@ class LLMService:
         system_instruction: str | None,
         message: str | None,
         tool_names: list[str] | None,
+        latest_tool_output: str | None = None,
     ) -> TurnBinding:
         """Bind the client, provider and model for the next provider request.
 
@@ -703,6 +742,7 @@ class LLMService:
             system_instruction=system_instruction,
             message=message,
             tool_names=tool_names,
+            latest_tool_output=latest_tool_output,
         )
         bound = load_option_credential(decision.option)
         client, provider = self._client_for(bound.credential_type, bound.api_key, bound.base_url)
@@ -1334,13 +1374,18 @@ class LLMService:
         # Recomputed per turn: a routed run can change model between iterations.
         _context_limit: int | None = None
         tool_names = [t["name"] for t in tools]
-        routing_message: str | None = user_message
+        latest_tool_output: str | None = None
         routed_tool_cursor = len(tool_calls_collected)
+        # Without a router there is one window, so compression may replace the history.
+        routed_view = _RoutedHistoryView(history) if self.router is not None else None
+
+        def _sent_history() -> Any:
+            return routed_view.sent() if routed_view is not None else history
 
         def _trace_request() -> dict[str, Any]:
             # Must go through the transport: a trace row is stored as JSON and a
             # transport's own history object is not serializable.
-            req: dict[str, Any] = transport.trace_request(history, openai_tools)
+            req: dict[str, Any] = transport.trace_request(_sent_history(), openai_tools)
             if skills_included:
                 req["skills_included"] = skills_included
             return req
@@ -1418,27 +1463,32 @@ class LLMService:
                 if abort_reason:
                     return _build_error_result(abort_reason)
 
-            # Turn one routes on the user's message; later turns route on what the last
-            # turn's tools returned, which is what makes per-turn routing mean anything.
             # The cursor starts at the current length so a resumed agent does not replay
             # `initial_tool_calls` as if they were this turn's output.
             new_tool_entries = tool_calls_collected[routed_tool_cursor:]
             if new_tool_entries:
-                routing_message = _routing_message_from_tool_results(new_tool_entries)
+                latest_tool_output = _latest_tool_output_for_routing(new_tool_entries)
                 routed_tool_cursor = len(tool_calls_collected)
 
             binding = self._resolve_turn(
                 model=model,
                 system_instruction=system_instruction,
-                message=routing_message,
+                message=user_message,
+                latest_tool_output=latest_tool_output,
                 tool_names=tool_names,
             )
             client, provider, model = binding.client, binding.provider, binding.model
             _context_limit = get_context_limit(model, client)
 
-            history, _compression_info = await transport.compress(
-                history, model=model, client=client, context_limit_tokens=_context_limit
-            )
+            if routed_view is not None:
+                turn_history, _compression_info = await routed_view.for_turn(
+                    transport, model=model, client=client, limit=_context_limit
+                )
+            else:
+                history, _compression_info = await transport.compress(
+                    history, model=model, client=client, context_limit_tokens=_context_limit
+                )
+                turn_history = history
             if _compression_info is not None:
                 _comp_entry: dict[str, Any] = {
                     "name": "_context_compression",
@@ -1493,7 +1543,9 @@ class LLMService:
             )
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
-            _log_request(provider, str(base_url), transport.trace_request(history, openai_tools))
+            _log_request(
+                provider, str(base_url), transport.trace_request(turn_history, openai_tools)
+            )
 
             turn_started_ms = self._offset_ms()
             start_time = time.time()
@@ -1502,7 +1554,7 @@ class LLMService:
                     transport.create,
                     client=client,
                     model=model,
-                    history=history,
+                    history=turn_history,
                     tools=openai_tools,
                     opts=opts,
                 )
@@ -2033,7 +2085,9 @@ class LLMService:
             )
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
-            _log_request(provider, str(base_url), transport.trace_request(history, openai_tools))
+            _log_request(
+                provider, str(base_url), transport.trace_request(_sent_history(), openai_tools)
+            )
             grace_start = time.time()
             grace_turn = None
             try:
@@ -2041,7 +2095,7 @@ class LLMService:
                     transport.create,
                     client=client,
                     model=model,
-                    history=history,
+                    history=_sent_history(),
                     tools=openai_tools,
                     opts=grace_opts,
                 )
@@ -2051,7 +2105,7 @@ class LLMService:
                         transport.create,
                         client=client,
                         model=model,
-                        history=history,
+                        history=_sent_history(),
                         tools=None,
                         opts=RequestOpts(
                             temperature=temperature,

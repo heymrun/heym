@@ -9,6 +9,7 @@ from app.services.model_router import (
     ROUTER_STATE_MAX_TOOLS,
     ROUTER_STATE_MESSAGE_CHARS,
     ROUTER_STATE_SYSTEM_CHARS,
+    ROUTER_STATE_TOOL_OUTPUT_CHARS,
     BoundOption,
     ModelRouter,
     ModelRouterConfigError,
@@ -18,6 +19,7 @@ from app.services.model_router import (
     build_router_for_credential,
     build_routing_body,
     build_routing_state,
+    fit_tool_outputs_to_budget,
     load_option_credential,
     parse_router_config,
     read_route_answer,
@@ -168,16 +170,35 @@ class TestRoutingState(unittest.TestCase):
         self.assertNotIn("tools", state)
         self.assertEqual(state["message"], "Hi")
 
-    def test_long_values_are_truncated_with_a_marker(self) -> None:
+    def test_long_values_keep_their_start_and_end(self) -> None:
         state = build_routing_state(
-            system_instruction="s" * (ROUTER_STATE_SYSTEM_CHARS + 500),
-            message="m" * (ROUTER_STATE_MESSAGE_CHARS + 500),
+            system_instruction="SYS-START " + "s" * ROUTER_STATE_SYSTEM_CHARS + " SYS-END",
+            message="MSG-START " + "m" * ROUTER_STATE_MESSAGE_CHARS + " MSG-END",
             tool_names=[f"tool_{i}" for i in range(ROUTER_STATE_MAX_TOOLS + 10)],
         )
-        self.assertTrue(state["system"].endswith("\u2026[truncated]"))
-        self.assertLessEqual(len(state["system"]), ROUTER_STATE_SYSTEM_CHARS + 20)
-        self.assertTrue(state["message"].endswith("\u2026[truncated]"))
+        for key, limit, start, end in (
+            ("system", ROUTER_STATE_SYSTEM_CHARS, "SYS-START", "SYS-END"),
+            ("message", ROUTER_STATE_MESSAGE_CHARS, "MSG-START", "MSG-END"),
+        ):
+            value = state[key]
+            self.assertTrue(value.startswith(start), key)
+            self.assertTrue(value.endswith(end), key)
+            self.assertIn("\u2026[truncated]\u2026", value)
+            # The limit is a real cap: the marker no longer rides on top of it.
+            self.assertLessEqual(len(value), limit)
         self.assertEqual(len(state["tools"]), ROUTER_STATE_MAX_TOOLS)
+
+    def test_an_instruction_at_the_end_of_a_long_paste_reaches_the_router(self) -> None:
+        document = "Quarterly report. " * 800
+        state = build_routing_state(
+            system_instruction=None,
+            message=document + "Summarise this in three bullet points.",
+            tool_names=None,
+        )
+
+        self.assertTrue(state["message"].startswith("Quarterly report."))
+        self.assertTrue(state["message"].endswith("Summarise this in three bullet points."))
+        self.assertLessEqual(len(state["message"]), ROUTER_STATE_MESSAGE_CHARS)
 
     def test_state_hash_is_stable_and_input_sensitive(self) -> None:
         first = build_routing_state(system_instruction="a", message="b", tool_names=["t"])
@@ -588,6 +609,129 @@ class TestDecisionTiming(unittest.TestCase):
             )
 
         self.assertEqual(decision.trace_id, str(written))
+
+
+class TestRoutingStateKeepsTheRequest(unittest.TestCase):
+    """The request must reach the router on every turn, not only the first."""
+
+    def test_a_later_turn_carries_the_request_and_the_tool_output(self) -> None:
+        state = build_routing_state(
+            system_instruction="You are an engineer.",
+            message="Refactor billing and explain every tradeoff.",
+            tool_names=["read_status"],
+            latest_tool_output='{"status": "ok"}',
+        )
+        self.assertEqual(state["message"], "Refactor billing and explain every tradeoff.")
+        self.assertEqual(state["latest_tool_output"], '{"status": "ok"}')
+
+    def test_the_first_turn_has_no_tool_output_field(self) -> None:
+        state = build_routing_state(
+            system_instruction=None, message="hello", tool_names=None, latest_tool_output=None
+        )
+        self.assertNotIn("latest_tool_output", state)
+
+    def test_tool_output_has_its_own_budget(self) -> None:
+        state = build_routing_state(
+            system_instruction=None,
+            message="short request",
+            tool_names=None,
+            latest_tool_output="LOG-START " + "x" * ROUTER_STATE_TOOL_OUTPUT_CHARS + " LOG-END",
+        )
+        self.assertTrue(state["latest_tool_output"].startswith("LOG-START"))
+        self.assertTrue(state["latest_tool_output"].endswith("LOG-END"))
+        self.assertLessEqual(len(state["latest_tool_output"]), ROUTER_STATE_TOOL_OUTPUT_CHARS)
+        # A long log cannot crowd the request out.
+        self.assertEqual(state["message"], "short request")
+
+    def test_new_tool_output_is_a_new_state(self) -> None:
+        before = build_routing_state(
+            system_instruction=None, message="m", tool_names=None, latest_tool_output="a"
+        )
+        after = build_routing_state(
+            system_instruction=None, message="m", tool_names=None, latest_tool_output="b"
+        )
+        self.assertNotEqual(state_hash(before), state_hash(after))
+
+    def test_route_sends_both_to_the_decision_model(self) -> None:
+        bodies: list[dict] = []
+
+        def decide(**kwargs: object) -> dict:
+            bodies.append(kwargs["body"])
+            return {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
+
+        router = ModelRouter(
+            credential_id="99999999-9999-9999-9999-999999999999",
+            label="Auto Model",
+            config=parse_router_config(_valid_config()),
+        )
+        with (
+            mock.patch.object(model_router, "call_decision_model", side_effect=decide),
+            mock.patch.object(
+                model_router,
+                "load_decision_credential",
+                return_value={"base_url": "https://api.typesafe.ai", "api_key": "k"},
+            ),
+        ):
+            router.route(
+                system_instruction=None,
+                message="the request",
+                tool_names=None,
+                latest_tool_output="tool said hi",
+            )
+
+        self.assertEqual(bodies[0]["state"]["message"], "the request")
+        self.assertEqual(bodies[0]["state"]["latest_tool_output"], "tool said hi")
+
+
+class TestFitToolOutputsToBudget(unittest.TestCase):
+    """A parallel turn must show the router every tool, not only the first."""
+
+    def test_two_long_outputs_share_the_budget_evenly(self) -> None:
+        food = "FOOD-START " + "f" * 2200 + " FOOD-END"
+        directions = "ROUTE-START " + "d" * 3740 + " ROUTE-END"
+        fitted = fit_tool_outputs_to_budget([food, directions], budget=2000)
+        first, second = fitted.split("\n")
+
+        # Squeezed to about 999 each, both keep their start and their end.
+        self.assertTrue(first.startswith("FOOD-START"))
+        self.assertTrue(first.endswith("FOOD-END"))
+        self.assertTrue(second.startswith("ROUTE-START"))
+        self.assertTrue(second.endswith("ROUTE-END"))
+        self.assertIn("\u2026[truncated]\u2026", first)
+        self.assertIn("\u2026[truncated]\u2026", second)
+        self.assertLessEqual(len(fitted), 2000)
+        self.assertLessEqual(abs(len(first) - len(second)), 1)
+
+    def test_a_short_output_stays_whole_and_its_unused_share_goes_to_the_rest(self) -> None:
+        fitted = fit_tool_outputs_to_budget(['{"status": "ok"}', "L" * 5000], budget=2000)
+        first, second = fitted.split("\n")
+
+        self.assertEqual(first, '{"status": "ok"}')
+        self.assertEqual(len(fitted), 2000)
+        self.assertGreater(len(second), 1900)
+
+    def test_a_single_output_gets_the_whole_budget(self) -> None:
+        self.assertEqual(len(fit_tool_outputs_to_budget(["x" * 50_000], budget=2000)), 2000)
+
+    def test_outputs_that_fit_are_untouched(self) -> None:
+        self.assertEqual(fit_tool_outputs_to_budget(["a", "b"], budget=2000), "a\nb")
+
+    def test_the_call_order_is_kept(self) -> None:
+        fitted = fit_tool_outputs_to_budget(["L" * 5000, "short"], budget=2000)
+
+        self.assertTrue(fitted.startswith("L"))
+        self.assertTrue(fitted.endswith("short"))
+
+    def test_many_outputs_each_keep_a_slice(self) -> None:
+        texts = [f"{index:02d}" + "x" * 1000 for index in range(40)]
+        parts = fit_tool_outputs_to_budget(texts, budget=2000).split("\n")
+
+        self.assertEqual([part[:2] for part in parts], [f"{index:02d}" for index in range(40)])
+        self.assertLessEqual(len("\n".join(parts)), 2000)
+
+    def test_blank_outputs_are_dropped(self) -> None:
+        self.assertEqual(fit_tool_outputs_to_budget(["", "  ", "a"], budget=2000), "a")
+        self.assertEqual(fit_tool_outputs_to_budget([], budget=2000), "")
 
 
 if __name__ == "__main__":

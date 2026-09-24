@@ -57,7 +57,9 @@ class ToolPayloadSanitizationTests(unittest.TestCase):
 
         self.assertEqual(sanitized["api_key"], "[REDACTED]")
         self.assertEqual(sanitized["nested"]["password"], "[REDACTED]")
-        self.assertTrue(str(sanitized["nested"]["value"]).endswith("...(truncated)"))
+        value = str(sanitized["nested"]["value"])
+        self.assertIn("truncated", value)
+        self.assertLessEqual(len(value), 40)
 
     def test_preserves_scalar_types_for_safe_payloads(self) -> None:
         payload = {"count": 3, "enabled": True, "items": ["one", "two"]}
