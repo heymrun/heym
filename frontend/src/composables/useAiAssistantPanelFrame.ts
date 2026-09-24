@@ -68,6 +68,15 @@ export function clampAiPanelFrame(frame: AiPanelFrame, viewport: Viewport): AiPa
   };
 }
 
+function framesMatch(left: AiPanelFrame, right: AiPanelFrame): boolean {
+  return (
+    Math.abs(left.left - right.left) < 1 &&
+    Math.abs(left.top - right.top) < 1 &&
+    Math.abs(left.width - right.width) < 1 &&
+    Math.abs(left.height - right.height) < 1
+  );
+}
+
 function suppressClickAfterDrag(): void {
   const suppress = (clickEvent: Event): void => {
     clickEvent.preventDefault();
@@ -108,10 +117,12 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
   onHeaderPointerDown: (event: PointerEvent) => void;
   onResizePointerDown: (edge: AiPanelResizeEdge, event: PointerEvent) => void;
   resetFrame: () => void;
+  movedFromDefault: Ref<boolean>;
 } {
   const frame = ref<AiPanelFrame | null>(null);
   const dragging = ref(false);
   const resizing = ref(false);
+  const movedFromDefault = ref(false);
 
   function viewport(): Viewport {
     return { width: window.innerWidth, height: window.innerHeight };
@@ -123,6 +134,12 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
 
   function persist(): void {
     if (!frame.value) return;
+    const atDefault = framesMatch(frame.value, defaultAiPanelFrame(viewport()));
+    movedFromDefault.value = !atDefault;
+    if (atDefault) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(frame.value));
   }
 
@@ -130,12 +147,14 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
     if (!enabled()) return;
     const stored = readStoredFrame();
     const fallback = defaultAiPanelFrame(viewport());
-    place({
+    const next = {
       left: stored?.left ?? fallback.left,
       top: stored?.top ?? fallback.top,
       width: typeof stored?.width === "number" ? stored.width : fallback.width,
       height: stored?.height ?? fallback.height,
-    });
+    };
+    place(next);
+    movedFromDefault.value = frame.value !== null && !framesMatch(frame.value, fallback);
   }
 
   function onHeaderPointerDown(event: PointerEvent): void {
@@ -228,13 +247,19 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
 
   function resetFrame(): void {
     localStorage.removeItem(STORAGE_KEY);
+    movedFromDefault.value = false;
     if (!enabled()) return;
     place(defaultAiPanelFrame(viewport()));
   }
 
   function onWindowResize(): void {
     if (!enabled() || !frame.value) return;
+    if (!movedFromDefault.value) {
+      place(defaultAiPanelFrame(viewport()));
+      return;
+    }
     place(frame.value);
+    movedFromDefault.value = !framesMatch(frame.value, defaultAiPanelFrame(viewport()));
   }
 
   onMounted(() => {
@@ -246,5 +271,5 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
     window.removeEventListener("resize", onWindowResize);
   });
 
-  return { frame, dragging, resizing, onHeaderPointerDown, onResizePointerDown, resetFrame };
+  return { frame, dragging, resizing, onHeaderPointerDown, onResizePointerDown, resetFrame, movedFromDefault };
 }

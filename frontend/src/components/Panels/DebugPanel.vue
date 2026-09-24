@@ -1525,6 +1525,7 @@ const {
   onHeaderPointerDown: onAiPanelHeaderPointerDown,
   onResizePointerDown: onAiPanelResizePointerDown,
   resetFrame: resetAiPanelFrame,
+  movedFromDefault: aiPanelMovedFromDefault,
 } = useAiAssistantPanelFrame(() => !props.mobileAiSheet);
 const aiPanelFrameStyle = computed(() => {
   if (props.mobileAiSheet || !aiPanelFrame.value) return undefined;
@@ -3792,7 +3793,7 @@ function renderContent(content: string): string {
             class="ai-panel-title"
             data-testid="ai-assistant-title-toggle"
           >
-            <Sparkles class="w-4 h-4 text-primary" />
+            <Sparkles class="h-4 w-4 text-primary dark:text-brand-primary-soft" />
             <span class="font-medium text-sm">AI Assistant</span>
           </div>
           <div
@@ -3816,14 +3817,14 @@ function renderContent(content: string): string {
               </button>
             </div>
             <button
-              v-if="!props.mobileAiSheet"
+              v-if="!props.mobileAiSheet && aiPanelMovedFromDefault"
               type="button"
               class="p-1 rounded hover:bg-muted transition-colors"
               title="Reset position and size"
               data-testid="ai-assistant-reset-frame"
               @click="resetAiPanelFrame"
             >
-              <RotateCcw class="w-4 h-4" />
+              <RotateCcw class="h-3.5 w-3.5" />
             </button>
             <button
               type="button"
@@ -3889,7 +3890,7 @@ function renderContent(content: string): string {
           >
             <Bot class="w-12 h-12 text-muted-foreground/50 mb-3" />
             <p class="text-sm text-muted-foreground text-center">
-              {{ canvasMode === 'ask' ? 'Ask me anything about your workflow or Heym' : 'Ask me to create or modify your workflow' }}
+              {{ canvasMode === 'ask' ? 'Ask me anything about your workflow or Heym' : 'Ask me to create or modify your workflow or credentials' }}
             </p>
           </div>
 
