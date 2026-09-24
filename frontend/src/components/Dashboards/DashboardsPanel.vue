@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import axios from "axios";
-import { useRouter } from "vue-router";
-import { LayoutGrid, Loader2, Pencil, Plus, RefreshCw, Sparkles } from "lucide-vue-next";
+import { useRoute, useRouter } from "vue-router";
+import { Loader2, Plus, Sparkles } from "lucide-vue-next";
 
 import AddWidgetDialog from "@/components/Dashboards/AddWidgetDialog.vue";
 import AiWidgetDialog from "@/components/Dashboards/AiWidgetDialog.vue";
-import DashboardAutoRefreshControl from "@/components/Dashboards/DashboardAutoRefreshControl.vue";
+import DashboardCreateDialog from "@/components/Dashboards/DashboardCreateDialog.vue";
 import DashboardGrid from "@/components/Dashboards/DashboardGrid.vue";
+import DashboardHeader from "@/components/Dashboards/DashboardHeader.vue";
+import DashboardSettingsDialog from "@/components/Dashboards/DashboardSettingsDialog.vue";
 import WidgetSettingsDialog from "@/components/Dashboards/WidgetSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
+import { tidyLayouts } from "@/lib/dashboardTidy";
 import { dashboardApi } from "@/services/api";
+import { useDashboardStore } from "@/stores/dashboard";
 import type {
   DashboardWidget,
   WidgetCreateRequest,
@@ -19,27 +23,46 @@ import type {
 } from "@/types/dashboard";
 import { playSuccessSound } from "@/utils/audio";
 
+const route = useRoute();
 const router = useRouter();
+const dashboardStore = useDashboardStore();
 
-const widgets = ref<DashboardWidget[]>([]);
-const loading = ref(true);
 const editMode = ref(false);
 const showAdd = ref(false);
 const showAi = ref(false);
+const showCreate = ref(false);
+const showSettings = ref(false);
 const refineWidget = ref<DashboardWidget | null>(null);
 const settingsWidget = ref<DashboardWidget | null>(null);
 const reloadKey = ref(0);
 const cloningWidgetId = ref<string | null>(null);
 const cloneError = ref<string | null>(null);
+const loadError = ref<string | null>(null);
 
-async function loadDashboard(): Promise<void> {
-  loading.value = true;
+async function openDashboardWithUrl(dashboardId: string): Promise<void> {
+  editMode.value = false;
+  loadError.value = null;
   try {
-    const data = await dashboardApi.getDashboard();
-    widgets.value = data.widgets;
-  } finally {
-    loading.value = false;
+    await dashboardStore.openDashboard(dashboardId);
+  } catch {
+    loadError.value = "Failed to load the dashboard";
+    return;
   }
+  if (route.query.dashboard !== dashboardId) {
+    await router.replace({ query: { ...route.query, tab: "dashboard", dashboard: dashboardId } });
+  }
+}
+
+async function loadDashboards(): Promise<void> {
+  try {
+    await dashboardStore.fetchDashboards();
+  } catch {
+    loadError.value = "Failed to load dashboards";
+    return;
+  }
+  const requested = typeof route.query.dashboard === "string" ? route.query.dashboard : null;
+  const target = dashboardStore.defaultDashboardId(requested);
+  if (target) await openDashboardWithUrl(target);
 }
 
 function openEditor(workflowId: string): void {
@@ -48,8 +71,10 @@ function openEditor(workflowId: string): void {
 
 async function handleCreate(body: WidgetCreateRequest): Promise<void> {
   showAdd.value = false;
-  const widget = await dashboardApi.createWidget(body);
-  widgets.value = [...widgets.value, widget];
+  const dashboard = dashboardStore.activeDashboard;
+  if (!dashboard) return;
+  const widget = await dashboardApi.createWidget(dashboard.id, body);
+  dashboardStore.addWidget(widget);
   openEditor(widget.workflow_id);
 }
 
@@ -58,13 +83,16 @@ async function handleGenerate(payload: {
   credentialId: string;
   model: string;
 }): Promise<void> {
+  const dashboard = dashboardStore.activeDashboard;
+  if (!dashboard) return;
   try {
     const widget = await dashboardApi.aiGenerateWidget(
+      dashboard.id,
       payload.prompt,
       payload.credentialId,
       payload.model,
     );
-    widgets.value = [...widgets.value, widget];
+    dashboardStore.addWidget(widget);
     showAi.value = false;
     playSuccessSound();
   } catch {
@@ -74,7 +102,7 @@ async function handleGenerate(payload: {
 
 async function handleDelete(widgetId: string): Promise<void> {
   await dashboardApi.deleteWidget(widgetId);
-  widgets.value = widgets.value.filter((w) => w.id !== widgetId);
+  dashboardStore.removeWidget(widgetId);
 }
 
 async function handleClone(widgetId: string): Promise<void> {
@@ -83,7 +111,7 @@ async function handleClone(widgetId: string): Promise<void> {
   cloneError.value = null;
   try {
     await dashboardApi.cloneWidget(widgetId);
-    await loadDashboard();
+    await dashboardStore.reloadActiveDashboard();
     playSuccessSound();
   } catch (error: unknown) {
     if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") {
@@ -110,7 +138,7 @@ async function handleRefine(payload: {
       payload.credentialId,
       payload.model,
     );
-    widgets.value = widgets.value.map((w) => (w.id === updated.id ? updated : w));
+    dashboardStore.replaceWidget(updated);
     refineWidget.value = null;
     playSuccessSound();
   } catch {
@@ -121,154 +149,54 @@ async function handleRefine(payload: {
 async function handleSettingsSave(payload: WidgetUpdateRequest): Promise<void> {
   const target = settingsWidget.value;
   if (!target) return;
-  const updated = await dashboardApi.updateWidget(target.id, payload);
-  widgets.value = widgets.value.map((w) => (w.id === updated.id ? updated : w));
+  dashboardStore.replaceWidget(await dashboardApi.updateWidget(target.id, payload));
   settingsWidget.value = null;
 }
 
 async function handleTitleChange(payload: { id: string; title: string }): Promise<void> {
-  const updated = await dashboardApi.updateWidget(payload.id, { title: payload.title });
-  widgets.value = widgets.value.map((w) => (w.id === updated.id ? updated : w));
+  dashboardStore.replaceWidget(
+    await dashboardApi.updateWidget(payload.id, { title: payload.title }),
+  );
 }
 
 async function handleLayoutChange(payload: { id: string; layout: WidgetLayout }): Promise<void> {
   await dashboardApi.updateWidget(payload.id, { layout: payload.layout });
-  widgets.value = widgets.value.map((w) =>
-    w.id === payload.id ? { ...w, layout: payload.layout } : w,
-  );
+  dashboardStore.applyLayouts({ [payload.id]: payload.layout });
 }
-
-function refreshAll(): void {
-  reloadKey.value += 1;
-}
-
-// Randomly split N widgets into rows of 2 or 3 (with an occasional trailing 1),
-// producing variations like 2-2-2, 2-3-3, or 3-3-1 on each press.
-function buildRowSizes(count: number): number[] {
-  const rows: number[] = [];
-  let remaining = count;
-  while (remaining > 0) {
-    if (remaining <= 2) {
-      rows.push(remaining);
-      break;
-    }
-    const size = Math.random() < 0.5 ? 2 : 3;
-    rows.push(size);
-    remaining -= size;
-  }
-  return rows;
-}
-
-const TIDY_ROW_HEIGHT = 5; // grid row units per widget
 
 async function tidyUp(): Promise<void> {
-  if (widgets.value.length === 0) return;
-  const ordered = [...widgets.value].sort((a, b) => a.position - b.position);
-  const rowSizes = buildRowSizes(ordered.length);
-
-  const updates: { id: string; layout: WidgetLayout }[] = [];
-  let index = 0;
-  let y = 0;
-  for (const size of rowSizes) {
-    const w = Math.floor(12 / size);
-    for (let col = 0; col < size; col++) {
-      const widget = ordered[index];
-      if (widget) {
-        updates.push({ id: widget.id, layout: { x: col * w, y, w, h: TIDY_ROW_HEIGHT } });
-      }
-      index += 1;
-    }
-    y += TIDY_ROW_HEIGHT;
-  }
-
-  const layoutById = Object.fromEntries(updates.map((u) => [u.id, u.layout]));
+  if (dashboardStore.widgets.length === 0) return;
+  const updates = tidyLayouts(dashboardStore.widgets);
   // Replacing the layouts triggers DashboardGrid's deep watch, which repositions
   // the items reactively (no remount, so widgets keep their already-loaded data).
-  widgets.value = widgets.value.map((w) =>
-    layoutById[w.id] ? { ...w, layout: layoutById[w.id] } : w,
-  );
+  dashboardStore.applyLayouts(Object.fromEntries(updates.map((u) => [u.id, u.layout])));
   await Promise.all(updates.map((u) => dashboardApi.updateWidget(u.id, { layout: u.layout })));
 }
 
+async function onDashboardDeleted(): Promise<void> {
+  const next = dashboardStore.defaultDashboardId(null);
+  if (next) await openDashboardWithUrl(next);
+}
+
 onMounted(() => {
-  void loadDashboard();
+  void loadDashboards();
 });
 </script>
 
 <template>
   <div class="flex h-full flex-col">
-    <div
-      data-testid="dashboard-header"
-      class="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 class="shrink-0 text-lg font-semibold">
-          Dashboard
-        </h1>
-        <DashboardAutoRefreshControl
-          class="ml-auto sm:ml-0"
-          @refresh="refreshAll"
-        />
-      </div>
-      <div class="flex flex-wrap items-center gap-1 sm:gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-11 w-11 shrink-0 justify-center px-0 sm:h-auto sm:w-auto sm:px-3"
-          title="Refresh dashboard"
-          aria-label="Refresh dashboard"
-          @click="refreshAll"
-        >
-          <RefreshCw class="h-4 w-4 sm:mr-1" />
-          <span class="hidden sm:inline">Refresh</span>
-        </Button>
-        <Button
-          v-if="widgets.length > 0"
-          variant="ghost"
-          size="sm"
-          class="h-11 w-11 shrink-0 justify-center px-0 sm:h-auto sm:w-auto sm:px-3"
-          title="Rearrange widgets into a random tidy grid"
-          aria-label="Tidy up dashboard"
-          @click="tidyUp"
-        >
-          <LayoutGrid class="h-4 w-4 sm:mr-1" />
-          <span class="hidden sm:inline">Tidy up</span>
-        </Button>
-        <Button
-          :variant="editMode ? 'default' : 'ghost'"
-          size="sm"
-          class="h-11 w-11 shrink-0 justify-center px-0 sm:h-auto sm:w-auto sm:px-3"
-          :title="editMode ? 'Finish editing dashboard' : 'Edit dashboard'"
-          :aria-label="editMode ? 'Finish editing dashboard' : 'Edit dashboard'"
-          @click="editMode = !editMode"
-        >
-          <Pencil class="h-4 w-4 sm:mr-1" />
-          <span class="hidden sm:inline">{{ editMode ? "Done" : "Edit" }}</span>
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-11 w-11 shrink-0 justify-center px-0 sm:h-auto sm:w-auto sm:px-3"
-          title="Generate widget with AI"
-          aria-label="Generate widget with AI"
-          @click="showAi = true"
-        >
-          <Sparkles class="h-4 w-4 sm:mr-1" />
-          <span class="hidden sm:inline">AI</span>
-        </Button>
-        <Button
-          size="sm"
-          class="h-11 min-w-[4.5rem] flex-1 justify-center px-2 sm:h-auto sm:min-w-0 sm:flex-none sm:px-3"
-          title="Add widget"
-          aria-label="Add widget"
-          @click="showAdd = true"
-        >
-          <Plus class="mr-1 h-4 w-4" />
-          <span class="sm:hidden">Add</span>
-          <span class="hidden sm:inline">Add widget</span>
-        </Button>
-      </div>
-    </div>
+    <DashboardHeader
+      :edit-mode="editMode"
+      :has-widgets="dashboardStore.widgets.length > 0"
+      @select="openDashboardWithUrl"
+      @create="showCreate = true"
+      @settings="showSettings = true"
+      @refresh="reloadKey += 1"
+      @tidy="tidyUp"
+      @toggle-edit="editMode = !editMode"
+      @ai="showAi = true"
+      @add="showAdd = true"
+    />
 
     <div class="flex-1 overflow-auto p-4">
       <div
@@ -279,17 +207,27 @@ onMounted(() => {
         {{ cloneError }}
       </div>
       <div
-        v-if="loading"
+        v-if="loadError"
+        class="flex h-full items-center justify-center text-sm text-destructive"
+        role="alert"
+      >
+        {{ loadError }}
+      </div>
+      <div
+        v-else-if="!dashboardStore.activeDashboard || dashboardStore.dashboardLoading"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
         <Loader2 class="h-6 w-6 animate-spin" />
       </div>
       <div
-        v-else-if="widgets.length === 0"
+        v-else-if="dashboardStore.widgets.length === 0"
         class="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground"
       >
         <p>No widgets yet.</p>
-        <div class="flex gap-2">
+        <div
+          v-if="dashboardStore.canWrite"
+          class="flex gap-2"
+        >
           <Button
             size="sm"
             @click="showAdd = true"
@@ -307,10 +245,11 @@ onMounted(() => {
       </div>
       <DashboardGrid
         v-else
-        :key="reloadKey"
-        :widgets="widgets"
+        :key="`${dashboardStore.activeDashboard.id}-${reloadKey}`"
+        :widgets="dashboardStore.widgets"
         :edit-mode="editMode"
         :cloning-widget-id="cloningWidgetId"
+        :can-write="dashboardStore.canWrite"
         @edit="openEditor"
         @delete="handleDelete"
         @clone="handleClone"
@@ -344,6 +283,16 @@ onMounted(() => {
       :widget="settingsWidget"
       @close="settingsWidget = null"
       @save="handleSettingsSave"
+    />
+    <DashboardCreateDialog
+      :open="showCreate"
+      @close="showCreate = false"
+      @created="openDashboardWithUrl"
+    />
+    <DashboardSettingsDialog
+      :open="showSettings"
+      @close="showSettings = false"
+      @deleted="onDashboardDeleted"
     />
   </div>
 </template>

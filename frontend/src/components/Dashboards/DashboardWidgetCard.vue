@@ -23,6 +23,7 @@ const props = defineProps<{
   widget: DashboardWidget;
   editMode: boolean;
   cloning: boolean;
+  canWrite: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -99,6 +100,16 @@ const actions: WidgetAction[] = [
     run: () => emit("delete", props.widget.id),
   },
 ];
+
+// A read-only share keeps only Refresh; every other action changes the widget.
+const visibleActions = computed<WidgetAction[]>(() =>
+  props.canWrite ? actions : actions.filter((action) => action.key === "refresh"),
+);
+
+// Read-only viewers see task lists as plain checkboxes they cannot tick.
+const displayPayload = computed<ChartPayload | null>(() =>
+  props.canWrite || !payload.value ? payload.value : { ...payload.value, text_interactive: false },
+);
 
 const menuOpen = ref(false);
 const triggerRef = ref<HTMLElement | null>(null);
@@ -226,7 +237,7 @@ function commitTitle(): void {
 }
 
 function onBodyDoubleClick(): void {
-  emit("edit", props.widget.workflow_id);
+  if (props.canWrite) emit("edit", props.widget.workflow_id);
 }
 
 // Reload when the widget's workflow changes (AI refine, settings) — updated_at bumps.
@@ -260,13 +271,20 @@ onBeforeUnmount(() => {
         @keyup.enter="commitTitle"
       >
       <button
-        v-else
+        v-else-if="canWrite"
         class="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-primary"
         :title="widget.title"
         @click="editingTitle = true"
       >
         {{ widget.title }}
       </button>
+      <span
+        v-else
+        class="min-w-0 flex-1 truncate text-sm font-medium"
+        :title="widget.title"
+      >
+        {{ widget.title }}
+      </span>
 
       <a
         v-if="externalUrl"
@@ -282,7 +300,7 @@ onBeforeUnmount(() => {
       <!-- sm+: inline icon row -->
       <div class="hidden shrink-0 items-center gap-1 sm:flex">
         <button
-          v-for="action in actions"
+          v-for="action in visibleActions"
           :key="action.key"
           class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           :class="[
@@ -323,7 +341,7 @@ onBeforeUnmount(() => {
           :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }"
         >
           <button
-            v-for="action in actions"
+            v-for="action in visibleActions"
             :key="action.key"
             class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
             :class="action.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground'"
@@ -358,7 +376,7 @@ onBeforeUnmount(() => {
       </div>
       <ChartRenderer
         v-else
-        :payload="payload"
+        :payload="displayPayload"
         :markdown-task-saving="markdownTaskSaving"
         @markdown-task-toggle="onMarkdownTaskToggle"
         @markdown-task-update="onMarkdownTaskUpdate"

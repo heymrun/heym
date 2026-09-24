@@ -35,6 +35,7 @@ from app.models.schemas import (
     TeamUpdate,
 )
 from app.services.audit_log import OUTCOME_DENIED, audit
+from app.services.dashboard_access import team_writable_widget_workflow_ids
 from app.services.workflow_access import revoke_execution_tokens_without_access
 
 router = APIRouter(tags=["teams"])
@@ -430,7 +431,9 @@ async def delete_team(
     team_workflow_ids = (
         (
             await db.execute(
-                select(WorkflowTeamShare.workflow_id).where(WorkflowTeamShare.team_id == team_id)
+                select(WorkflowTeamShare.workflow_id)
+                .where(WorkflowTeamShare.team_id == team_id)
+                .union(team_writable_widget_workflow_ids(team_id))
             )
         )
         .scalars()
@@ -530,7 +533,9 @@ async def remove_team_member(
     team_workflow_ids = (
         (
             await db.execute(
-                select(WorkflowTeamShare.workflow_id).where(WorkflowTeamShare.team_id == team.id)
+                select(WorkflowTeamShare.workflow_id)
+                .where(WorkflowTeamShare.team_id == team.id)
+                .union(team_writable_widget_workflow_ids(team.id))
             )
         )
         .scalars()

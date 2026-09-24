@@ -19,11 +19,6 @@ def _widget(cached_payload=None, cached_at=None, version="v1", ttl=300):
     return w
 
 
-class _User:
-    def __init__(self):
-        self.id = uuid.uuid4()
-
-
 def _db_returning_workflow(wf):
     db = MagicMock()
     db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=wf)))
@@ -103,7 +98,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
         wf.edges = []
         db = _db_returning_workflow(wf)
 
-        resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=False)
+        resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=False)
 
         self.assertTrue(resp.cached)
         self.assertEqual(resp.payload, {"type": "bar", "labels": ["x"]})
@@ -129,7 +124,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
             "dispatch_workflow",
             new=AsyncMock(),
         ) as dispatch:
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=False)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=False)
 
         dispatch.assert_not_awaited()
         self.assertFalse(resp.cached)
@@ -159,7 +154,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
             "dispatch_workflow",
             new=AsyncMock(return_value=fake_result),
         ):
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=True)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=True)
 
         self.assertFalse(resp.cached)
         self.assertEqual(resp.payload, {"type": "bar", "labels": ["new"]})
@@ -169,7 +164,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
         widget = _widget(cached_payload=None, cached_at=None, version="v")
         workflow_id = uuid.uuid4()
         owner_id = uuid.uuid4()
-        user = _User()
+        run_as_user_id = uuid.uuid4()
         wf = MagicMock()
         wf.id = workflow_id
         wf.owner_id = owner_id
@@ -207,7 +202,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
         ):
-            await dashboard_data.compute_widget_data(db, widget, user, force=True)
+            await dashboard_data.compute_widget_data(db, widget, run_as_user_id, force=True)
 
         dispatch.assert_awaited_once()
         self.assertEqual(dispatch.call_args.kwargs["workflow_id"], workflow_id)
@@ -220,7 +215,13 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
             global_variables_context,
         )
         self.assertEqual(dispatch.call_args.kwargs["trigger_source"], "dashboard")
-        self.assertEqual(dispatch.call_args.kwargs["credentials_owner_id"], user.id)
+        # The widget runs as the id the caller passes (the dashboard owner), never as
+        # whoever happens to be viewing, so credentials, traces and actor all follow it.
+        self.assertEqual(dispatch.call_args.kwargs["credentials_owner_id"], run_as_user_id)
+        self.assertEqual(dispatch.call_args.kwargs["trace_user_id"], run_as_user_id)
+        self.assertEqual(dispatch.call_args.kwargs["actor_user_id"], run_as_user_id)
+        self.get_credentials_context.assert_awaited_once_with(db, run_as_user_id)
+        self.get_global_variables_context.assert_awaited_once_with(db, run_as_user_id)
         self.assertTrue(dispatch.call_args.kwargs["return_on_chart_output"])
 
     async def test_recomputes_from_final_outputs_when_chart_node_result_is_empty(self):
@@ -257,7 +258,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
         ):
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=True)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=True)
 
         self.assertFalse(resp.cached)
         self.assertIsNone(resp.error)
@@ -287,7 +288,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
             "dispatch_workflow",
             new=AsyncMock(return_value=fake_result),
         ):
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=False)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=False)
 
         self.assertFalse(resp.cached)
         self.assertEqual(resp.payload, {"type": "bar", "fresh": True})
@@ -344,7 +345,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
         ):
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=True)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=True)
 
         self.assertIsNone(resp.error)
         self.assertEqual(resp.payload, {"type": "text", "text": "ok"})
@@ -412,7 +413,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
         ):
-            resp = await dashboard_data.compute_widget_data(db, widget, _User(), force=True)
+            resp = await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=True)
 
         self.assertIsNone(resp.error)
         self.assertEqual(resp.payload, {"type": "text", "text": "ok"})
@@ -452,7 +453,7 @@ class TestComputeWidgetData(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
         ):
-            await dashboard_data.compute_widget_data(db, widget, _User(), force=True)
+            await dashboard_data.compute_widget_data(db, widget, uuid.uuid4(), force=True)
 
         added_types = [type(c.args[0]).__name__ for c in db.add.call_args_list]
         self.assertIn(ExecutionHistory.__name__, added_types)

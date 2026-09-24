@@ -24,6 +24,7 @@ COVERED_RESOURCES = {
     "alert",
     "data_table",
     "board",
+    "dashboard",
     "drive",
     "team",
     "folder",

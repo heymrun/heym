@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { X } from "lucide-vue-next";
 
+import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import Select from "@/components/ui/Select.vue";
+import { CHART_TYPE_EXAMPLES, chartTypeExample } from "@/lib/chartTypeExamples";
 import type { ChartPayload, WidgetCreateRequest } from "@/types/dashboard";
 
 const emit = defineEmits<{
@@ -28,19 +30,8 @@ const title = ref("New widget");
 const description = ref("");
 const chartType = ref<ChartPayload["type"]>("bar");
 
-const chartTypeOptions = [
-  { value: "bar", label: "Bar" },
-  { value: "line", label: "Line" },
-  { value: "area", label: "Area" },
-  { value: "pie", label: "Pie" },
-  { value: "table", label: "Table" },
-  { value: "numeric", label: "Numeric" },
-  { value: "gauge", label: "Gauge" },
-  { value: "scatter", label: "Scatter" },
-  { value: "proportion", label: "Proportion" },
-  { value: "barGauge", label: "Bar gauge" },
-  { value: "text", label: "Text" },
-];
+const chartTypeOptions = CHART_TYPE_EXAMPLES.map(({ value, label }) => ({ value, label }));
+const example = computed(() => chartTypeExample(chartType.value));
 
 function submit(): void {
   emit("create", {
@@ -59,7 +50,7 @@ function submit(): void {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       @click.self="emit('close')"
     >
-      <div class="w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
+      <div class="mx-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg">
         <div class="mb-4 flex items-center justify-between">
           <h2 class="text-base font-semibold">
             Add widget
@@ -92,6 +83,29 @@ function submit(): void {
               v-model="chartType"
               :options="chartTypeOptions"
             />
+            <p
+              class="pt-1 text-xs text-muted-foreground"
+              data-testid="add-widget-chart-hint"
+            >
+              {{ example.hint }}
+            </p>
+            <div
+              class="relative mt-1 rounded-md border border-dashed bg-background/60 p-2"
+              data-testid="add-widget-chart-example"
+            >
+              <span
+                class="absolute right-2 top-1.5 z-10 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                Example
+              </span>
+              <!-- Keyed on the type: ApexCharts does not redraw cleanly across chart types. -->
+              <div class="h-40">
+                <ChartRenderer
+                  :key="chartType"
+                  :payload="example.payload"
+                />
+              </div>
+            </div>
           </div>
         </div>
 

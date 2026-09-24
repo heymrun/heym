@@ -474,6 +474,54 @@ class Dashboard(Base):
     widgets: Mapped[list["DashboardWidget"]] = relationship(
         "DashboardWidget", back_populates="dashboard", cascade="all, delete-orphan"
     )
+    shares: Mapped[list["DashboardShare"]] = relationship(
+        "DashboardShare", back_populates="dashboard", cascade="all, delete-orphan"
+    )
+    team_shares: Mapped[list["DashboardTeamShare"]] = relationship(
+        "DashboardTeamShare", back_populates="dashboard", cascade="all, delete-orphan"
+    )
+
+
+class DashboardShare(Base):
+    __tablename__ = "dashboard_shares"
+    __table_args__ = (UniqueConstraint("dashboard_id", "user_id", name="uq_dashboard_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dashboard_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission: Mapped[str] = mapped_column(String(10), nullable=False, default="read")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="shares")
+    user: Mapped["User"] = relationship("User")
+
+
+class DashboardTeamShare(Base):
+    __tablename__ = "dashboard_team_shares"
+    __table_args__ = (UniqueConstraint("dashboard_id", "team_id", name="uq_dashboard_team_share"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dashboard_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission: Mapped[str] = mapped_column(String(10), nullable=False, default="read")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="team_shares")
+    team: Mapped["Team"] = relationship("Team")
 
 
 class DashboardWidget(Base):

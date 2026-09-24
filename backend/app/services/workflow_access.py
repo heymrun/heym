@@ -7,7 +7,7 @@ supplies the session and the engine.
 
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -18,13 +18,16 @@ from app.db.models import (
     WorkflowShare,
     WorkflowTeamShare,
 )
+from app.services.dashboard_access import writable_shared_widget_workflow_ids
 
 
 def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
     """Return the WHERE clause matching every workflow ``user_id`` can reach.
 
     A user reaches a workflow by owning it, by holding a direct share, or by
-    belonging to a team the workflow is shared with.
+    belonging to a team the workflow is shared with. A dashboard widget's hidden
+    workflow is also reachable with write access to its dashboard; read access
+    to a dashboard never reaches a workflow.
     """
     return or_(
         Workflow.owner_id == user_id,
@@ -35,6 +38,10 @@ def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
                     select(TeamMember.team_id).where(TeamMember.user_id == user_id)
                 )
             )
+        ),
+        and_(
+            Workflow.kind == "dashboard_widget",
+            Workflow.id.in_(writable_shared_widget_workflow_ids(user_id)),
         ),
     )
 
