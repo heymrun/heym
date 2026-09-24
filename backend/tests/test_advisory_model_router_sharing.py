@@ -111,6 +111,14 @@ class TestNoKeyLeavesTheRouter(unittest.TestCase):
         )
         self.assertEqual(set(state), {"system", "message", "tools"})
 
+        later = build_routing_state(
+            system_instruction="You are helpful.",
+            message="What is 2+2?",
+            tool_names=["search"],
+            latest_tool_output="4",
+        )
+        self.assertEqual(set(later), {"system", "message", "latest_tool_output", "tools"})
+
 
 class TestGrantIsCheckedAtWriteTime(unittest.TestCase):
     def test_run_time_loading_does_not_re_check_the_caller(self) -> None:

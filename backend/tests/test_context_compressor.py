@@ -320,5 +320,21 @@ class TestMaybeCompressMessages(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Context hard-compressed", result[1]["content"])
 
 
+class TestFitTextToTokenBudget(unittest.TestCase):
+    def test_the_compressor_output_is_unchanged(self) -> None:
+        from app.services.context_compressor import _fit_text_to_token_budget
+
+        text = "alpha " * 3000 + "omega"
+        # The formula _fit_text_to_token_budget used before it delegated to the helper.
+        max_chars = 1000 * 4
+        marker = "\n\n[... content omitted during hard context compression ...]\n\n"
+        available = max(1, max_chars - len(marker))
+        head_chars = max(1, int(available * 0.65))
+        tail_chars = max(1, available - head_chars)
+        expected = text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
+
+        self.assertEqual(_fit_text_to_token_budget(text, 1000), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
