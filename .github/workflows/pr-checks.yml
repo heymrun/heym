@@ -4,9 +4,6 @@ on:
   pull_request:
     branches:
       - "**"
-  push:
-    branches:
-      - main
   workflow_call:
     secrets:
       ENCRYPTION_KEY:

@@ -10,6 +10,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import {
   credentialsApi,
   observabilityApi,
@@ -469,6 +470,29 @@ async function handleChangePassword(): Promise<void> {
         class="space-y-5"
         @submit.prevent="handleSaveProfile"
       >
+        <div
+          v-if="authStore.user"
+          class="flex items-center gap-3"
+        >
+          <UserAvatar
+            :user-id="authStore.user.id"
+            :name="name || authStore.user.name"
+            :email="authStore.user.email"
+            class="h-12 w-12 bg-primary/15 text-lg font-semibold text-primary dark:bg-primary/25 dark:text-accent-foreground"
+          />
+          <p class="min-w-0 text-xs text-muted-foreground">
+            Your picture comes from
+            <a
+              href="https://gravatar.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-medium text-primary hover:underline dark:text-accent-foreground"
+            >Gravatar</a>
+            for <span class="break-all font-medium text-foreground">{{ authStore.user.email }}</span>.
+            Without one, Heym shows your initial.
+          </p>
+        </div>
+
         <div class="space-y-2">
           <Label for="user-name">Name</Label>
           <Input

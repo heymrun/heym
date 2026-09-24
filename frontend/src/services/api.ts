@@ -406,6 +406,11 @@ export const authApi = {
   },
 };
 
+export const avatarApi = {
+  // Same-origin <img> URL; the access-token cookie authenticates it. 404 means no Gravatar.
+  url: (userId: string): string => `${API_URL}/api/avatars/${encodeURIComponent(userId)}`,
+};
+
 export const versionApi = {
   getInfo: async (): Promise<AppVersionInfo> => {
     const response = await api.get<AppVersionInfo>("/version", {

@@ -30,6 +30,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { teamsApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -519,19 +520,27 @@ function hasAnySharedEntities(entities: TeamSharedEntities | null): boolean {
               :key="member.id"
               class="flex items-center justify-between p-2 rounded bg-muted/50"
             >
-              <div>
-                <p class="text-sm font-medium">
-                  {{ member.name }}
-                  <span
-                    v-if="isCreatorMember(member)"
-                    class="text-xs text-muted-foreground"
-                  >
-                    (creator)
-                  </span>
-                </p>
-                <p class="text-xs text-muted-foreground">
-                  {{ member.email }}
-                </p>
+              <div class="flex min-w-0 items-center gap-2.5">
+                <UserAvatar
+                  :user-id="member.user_id"
+                  :name="member.name"
+                  :email="member.email"
+                  class="h-8 w-8 bg-primary/10 text-xs font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+                />
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium">
+                    {{ member.name }}
+                    <span
+                      v-if="isCreatorMember(member)"
+                      class="text-xs text-muted-foreground"
+                    >
+                      (creator)
+                    </span>
+                  </p>
+                  <p class="truncate text-xs text-muted-foreground">
+                    {{ member.email }}
+                  </p>
+                </div>
               </div>
               <Button
                 v-if="!isCreatorMember(member) && isCreator(selectedTeam)"

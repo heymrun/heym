@@ -5,6 +5,7 @@ import { ChevronDown, Trash2, Users } from "lucide-vue-next";
 import type { BoardShare, BoardTeamShare } from "@/types/board";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { boardApi, teamsApi } from "@/services/api";
 
 const props = defineProps<{ boardId: string }>();
@@ -121,9 +122,15 @@ onMounted(load);
       class="flex items-center justify-between rounded-md border border-border/60 px-2 py-1.5 text-sm"
       :data-testid="`board-share-${share.email}`"
     >
-      <div class="min-w-0 truncate">
-        <span class="font-medium">{{ share.name || share.email }}</span>
-        <span class="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">{{ share.permission }}</span>
+      <div class="flex min-w-0 items-center gap-2">
+        <UserAvatar
+          :user-id="share.user_id"
+          :name="share.name"
+          :email="share.email"
+          class="h-6 w-6 bg-primary/10 text-[11px] font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
+        />
+        <span class="min-w-0 truncate font-medium">{{ share.name || share.email }}</span>
+        <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs">{{ share.permission }}</span>
       </div>
       <button
         class="rounded p-1 hover:bg-destructive/10"

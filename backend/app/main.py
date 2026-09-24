@@ -19,6 +19,7 @@ from app.api import (
     alerts,
     analytics,
     auth,
+    avatars,
     bigquery_oauth,
     boards,
     chats,
@@ -321,6 +322,7 @@ app.add_middleware(HeymIdentityMiddleware)
 
 app.include_router(oauth.router, tags=["OAuth"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(avatars.router, prefix="/api/avatars", tags=["Avatars"])
 app.include_router(sso_auth.router, prefix="/api/auth/sso", tags=["SSO"])
 app.include_router(sso_admin.router, prefix="/api/admin/sso", tags=["SSO Admin"])
 app.include_router(admin_cluster.router, prefix="/api/admin/cluster", tags=["Cluster Admin"])

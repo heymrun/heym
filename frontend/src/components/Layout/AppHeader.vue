@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { BookOpen, ExternalLink, LogOut, Moon, Search, Settings, Sun } from "lucide-vue-next";
+import { BookOpen, ExternalLink, LogOut, Moon, Search, Sun } from "lucide-vue-next";
 
 import ActiveWorkflowsBadge from "@/components/Layout/ActiveWorkflowsBadge.vue";
 import UserSettingsDialog from "@/components/Layout/UserSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
+import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
@@ -119,13 +120,15 @@ async function handleLogout(): Promise<void> {
           title="Settings"
           @click="settingsInitialTab = 'profile'; showSettingsDialog = true; pushOverlayState()"
         >
-          <Settings class="w-4 h-4 md:hidden" />
           <!-- --primary is the same 62% lightness in both themes, so on the dark
-               background the /15 tile and the icon both sink. Dark mode lifts the
-               tile and switches to --accent-foreground, the theme's lighter purple. -->
-          <div class="hidden md:flex items-center justify-center w-6 h-6 rounded-lg bg-primary/15 text-primary dark:bg-primary/25 dark:text-accent-foreground shrink-0">
-            <Settings class="w-3.5 h-3.5" />
-          </div>
+               background the /15 fill and the initial both sink. Dark mode lifts the
+               fill and switches to --accent-foreground, the theme's lighter purple. -->
+          <UserAvatar
+            :user-id="authStore.user.id"
+            :name="authStore.user.name"
+            :email="authStore.user.email"
+            class="w-7 h-7 bg-primary/15 text-xs font-semibold text-primary dark:bg-primary/25 dark:text-accent-foreground"
+          />
           <span class="font-medium text-foreground hidden md:inline">{{ authStore.user.name }}</span>
         </button>
 
