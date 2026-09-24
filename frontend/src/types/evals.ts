@@ -40,6 +40,9 @@ export interface EvalRun {
   temperature: number;
   reasoning_effort?: string | null;
   max_tokens: number | null;
+  /** The judge that scored an LLM-as-Judge run; empty when each model scored itself. */
+  judge_credential_id?: string | null;
+  judge_model?: string | null;
   status: string;
   created_at: string;
   completed_at: string | null;
@@ -68,6 +71,7 @@ export interface EvalRunListItem {
   models: string[];
   status: string;
   scoring_method: string;
+  judge_model?: string | null;
   created_at: string;
   completed_at: string | null;
   pass_count: number;

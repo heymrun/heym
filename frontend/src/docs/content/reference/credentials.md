@@ -12,8 +12,8 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 
 | Node type | Typical credential | Purpose |
 |-----------|--------------------|---------|
-| [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | OpenAI, Google, Custom | API key for the model |
-| [Decision](../nodes/decision-node.md) | Decision Model | Base URL of a decision model endpoint, plus an optional API key |
+| [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [Evals](../tabs/evals-tab.md) | OpenAI, Google, Custom | API key for the model |
+| [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) judge | Decision Model | Base URL of a decision model endpoint, plus an optional API key |
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults | Model Router (Auto Model) | Picks which of your models serves each request, using a decision model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [OpenCode Go](../nodes/opencode-go-node.md) | OpenCode Go + GitHub | An OpenCode Go gateway API key (optional base URL) for the runner, plus a GitHub PAT for repository operations |
@@ -109,9 +109,10 @@ options** — each an existing OpenAI, Google or Custom credential plus a model 
 each option, free text saying when that option should be used.
 
 It appears in every picker that offers a model: the [LLM](../nodes/llm-node.md) and
-[Agent](../nodes/agent-node.md) nodes, Chat, AI Defaults, Evals, Dashboards, the
-expression builder and Data Tables. Its only model is **Auto**. Pick it, and the decision
-model reads each request and routes it.
+[Agent](../nodes/agent-node.md) nodes, Chat, AI Defaults, Dashboards, the expression
+builder and Data Tables. Its only model is **Auto**. Pick it, and the decision model reads
+each request and routes it. [Evals](../tabs/evals-tab.md) leaves it out, because an eval
+compares specific models and a router picks its own.
 
 An agent re-routes as its tool loop progresses, so a cheap model can take the early turns
 and a stronger one the turn that needs it. Identical inputs reuse the previous decision,

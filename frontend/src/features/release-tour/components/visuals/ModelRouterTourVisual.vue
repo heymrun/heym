@@ -68,7 +68,7 @@ const showTrace = computed<boolean>(() => step.value >= 3);
         </span>
         <span
           class="shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] leading-none transition-colors duration-500"
-          :class="option.wins ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'"
+          :class="option.wins ? 'bg-primary/15 text-primary dark:bg-primary/25 dark:text-brand-primary-soft' : 'bg-muted text-muted-foreground'"
         >
           {{ option.model }}
         </span>
@@ -87,7 +87,7 @@ const showTrace = computed<boolean>(() => step.value >= 3);
         Traces
       </span>
       <span
-        class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] leading-none text-primary transition-opacity duration-500"
+        class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] leading-none text-primary transition-opacity duration-500 dark:bg-primary/25 dark:text-brand-primary-soft"
         :class="showTrace ? 'opacity-100' : 'opacity-0'"
       >
         Auto Model / gpt-5

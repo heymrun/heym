@@ -347,6 +347,31 @@ class CallDecisionModelTests(unittest.TestCase):
             self._call(_response(529, {"error": "overloaded"}))
         self.assertIn("transient", str(ctx.exception).lower())
 
+    def test_a_refusal_carries_its_status_code(self) -> None:
+        with self.assertRaises(DecisionProviderError) as ctx:
+            self._call(_response(429, {"error": "slow down"}))
+        self.assertEqual(ctx.exception.status_code, 429)
+
+    def test_a_transport_failure_has_no_status_code(self) -> None:
+        client = mock.MagicMock()
+        client.post.side_effect = httpx.ConnectError("refused")
+        client.__enter__.return_value = client
+        client.__exit__.return_value = False
+        with (
+            mock.patch("app.services.decision_models.guard_http_url"),
+            mock.patch(
+                "app.services.decision_models.build_guarded_http_client", return_value=client
+            ),
+            self.assertRaises(DecisionProviderError) as ctx,
+        ):
+            call_decision_model(
+                base_url="https://api.typesafe.ai",
+                api_key="",
+                body=self.body,
+                timeout=30.0,
+            )
+        self.assertIsNone(ctx.exception.status_code)
+
     def test_a_failure_is_traced_too(self) -> None:
         with self.assertRaises(DecisionProviderError):
             self._call(_response(401, {"error": "bad key"}))

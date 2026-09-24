@@ -2,7 +2,9 @@
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { onClickOutside } from "@vueuse/core";
+import axios from "axios";
 
+import EvalsJudgeFields from "@/components/Evals/EvalsJudgeFields.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -75,8 +77,8 @@ const selectedCredentialId = ref<string>("");
 const selectedModelIds = ref<Set<string>>(new Set());
 const scoringMethod = ref<string>("exact_match");
 const judgeCredentialId = ref<string>("");
-const judgeModelId = ref<string>("");
-const judgeModels = ref<LLMModel[]>([]);
+const judgeModel = ref<string>("");
+const runError = ref<string | null>(null);
 const temperature = ref(0.7);
 const reasoningEffort = ref<ReasoningEffort>("medium");
 const runsPerTest = ref(1);
@@ -122,6 +124,30 @@ const SCORING_OPTIONS = [
   { value: "contains", label: "Contains" },
   { value: "llm_judge", label: "LLM-as-Judge" },
 ];
+
+// LLM-as-Judge runs on fixed settings, so temperature and reasoning effort are hidden.
+const isJudgeScoring = computed((): boolean => scoringMethod.value === "llm_judge");
+
+const judgeIncomplete = computed(
+  (): boolean => isJudgeScoring.value && !!judgeCredentialId.value && !judgeModel.value.trim(),
+);
+
+// Opening a past run loads its scoring setup, so Re-Run Evals repeats the same judge.
+watch(
+  () => props.currentRun?.id,
+  () => {
+    const run = props.currentRun;
+    if (!run || !isViewingHistory.value) return;
+    if (SCORING_OPTIONS.some((option) => option.value === run.scoring_method)) {
+      scoringMethod.value = run.scoring_method;
+    }
+    if (run.scoring_method === "llm_judge") {
+      judgeCredentialId.value = run.judge_credential_id ?? "";
+      judgeModel.value = run.judge_model ?? "";
+    }
+  },
+  { immediate: true },
+);
 
 let savePromptTimeout: ReturnType<typeof setTimeout> | null = null;
 let saveNameTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -184,7 +210,10 @@ watch(suiteName, () => {
 
 async function loadCredentials(): Promise<void> {
   try {
-    credentials.value = await credentialsApi.listLLM();
+    // Evals compares specific models, and a Model Router picks its own per request.
+    credentials.value = (await credentialsApi.listLLM()).filter(
+      (credential) => credential.type !== "model_router",
+    );
     if (credentials.value.length > 0 && !selectedCredentialId.value) {
       selectedCredentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
     }
@@ -214,33 +243,6 @@ watch(
   },
   { immediate: true },
 );
-
-watch(
-  judgeCredentialId,
-  async (id) => {
-    if (!id) {
-      judgeModels.value = [];
-      judgeModelId.value = "";
-      return;
-    }
-    try {
-      judgeModels.value = await credentialsApi.getModels(id);
-      judgeModelId.value =
-        judgeModels.value.length > 0 ? judgeModels.value[0].id : "";
-    } catch {
-      judgeModels.value = [];
-      judgeModelId.value = "";
-    }
-  },
-  { immediate: true },
-);
-
-watch(scoringMethod, () => {
-  if (scoringMethod.value !== "llm_judge") {
-    judgeCredentialId.value = "";
-    judgeModelId.value = "";
-  }
-});
 
 watch(
   () => props.suite.id,
@@ -293,31 +295,38 @@ function applyOptimizedPrompt(): void {
   optimizeDialogOpen.value = false;
 }
 
+function runErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const detail: unknown = error.response?.data?.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (!error.response) return "Unable to reach the server. Check your connection and try again.";
+  }
+  return "Could not start the run. Try again.";
+}
+
 async function handleRunEvals(): Promise<void> {
   if (
     !selectedCredentialId.value ||
-    selectedModelIds.value.size === 0
+    selectedModelIds.value.size === 0 ||
+    judgeIncomplete.value
   ) {
     return;
   }
-  // Judge is optional for llm_judge; when provided, uses separate judge for unbiased scoring
+  // Without a judge credential, LLM-as-Judge falls back to each model scoring itself.
+  const judged = isJudgeScoring.value && !!judgeCredentialId.value;
+  runError.value = null;
   isRunning.value = true;
   try {
     const run = await evalsApi.runEvals(props.suite.id, {
       credential_id: selectedCredentialId.value,
       models: Array.from(selectedModelIds.value),
       scoring_method: scoringMethod.value,
-      temperature: temperature.value,
-      reasoning_effort: reasoningEffort.value,
+      ...(isJudgeScoring.value
+        ? {}
+        : { temperature: temperature.value, reasoning_effort: reasoningEffort.value }),
       runs_per_test: runsPerTest.value,
-      judge_credential_id:
-        scoringMethod.value === "llm_judge" && judgeCredentialId.value && judgeModelId.value
-          ? judgeCredentialId.value
-          : null,
-      judge_model:
-        scoringMethod.value === "llm_judge" && judgeCredentialId.value && judgeModelId.value
-          ? judgeModelId.value
-          : null,
+      judge_credential_id: judged ? judgeCredentialId.value : null,
+      judge_model: judged ? judgeModel.value.trim() : null,
     });
     emit("run-completed", run);
     if (run.status !== "completed") {
@@ -335,8 +344,9 @@ async function handleRunEvals(): Promise<void> {
         }
       }, 1500);
     }
-  } catch (e) {
-    console.error("Run failed:", e);
+  } catch (error: unknown) {
+    runError.value = runErrorMessage(error);
+    console.error("Run failed:", error);
   } finally {
     isRunning.value = false;
   }
@@ -436,60 +446,45 @@ async function handleRunEvals(): Promise<void> {
             :options="SCORING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))"
           />
         </div>
-        <template v-if="scoringMethod === 'llm_judge'">
+        <EvalsJudgeFields
+          v-if="isJudgeScoring"
+          v-model:credential-id="judgeCredentialId"
+          v-model:model="judgeModel"
+        />
+        <template v-else>
           <div>
             <Label class="text-xs font-medium text-muted-foreground mb-2 block">
-              Judge Credential (optional)
+              Temperature: {{ displayTemperature.toFixed(1) }}
             </Label>
-            <Select
-              v-model="judgeCredentialId"
-              :options="credentials.map((c) => ({ value: c.id, label: c.name }))"
-              placeholder="Separate judge for unbiased scoring"
-            />
+            <input
+              :value="displayTemperature"
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              class="w-full h-6"
+              :disabled="isViewingHistory"
+              @input="(e) => { if (!isViewingHistory) temperature = parseFloat((e.target as HTMLInputElement).value) }"
+            >
+            <p class="text-xs text-muted-foreground mt-1">
+              For non-reasoning models
+            </p>
           </div>
           <div>
             <Label class="text-xs font-medium text-muted-foreground mb-2 block">
-              Judge Model (optional)
+              Reasoning Effort
             </Label>
             <Select
-              v-model="judgeModelId"
-              :options="judgeModels.map((m) => ({ value: m.id, label: m.name }))"
-              placeholder="Separate judge for unbiased scoring"
+              :model-value="displayReasoningEffort"
+              :options="REASONING_EFFORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))"
+              :disabled="isViewingHistory"
+              @update:model-value="(v) => { if (!isViewingHistory) reasoningEffort = v as ReasoningEffort }"
             />
+            <p class="text-xs text-muted-foreground mt-1">
+              For reasoning models (GPT-5, o1, o3)
+            </p>
           </div>
         </template>
-        <div>
-          <Label class="text-xs font-medium text-muted-foreground mb-2 block">
-            Temperature: {{ displayTemperature.toFixed(1) }}
-          </Label>
-          <input
-            :value="displayTemperature"
-            type="range"
-            min="0"
-            max="2"
-            step="0.1"
-            class="w-full h-6"
-            :disabled="isViewingHistory"
-            @input="(e) => { if (!isViewingHistory) temperature = parseFloat((e.target as HTMLInputElement).value) }"
-          >
-          <p class="text-xs text-muted-foreground mt-1">
-            For non-reasoning models
-          </p>
-        </div>
-        <div>
-          <Label class="text-xs font-medium text-muted-foreground mb-2 block">
-            Reasoning Effort
-          </Label>
-          <Select
-            :model-value="displayReasoningEffort"
-            :options="REASONING_EFFORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))"
-            :disabled="isViewingHistory"
-            @update:model-value="(v) => { if (!isViewingHistory) reasoningEffort = v as ReasoningEffort }"
-          />
-          <p class="text-xs text-muted-foreground mt-1">
-            For reasoning models (GPT-5, o1, o3)
-          </p>
-        </div>
         <div>
           <Label class="text-xs font-medium text-muted-foreground mb-2 block">
             Runs per test
@@ -506,11 +501,18 @@ async function handleRunEvals(): Promise<void> {
       </div>
     </div>
     <div class="shrink-0 border-t border-border/40">
+      <p
+        v-if="runError"
+        class="px-4 py-2 text-xs text-destructive"
+        data-testid="eval-run-error"
+      >
+        {{ runError }}
+      </p>
       <Button
         class="w-full"
         variant="gradient"
         :loading="isRunning"
-        :disabled="props.isRunInProgress || !selectedCredentialId || selectedModelIds.size === 0 || (props.suite.test_cases?.length ?? 0) === 0"
+        :disabled="props.isRunInProgress || !selectedCredentialId || selectedModelIds.size === 0 || (props.suite.test_cases?.length ?? 0) === 0 || judgeIncomplete"
         @click="handleRunEvals"
       >
         {{ showEditButton ? "Re-Run Evals" : "Run Evals" }}

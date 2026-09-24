@@ -84,8 +84,10 @@ class RunEvalsRequest(BaseModel):
     reasoning_effort: ReasoningEffort | None = None
     runs_per_test: int = Field(ge=1, le=20, default=1)
     max_tokens: int | None = None
+    # The judge for LLM-as-Judge: an OpenAI, Google, OpenAI-compatible or Decision Model
+    # credential plus its model. Leave both empty and each model scores its own answer.
     judge_credential_id: uuid.UUID | None = None
-    judge_model: str | None = None
+    judge_model: str | None = Field(None, max_length=255)
 
 
 class EvalRunResultResponse(BaseModel):
@@ -118,6 +120,8 @@ class EvalRunResponse(BaseModel):
     temperature: float
     reasoning_effort: str | None = None
     max_tokens: int | None
+    judge_credential_id: uuid.UUID | None = None
+    judge_model: str | None = None
     status: str
     created_at: datetime
     completed_at: datetime | None
@@ -133,6 +137,7 @@ class EvalRunListResponse(BaseModel):
     models: list[str]
     status: str
     scoring_method: str = "exact_match"
+    judge_model: str | None = None
     created_at: datetime
     completed_at: datetime | None
     pass_count: int = 0

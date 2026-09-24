@@ -19,7 +19,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
-| **Decision Model** | [Decision](../nodes/decision-node.md) | `base_url`, optional `api_key` |
+| **Decision Model** | [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) (LLM-as-Judge judge) | `base_url`, optional `api_key` |
 | **Model Router (Auto Model)** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults | a decision model credential, plus model options referencing your other credentials |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -109,6 +109,7 @@ A decision model answers typed questions about a state and returns probabilities
 ### Used By
 
 - [Decision](../nodes/decision-node.md)
+- [Evals](../tabs/evals-tab.md) – scores `LLM-as-Judge` answers against the expected output
 
 ## OpenAI Codex
 

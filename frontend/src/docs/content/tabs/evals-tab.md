@@ -30,18 +30,33 @@ The **Evals** tab is a separate page at `/evals`. It lets you create evaluation 
 
 - **Select one or more models** – Run the same suite against multiple models in one evaluation
 - **Scoring method** – Choose `Exact Match`, `Contains`, or `LLM-as-Judge`
-- **Judge model** – For `LLM-as-Judge`, optionally use a separate credential/model for unbiased scoring
+- **Judge** – For `LLM-as-Judge`, optionally pick an OpenAI, OpenAI compatible (Custom), Gemini (Google) or [Decision Model](../nodes/decision-node.md) credential and type the judge's model (for example `gpt-4o-mini` or `jev-latest`) to score with an independent judge
 - **Runs per test** – Repeat each test case multiple times in one run
-- **Temperature** – Set model temperature
-- **Reasoning effort** – Set reasoning effort for reasoning models
+- **Temperature** – Set model temperature (`Exact Match` and `Contains`)
+- **Reasoning effort** – Set reasoning effort for reasoning models (`Exact Match` and `Contains`)
+
+### LLM-as-Judge
+
+With a judge, each model answers the test input with the suite prompt alone, then the judge rates how closely the answer matches the expected output from 0 to 100:
+
+- **A model judge** (OpenAI, OpenAI compatible or Gemini) reads the question, the expected output and the answer, and returns a score with a one-line reason. It runs at temperature `0`, or at `low` reasoning effort for a reasoning model, so the same answer gets the same verdict.
+- **A decision model judge** rates the answer on a five-level rubric, from *Completely off* to *Fully matches*. The score is the probability-weighted position on that rubric, so it comes from a distribution the model computed rather than a number it wrote.
+
+The cell's hover card shows the judge's reason, or for a decision model the level, the score and its confidence. Latency and tokens describe the model under test; the judge's own calls appear in [Traces](./traces-tab.md) under the **Evals** source. The model picker leaves out Model Router credentials, because an eval compares specific models.
+
+Without a judge, each model answers and scores its own answer in a single request.
+
+Temperature and reasoning effort are hidden in this mode, and the run uses fixed settings: temperature `0.7` for standard models, and `medium` reasoning effort for reasoning models (`low` when they score their own answers).
 
 ## Results
 
 - View pass/fail per test case
 - Inspect actual vs expected outputs
 - Compare per-model outputs side by side when a run includes multiple models
-- Review run history for past evaluations
+- Review run history for past evaluations; an `LLM-as-Judge` run shows its judge model in the history list
 - Open historical runs from the results panel and inspect saved prompt/input/output snapshots
+- Opening a past run loads its scoring method and judge into the left panel, so **Re-Run Evals** repeats the same evaluation
+- **Export** downloads the run as JSON, including `judge_credential_id` and `judge_model`
 
 ## Benchmark Matrix Ideas
 

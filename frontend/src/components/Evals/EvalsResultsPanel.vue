@@ -213,6 +213,13 @@ function formatScoringMethod(method: string): string {
   };
   return labels[method] ?? method;
 }
+
+function formatRunScoring(run: EvalRunListItem): string {
+  const method = formatScoringMethod(run.scoring_method);
+  return run.scoring_method === "llm_judge" && run.judge_model
+    ? `${method} (${run.judge_model})`
+    : method;
+}
 </script>
 
 <template>
@@ -333,7 +340,7 @@ function formatScoringMethod(method: string): string {
                 <span
                   v-if="r.scoring_method"
                   class="ml-1"
-                >· {{ formatScoringMethod(r.scoring_method) }}</span>
+                >· {{ formatRunScoring(r) }}</span>
               </div>
             </div>
             <div class="flex gap-1 opacity-0 group-hover:opacity-100">

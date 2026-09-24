@@ -1516,6 +1516,15 @@ class EvalRun(Base):
     temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     reasoning_effort: Mapped[str | None] = mapped_column(String(20), nullable=True)
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The judge (a model or a decision model) that scored an LLM-as-Judge run; both stay
+    # empty when each model scored its own answer. The model outlives a deleted credential.
+    judge_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    judge_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
