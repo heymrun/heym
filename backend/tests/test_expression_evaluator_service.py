@@ -433,6 +433,46 @@ class TestBuildEvalContext(unittest.TestCase):
         self.assertEqual(result["input"]["items"], ["a", "b"])
         self.assertEqual(result["input"]["text"], "hello")
 
+    def test_text_input_last_run_wins_over_empty_form_preview(self) -> None:
+        """Alert runs land on a textInput node; the editor form stays empty and must not hide that output."""
+        nodes = [
+            self._node("alert-1", "alert", node_type="textInput"),
+            self._node("slack-1", "slack", node_type="slack"),
+        ]
+        edges = [{"id": "e1", "source": "alert-1", "target": "slack-1"}]
+        canvas = [
+            {
+                "node_id": "alert-1",
+                "label": "alert",
+                "output": {
+                    "body": {"condition": "100+ executions in 60m"},
+                    "condition": "100+ executions in 60m",
+                },
+            }
+        ]
+        result = build_eval_context(
+            nodes,
+            canvas,
+            workflow_edges=edges,
+            current_node_id="slack-1",
+            initial_inputs={"text": ""},
+        )
+        self.assertEqual(result["alert"]["body"]["condition"], "100+ executions in 60m")
+
+        evaluated = ExpressionEvaluatorService(
+            workflow_nodes=nodes,
+            workflow_edges=edges,
+        ).evaluate(
+            ":rotating_light: *Heym Alert*\n$alert.body.condition",
+            result,
+            current_node_id="slack-1",
+        )
+        self.assertIsNone(evaluated.error)
+        self.assertEqual(
+            evaluated.result,
+            ":rotating_light: *Heym Alert*\n100+ executions in 60m",
+        )
+
     def test_upstream_filtering_ignores_unrelated_nodes(self) -> None:
         nodes = [
             self._node("in1", "userInput", pinned={"text": "hello"}),

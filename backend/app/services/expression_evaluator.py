@@ -992,12 +992,12 @@ def build_eval_context(
             context[label] = pinned_data
             continue
 
-        if node.get("type") == "textInput" and input_preview_output:
-            context[label] = input_preview_output
-            continue
-
         if label in canvas_by_label:
             context[label] = canvas_by_label[label]
+            continue
+
+        if node.get("type") == "textInput" and input_preview_output:
+            context[label] = input_preview_output
 
     if workflow_edges and current_node_id:
         _inject_loop_preview_context_for_evaluator(
