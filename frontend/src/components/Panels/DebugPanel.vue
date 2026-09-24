@@ -6,7 +6,7 @@ import axios from "axios";
 import DOMPurify from "dompurify";
 import { jsonrepair } from "jsonrepair";
 import { marked } from "marked";
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, RotateCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -44,6 +44,7 @@ import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workf
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { aiApi, codexFollowupApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
+import { useAiAssistantPanelFrame } from "@/composables/useAiAssistantPanelFrame";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
@@ -1516,6 +1517,29 @@ interface SpeechRecognitionWindow extends Window {
 }
 
 const aiPanelOpen = ref(false);
+const aiPanelRef = ref<HTMLElement | null>(null);
+const {
+  frame: aiPanelFrame,
+  dragging: aiPanelDragging,
+  resizing: aiPanelResizing,
+  onHeaderPointerDown: onAiPanelHeaderPointerDown,
+  onResizePointerDown: onAiPanelResizePointerDown,
+  resetFrame: resetAiPanelFrame,
+  movedFromDefault: aiPanelMovedFromDefault,
+} = useAiAssistantPanelFrame(() => !props.mobileAiSheet);
+const aiPanelFrameStyle = computed(() => {
+  if (props.mobileAiSheet || !aiPanelFrame.value) return undefined;
+  return {
+    left: `${aiPanelFrame.value.left}px`,
+    top: `${aiPanelFrame.value.top}px`,
+    width: `${aiPanelFrame.value.width}px`,
+    height: `${aiPanelFrame.value.height}px`,
+    maxWidth: "none",
+    maxHeight: "none",
+    right: "auto",
+    bottom: "auto",
+  };
+});
 const aiLoading = ref(false);
 const aiStreaming = ref(false);
 const aiAbortController = ref<AbortController | null>(null);
@@ -3719,26 +3743,62 @@ function renderContent(content: string): string {
     <Transition name="ai-slide">
       <div
         v-if="aiPanelOpen"
+        ref="aiPanelRef"
         class="ai-panel"
-        :class="{ 'ai-panel-mobile-sheet': props.mobileAiSheet }"
+        :class="{
+          'ai-panel-mobile-sheet': props.mobileAiSheet,
+          'ai-panel-dragging': aiPanelDragging,
+          'ai-panel-resizing': aiPanelResizing,
+        }"
+        :style="aiPanelFrameStyle"
       >
         <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-corner ai-panel-resize-corner-top-left"
+          data-testid="ai-assistant-resize-top-left"
+          @pointerdown="onAiPanelResizePointerDown('top-left', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-corner ai-panel-resize-corner-top-right"
+          data-testid="ai-assistant-resize-top-right"
+          @pointerdown="onAiPanelResizePointerDown('top-right', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-edge ai-panel-resize-edge-top"
+          data-testid="ai-assistant-resize-top"
+          title="Drag to resize height"
+          @pointerdown="onAiPanelResizePointerDown('top', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-edge ai-panel-resize-edge-left"
+          data-testid="ai-assistant-resize-left"
+          title="Drag to resize width"
+          @pointerdown="onAiPanelResizePointerDown('left', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-edge ai-panel-resize-edge-right"
+          data-testid="ai-assistant-resize-right"
+          title="Drag to resize width"
+          @pointerdown="onAiPanelResizePointerDown('right', $event)"
+        />
+        <div
           class="ai-panel-header"
-          @click.self="aiPanelOpen = false"
+          @pointerdown="onAiPanelHeaderPointerDown"
         >
-          <button
-            type="button"
+          <div
             class="ai-panel-title"
-            title="Close AI Assistant (Ctrl+I)"
             data-testid="ai-assistant-title-toggle"
-            @click="aiPanelOpen = false"
           >
-            <Sparkles class="w-4 h-4 text-primary" />
+            <Sparkles class="h-4 w-4 text-primary dark:text-brand-primary-soft" />
             <span class="font-medium text-sm">AI Assistant</span>
-          </button>
+          </div>
           <div
             class="flex items-center gap-2"
-            @click.self="aiPanelOpen = false"
+            data-ai-panel-no-drag
           >
             <div class="mode-toggle">
               <button
@@ -3757,7 +3817,19 @@ function renderContent(content: string): string {
               </button>
             </div>
             <button
+              v-if="!props.mobileAiSheet && aiPanelMovedFromDefault"
+              type="button"
               class="p-1 rounded hover:bg-muted transition-colors"
+              title="Reset position and size"
+              data-testid="ai-assistant-reset-frame"
+              @click="resetAiPanelFrame"
+            >
+              <RotateCcw class="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              class="p-1 rounded hover:bg-muted transition-colors"
+              title="Close"
               @click="aiPanelOpen = false"
             >
               <X class="w-4 h-4" />
@@ -3818,7 +3890,7 @@ function renderContent(content: string): string {
           >
             <Bot class="w-12 h-12 text-muted-foreground/50 mb-3" />
             <p class="text-sm text-muted-foreground text-center">
-              {{ canvasMode === 'ask' ? 'Ask me anything about your workflow or Heym' : 'Ask me to create or modify your workflow' }}
+              {{ canvasMode === 'ask' ? 'Ask me anything about your workflow or Heym' : 'Ask me to create or modify your workflow or credentials' }}
             </p>
           </div>
 
@@ -3876,12 +3948,32 @@ function renderContent(content: string): string {
         </div>
 
 
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-corner ai-panel-resize-corner-bottom-left"
+          data-testid="ai-assistant-resize-bottom-left"
+          @pointerdown="onAiPanelResizePointerDown('bottom-left', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-corner ai-panel-resize-corner-bottom-right"
+          data-testid="ai-assistant-resize-bottom-right"
+          @pointerdown="onAiPanelResizePointerDown('bottom-right', $event)"
+        />
+        <div
+          v-if="!props.mobileAiSheet"
+          class="ai-panel-resize-edge ai-panel-resize-edge-bottom"
+          data-testid="ai-assistant-resize-bottom"
+          title="Drag to resize height"
+          @pointerdown="onAiPanelResizePointerDown('bottom', $event)"
+        />
+
         <div class="ai-input">
           <textarea
             ref="aiTextareaRef"
             v-model="aiInputMessage"
             :disabled="aiStreaming || !selectedCredentialId || !selectedModel"
-            :placeholder="canvasMode === 'ask' ? 'Ask a question...' : 'Describe your workflow...'"
+            :placeholder="canvasMode === 'ask' ? 'Ask a question...' : 'What do you want to automate...'"
             class="ai-textarea"
             rows="2"
             @keydown="handleAiKeydown"
@@ -4034,6 +4126,80 @@ function renderContent(content: string): string {
   border-radius: 20px 20px 0 0;
 }
 
+.ai-panel-resize-edge {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  z-index: 2;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.ai-panel-resize-edge-top {
+  top: 0;
+}
+
+.ai-panel-resize-edge-bottom {
+  bottom: 0;
+}
+
+.ai-panel-resize-edge-left,
+.ai-panel-resize-edge-right {
+  top: 12px;
+  bottom: 12px;
+  width: 8px;
+  height: auto;
+  cursor: ew-resize;
+}
+
+.ai-panel-resize-edge-left {
+  left: 0;
+  right: auto;
+}
+
+.ai-panel-resize-edge-right {
+  right: 0;
+  left: auto;
+}
+
+.ai-panel-resize-corner {
+  position: absolute;
+  z-index: 3;
+  width: 14px;
+  height: 14px;
+  touch-action: none;
+}
+
+.ai-panel-resize-corner-top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.ai-panel-resize-corner-top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.ai-panel-resize-corner-bottom-left {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.ai-panel-resize-corner-bottom-right {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.ai-panel-dragging,
+.ai-panel-resizing {
+  user-select: none;
+}
+
 .execution-markdown-output {
   min-width: 0;
   max-width: 100%;
@@ -4150,11 +4316,42 @@ function renderContent(content: string): string {
   justify-content: space-between;
   background: hsl(var(--muted) / 0.5);
   border-radius: 12px 12px 0 0;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
 }
 
-/* Fills the free space between the title and the header controls so the whole
-   empty strip closes the panel, not just the label. */
+.ai-panel-mobile-sheet .ai-panel-header {
+  cursor: pointer;
+  touch-action: auto;
+}
+
+.ai-panel-dragging .ai-panel-header {
+  cursor: grabbing;
+}
+
+.ai-panel [data-ai-panel-no-drag] {
+  cursor: auto;
+  touch-action: auto;
+}
+
+.ai-panel-resize-edge-bottom::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 36px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: hsl(var(--border));
+}
+
+.ai-panel:not(.ai-panel-mobile-sheet) .ai-panel-title {
+  cursor: grab;
+}
+
+/* Fills the free space between the title and the header controls. The header
+   drags the panel; only the close button dismisses it. */
 .ai-panel-title {
   display: flex;
   flex: 1;
@@ -4165,12 +4362,7 @@ function renderContent(content: string): string {
   padding: 4px 6px;
   margin: -4px 0 -4px -6px;
   border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.ai-panel-title:hover {
-  background: hsl(var(--muted));
+  cursor: grab;
 }
 
 .ai-panel-config {

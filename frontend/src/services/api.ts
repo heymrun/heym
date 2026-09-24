@@ -697,7 +697,7 @@ export const workflowApi = {
         let buffer = "";
         let doneReceived = false;
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -788,7 +788,7 @@ export const workflowApi = {
         let buffer = "";
         let completionReceived = false;
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -1020,7 +1020,7 @@ export const workflowApi = {
         let buffer = "";
         let completionReceived = false;
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -2674,7 +2674,7 @@ export const aiApi = {
         const decoder = new TextDecoder();
         let buffer = "";
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -2745,7 +2745,7 @@ export const aiApi = {
         const decoder = new TextDecoder();
         let buffer = "";
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -2805,12 +2805,12 @@ export const aiApi = {
           : {}),
         ...(request.attachment
           ? {
-              attachment: {
-                name: request.attachment.name,
-                kind: request.attachment.kind,
-                content: request.attachment.content,
-              },
-            }
+            attachment: {
+              name: request.attachment.name,
+              kind: request.attachment.kind,
+              content: request.attachment.content,
+            },
+          }
           : {}),
       }),
       signal,
@@ -2831,7 +2831,7 @@ export const aiApi = {
         const decoder = new TextDecoder();
         let buffer = "";
 
-        for (;;) {
+        for (; ;) {
           const { done, value } = await reader.read();
           if (done) break;
 

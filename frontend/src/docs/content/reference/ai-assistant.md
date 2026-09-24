@@ -1,6 +1,6 @@
 # AI Assistant
 
-The **AI Assistant** is a chat panel that opens from the Debug panel and appears fixed at the bottom-right of the editor. Use natural language to create or modify workflows—describe what you want, and the AI generates nodes and edges that are applied to the canvas.
+The **AI Assistant** is a chat panel that opens from the Debug panel and starts at the bottom-right of the editor. Drag the header to move it, and drag an edge or a corner to change its width or height. It will not shrink below 360×480 pixels. The position and size are remembered in this browser. **Reset position and size** in the header puts the panel back at the bottom-right. Use natural language to create or modify workflows—describe what you want, and the AI generates nodes and edges that are applied to the canvas.
 
 For documentation questions outside the editor, use [Chat with Heym](./chat-with-heym.md). That surface is optimized for page-aware product help instead of workflow generation.
 
@@ -9,13 +9,13 @@ For documentation questions outside the editor, use [Chat with Heym](./chat-with
 1. Open a workflow in the editor
 2. Locate the **Debug panel** at the bottom (execution results area)
 3. Click the **AI** button (Sparkles icon) in the panel toolbar
-4. The AI Assistant panel opens at the bottom-right
+4. The AI Assistant panel opens at the bottom-right. Drag its header to move it, or drag an edge or a corner to change its width and height.
 
 Press `Ctrl + I` / `Cmd + I` anywhere in the editor to open or close the panel — the shortcut works even while a text input is focused. See [Keyboard Shortcuts](./keyboard-shortcuts.md).
 
 ## Closing the Panel
 
-Click the **X** button, click the **AI Assistant** title in the panel header, press `Ctrl + I` / `Cmd + I`, or toggle the **AI** button in the Debug panel toolbar.
+Click the **X** button, press `Ctrl + I` / `Cmd + I`, or toggle the **AI** button in the Debug panel toolbar. The header drags the panel; it does not close it.
 
 ## Configuration
 
