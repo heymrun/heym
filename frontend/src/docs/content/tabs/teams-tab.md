@@ -31,6 +31,7 @@ Share resources with teams from:
 - **Credentials** – Share dialog in the Credentials tab
 - **Variables** – Share dialog in the Variables tab
 - **Vector Stores** – Share dialog in the Vectors tab
+- **Dashboards** – Dashboard settings in the Dashboard tab (read or write)
 - **Drive Files** – Share dialog in the Drive tab or Drive node `shareWithMyTeams` / `unshareWithMyTeams` operations
 
 When you share with a team, all team members gain access. See [Teams](../reference/teams.md) for details.

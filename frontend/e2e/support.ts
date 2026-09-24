@@ -175,12 +175,23 @@ export async function uploadDriveFile(
   return (await response.json()) as { id: string };
 }
 
+/** The E2E user's first own dashboard, the one the tab opens; listing creates it if missing. */
+export async function ownDashboardId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/dashboards");
+  await expectOk(response);
+  const dashboards = (await response.json()) as { id: string; permission: string }[];
+  const own = dashboards.find((dashboard) => dashboard.permission === "owner");
+  if (!own) throw new Error("The E2E user owns no dashboard");
+  return own.id;
+}
+
 export async function createDashboardWidget(
   page: Page,
   title: string,
   chartType = "bar",
 ): Promise<{ id: string; workflow_id: string }> {
-  const response = await page.request.post("/api/dashboards/widgets", {
+  const dashboardId = await ownDashboardId(page);
+  const response = await page.request.post(`/api/dashboards/${dashboardId}/widgets`, {
     data: {
       title,
       description: null,
@@ -199,7 +210,7 @@ export async function deleteDashboardWidget(page: Page, widgetId: string): Promi
 }
 
 export async function clearDashboardWidgets(page: Page): Promise<void> {
-  const response = await page.request.get("/api/dashboards");
+  const response = await page.request.get(`/api/dashboards/${await ownDashboardId(page)}`);
   await expectOk(response);
   const dashboard = (await response.json()) as { widgets?: { id: string }[] };
   for (const widget of dashboard.widgets ?? []) {

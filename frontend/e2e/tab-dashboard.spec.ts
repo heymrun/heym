@@ -31,7 +31,7 @@ test("creates a widget via the Add widget dialog and opens the editor", async ({
   const widgetResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/dashboards/widgets",
+      /^\/api\/dashboards\/[0-9a-f-]+\/widgets$/.test(new URL(response.url()).pathname),
   );
   await page.getByRole("button", { name: "Create & edit" }).click();
   const widget = (await (await widgetResponsePromise).json()) as {
@@ -78,7 +78,7 @@ test("keeps the dashboard header within a mobile viewport", async ({ page }) => 
   await page.goto("/?tab=dashboard");
 
   const header = page.getByTestId("dashboard-header");
-  await expect(header.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(header.getByTestId("dashboard-select")).toBeVisible();
   await expect(header.getByRole("button", { name: "Refresh dashboard" })).toBeVisible();
   await expect(header.getByRole("button", { name: "Add widget" })).toBeVisible();
 

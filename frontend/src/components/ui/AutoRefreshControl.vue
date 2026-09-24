@@ -142,8 +142,8 @@ watch(
       :options="presetOptions"
       placeholder=""
       search-placeholder="Search refresh interval..."
-      class="w-[5.5rem] sm:w-24"
-      select-class="h-9 min-h-0 px-2.5 py-1.5 text-xs sm:text-sm"
+      class="w-28"
+      select-class="h-9 min-h-0 py-1.5 text-xs sm:text-sm"
       hide-trigger-icon
       @update:model-value="handlePresetChange"
     />

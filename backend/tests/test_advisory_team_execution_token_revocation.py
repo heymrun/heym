@@ -12,6 +12,8 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.dialects import postgresql
+
 from app.api.teams import delete_team, remove_team_member
 
 
@@ -100,6 +102,42 @@ class TeamChangeRevokesStaleExecutionTokensTests(unittest.IsolatedAsyncioTestCas
         self.assertTrue(token.revoked)
         db.flush.assert_awaited_once()
         db.commit.assert_awaited_once()
+
+    async def test_team_changes_also_capture_write_shared_dashboard_widget_workflows(
+        self,
+    ) -> None:
+        """A write team share on a dashboard reaches its widget workflows, so leaving the
+        team must revoke tokens minted on those too; a read share never reached them."""
+        creator = SimpleNamespace(id=uuid.uuid4())
+        team = _team(creator.id)
+        no_rows = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+        member_db = AsyncMock()
+        member_db.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: team),
+                SimpleNamespace(scalar_one_or_none=lambda: SimpleNamespace()),
+                no_rows,
+            ]
+        )
+        with patch("app.api.teams.get_team", AsyncMock(return_value="ignored")):
+            await remove_team_member(team.id, uuid.uuid4(), db=member_db, current_user=creator)
+
+        team_db = AsyncMock()
+        team_db.execute = AsyncMock(
+            side_effect=[SimpleNamespace(scalar_one_or_none=lambda: team), no_rows]
+        )
+        await delete_team(team.id, db=team_db, current_user=creator)
+
+        for captured in (member_db.execute.await_args_list[2], team_db.execute.await_args_list[1]):
+            sql = str(
+                captured.args[0].compile(
+                    dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+                )
+            )
+            self.assertIn("workflow_team_shares", sql)
+            self.assertIn("dashboard_widgets.workflow_id", sql)
+            self.assertIn("dashboard_team_shares.permission = 'write'", sql)
 
 
 if __name__ == "__main__":

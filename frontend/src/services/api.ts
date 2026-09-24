@@ -135,6 +135,10 @@ import type {
 import type { ExpressionGenerateRequest, ExpressionGenerateResponse } from "@/types/expression";
 import type {
   DashboardData,
+  DashboardShare,
+  DashboardSharePermission,
+  DashboardSummary,
+  DashboardTeamShare,
   DashboardWidget,
   WidgetCreateRequest,
   WidgetDataResponse,
@@ -1647,13 +1651,35 @@ export const gristApi = {
 };
 
 export const dashboardApi = {
-  getDashboard: async (): Promise<DashboardData> => {
-    const response = await api.get<DashboardData>("/dashboards");
+  list: async (): Promise<DashboardSummary[]> => {
+    const response = await api.get<DashboardSummary[]>("/dashboards");
     return response.data;
   },
 
-  createWidget: async (body: WidgetCreateRequest): Promise<DashboardWidget> => {
-    const response = await api.post<DashboardWidget>("/dashboards/widgets", body);
+  create: async (name: string): Promise<DashboardSummary> => {
+    const response = await api.post<DashboardSummary>("/dashboards", { name });
+    return response.data;
+  },
+
+  get: async (dashboardId: string): Promise<DashboardData> => {
+    const response = await api.get<DashboardData>(`/dashboards/${dashboardId}`);
+    return response.data;
+  },
+
+  rename: async (dashboardId: string, name: string): Promise<DashboardSummary> => {
+    const response = await api.patch<DashboardSummary>(`/dashboards/${dashboardId}`, { name });
+    return response.data;
+  },
+
+  remove: async (dashboardId: string): Promise<void> => {
+    await api.delete(`/dashboards/${dashboardId}`);
+  },
+
+  createWidget: async (
+    dashboardId: string,
+    body: WidgetCreateRequest,
+  ): Promise<DashboardWidget> => {
+    const response = await api.post<DashboardWidget>(`/dashboards/${dashboardId}/widgets`, body);
     return response.data;
   },
 
@@ -1699,12 +1725,13 @@ export const dashboardApi = {
   },
 
   aiGenerateWidget: async (
+    dashboardId: string,
     prompt: string,
     credentialId: string,
     model: string,
   ): Promise<DashboardWidget> => {
     const response = await api.post<DashboardWidget>(
-      "/dashboards/widgets/ai-generate",
+      `/dashboards/${dashboardId}/widgets/ai-generate`,
       {
         prompt,
         credential_id: credentialId,
@@ -1731,6 +1758,50 @@ export const dashboardApi = {
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
     return response.data;
+  },
+
+  listShares: async (dashboardId: string): Promise<DashboardShare[]> => {
+    const response = await api.get<DashboardShare[]>(`/dashboards/${dashboardId}/shares`);
+    return response.data;
+  },
+
+  addShare: async (
+    dashboardId: string,
+    email: string,
+    permission: DashboardSharePermission,
+  ): Promise<DashboardShare> => {
+    const response = await api.post<DashboardShare>(`/dashboards/${dashboardId}/shares`, {
+      email,
+      permission,
+    });
+    return response.data;
+  },
+
+  removeShare: async (dashboardId: string, userId: string): Promise<void> => {
+    await api.delete(`/dashboards/${dashboardId}/shares/${userId}`);
+  },
+
+  listTeamShares: async (dashboardId: string): Promise<DashboardTeamShare[]> => {
+    const response = await api.get<DashboardTeamShare[]>(
+      `/dashboards/${dashboardId}/team-shares`,
+    );
+    return response.data;
+  },
+
+  addTeamShare: async (
+    dashboardId: string,
+    teamId: string,
+    permission: DashboardSharePermission,
+  ): Promise<DashboardTeamShare> => {
+    const response = await api.post<DashboardTeamShare>(
+      `/dashboards/${dashboardId}/team-shares`,
+      { team_id: teamId, permission },
+    );
+    return response.data;
+  },
+
+  removeTeamShare: async (dashboardId: string, teamId: string): Promise<void> => {
+    await api.delete(`/dashboards/${dashboardId}/team-shares/${teamId}`);
   },
 };
 

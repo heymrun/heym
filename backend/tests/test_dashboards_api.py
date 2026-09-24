@@ -16,6 +16,15 @@ class _User:
         self.id = uuid.uuid4()
 
 
+def _dashboard(owner_id):
+    return MagicMock(id=uuid.uuid4(), owner_id=owner_id, name="Dashboard")
+
+
+def _widget_row(widget, owner_id):
+    """The widget + dashboard row ``_load_widget_for_user`` looks up first."""
+    return MagicMock(one_or_none=MagicMock(return_value=(widget, _dashboard(owner_id))))
+
+
 def _wire_db_inserts(db):
     """Make a mocked DB assign PKs on flush and column defaults on refresh,
     emulating what PostgreSQL would do for newly added ORM objects."""
@@ -194,22 +203,25 @@ class TestCreateWidget(unittest.IsolatedAsyncioTestCase):
     async def test_create_widget_creates_hidden_workflow(self):
         user = _User()
         db = MagicMock()
-        # _get_or_create_dashboard: first query returns an existing dashboard
-        dashboard = MagicMock(id=uuid.uuid4())
-        existing = MagicMock()
-        existing.scalars.return_value.first.return_value = dashboard
-        db.execute = AsyncMock(return_value=existing)
+        dashboard = _dashboard(user.id)
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
         db.add = MagicMock()
         db.commit = AsyncMock()
         _wire_db_inserts(db)
 
         body = WidgetCreateRequest(title="Sales", chart_type="bar", layout=WidgetLayout())
-        resp = await dash_api.create_widget(body=body, current_user=user, db=db)
+        resp = await dash_api.create_widget(
+            dashboard_id=dashboard.id, body=body, current_user=user, db=db
+        )
 
         self.assertEqual(resp.title, "Sales")
         self.assertEqual(resp.chart_type, "bar")
         added_kinds = [getattr(c.args[0], "kind", None) for c in db.add.call_args_list]
         self.assertIn("dashboard_widget", added_kinds)
+        widget_workflow = db.add.call_args_list[0].args[0]
+        self.assertEqual(widget_workflow.owner_id, user.id)
 
 
 class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
@@ -235,8 +247,7 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
             ],
             edges=[{"id": "edge", "source": "source", "target": "chart"}],
         )
-        widget_result = MagicMock()
-        widget_result.scalar_one_or_none.return_value = widget
+        widget_result = _widget_row(widget, user.id)
         workflow_result = MagicMock()
         workflow_result.scalar_one_or_none.return_value = workflow
         db.execute = AsyncMock(side_effect=[widget_result, workflow_result])
@@ -259,9 +270,9 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
 
     async def test_clone_widget_returns_not_found_for_another_users_widget(self):
         db = MagicMock()
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = None
-        db.execute = AsyncMock(return_value=result)
+        no_grants = MagicMock()
+        no_grants.scalars.return_value.all.return_value = []
+        db.execute = AsyncMock(side_effect=[_widget_row(MagicMock(), uuid.uuid4()), no_grants])
 
         with self.assertRaises(HTTPException) as context:
             await dash_api.clone_widget(uuid.uuid4(), current_user=_User(), db=db)
@@ -273,10 +284,10 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
     async def test_ai_generate_extracts_chart_type(self):
         user = _User()
         db = MagicMock()
-        dashboard = MagicMock(id=uuid.uuid4())
-        existing = MagicMock()
-        existing.scalars.return_value.first.return_value = dashboard
-        db.execute = AsyncMock(return_value=existing)
+        dashboard = _dashboard(user.id)
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
         db.add = MagicMock()
         db.commit = AsyncMock()
         _wire_db_inserts(db)
@@ -299,6 +310,7 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
             patch.object(dash_api, "get_credential_for_user", AsyncMock(return_value=credential)),
         ):
             resp = await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
                 body=AiWidgetRequest(
                     prompt="show signups by month",
                     credential_id=uuid.uuid4(),
@@ -312,10 +324,10 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
     async def test_ai_generate_rejects_trigger_nodes(self):
         user = _User()
         db = MagicMock()
-        dashboard = MagicMock(id=uuid.uuid4())
-        existing = MagicMock()
-        existing.scalars.return_value.first.return_value = dashboard
-        db.execute = AsyncMock(return_value=existing)
+        dashboard = _dashboard(user.id)
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
         db.add = MagicMock()
         db.commit = AsyncMock()
         _wire_db_inserts(db)
@@ -338,6 +350,7 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as ctx:
                 await dash_api.ai_generate_widget(
+                    dashboard_id=dashboard.id,
                     body=AiWidgetRequest(prompt="anything", credential_id=uuid.uuid4(), model="m"),
                     current_user=user,
                     db=db,
@@ -349,10 +362,10 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
     async def test_ai_generate_uses_dsl_name_and_description(self):
         user = _User()
         db = MagicMock()
-        dashboard = MagicMock(id=uuid.uuid4())
-        existing = MagicMock()
-        existing.scalars.return_value.first.return_value = dashboard
-        db.execute = AsyncMock(return_value=existing)
+        dashboard = _dashboard(user.id)
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
         added: list = []
         db.add = MagicMock(side_effect=lambda obj: added.append(obj))
         db.commit = AsyncMock()
@@ -374,6 +387,7 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
             patch.object(dash_api, "get_credential_for_user", AsyncMock(return_value=credential)),
         ):
             resp = await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
                 body=AiWidgetRequest(prompt="anything", credential_id=uuid.uuid4(), model="m"),
                 current_user=user,
                 db=db,
@@ -404,7 +418,7 @@ class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -448,7 +462,7 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -510,7 +524,7 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -567,7 +581,7 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -634,7 +648,7 @@ class TestMarkdownTaskToggle(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -696,7 +710,7 @@ class TestMarkdownTaskToggle(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -749,7 +763,7 @@ class TestMarkdownTaskToggle(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -815,7 +829,7 @@ class TestMarkdownTaskUpdate(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -872,7 +886,7 @@ class TestMarkdownTaskUpdate(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )
@@ -924,7 +938,7 @@ class TestMarkdownTaskUpdate(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(
             side_effect=[
-                MagicMock(scalar_one_or_none=MagicMock(return_value=widget)),
+                _widget_row(widget, user.id),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=workflow)),
             ]
         )

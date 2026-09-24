@@ -1,10 +1,22 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 from app.models.schemas import HighlightPayloadSchema
+
+SharePermission = Literal["read", "write"]
+
+
+def _clean_dashboard_name(value: str) -> str:
+    name = value.strip()
+    if not name:
+        raise ValueError("Dashboard name cannot be empty")
+    return name
+
+
+DashboardName = Annotated[str, Field(max_length=255), AfterValidator(_clean_dashboard_name)]
 
 
 class WidgetLayout(BaseModel):
@@ -26,10 +38,54 @@ class DashboardWidgetResponse(BaseModel):
     updated_at: datetime
 
 
-class DashboardResponse(BaseModel):
+class DashboardSummaryResponse(BaseModel):
     id: uuid.UUID
     name: str
+    # The caller's access: "owner", "write" or "read".
+    permission: str = "owner"
+    # Set only on dashboards shared with the caller.
+    owner_name: str | None = None
+    shared_by: str | None = None
+    updated_at: datetime
+
+
+class DashboardResponse(DashboardSummaryResponse):
     widgets: list[DashboardWidgetResponse]
+
+
+class DashboardCreateRequest(BaseModel):
+    name: DashboardName = "Dashboard"
+
+
+class DashboardUpdateRequest(BaseModel):
+    name: DashboardName
+
+
+class DashboardShareRequest(BaseModel):
+    email: str
+    permission: SharePermission = "read"
+
+
+class DashboardShareResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    email: str
+    name: str | None = None
+    permission: str
+    shared_at: datetime
+
+
+class DashboardTeamShareRequest(BaseModel):
+    team_id: uuid.UUID
+    permission: SharePermission = "read"
+
+
+class DashboardTeamShareResponse(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    team_name: str
+    permission: str
+    shared_at: datetime
 
 
 class WidgetCreateRequest(BaseModel):

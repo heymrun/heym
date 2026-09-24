@@ -344,6 +344,7 @@ export const SHOWCASE_DEFINITIONS: Record<ShowcaseContext, ShowcaseDefinition> =
       "Each widget is backed by a workflow that produces data and feeds a Chart Output node.",
       "Use bar, line, pie, table, and numeric widgets to fit the metric.",
       "Generate or fine-tune widgets with AI, and cache results so the page stays fast.",
+      "Keep several dashboards and share each with people or teams, read-only or editable.",
     ],
     highlights: [
       { eyebrow: "Compose", title: "Workflow-backed charts", description: "Any data a workflow can produce becomes a chart.", tone: "primary" },

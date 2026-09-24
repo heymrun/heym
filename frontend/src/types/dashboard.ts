@@ -57,10 +57,39 @@ export interface DashboardWidget {
   updated_at: string;
 }
 
-export interface DashboardData {
+/** The caller's access to a dashboard. */
+export type DashboardPermission = "owner" | "write" | "read";
+export type DashboardSharePermission = "read" | "write";
+
+export interface DashboardSummary {
   id: string;
   name: string;
+  permission: DashboardPermission;
+  /** Set only on dashboards shared with the caller. */
+  owner_name: string | null;
+  shared_by: string | null;
+  updated_at: string;
+}
+
+export interface DashboardData extends DashboardSummary {
   widgets: DashboardWidget[];
+}
+
+export interface DashboardShare {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string | null;
+  permission: DashboardSharePermission;
+  shared_at: string;
+}
+
+export interface DashboardTeamShare {
+  id: string;
+  team_id: string;
+  team_name: string;
+  permission: DashboardSharePermission;
+  shared_at: string;
 }
 
 export interface WidgetDataResponse {

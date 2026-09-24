@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.models import DashboardWidget, ExecutionHistory, User, Workflow
+from app.db.models import DashboardWidget, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.models.dashboard_schemas import WidgetDataResponse
 from app.services.cluster.dispatch import dispatch_workflow
@@ -152,16 +152,16 @@ def _extract_chart_payload(result: Any) -> dict | None:
 
 
 async def _load_widget_execution_context(
-    db: AsyncSession, workflow: Workflow, user: User
+    db: AsyncSession, workflow: Workflow, run_as_user_id: uuid.UUID
 ) -> tuple[dict[str, dict], dict[str, str], dict[str, object]]:
     from app.api.workflows import collect_referenced_workflows, get_credentials_context
     from app.services.global_variables_service import get_global_variables_context
 
     workflow_cache = await collect_referenced_workflows(
-        db, workflow.nodes or [], actor_user_id=user.id
+        db, workflow.nodes or [], actor_user_id=run_as_user_id
     )
-    credentials_context = await get_credentials_context(db, user.id)
-    global_variables_context = await get_global_variables_context(db, user.id)
+    credentials_context = await get_credentials_context(db, run_as_user_id)
+    global_variables_context = await get_global_variables_context(db, run_as_user_id)
     return workflow_cache, credentials_context, global_variables_context
 
 
@@ -234,8 +234,13 @@ async def _finalize_widget_allow_downstream(
 
 
 async def compute_widget_data(
-    db: AsyncSession, widget: DashboardWidget, user: User, force: bool = False
+    db: AsyncSession, widget: DashboardWidget, run_as_user_id: uuid.UUID, force: bool = False
 ) -> WidgetDataResponse:
+    """Serve the widget's cached chart, or run its workflow as ``run_as_user_id``.
+
+    Callers pass the dashboard owner, whoever is viewing: the cache is shared by
+    every viewer, so the run behind it must not depend on who asked.
+    """
     wf_result = await db.execute(select(Workflow).where(Workflow.id == widget.workflow_id))
     workflow = wf_result.scalar_one_or_none()
     if workflow is None:
@@ -282,7 +287,7 @@ async def compute_widget_data(
             workflow_cache,
             credentials_context,
             global_variables_context,
-        ) = await _load_widget_execution_context(db, workflow, user)
+        ) = await _load_widget_execution_context(db, workflow, run_as_user_id)
         result = await dispatch_workflow(
             workflow_id=workflow.id,
             nodes=nodes,
@@ -291,12 +296,12 @@ async def compute_widget_data(
             workflow_cache=workflow_cache,
             test_run=False,
             trigger_source="dashboard",
-            credentials_owner_id=user.id,
+            credentials_owner_id=run_as_user_id,
             run_in_thread=True,
             credentials_context=credentials_context,
             global_variables_context=global_variables_context,
-            trace_user_id=user.id,
-            actor_user_id=user.id,
+            trace_user_id=run_as_user_id,
+            actor_user_id=run_as_user_id,
             return_on_chart_output=True,
         )
     except Exception as exc:  # surface execution errors to the widget, never 500 the dashboard
@@ -313,7 +318,7 @@ async def compute_widget_data(
 
     background_finalize = bool(getattr(result, "allow_downstream_pending", False))
     if not background_finalize and result.status != "pending":
-        await _persist_widget_global_variables(db, user.id, nodes, workflow_cache, result)
+        await _persist_widget_global_variables(db, run_as_user_id, nodes, workflow_cache, result)
 
     widget.cached_payload = payload
     widget.cached_at = now
@@ -326,7 +331,7 @@ async def compute_widget_data(
                 history_entry_id=history_entry.id if history_entry is not None else None,
                 workflow_id=workflow.id,
                 workflow_name=workflow.name,
-                owner_id=user.id,
+                owner_id=run_as_user_id,
                 workflow_nodes=copy.deepcopy(nodes),
                 workflow_cache=copy.deepcopy(workflow_cache),
                 result=result,

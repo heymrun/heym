@@ -1,6 +1,14 @@
 # Dashboard
 
-The **Dashboard** tab is a Grafana-style space where you build a grid of chart widgets. Each widget is rendered from the output of its own hidden Heym workflow, so any data you can produce in a workflow — database queries, API calls, RAG lookups, LLM output — can become a chart.
+The **Dashboard** tab is a Grafana-style space where you build grids of chart widgets. Each widget is rendered from the output of its own hidden Heym workflow, so any data you can produce in a workflow — database queries, API calls, RAG lookups, LLM output — can become a chart. You can keep several dashboards and share each one with people or teams.
+
+## Dashboards
+
+Everyone starts with one dashboard, created the first time they open the tab. Use the dashboard selector at the top of the tab to switch between dashboards, and **+** next to it to create a new one. The selector lists your own dashboards first, then the ones shared with you, labelled with the name of the person who shared them.
+
+The tab reopens the dashboard you used last, and the address bar carries the open dashboard (`?tab=dashboard&dashboard=<id>`), so a link opens that exact dashboard for anyone who has access to it.
+
+The settings button (owners only) renames the dashboard, manages sharing, and deletes it. Deleting a dashboard removes its widgets and their workflows. You always keep at least one dashboard of your own, so the last one cannot be deleted.
 
 ## Widgets
 
@@ -22,8 +30,8 @@ Each widget loads its data asynchronously when you open the tab, so the page sta
 
 ## Adding a widget
 
-1. Click **Add widget**, give it a title, and pick a chart type.
-2. The widget opens in the workflow editor with a starter graph: an input node connected to a [Chart Output](../nodes/chart-output-node.md) node.
+1. Click **Add widget**, give it a title, and pick a chart type. Below the picker, the dialog draws an example of that chart type with sample data and names the rows it expects, so you can compare types before you build anything.
+2. The widget opens in the workflow editor with a starter graph: a [Set](../nodes/set-node.md) node that produces the rows, connected to a [Chart Output](../nodes/chart-output-node.md) node. Replace the Set node with any data source.
 3. Build the workflow so the node feeding **Chart Output** produces an array of rows, then configure the Chart Output node's field mapping (label field, value field, etc.).
 4. Save, return to the Dashboard tab, and the widget renders.
 
@@ -46,6 +54,23 @@ Toggle **Edit** to enter edit mode, where you can drag widgets and resize them o
 Each widget caches its last computed data on the server for a configurable time-to-live (TTL). While the cache is fresh, reopening the dashboard serves the stored result instead of re-running the workflow. The cache is replaced in place every time the data is recomputed (one cache per widget), and it is automatically invalidated when you edit the widget's workflow.
 
 Use a widget's **Refresh** button (or **Refresh** in the toolbar) to bypass the cache and recompute immediately.
+
+## Sharing
+
+Owners share a dashboard from its settings, with individual users (by email) or with any [team](teams-tab.md) they belong to. Each share is **Read** or **Write**; when someone has both a personal and a team share, the stronger one applies.
+
+| Action | Owner | Write | Read |
+|--------|:-----:|:-----:|:----:|
+| View widgets, refresh them, use auto-refresh | ✓ | ✓ | ✓ |
+| Add, clone, delete, rename and resize widgets; AI generate and fine-tune; tick checklist items | ✓ | ✓ | |
+| Open a widget's workflow in the editor | ✓ | ✓ | |
+| Rename or delete the dashboard, manage sharing | ✓ | | |
+
+**Widgets always run as the dashboard owner.** Whoever is looking, a widget uses the owner's credentials and global variables, and its runs appear in the owner's execution history and traces. Teammates therefore see the same data without access to the accounts behind it, and every viewer shares the one cached result per widget. Widgets that a write collaborator adds or clones belong to the owner as well.
+
+Because of this, **Write** carries the same trust as sharing a workflow for editing: a collaborator with write access can change what runs with your credentials. Give it only to people you would let edit your workflows. A test run that a collaborator starts from the workflow editor uses their own credentials, as with any shared workflow; only the dashboard itself runs as the owner. **Read** grants no access to the widget workflows, and read-only viewers receive the chart itself but not the per-node execution details behind it.
+
+Removing a share, or lowering it from write to read, takes effect immediately.
 
 ## Related
 

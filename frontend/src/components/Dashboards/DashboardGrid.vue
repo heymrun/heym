@@ -13,6 +13,7 @@ const props = defineProps<{
   widgets: DashboardWidget[];
   editMode: boolean;
   cloningWidgetId: string | null;
+  canWrite: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -73,6 +74,7 @@ function emitItemLayout(id: string): void {
         :widget="widgetById[item.i]"
         :edit-mode="editMode"
         :cloning="cloningWidgetId === item.i"
+        :can-write="canWrite"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"
         @edit="emit('edit', $event)"
         @delete="emit('delete', $event)"

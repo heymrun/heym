@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import MultipleResultsFound
 
 from app.db.models import Workflow
@@ -22,11 +23,28 @@ class WorkflowAccessClauseTest(unittest.TestCase):
         self.assertIn("workflow_team_shares", sql)
         self.assertIn("team_members", sql)
 
-    def test_clause_is_an_or_of_three_branches(self) -> None:
+    def test_clause_is_an_or_of_four_branches(self) -> None:
         user_id = uuid.uuid4()
         clause = workflow_access_clause(user_id)
 
-        self.assertEqual(len(clause.clauses), 3)
+        self.assertEqual(len(clause.clauses), 4)
+
+    def test_dashboard_branch_only_reaches_widget_workflows_through_write_shares(self) -> None:
+        user_id = uuid.uuid4()
+        dashboard_branch = workflow_access_clause(user_id).clauses[3]
+        sql = str(
+            select(Workflow.id)
+            .where(dashboard_branch)
+            .compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+        )
+
+        self.assertIn("workflows.kind = 'dashboard_widget' AND workflows.id IN", sql)
+        self.assertIn("dashboard_widgets.workflow_id", sql)
+        # A read share must never reach a workflow: both share paths filter on write.
+        self.assertIn("dashboard_shares.permission = 'write'", sql)
+        self.assertIn("dashboard_team_shares.permission = 'write'", sql)
+        self.assertNotIn("'read'", sql)
+        self.assertNotIn(" JOIN ", sql.upper())
 
 
 class UserHasWorkflowAccessTest(unittest.IsolatedAsyncioTestCase):
