@@ -814,7 +814,7 @@ See also [Chart Output node](../nodes/chart-output-node.md), [Analytics](../tabs
 
 ### [Evals](../tabs/evals-tab.md)
 
-The Evals tab (at `/evals`) lets you create evaluation suites, add or generate test cases, optimize the suite prompt, and run evaluations against [Agent Node](../nodes/agent-node.md) workflows. Select one or more models, choose a scoring method (Exact Match, Contains, or LLM-as-Judge), optionally configure a separate judge model, set temperature/reasoning effort/runs-per-test, then compare pass/fail and per-model outputs. Review run history for past evaluations and cross-check the underlying behavior in [Traces](../tabs/traces-tab.md).
+The Evals tab (at `/evals`) lets you create evaluation suites, add or generate test cases, optimize the suite prompt, and run evaluations against [Agent Node](../nodes/agent-node.md) workflows. Select one or more models, choose a scoring method (Exact Match, Contains, or LLM-as-Judge), optionally let a separate model or a [Decision Model](../nodes/decision-node.md) judge LLM-as-Judge answers, set runs per test (plus temperature and reasoning effort for Exact Match and Contains), then compare pass/fail and per-model outputs. Review run history for past evaluations, including the judge each run used, re-run one with the same judge, export it as JSON, and cross-check the underlying behavior in [Traces](../tabs/traces-tab.md).
 
 See also [Agent Node](../nodes/agent-node.md), [Traces](../tabs/traces-tab.md), and [Execution History](./execution-history.md).
 

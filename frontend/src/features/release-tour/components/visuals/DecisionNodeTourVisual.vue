@@ -27,7 +27,9 @@ const scorePercent = computed<number>(() => (step.value >= 3 ? (1.05 / 2) * 100 
 </script>
 
 <template>
-  <div class="w-full rounded-lg border border-border bg-card p-3">
+  <!-- Fills the tour's fixed frame and draws no border of its own: the frame already
+       has one, and a second rounded edge inside it reads as a doubled line. -->
+  <div class="flex h-full w-full flex-col justify-center rounded-lg bg-card p-3">
     <div class="mb-2 flex items-center justify-between">
       <span class="text-xs font-medium text-foreground">Decision &middot; triage</span>
       <span class="font-mono text-[10px] text-muted-foreground">jev-latest</span>
@@ -95,7 +97,7 @@ const scorePercent = computed<number>(() => (step.value >= 3 ? (1.05 / 2) * 100 
       <span class="text-muted-foreground">Calm &middot; Frustrated &middot; Very angry</span>
       <span
         class="transition-opacity duration-500"
-        :class="step >= 2 ? 'text-primary opacity-100' : 'text-muted-foreground opacity-40'"
+        :class="step >= 2 ? 'text-primary opacity-100 dark:text-brand-primary-soft' : 'text-muted-foreground opacity-40'"
       >Switch &rarr; billing</span>
     </div>
   </div>

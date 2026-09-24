@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+import math
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,6 +21,11 @@ from app.db.models import (
     User,
 )
 from app.services.credential_access import get_accessible_credential
+from app.services.decision_models import (
+    DecisionProviderError,
+    build_decision_body,
+    call_decision_model,
+)
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -97,14 +105,11 @@ def _score_contains(actual: str, expected: str) -> str:
     return "100" if e in a else "0"
 
 
-def _parse_combined_judge_response(text: str) -> tuple[str, str, str | None]:
-    """Parse JSON from combined judge response. Returns (actual_answer, score_str, explanation).
+def _find_judge_payload(text: str) -> dict | None:
+    """Find the JSON object a judge answered with.
 
-    Handles various formats from reasoning models:
-    - Plain JSON: {"actual_answer": "...", "score": N, "explanation": "..."}
-    - Wrapped in markdown: ```json {...} ```
-    - Nested: {"response": {"actual_answer": "...", ...}} or {"output": {...}}
-    - Alternative keys: "answer" instead of "actual_answer"
+    Handles what models actually send back: plain JSON, JSON fenced in markdown, and
+    the object nested under a "response" or "output" key.
     """
     t = (text or "").strip()
     # Strip markdown code blocks (```json ... ``` or ``` ... ```)
@@ -119,39 +124,336 @@ def _parse_combined_judge_response(text: str) -> tuple[str, str, str | None]:
                         t = block
                     break
 
-    def _extract_from_data(data: dict) -> tuple[str, str, str | None] | None:
-        """Extract actual_answer, score, explanation from dict, supporting nested structures."""
-        # Flatten nested response/output wrapper
-        inner = data.get("response") or data.get("output") or data
-        if isinstance(inner, dict):
-            actual = str(inner.get("actual_answer", "") or inner.get("answer", "")).strip() or ""
-            try:
-                score_val = inner.get("score", 0)
-                score = max(0, min(100, int(score_val)))
-            except (ValueError, TypeError):
-                score = 0
-            explanation = str(inner.get("explanation", "")).strip() or None
-            return actual, str(score), explanation
-        return None
-
     start = t.find("{")
-    if start >= 0:
-        depth = 0
-        for i, c in enumerate(t[start:], start):
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        data = json.loads(t[start : i + 1])
-                        if isinstance(data, dict):
-                            result = _extract_from_data(data)
-                            if result:
-                                return result
-                    except (json.JSONDecodeError, ValueError, TypeError):
-                        pass
-    return "", "0", None
+    if start < 0:
+        return None
+    depth = 0
+    for i, c in enumerate(t[start:], start):
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    data = json.loads(t[start : i + 1])
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    continue
+                if isinstance(data, dict):
+                    inner = data.get("response") or data.get("output") or data
+                    if isinstance(inner, dict):
+                        return inner
+    return None
+
+
+def _parse_combined_judge_response(text: str) -> tuple[str, str, str | None]:
+    """Parse JSON from combined judge response. Returns (actual_answer, score_str, explanation).
+
+    Accepts "answer" in place of "actual_answer", and scores anything unreadable as 0.
+    """
+    inner = _find_judge_payload(text)
+    if inner is None:
+        return "", "0", None
+    actual = str(inner.get("actual_answer", "") or inner.get("answer", "")).strip() or ""
+    try:
+        score = max(0, min(100, int(inner.get("score", 0))))
+    except (ValueError, TypeError):
+        score = 0
+    explanation = str(inner.get("explanation", "")).strip() or None
+    return actual, str(score), explanation
+
+
+JUDGE_QUESTION_ID = "match"
+JUDGE_REQUEST_TIMEOUT_SECONDS = 60.0
+RETRYABLE_JUDGE_STATUS_CODES = frozenset({429, 503, 529})
+
+# A judge is a model that writes its verdict or a decision model that computes one. A
+# Model Router is left out: a judge that changes per request cannot be compared across runs.
+JUDGE_CREDENTIAL_TYPES = (
+    CredentialType.openai,
+    CredentialType.google,
+    CredentialType.custom,
+    CredentialType.decision,
+)
+
+# Lowest first, as the score primitive requires. Each level names its situation in
+# full because the decision model reads the text, not the position.
+JUDGE_LEVELS: tuple[tuple[str, str], ...] = (
+    ("Completely off", "The actual answer has nothing in common with the expected answer."),
+    (
+        "Mostly different",
+        "Most key points of the expected answer are missing from the actual answer "
+        "or contradicted by it.",
+    ),
+    (
+        "Partially matches",
+        "The actual answer shares some key points with the expected answer but misses "
+        "or changes others.",
+    ),
+    (
+        "Mostly matches",
+        "The actual answer carries the meaning and key points of the expected answer, "
+        "with minor omissions or wording differences.",
+    ),
+    (
+        "Fully matches",
+        "The actual answer has the same meaning, key points and intent as the expected answer.",
+    ),
+)
+
+JUDGE_INSTRUCTIONS = (
+    "The state holds a question, the expected_answer we want, and the actual_answer a "
+    "model gave. How closely does actual_answer match expected_answer in meaning, key "
+    "points and intent? Judge agreement with expected_answer only, not general quality "
+    "or correctness, and do not count different wording as a mismatch."
+)
+
+LLM_JUDGE_SYSTEM_PROMPT = (
+    "You are an impartial evaluator. You compare a model's answer with an expected "
+    "reference answer and report how closely they agree."
+)
+
+LLM_JUDGE_PROMPT = """Score how well the ACTUAL answer matches the EXPECTED reference for the QUESTION. We measure alignment with EXPECTED, not general quality or correctness. Different wording alone is not a mismatch.
+
+QUESTION:
+{input}
+
+EXPECTED:
+{expected}
+
+ACTUAL:
+{actual}
+
+Score 0-100:
+- 100: ACTUAL matches EXPECTED in meaning, key points, and intent.
+- 80-99: Mostly matches, minor omissions or wording differences.
+- 50-79: Partially matches, some key points missing or divergent.
+- 20-49: Mostly does not match EXPECTED.
+- 0-19: Completely off from what EXPECTED describes.
+
+Output ONLY valid JSON: {{"score": <0-100>, "explanation": "<brief reason>"}}"""
+
+
+class EvalJudgeError(RuntimeError):
+    """Raised when the judge cannot score an answer."""
+
+
+@dataclass(frozen=True)
+class EvalJudge:
+    """A credential and model resolved for scoring LLM-as-Judge answers."""
+
+    credential_id: UUID
+    credential_type: CredentialType
+    model: str
+    base_url: str | None
+    api_key: str = field(repr=False)
+
+    @property
+    def is_decision_model(self) -> bool:
+        """True when the judge answers typed questions instead of writing its verdict."""
+        return self.credential_type == CredentialType.decision
+
+
+async def load_eval_judge(
+    db: AsyncSession,
+    *,
+    credential_id: UUID | None,
+    model: str | None,
+    user_id: UUID,
+) -> EvalJudge:
+    """Resolve the judge a run asks for, or raise ValueError saying why it cannot be used."""
+    resolved_model = (model or "").strip()
+    if credential_id is None:
+        raise ValueError("Choose a judge credential")
+    if not resolved_model:
+        raise ValueError("Enter the judge model")
+    credential = await get_accessible_credential(
+        db=db,
+        credential_id=credential_id,
+        user_id=user_id,
+    )
+    if not credential:
+        raise ValueError("Judge credential not found")
+    if credential.type not in JUDGE_CREDENTIAL_TYPES:
+        raise ValueError(
+            "Judge credential must be an OpenAI, Google, OpenAI-compatible or "
+            "Decision Model credential"
+        )
+    config = decrypt_config(credential.encrypted_config)
+    base_url: str | None = None
+    if credential.type in (CredentialType.custom, CredentialType.decision):
+        base_url = str(config.get("base_url") or "").strip() or None
+        if base_url is None:
+            raise ValueError("Judge credential has no base URL configured")
+    return EvalJudge(
+        credential_id=credential.id,
+        credential_type=credential.type,
+        model=resolved_model,
+        base_url=base_url,
+        api_key=str(config.get("api_key") or ""),
+    )
+
+
+def build_decision_judge_body(
+    *, model: str, question: str, expected: str, actual: str
+) -> dict[str, Any]:
+    """Build the decision model request that scores one answer against the expected one."""
+    return build_decision_body(
+        model=model,
+        state={
+            "question": question,
+            "expected_answer": (expected or "").strip() or "(none)",
+            "actual_answer": actual,
+        },
+        questions=[
+            {
+                "id": JUDGE_QUESTION_ID,
+                "type": "score",
+                "instructions": JUDGE_INSTRUCTIONS,
+                "levels": [f"{label}: {meaning}" for label, meaning in JUDGE_LEVELS],
+            }
+        ],
+    )
+
+
+def read_decision_judge_score(payload: object) -> tuple[str, str]:
+    """Turn a decision model's answer into a 0-100 score and a readable explanation.
+
+    A score answer is a probability-weighted position between the first and the last
+    level, so it maps linearly onto the 0-100 scale every other scoring method uses.
+    """
+    answers = payload.get("answers") if isinstance(payload, dict) else None
+    answer = answers.get(JUDGE_QUESTION_ID) if isinstance(answers, dict) else None
+    value = answer.get("score") if isinstance(answer, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise EvalJudgeError("Judge failed: the decision model returned no score")
+    top = len(JUDGE_LEVELS) - 1
+    position = min(max(float(value), 0.0), float(top))
+    detail = f"score {position:.2f} of {top}"
+    confidence = answer.get("confidence") if isinstance(answer, dict) else None
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+        detail += f", confidence {float(confidence):.2f}"
+    label = JUDGE_LEVELS[round(position)][0]
+    return str(round(position / top * 100)), f"{label} ({detail})"
+
+
+def read_llm_judge_score(text: str) -> tuple[str, str | None]:
+    """Pull the 0-100 score and the explanation out of an LLM judge's JSON verdict."""
+    payload = _find_judge_payload(text)
+    if payload is None:
+        raise EvalJudgeError("Judge failed: the judge model returned no JSON verdict")
+    value = payload.get("score")
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            value = None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise EvalJudgeError("Judge failed: the judge model returned no score")
+    explanation = str(payload.get("explanation") or "").strip() or None
+    return str(round(min(max(float(value), 0.0), 100.0))), explanation
+
+
+async def _judge_with_decision_model(
+    judge: EvalJudge,
+    *,
+    question: str,
+    expected: str,
+    actual: str,
+    trace_context: LLMTraceContext | None,
+) -> tuple[str, str]:
+    """Score one answer with a decision model, retrying rate limits and overloads."""
+    body = build_decision_judge_body(
+        model=judge.model, question=question, expected=expected, actual=actual
+    )
+    attempt = 0
+    while True:
+        try:
+            # The transport is synchronous, so it runs off the event loop.
+            payload = await asyncio.to_thread(
+                call_decision_model,
+                base_url=judge.base_url or "",
+                api_key=judge.api_key,
+                body=body,
+                timeout=JUDGE_REQUEST_TIMEOUT_SECONDS,
+                trace_context=trace_context,
+            )
+            break
+        except DecisionProviderError as exc:
+            attempt += 1
+            if exc.status_code not in RETRYABLE_JUDGE_STATUS_CODES:
+                raise EvalJudgeError(f"Judge failed: {exc}") from exc
+            if attempt >= MAX_RETRIES_503:
+                raise EvalJudgeError(
+                    f"Judge failed: the decision model stayed unavailable "
+                    f"({exc.status_code}) after {attempt} attempts"
+                ) from exc
+            delay = RETRY_DELAY_BASE * (2 ** (attempt - 1))
+            logger.warning(
+                "Eval judge call failed (attempt %s/%s), retrying in %.1fs: %s",
+                attempt,
+                MAX_RETRIES_503,
+                delay,
+                str(exc),
+            )
+            await asyncio.sleep(delay)
+        except (ValueError, OSError) as exc:
+            # A blocked private address fails the same way on every attempt.
+            raise EvalJudgeError(f"Judge failed: {exc}") from exc
+    return read_decision_judge_score(payload)
+
+
+async def _judge_with_llm(
+    judge: EvalJudge,
+    *,
+    question: str,
+    expected: str,
+    actual: str,
+    trace_context: LLMTraceContext | None,
+) -> tuple[str, str | None]:
+    """Score one answer with a separate model that writes a JSON verdict."""
+    llm_kwargs: dict = {
+        "credential_type": judge.credential_type.value,
+        "api_key": judge.api_key,
+        "base_url": judge.base_url,
+        "model": judge.model,
+        "system_instruction": LLM_JUDGE_SYSTEM_PROMPT,
+        "user_message": LLM_JUDGE_PROMPT.format(
+            input=question,
+            expected=(expected or "").strip() or "(none)",
+            actual=actual,
+        ),
+        "response_format": {"type": "json_object"},
+        "content_only": True,
+        "trace_context": trace_context,
+    }
+    # A judge should give the same verdict twice, so it runs without sampling noise.
+    if is_reasoning_model(judge.model):
+        llm_kwargs["reasoning_effort"] = "low"
+    else:
+        llm_kwargs["temperature"] = 0.0
+    try:
+        result = await _execute_llm_with_retry(**llm_kwargs)
+    except Exception as exc:
+        raise EvalJudgeError(f"Judge failed: {exc}") from exc
+    return read_llm_judge_score(str(result.get("text") or ""))
+
+
+async def judge_answer(
+    judge: EvalJudge,
+    *,
+    question: str,
+    expected: str,
+    actual: str,
+    trace_context: LLMTraceContext | None = None,
+) -> tuple[str, str | None]:
+    """Score one answer against the expected output with the run's judge."""
+    if judge.is_decision_model:
+        return await _judge_with_decision_model(
+            judge, question=question, expected=expected, actual=actual, trace_context=trace_context
+        )
+    return await _judge_with_llm(
+        judge, question=question, expected=expected, actual=actual, trace_context=trace_context
+    )
 
 
 async def create_run(
@@ -187,7 +489,18 @@ async def create_run(
     if credential.type not in LLM_CREDENTIAL_TYPES:
         raise ValueError("Credential must be OpenAI, Google, or Custom type")
 
-    # LLM-as-Judge uses combined single-request flow with main model; judge credential optional
+    # LLM-as-Judge scores with a separate judge (a model or a decision model) when one
+    # is given; without one, each model scores its own answer in a single request.
+    judge: EvalJudge | None = None
+    if scoring_method == SCORING_LLM_JUDGE and (
+        judge_credential_id is not None or (judge_model or "").strip()
+    ):
+        judge = await load_eval_judge(
+            db,
+            credential_id=judge_credential_id,
+            model=judge_model,
+            user_id=current_user.id,
+        )
 
     count_result = await db.execute(select(EvalRun).where(EvalRun.suite_id == suite_id))
     run_number = len(count_result.scalars().all()) + 1
@@ -203,6 +516,8 @@ async def create_run(
         temperature=temperature,
         reasoning_effort=reasoning_effort,
         max_tokens=max_tokens,
+        judge_credential_id=judge.credential_id if judge else None,
+        judge_model=judge.model if judge else None,
         status="running",
     )
     db.add(run)
@@ -220,10 +535,9 @@ async def execute_evals_for_run(
     reasoning_effort: str | None,
     max_tokens: int | None,
     runs_per_test: int,
-    judge_credential_id: UUID | None,
-    judge_model: str | None,
     user_id: UUID,
 ) -> None:
+    """Run a created eval in the background; the judge is read from the run row."""
     from app.db.session import async_session_maker
 
     async with async_session_maker() as db:
@@ -246,8 +560,6 @@ async def execute_evals_for_run(
                 reasoning_effort=reasoning_effort,
                 max_tokens=max_tokens,
                 runs_per_test=runs_per_test,
-                judge_credential_id=judge_credential_id,
-                judge_model=judge_model,
                 current_user=user,
             )
         except Exception:
@@ -269,8 +581,6 @@ async def _run_evals_into_run(
     reasoning_effort: str | None,
     max_tokens: int | None,
     runs_per_test: int,
-    judge_credential_id: UUID | None,
-    judge_model: str | None,
     current_user: User,
 ) -> None:
     suite_result = await db.execute(
@@ -300,10 +610,49 @@ async def _run_evals_into_run(
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") if credential.type == CredentialType.custom else None
 
+    # The run row is what history shows, so it is also what decides the judge. A judge
+    # that went missing after the run was created fails the run rather than silently
+    # falling back to self-scoring.
+    judge: EvalJudge | None = None
+    if scoring_method == SCORING_LLM_JUDGE and (
+        run.judge_credential_id is not None or run.judge_model
+    ):
+        judge = await load_eval_judge(
+            db,
+            credential_id=run.judge_credential_id,
+            model=run.judge_model,
+            user_id=current_user.id,
+        )
+
     semaphore = asyncio.Semaphore(3)
     db_lock = asyncio.Lock()
 
     from app.db.models import EvalTestCase
+
+    async def generate_answer(
+        tc: EvalTestCase,
+        model_id: str,
+        trace_context: LLMTraceContext,
+    ) -> tuple[str, int | None]:
+        """Ask the model under test for its plain answer to one test input."""
+        llm_kwargs: dict = {
+            "credential_type": credential.type.value,
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model_id,
+            "system_instruction": suite.system_prompt,
+            "user_message": tc.input,
+            "max_tokens": max_tokens,
+            "trace_context": trace_context,
+            "router": router,
+        }
+        if is_reasoning_model(model_id):
+            llm_kwargs["reasoning_effort"] = reasoning_effort or "medium"
+        else:
+            llm_kwargs["temperature"] = temperature
+        result = await _execute_llm_with_retry(**llm_kwargs)
+        usage = result.get("usage", {})
+        return result.get("text", ""), usage.get("total_tokens")
 
     async def process_one(
         tc: EvalTestCase,
@@ -311,7 +660,6 @@ async def _run_evals_into_run(
         run_idx: int,
         run_order: int,
     ) -> None:
-        nonlocal suite, credential, scoring_method, temperature, reasoning_effort, max_tokens
         actual_output = ""
         latency_ms = None
         tokens_used = None
@@ -327,7 +675,7 @@ async def _run_evals_into_run(
                     source="evals",
                     node_label="run_evals",
                 )
-                if scoring_method == SCORING_LLM_JUDGE:
+                if scoring_method == SCORING_LLM_JUDGE and judge is None:
                     combined_prompt = COMBINED_LLM_JUDGE_PROMPT.format(
                         input=tc.input,
                         expected=tc.expected_output or "(none)",
@@ -358,30 +706,29 @@ async def _run_evals_into_run(
                     tokens_used = usage.get("total_tokens")
                     latency_ms = elapsed_ms
                 else:
-                    llm_kwargs: dict = {
-                        "credential_type": credential.type.value,
-                        "api_key": api_key,
-                        "base_url": base_url,
-                        "model": model_id,
-                        "system_instruction": suite.system_prompt,
-                        "user_message": tc.input,
-                        "max_tokens": max_tokens,
-                        "trace_context": run_trace_ctx,
-                    }
-                    if is_reasoning_model(model_id):
-                        llm_kwargs["reasoning_effort"] = reasoning_effort or "medium"
-                    else:
-                        llm_kwargs["temperature"] = temperature
-                    result = await _execute_llm_with_retry(**llm_kwargs)
-                    actual_output = result.get("text", "")
-                    if scoring_method == SCORING_CONTAINS:
+                    actual_output, tokens_used = await generate_answer(tc, model_id, run_trace_ctx)
+                    # Latency and tokens describe the model under test, so the judge
+                    # call below is kept out of both; it has its own trace row.
+                    latency_ms = int((time.time() - start) * 1000)
+                    if judge is not None:
+                        score, explanation = await judge_answer(
+                            judge,
+                            question=tc.input,
+                            expected=tc.expected_output,
+                            actual=actual_output,
+                            trace_context=LLMTraceContext(
+                                user_id=current_user.id,
+                                credential_id=judge.credential_id,
+                                source="evals",
+                                node_label="eval_judge",
+                                # One session per run keeps an OpenCode judge's cache warm.
+                                session_id=str(run.id),
+                            ),
+                        )
+                    elif scoring_method == SCORING_CONTAINS:
                         score = _score_contains(actual_output, tc.expected_output)
                     else:
                         score = _score_exact_match(actual_output, tc.expected_output)
-                    elapsed_ms = int((time.time() - start) * 1000)
-                    usage = result.get("usage", {})
-                    tokens_used = usage.get("total_tokens")
-                    latency_ms = elapsed_ms
         except Exception as e:
             error_msg = str(e)
             logger.exception(

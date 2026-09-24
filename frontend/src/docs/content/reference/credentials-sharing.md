@@ -78,7 +78,7 @@ Some nodes store `credentialId` (UUID) in `node.data`:
 | [Telegram Trigger](../nodes/telegram-trigger-node.md), [Telegram](../nodes/telegram-node.md) | `credentialId` | Telegram bot credential |
 | [Discord Trigger](../nodes/discord-trigger-node.md), [Discord](../nodes/discord-node.md) | `credentialId` | Discord public key or webhook credential |
 | Vector Store | `credential_id` | Qdrant or Postgres (pgvector) vector DB, via a Qdrant, Psql, or Custom Embeddings RAG credential |
-| Evals | `credential_id`, `judge_credential_id` | Model credentials |
+| Evals | `credential_id`, `judge_credential_id` | Model credential; a model or Decision Model credential for the LLM-as-Judge judge |
 | [Playwright](../nodes/playwright-node.md) AI step | `credentialId` | LLM/Vision model (for AI step and [Auto Heal](../nodes/playwright-node.md#ai-auto-heal)) |
 
 The executor loads the credential directly from the database by ID and decrypts the config.

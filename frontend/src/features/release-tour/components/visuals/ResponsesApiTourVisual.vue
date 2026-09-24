@@ -41,16 +41,18 @@ const capabilityMessage = computed<string>(() =>
 </script>
 
 <template>
-  <div class="w-full rounded-lg border border-border bg-card p-4">
-    <div class="mb-3 flex items-center justify-between">
-      <span class="text-sm font-medium text-foreground">Agent &middot; Model</span>
-      <span class="font-mono text-xs text-muted-foreground">gpt-5</span>
+  <!-- Fills the tour's fixed frame and draws no border of its own: the frame already
+       has one, and a second rounded edge inside it reads as a doubled line. -->
+  <div class="flex h-full w-full flex-col gap-1.5 rounded-lg bg-card p-2.5">
+    <div class="flex shrink-0 items-center justify-between">
+      <span class="text-xs font-medium leading-none text-foreground">Agent &middot; Model</span>
+      <span class="font-mono text-[10px] leading-none text-muted-foreground">gpt-5</span>
     </div>
 
-    <div class="mb-3 rounded-md border border-border bg-background px-3 py-2">
-      <div class="flex items-center gap-2">
+    <div class="shrink-0 rounded-md border border-border bg-background px-2 py-1">
+      <div class="flex items-center gap-1.5">
         <span
-          class="flex h-4 w-4 items-center justify-center rounded border transition-colors duration-500"
+          class="flex h-3.5 w-3.5 items-center justify-center rounded border transition-colors duration-500"
           :class="enabled
             ? 'border-primary bg-primary text-primary-foreground'
             : 'border-input bg-background'"
@@ -58,7 +60,7 @@ const capabilityMessage = computed<string>(() =>
           <svg
             v-if="enabled"
             viewBox="0 0 16 16"
-            class="h-3 w-3"
+            class="h-2.5 w-2.5"
             fill="none"
             stroke="currentColor"
             stroke-width="2.5"
@@ -70,39 +72,34 @@ const capabilityMessage = computed<string>(() =>
             />
           </svg>
         </span>
-        <span class="text-sm text-foreground">Use Responses API</span>
+        <span class="text-[11px] leading-none text-foreground">Use Responses API</span>
       </div>
       <p
-        class="mt-1.5 text-xs transition-colors duration-500"
+        class="mt-1 truncate text-[10px] leading-tight transition-colors duration-500"
         :class="enabled ? 'text-success' : 'text-muted-foreground'"
       >
         {{ capabilityMessage }}
       </p>
     </div>
 
-    <div class="space-y-1.5">
+    <div class="flex min-h-0 flex-1 flex-col justify-center gap-1">
       <div
         v-for="turn in turns"
         :key="turn.label"
-        class="flex items-center gap-3 rounded-md border bg-background px-3 py-2 transition-all duration-500"
+        class="flex items-center gap-2 rounded-md border bg-background px-2 py-1 transition-all duration-500"
         :class="{
           'border-border opacity-100': turn.state === 'done',
           'border-primary/60 opacity-100': turn.state === 'active',
           'border-border opacity-40': turn.state === 'idle',
         }"
       >
-        <span class="w-24 shrink-0 text-xs text-muted-foreground">{{ turn.label }}</span>
-        <span class="flex-1 truncate text-sm text-foreground">{{ turn.detail }}</span>
+        <span class="w-20 shrink-0 text-[10px] leading-none text-muted-foreground">{{ turn.label }}</span>
+        <span class="flex-1 truncate text-[11px] leading-none text-foreground">{{ turn.detail }}</span>
         <span
           v-if="turn.label === 'Reasoning' && enabled"
-          class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"
+          class="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] leading-none text-primary dark:bg-primary/25 dark:text-brand-primary-soft"
         >encrypted</span>
       </div>
     </div>
-
-    <p class="mt-3 text-xs text-muted-foreground">
-      The conversation stays in Heym. Only the reasoning travels back to the model, as an
-      encrypted blob, so the agent picks up where it left off.
-    </p>
   </div>
 </template>

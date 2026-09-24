@@ -130,7 +130,15 @@ def build_decision_body(
 
 
 class DecisionProviderError(RuntimeError):
-    """Raised when the decision model endpoint refuses or fails a request."""
+    """Raised when the decision model endpoint refuses or fails a request.
+
+    `status_code` is the HTTP status the endpoint answered with, and None when no
+    response arrived, so a caller can retry the transient ones without parsing text.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _endpoint_url(base_url: str) -> str:
@@ -192,6 +200,7 @@ def call_decision_model(
     started = time.monotonic()
     payload: object = None
     error: str | None = None
+    failed_status: int | None = None
     text = ""
     try:
         with build_guarded_http_client(timeout=timeout, follow_redirects=True) as client:
@@ -203,6 +212,7 @@ def call_decision_model(
             except (json.JSONDecodeError, ValueError):
                 payload = None
             if status_code >= 400:
+                failed_status = status_code
                 error = _error_message(status_code, payload, text)
             elif not isinstance(payload, dict):
                 error = "Decision model did not return a JSON object"
@@ -234,7 +244,7 @@ def call_decision_model(
             )
 
     if error:
-        raise DecisionProviderError(error)
+        raise DecisionProviderError(error, status_code=failed_status)
     if not isinstance(payload, dict):
         raise DecisionProviderError("Decision model did not return a JSON object")
     return payload

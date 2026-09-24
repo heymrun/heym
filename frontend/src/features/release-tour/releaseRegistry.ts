@@ -19,14 +19,15 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.15",
     publishedAt: new Date("2026-09-23T00:00:00Z"),
-    headline: "Add a credential without leaving the conversation",
+    headline:
+      "Add a credential without leaving the conversation, and give your evals an independent judge",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
-      sectionOrder: ["chat-credentials"],
+      tourEnabled: true,
+      sectionOrder: ["chat-credentials", "evals-judge"],
     },
     sections: [
       {
@@ -66,6 +67,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
           },
         },
       },
+      {
+        id: "evals-judge",
+        title: "Give your evals an independent judge",
+        publishedAt: new Date("2026-09-23T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "**LLM-as-Judge** in the **Evals** tab can now hand scoring to a separate judge. Pick an OpenAI, OpenAI compatible, Gemini or **Decision Model** credential and type the judge's model. Each model answers the test input on its own, then the judge rates how closely that answer matches the expected output from 0 to 100. A decision model such as `jev-latest` computes that score from a probability distribution instead of writing a number about the answer.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Temperature and reasoning effort leave the panel in this mode, so it only shows what the run uses. Every run keeps its judge: the history list names it, opening a past run loads it back for **Re-Run Evals**, and **Export** includes it. Leave the judge empty and each model scores its own answer, as before.",
+          },
+        ],
+        tour: {
+          description:
+            "Score eval answers with a separate model or a decision model instead of asking each model to grade its own work.",
+          useCases: [
+            "Compare models on one suite with a single independent judge",
+            "See which judge scored a past run in the history list and the export",
+            "Re-run a past evaluation with the same judge in one click",
+          ],
+          tourVisual: "evals-judge",
+          docTarget: {
+            categoryId: "tabs",
+            slug: "evals-tab",
+            title: "Evals",
+          },
+        },
+      },
     ],
   },
   {
@@ -94,7 +127,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
           {
             type: "prose",
             markdown:
-              "It works everywhere a model is chosen: the **LLM** and **Agent** nodes, **Chat**, **AI Defaults**, **Evals**, **Dashboards** and the expression builder. An agent re-routes as its tool loop progresses, so a cheap model can take the early turns and a stronger one can take the turn that actually needs it.",
+              "It works everywhere a model is chosen: the **LLM** and **Agent** nodes, **Chat**, **AI Defaults**, **Dashboards** and the expression builder. An agent re-routes as its tool loop progresses, so a cheap model can take the early turns and a stronger one can take the turn that actually needs it.",
           },
           {
             type: "prose",
@@ -219,58 +252,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "agent-node",
             title: "Agent Node",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.11",
-    publishedAt: new Date("2026-09-01T00:00:00Z"),
-    headline: "Keep a vector store in step with its source",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["rag-upsert-delete"],
-    },
-    sections: [
-      {
-        id: "rag-upsert-delete",
-        title: "Upsert and delete documents by your own ID",
-        publishedAt: new Date("2026-09-01T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The **RAG / Vector Store** node has two new operations: **Upsert** and **Delete**. Both address a document by a unique ID that lives inside the payload rather than by the store's internal point ID, so a document keeps the identifier your own system already uses - a CRM record ID, an SKU, a page slug. A **Document ID Field** names the field (default `doc_id`) and **Document ID** carries the value, and both accept expressions.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Upsert removes every point stored under that ID before writing the new version, so a document that was split into chunks is replaced as a whole instead of duplicated. Delete reports `deleted: true` or `false`, so removing an ID that is not there is a plain result rather than a failed run. Both work identically on Qdrant and on Postgres (pgvector).",
-          },
-          {
-            type: "prose",
-            markdown:
-              "**Document metadata now resolves expressions.** Writing `{ \"url\": \"$start.url\" }` on Insert or Upsert stores what the run actually produced, and a value that is one whole expression keeps its type, so a number stays a number and still matches a search filter.",
-          },
-        ],
-        tour: {
-          description:
-            "Replace or remove a stored document by the ID your own system uses, without searching for it first.",
-          useCases: [
-            "Re-sync a knowledge base when the source record changes",
-            "Drop a document from the store when it is deleted upstream",
-            "Tag a document with the URL or record ID the run came from",
-          ],
-          tourVisual: "rag-upsert-delete",
-          docTarget: {
-            categoryId: "nodes",
-            slug: "rag-node",
-            title: "RAG / Vector Store",
           },
         },
       },

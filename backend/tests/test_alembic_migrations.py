@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["125_llm_trace_router_cols"])
+        self.assertEqual(self.script.get_heads(), ["126_eval_run_judge_cols"])
+
+    def test_eval_run_judge_columns_follow_llm_trace_router_columns(self) -> None:
+        revision = self.script.get_revision("126_eval_run_judge_cols")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "125_llm_trace_router_cols")
 
     def test_llm_trace_router_columns_follow_model_router(self) -> None:
         revision = self.script.get_revision("125_llm_trace_router_cols")
