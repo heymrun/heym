@@ -3973,7 +3973,7 @@ function renderContent(content: string): string {
             ref="aiTextareaRef"
             v-model="aiInputMessage"
             :disabled="aiStreaming || !selectedCredentialId || !selectedModel"
-            :placeholder="canvasMode === 'ask' ? 'Ask a question...' : 'Describe your workflow...'"
+            :placeholder="canvasMode === 'ask' ? 'Ask a question...' : 'What do you want to automate...'"
             class="ai-textarea"
             rows="2"
             @keydown="handleAiKeydown"
