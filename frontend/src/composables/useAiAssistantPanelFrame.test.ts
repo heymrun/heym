@@ -14,7 +14,7 @@ describe("estimateAiPanelWidth", () => {
     expect(estimateAiPanelWidth(800)).toBe(360);
     expect(estimateAiPanelWidth(1600)).toBe(544);
     expect(estimateAiPanelWidth(2400)).toBe(620);
-    expect(estimateAiPanelWidth(400)).toBe(400 - AI_PANEL_GAP * 2);
+    expect(estimateAiPanelWidth(400)).toBe(AI_PANEL_MIN_WIDTH);
   });
 });
 

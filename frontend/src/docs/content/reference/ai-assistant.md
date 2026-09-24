@@ -1,6 +1,6 @@
 # AI Assistant
 
-The **AI Assistant** is a chat panel that opens from the Debug panel and starts at the bottom-right of the editor. Drag the header to move it, and drag an edge or a corner to change its width or height. It will not shrink below 320×480 pixels. The position and size are remembered in this browser. Use natural language to create or modify workflows—describe what you want, and the AI generates nodes and edges that are applied to the canvas.
+The **AI Assistant** is a chat panel that opens from the Debug panel and starts at the bottom-right of the editor. Drag the header to move it, and drag an edge or a corner to change its width or height. It will not shrink below 360×480 pixels. The position and size are remembered in this browser. **Reset position and size** in the header puts the panel back at the bottom-right. Use natural language to create or modify workflows—describe what you want, and the AI generates nodes and edges that are applied to the canvas.
 
 For documentation questions outside the editor, use [Chat with Heym](./chat-with-heym.md). That surface is optimized for page-aware product help instead of workflow generation.
 

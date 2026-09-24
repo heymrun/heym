@@ -107,6 +107,7 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
   resizing: Ref<boolean>;
   onHeaderPointerDown: (event: PointerEvent) => void;
   onResizePointerDown: (edge: AiPanelResizeEdge, event: PointerEvent) => void;
+  resetFrame: () => void;
 } {
   const frame = ref<AiPanelFrame | null>(null);
   const dragging = ref(false);
@@ -225,6 +226,12 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
     window.addEventListener("pointerup", onUp);
   }
 
+  function resetFrame(): void {
+    localStorage.removeItem(STORAGE_KEY);
+    if (!enabled()) return;
+    place(defaultAiPanelFrame(viewport()));
+  }
+
   function onWindowResize(): void {
     if (!enabled() || !frame.value) return;
     place(frame.value);
@@ -239,5 +246,5 @@ export function useAiAssistantPanelFrame(enabled: () => boolean): {
     window.removeEventListener("resize", onWindowResize);
   });
 
-  return { frame, dragging, resizing, onHeaderPointerDown, onResizePointerDown };
+  return { frame, dragging, resizing, onHeaderPointerDown, onResizePointerDown, resetFrame };
 }

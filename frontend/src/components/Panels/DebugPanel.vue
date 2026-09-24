@@ -6,7 +6,7 @@ import axios from "axios";
 import DOMPurify from "dompurify";
 import { jsonrepair } from "jsonrepair";
 import { marked } from "marked";
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, RotateCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type {
@@ -1524,6 +1524,7 @@ const {
   resizing: aiPanelResizing,
   onHeaderPointerDown: onAiPanelHeaderPointerDown,
   onResizePointerDown: onAiPanelResizePointerDown,
+  resetFrame: resetAiPanelFrame,
 } = useAiAssistantPanelFrame(() => !props.mobileAiSheet);
 const aiPanelFrameStyle = computed(() => {
   if (props.mobileAiSheet || !aiPanelFrame.value) return undefined;
@@ -3815,7 +3816,19 @@ function renderContent(content: string): string {
               </button>
             </div>
             <button
+              v-if="!props.mobileAiSheet"
+              type="button"
               class="p-1 rounded hover:bg-muted transition-colors"
+              title="Reset position and size"
+              data-testid="ai-assistant-reset-frame"
+              @click="resetAiPanelFrame"
+            >
+              <RotateCcw class="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              class="p-1 rounded hover:bg-muted transition-colors"
+              title="Close"
               @click="aiPanelOpen = false"
             >
               <X class="w-4 h-4" />
