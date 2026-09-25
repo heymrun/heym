@@ -37,7 +37,11 @@ import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
 import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, isHitlWaitNodeResult, isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { formatModelRoutingLabel, readSpanModelRouting } from "@/components/Panels/executionTimeline";
-import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
+import {
+  collectRunImageSrcs,
+  getOutputImageSrcs,
+  maskImageDataForDisplay,
+} from "@/lib/executionImages";
 import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
@@ -368,7 +372,7 @@ const displayResults = computed(() => {
           : undefined);
       return {
         ...r,
-        output: sanitizeForDisplay(r.output),
+        output: maskImageDataForDisplay(r.output),
         rawOutput,
         occurrence,
         displayKey:
@@ -512,7 +516,7 @@ function getLogsAsJsonData(): object {
 
 const sanitizedFinalOutputs = computed(() => {
   if (!executionResult.value?.outputs) return null;
-  return sanitizeForDisplay(executionResult.value.outputs);
+  return maskImageDataForDisplay(executionResult.value.outputs);
 });
 
 interface FileUploadMint {
@@ -2703,30 +2707,6 @@ function handleAiKeydown(event: KeyboardEvent): void {
   // message and started a run behind the panel.
   event.stopPropagation();
   sendAiMessage();
-}
-
-function sanitizeForDisplay(data: unknown): unknown {
-  if (typeof data === "string") {
-    if (data.startsWith("data:image")) {
-      return data.slice(0, 150) + "...";
-    }
-    if (data.length > 100 && /^[A-Za-z0-9+/=]+$/.test(data)) {
-      return "[Base64 data]";
-    }
-  }
-  if (typeof data === "object" && data !== null) {
-    if (Array.isArray(data)) {
-      return data.map(sanitizeForDisplay);
-    }
-    const result: Record<string, unknown> = {};
-    for (const key in data) {
-      if (Object.prototype.hasOwnProperty.call(data, key)) {
-        result[key] = sanitizeForDisplay((data as Record<string, unknown>)[key]);
-      }
-    }
-    return result;
-  }
-  return data;
 }
 
 function renderContent(content: string): string {
