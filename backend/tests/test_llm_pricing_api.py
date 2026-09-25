@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.api.llm_pricing import (
     clear_user_customizations,
@@ -298,6 +299,32 @@ class CustomCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_custom)
         self.assertEqual(result.provider, "org")
 
+    async def test_creates_custom_row_with_zero_prices(self):
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = AsyncMock()
+        scalar = MagicMock()
+        scalar.scalar_one_or_none = MagicMock(return_value=None)
+        db.execute = AsyncMock(return_value=scalar)
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        async def _refresh_side_effect(row):
+            row.id = uuid.uuid4()
+            row.updated_at = datetime.now(timezone.utc)
+
+        db.refresh = AsyncMock(side_effect=_refresh_side_effect)
+        payload = LLMPricingCustomCreate(
+            model="ollama/llama3",
+            input_per_1m_usd=Decimal("0"),
+            output_per_1m_usd=Decimal("0"),
+        )
+        result = await create_custom_pricing(payload=payload, current_user=user, db=db)
+        added = db.add.call_args[0][0]
+        self.assertEqual(added.input_per_1m_usd, Decimal("0"))
+        self.assertEqual(added.output_per_1m_usd, Decimal("0"))
+        self.assertEqual(result.output_per_1m_usd, Decimal("0"))
+
     async def test_create_custom_without_provider_keeps_model_only(self):
         user = MagicMock()
         user.id = uuid.uuid4()
@@ -361,6 +388,31 @@ class CustomCreateTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
         self.assertEqual(ctx.exception.status_code, 409)
+
+
+class PriceValidationTests(unittest.TestCase):
+    def test_zero_prices_are_accepted(self):
+        patch_payload = LLMPricingPatch(
+            input_per_1m_usd=Decimal("0.5"), output_per_1m_usd=Decimal("0")
+        )
+        create_payload = LLMPricingCustomCreate(
+            model="local-model", input_per_1m_usd=Decimal("0"), output_per_1m_usd=Decimal("0")
+        )
+        self.assertEqual(patch_payload.output_per_1m_usd, Decimal("0"))
+        self.assertEqual(create_payload.input_per_1m_usd, Decimal("0"))
+
+    def test_negative_prices_are_rejected(self):
+        for field in ("input_per_1m_usd", "output_per_1m_usd"):
+            prices = {
+                "input_per_1m_usd": Decimal("1"),
+                "output_per_1m_usd": Decimal("1"),
+                field: Decimal("-0.01"),
+            }
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError):
+                    LLMPricingPatch(**prices)
+                with self.assertRaises(ValidationError):
+                    LLMPricingCustomCreate(model="local-model", **prices)
 
 
 class ClearCustomizationsTests(unittest.IsolatedAsyncioTestCase):

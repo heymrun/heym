@@ -7372,6 +7372,10 @@ class WorkflowExecutor:
             model_routing = self._pop_model_routing(output)
             if model_routing:
                 metadata["model_routing"] = model_routing
+            # JSON output replaces the LLM payload, so token usage survives only here.
+            usage = output.pop("_usage", None)
+            if isinstance(usage, dict):
+                metadata["usage"] = usage
 
             return NodeResult(
                 node_id=node_id,

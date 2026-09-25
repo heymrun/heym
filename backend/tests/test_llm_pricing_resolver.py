@@ -54,6 +54,16 @@ class ResolverTests(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(side_effect=[exec_global, exec_override])
         return db
 
+    async def test_zero_output_price_charges_input_only(self):
+        db = self._db_with(overrides=[_override("local-llm", inp=2, out=0)])
+        out = await resolve_costs_for_user(db, self.user_id, [("local-llm", 1_000_000, 1_000_000)])
+        self.assertEqual(out, [(Decimal("2"), True)])
+
+    async def test_free_model_counts_as_priced(self):
+        db = self._db_with(overrides=[_override("ollama-llama3", inp=0, out=0)])
+        out = await resolve_costs_for_user(db, self.user_id, [("ollama-llama3", 1_000, 1_000)])
+        self.assertEqual(out, [(Decimal("0"), True)])
+
     async def test_equals_match_computes_cost(self):
         db = self._db_with(globals_=[_global("gpt-4o", "equals", 5, 15)])
         out = await resolve_costs_for_user(db, self.user_id, [("gpt-4o", 1_000_000, 1_000_000)])

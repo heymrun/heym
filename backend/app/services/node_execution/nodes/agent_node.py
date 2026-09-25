@@ -100,6 +100,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["fallbackUsed"] = agent_output["fallbackUsed"]
         if agent_output.get("model"):
             output["model"] = agent_output["model"]
+        if isinstance(agent_output.get("usage"), dict):
+            output["_usage"] = agent_output["usage"]
         if generated_files:
             output["_generated_files"] = generated_files
         self._restore_internal_trace_id(output, trace_id)
