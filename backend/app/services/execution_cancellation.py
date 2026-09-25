@@ -86,6 +86,7 @@ class ExecutionCancellationHandle:
     progress_event_bytes: int = 0
     next_progress_event_seq: int = 0
     dropped_progress_events: int = 0
+    claim_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ class _RegistryCommand:
     trigger_source: str | None = None
     actor_user_id: uuid.UUID | None = None
     recoverable: bool = True
+    claim_owner: str | None = None
 
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
@@ -164,6 +166,7 @@ def register_execution(
     trigger_source: str | None = None,
     actor_user_id: uuid.UUID | None = None,
     recoverable: bool = True,
+    claim_owner: str | None = None,
 ) -> threading.Event:
     if event is None:
         event = threading.Event()
@@ -177,6 +180,7 @@ def register_execution(
         trigger_source=trigger_source,
         actor_user_id=actor_user_id,
         recoverable=recoverable,
+        claim_owner=claim_owner,
     )
     event._execution_handle = handle  # type: ignore[attr-defined]
     with _LOCK:
@@ -712,6 +716,7 @@ class ActiveExecutionRegistry:
                 trigger_source=handle.trigger_source,
                 actor_user_id=handle.actor_user_id,
                 recoverable=handle.recoverable,
+                claim_owner=handle.claim_owner,
             )
         )
         self._wake()
@@ -776,7 +781,6 @@ class ActiveExecutionRegistry:
 
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
         from app.services.cluster.run_queue import (
-            STATUS_CLAIMED,
             STATUS_DONE,
             STATUS_FAILED,
             STATUS_SKIPPED_LATE,
@@ -815,29 +819,46 @@ class ActiveExecutionRegistry:
             )
             return
 
+        # Queue claim ownership check:
+        # If this execution exists in WorkflowRunQueue, QUEUE CLAIM OWNER == ACTIVE EXECUTION OWNER.
+        # Only the worker holding the matching claim (command.claim_owner == queue_row.claimed_by_process)
+        # may establish/refresh the active execution row. Dispatchers and other workers are discarded.
+        queue_check = await session.execute(
+            select(WorkflowRunQueue.claimed_by_process, WorkflowRunQueue.status).where(
+                WorkflowRunQueue.execution_id == command.execution_id
+            )
+        )
+        queue_row = queue_check.first()
+        if queue_row is not None:
+            if isinstance(queue_row, (tuple, list)) or hasattr(queue_row, "__getitem__"):
+                claimed_by_process = queue_row[0]
+                q_status = queue_row[1] if len(queue_row) > 1 else None
+            else:
+                claimed_by_process = getattr(queue_row, "claimed_by_process", str(queue_row))
+                q_status = getattr(queue_row, "status", None)
+            if q_status in (STATUS_DONE, STATUS_FAILED, STATUS_SKIPPED_LATE):
+                logger.info(
+                    "Active execution registry: discarding start command for terminal execution %s",
+                    command.execution_id,
+                )
+                return
+            if claimed_by_process is not None and (
+                command.claim_owner is None or command.claim_owner != claimed_by_process
+            ):
+                logger.info(
+                    "Active execution registry: discarding start command for queued execution %s (claim_owner %s != queue claimed_by_process %s)",
+                    command.execution_id,
+                    command.claim_owner,
+                    claimed_by_process,
+                )
+                return
+
         active_handle = get_active_execution_handle(command.execution_id)
         is_active_local_owner = (
             active_handle is not None
             and not active_handle.relinquished
             and active_handle.registration_token == command.registration_token
         )
-
-        # If this run was already claimed in WorkflowRunQueue, only the claiming
-        # worker (which holds the active, un-relinquished handle) may write a start command.
-        # Stale start commands from previous handlers/dispatchers must be discarded.
-        if not is_active_local_owner:
-            claimed_check = await session.execute(
-                select(WorkflowRunQueue.id).where(
-                    WorkflowRunQueue.execution_id == command.execution_id,
-                    WorkflowRunQueue.status == STATUS_CLAIMED,
-                )
-            )
-            if claimed_check.scalar_one_or_none() is not None:
-                logger.info(
-                    "Active execution registry: discarding stale start command for claimed execution %s",
-                    command.execution_id,
-                )
-                return
 
         heartbeat_time = now if is_active_local_owner else (command.enqueued_at or now)
         await session.execute(
@@ -1179,7 +1200,7 @@ async def request_persisted_execution_cancel(
             if queue_row is not None:
                 if queue_row.status in (STATUS_QUEUED, STATUS_WAITING_FOR_MAIN):
                     queue_row.status = STATUS_DONE
-                    queue_row.error = "Execution was cancelled"
+                    queue_row.error = None
                     queue_row.finished_at = now
                     queue_row.result = {
                         "execution_id": str(execution_id),
@@ -1188,7 +1209,7 @@ async def request_persisted_execution_cancel(
                         "outputs": {"error": "Execution was cancelled"},
                         "execution_time_ms": 0.0,
                         "history_written": True,
-                        "error": "Execution was cancelled",
+                        "error": None,
                         "instance": identity.instance_name(),
                     }
                     await db.execute(
@@ -1206,6 +1227,26 @@ async def request_persisted_execution_cancel(
                         )
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
+                    from app.db.models import Workflow
+
+                    workflow_row = (
+                        await db.execute(
+                            select(Workflow.owner_id, Workflow.name).where(
+                                Workflow.id == workflow_id
+                            )
+                        )
+                    ).first()
+                    if workflow_row is not None and workflow_row[0] is not None:
+                        from app.api.analytics import upsert_workflow_analytics_snapshot
+
+                        await upsert_workflow_analytics_snapshot(
+                            db,
+                            workflow_id=workflow_id,
+                            owner_id=workflow_row[0],
+                            workflow_name_snapshot=workflow_row[1],
+                            status="cancelled",
+                            execution_time_ms=0.0,
+                        )
                     notified_queue = True
                     marked_rows = (marked_rows or 0) + 1
                     # Ensure ActiveWorkflowExecution exists with cancel_requested_at
@@ -1476,7 +1517,50 @@ async def list_persisted_active_executions_for_user(
     from sqlalchemy import exists, or_, select
 
     from app.db.models import ActiveWorkflowExecution, Workflow, WorkflowRunQueue, WorkflowShare
-    from app.services.cluster.run_queue import STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
+    from app.services.cluster.run_queue import (
+        STATUS_CLAIMED,
+        STATUS_QUEUED,
+        STATUS_WAITING_FOR_MAIN,
+    )
+
+    # Keep queued runs visible during the handoff interval
+    # (between dispatcher relinquishment and worker's first active-row write).
+    queued_result = await db.execute(
+        select(
+            WorkflowRunQueue.execution_id,
+            WorkflowRunQueue.workflow_id,
+            WorkflowRunQueue.enqueued_at,
+            Workflow.name,
+            WorkflowRunQueue.inputs,
+        )
+        .join(Workflow, Workflow.id == WorkflowRunQueue.workflow_id)
+        .where(
+            WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN, STATUS_CLAIMED]),
+            ~exists().where(
+                ActiveWorkflowExecution.execution_id == WorkflowRunQueue.execution_id,
+                ActiveWorkflowExecution.cancel_requested_at.is_not(None),
+            ),
+            or_(
+                Workflow.owner_id == user_id,
+                Workflow.id.in_(
+                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
+                ),
+            ),
+        )
+        .order_by(WorkflowRunQueue.enqueued_at.desc())
+    )
+    queued_records = [
+        ActiveExecutionRecord(
+            execution_id=q_row.execution_id,
+            workflow_id=q_row.workflow_id,
+            workflow_name=q_row.name,
+            started_at=q_row.enqueued_at or _utcnow(),
+            inputs=dict(q_row.inputs or {}),
+            running_node_ids=[],
+            node_results=[],
+        )
+        for q_row in queued_result.all()
+    ]
 
     cutoff = _utcnow() - timedelta(seconds=ACTIVE_EXECUTION_STALE_AFTER_SECONDS)
     result = await db.execute(
@@ -1509,7 +1593,7 @@ async def list_persisted_active_executions_for_user(
         .order_by(ActiveWorkflowExecution.started_at.desc())
     )
 
-    return [
+    records = [
         ActiveExecutionRecord(
             execution_id=row.execution_id,
             workflow_id=row.workflow_id,
@@ -1521,6 +1605,13 @@ async def list_persisted_active_executions_for_user(
         )
         for row in result.all()
     ]
+    seen_ids = {r.execution_id for r in records}
+    for q_record in queued_records:
+        if q_record.execution_id not in seen_ids:
+            seen_ids.add(q_record.execution_id)
+            records.append(q_record)
+
+    return records
 
 
 @dataclass(frozen=True)

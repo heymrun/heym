@@ -112,6 +112,7 @@ class RequestPersistedCancelTests(unittest.IsolatedAsyncioTestCase):
                 raise SQLAlchemyError("could not read block 189")
             res = MagicMock(rowcount=rowcount)
             res.scalar_one_or_none.return_value = None
+            res.first.return_value = None
             return res
 
         db.execute = AsyncMock(side_effect=execute)

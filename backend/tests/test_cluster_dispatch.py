@@ -154,6 +154,30 @@ class WaitForResultTests(unittest.IsolatedAsyncioTestCase):
             await wait_for_result(execution_id, timeout_seconds=1.0)
         self.assertFalse(bus_module.run_result_bus.handle_payload(str(execution_id)))
 
+    async def test_a_cancelled_run_returns_cancelled_status_and_outputs(self) -> None:
+        execution_id = uuid.uuid4()
+        event = bus_module.run_result_bus.register(execution_id)
+        event.set()
+        with patch(
+            "app.services.cluster.dispatch.run_queue.read_terminal_result",
+            new=AsyncMock(
+                return_value=(
+                    "done",
+                    {
+                        "status": "cancelled",
+                        "outputs": {"error": "Execution was cancelled"},
+                        "error": None,
+                    },
+                    None,
+                )
+            ),
+        ):
+            result = await wait_for_result(execution_id, timeout_seconds=1.0)
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.outputs, {"error": "Execution was cancelled"})
+        self.assertIsNone(result.error)
+        self.assertTrue(result.history_written)
+
 
 class TestRunTests(unittest.TestCase):
     def test_a_test_run_never_leaves_this_instance(self) -> None:

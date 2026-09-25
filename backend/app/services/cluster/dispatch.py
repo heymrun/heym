@@ -401,6 +401,7 @@ class RunQueueWorker:
                 inputs=row.inputs,
                 trigger_source=row.trigger_source,
                 actor_user_id=row.actor_user_id,
+                claim_owner=getattr(row, "claimed_by_process", None),
             )
             async with async_session_maker() as db:
                 active_row = await db.get(ActiveWorkflowExecution, row.execution_id)
@@ -542,7 +543,7 @@ class RunQueueWorker:
                     "outputs": {"error": "Execution was cancelled"},
                     "execution_time_ms": 0.0,
                     "history_written": True,
-                    "error": "Execution was cancelled",
+                    "error": None,
                     "instance": identity.instance_name(),
                 },
                 error=None,

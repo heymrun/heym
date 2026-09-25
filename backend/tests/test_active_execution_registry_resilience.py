@@ -34,7 +34,13 @@ from app.services.execution_cancellation import (
 
 
 def _flush() -> None:
+    from app.services.execution_cancellation import active_execution_registry
+
     _ACTIVE_EXECUTIONS.clear()
+    with active_execution_registry._commands.mutex:
+        active_execution_registry._commands.queue.clear()
+    active_execution_registry._pending.clear()
+    active_execution_registry._command_attempts.clear()
 
 
 def _statement_kind(statement: Any) -> str:
@@ -71,6 +77,9 @@ class _FakeResult:
         return self._rows[0] if self._rows else False
 
     def scalar_one_or_none(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+    def first(self) -> Any:
         return self._rows[0] if self._rows else None
 
 
@@ -117,9 +126,12 @@ class _FakeSession:
         if kind == "select":
             stmt_str = str(statement)
             self.compiled_selects.append(stmt_str)
-            # A claimed-run lookup checks WorkflowRunQueue.id for STATUS_CLAIMED.
-            # When no row exists, real PostgreSQL returns 0 rows (scalar_one_or_none() is None).
-            if "workflow_run_queue.id" in stmt_str.lower():
+            # Terminal check uses exists(...) on ExecutionHistory / WorkflowRunQueue.
+            if "exists" in stmt_str.lower():
+                return _FakeResult(rows=self._select_rows)
+            # A claimed-run lookup checks WorkflowRunQueue.
+            # When no row exists, real PostgreSQL returns 0 rows.
+            if "workflow_run_queue" in stmt_str.lower():
                 return _FakeResult(rows=self._claimed_rows)
             return _FakeResult(rows=self._select_rows)
         return self._handler(kind, execution_id)
@@ -1328,6 +1340,7 @@ class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
             workflow_id=self.wf_id,
             execution_id=self.ex_id,
             inputs={"worker": 1},
+            claim_owner="worker-instance-1234",
         )
         worker_handle = getattr(worker_event, "_execution_handle", None)
         self.assertIsNotNone(worker_handle)
@@ -1428,6 +1441,431 @@ class SameProcessInFlightHeartbeatRaceTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).scalar_one_or_none()
             self.assertIsNone(row_after, "Worker finish command must delete its own row")
+
+    async def test_delayed_dispatcher_start_cannot_reclaim_another_process_worker_ownership(
+        self,
+    ) -> None:
+        """Prove that when another process claims a run and establishes ownership in PostgreSQL:
+            dispatcher registration enqueues START
+                     ↓
+            dispatcher relinquishes handle
+                     ↓
+            another process worker claims run (STATUS_CLAIMED, claimed_by_process="worker-host2-9999")
+                     ↓
+            worker establishes active row in PostgreSQL (worker_id="worker-host2-9999:token_other")
+                     ↓
+            delayed dispatcher START drains
+        Result: dispatcher START is discarded. The other process worker's ownership,
+        worker_id, and heartbeat are completely preserved against overwrite.
+        """
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
+        from app.db.session import async_session_maker
+        from app.services.cluster.run_queue import STATUS_CLAIMED
+        from app.services.execution_cancellation import (
+            active_execution_registry,
+            register_execution,
+            relinquish_execution,
+        )
+
+        now = datetime.now(timezone.utc)
+        # 1. Dispatcher registers and enqueues START command
+        disp_event = register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"disp": 1},
+        )
+        disp_handle = getattr(disp_event, "_execution_handle", None)
+        self.assertIsNotNone(disp_handle)
+
+        # 2. Row exists in WorkflowRunQueue claimed by another worker process
+        worker_process_id = "worker-host2-9999"
+        queued_run = WorkflowRunQueue(
+            id=uuid.uuid4(),
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            placement="anywhere",
+            target_instance_id="worker-host2",
+            status=STATUS_CLAIMED,
+            claimed_at=now,
+            claimed_by_process=worker_process_id,
+            inputs={"worker": 1},
+            trigger_source="api",
+            actor_user_id=self.user_id,
+            credentials_owner_id=self.user_id,
+            test_run=False,
+            timeout_seconds=60.0,
+            return_on_chart_output=False,
+            enqueued_at=now,
+            not_after=now + timedelta(seconds=120),
+        )
+        async with async_session_maker() as session:
+            session.add(queued_run)
+            await session.commit()
+
+        # Dispatcher relinquishes
+        relinquish_execution(self.ex_id, handle=disp_handle)
+
+        # 3. Another process worker writes its active row directly to PostgreSQL
+        other_worker_id = f"{worker_process_id}:{uuid.uuid4()}"
+        worker_heartbeat = now + timedelta(seconds=10)
+        async with async_session_maker() as session:
+            session.add(
+                ActiveWorkflowExecution(
+                    execution_id=self.ex_id,
+                    workflow_id=self.wf_id,
+                    worker_id=other_worker_id,
+                    started_at=now,
+                    heartbeat_at=worker_heartbeat,
+                    inputs={"worker": 1},
+                    trigger_source="api",
+                    actor_user_id=self.user_id,
+                    recoverable=True,
+                    running_node_ids=["node_active_on_other_worker"],
+                    running_node_started_at_ms={},
+                    node_results=[],
+                )
+            )
+            await session.commit()
+
+        # 4. Delayed dispatcher START command drains
+        await active_execution_registry._drain_commands()
+
+        # 5. In PostgreSQL: verify worker ownership was NOT overwritten
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                row.worker_id,
+                other_worker_id,
+                "Dispatcher must NOT overwrite other worker's worker_id",
+            )
+            self.assertEqual(row.inputs, {"worker": 1})
+            self.assertEqual(row.running_node_ids, ["node_active_on_other_worker"])
+
+    async def test_delayed_dispatcher_start_cannot_reclaim_same_process_worker_ownership(
+        self,
+    ) -> None:
+        """Prove that under the same-process worker claim:
+            dispatcher registration enqueues START
+                     ↓
+            dispatcher relinquishes
+                     ↓
+            same-process worker claims run (STATUS_CLAIMED, claimed_by_process="worker-local-1")
+                     ↓
+            worker registers with claim_owner and drains to establish ownership
+                     ↓
+            delayed dispatcher START drains
+        Result: delayed dispatcher START is discarded. Same-process worker ownership
+        is preserved against reclaim.
+        """
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from app.db.models import ActiveWorkflowExecution, WorkflowRunQueue
+        from app.db.session import async_session_maker
+        from app.services.cluster.run_queue import STATUS_CLAIMED
+        from app.services.execution_cancellation import (
+            _WORKER_ID,
+            active_execution_registry,
+            register_execution,
+            relinquish_execution,
+        )
+
+        now = datetime.now(timezone.utc)
+        # 1. Dispatcher registers and enqueues START
+        disp_event = register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"disp": 1},
+        )
+        disp_handle = getattr(disp_event, "_execution_handle", None)
+        self.assertIsNotNone(disp_handle)
+
+        # 2. Row exists in WorkflowRunQueue claimed by local worker
+        local_claim_owner = f"{_WORKER_ID}-local"
+        queued_run = WorkflowRunQueue(
+            id=uuid.uuid4(),
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            placement="anywhere",
+            target_instance_id="worker-local",
+            status=STATUS_CLAIMED,
+            claimed_at=now,
+            claimed_by_process=local_claim_owner,
+            inputs={"worker": 1},
+            trigger_source="api",
+            actor_user_id=self.user_id,
+            credentials_owner_id=self.user_id,
+            test_run=False,
+            timeout_seconds=60.0,
+            return_on_chart_output=False,
+            enqueued_at=now,
+            not_after=now + timedelta(seconds=120),
+        )
+        async with async_session_maker() as session:
+            session.add(queued_run)
+            await session.commit()
+
+        # Dispatcher relinquishes
+        relinquish_execution(self.ex_id, handle=disp_handle)
+
+        # 3. Same-process worker claims and registers
+        worker_event = register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"worker": 1},
+            claim_owner=local_claim_owner,
+        )
+        worker_handle = getattr(worker_event, "_execution_handle", None)
+        self.assertIsNotNone(worker_handle)
+        token_w = worker_handle.registration_token
+
+        # Drain worker's start command to PostgreSQL
+        await active_execution_registry._drain_commands()
+
+        # 4. Synthesize a delayed dispatcher START command queued from earlier
+        from app.services.execution_cancellation import _RegistryCommand
+
+        delayed_disp_cmd = _RegistryCommand(
+            action="start",
+            execution_id=self.ex_id,
+            registration_token=disp_handle.registration_token,
+            workflow_id=self.wf_id,
+            started_at=now - timedelta(minutes=1),
+            enqueued_at=now - timedelta(minutes=1),
+            inputs={"disp": "stale"},
+            trigger_source="api",
+            claim_owner=None,  # Dispatcher has no claim owner
+        )
+        active_execution_registry._commands.put(delayed_disp_cmd)
+        await active_execution_registry._drain_commands()
+
+        # 5. In PostgreSQL: worker's row is STILL the owner; stale dispatcher command did not overwrite
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(row.worker_id, f"{_WORKER_ID}:{token_w}")
+            self.assertEqual(row.inputs, {"worker": 1})
+
+    async def test_worker_completes_before_delayed_dispatcher_start_drains(
+        self,
+    ) -> None:
+        """Prove that when a worker completes the run before a delayed dispatcher START drains:
+            dispatcher registration enqueues START
+                     ↓
+            worker claims and completes (STATUS_DONE, ExecutionHistory written)
+                     ↓
+            worker deletes active row upon finish
+                     ↓
+            delayed dispatcher START drains
+        Result: delayed dispatcher START is discarded by terminal check. ActiveWorkflowExecution
+        row is NOT resurrected (zero phantom row).
+        """
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+        from app.db.session import async_session_maker
+        from app.services.cluster.run_queue import STATUS_DONE
+        from app.services.execution_cancellation import (
+            active_execution_registry,
+            register_execution,
+            relinquish_execution,
+        )
+
+        now = datetime.now(timezone.utc)
+        # 1. Dispatcher registers and enqueues START
+        disp_event = register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"disp": 1},
+        )
+        disp_handle = getattr(disp_event, "_execution_handle", None)
+        self.assertIsNotNone(disp_handle)
+        relinquish_execution(self.ex_id, handle=disp_handle)
+
+        # 2. Worker claims and completes in database
+        async with async_session_maker() as session:
+            session.add(
+                WorkflowRunQueue(
+                    id=uuid.uuid4(),
+                    workflow_id=self.wf_id,
+                    execution_id=self.ex_id,
+                    placement="anywhere",
+                    target_instance_id="worker-proc-1",
+                    status=STATUS_DONE,
+                    claimed_at=now - timedelta(seconds=10),
+                    claimed_by_process="worker-proc-1",
+                    finished_at=now,
+                    result={"status": "success", "outputs": {"done": True}},
+                    inputs={"worker": 1},
+                    trigger_source="api",
+                    actor_user_id=self.user_id,
+                    credentials_owner_id=self.user_id,
+                    test_run=False,
+                    timeout_seconds=60.0,
+                    return_on_chart_output=False,
+                    enqueued_at=now - timedelta(seconds=20),
+                    not_after=now + timedelta(seconds=120),
+                )
+            )
+            session.add(
+                ExecutionHistory(
+                    id=self.ex_id,
+                    workflow_id=self.wf_id,
+                    inputs={"worker": 1},
+                    outputs={"done": True},
+                    node_results=[],
+                    status="success",
+                    execution_time_ms=100.0,
+                    trigger_source="api",
+                )
+            )
+            await session.commit()
+
+        # 3. Delayed dispatcher START drains
+        await active_execution_registry._drain_commands()
+
+        # 4. In PostgreSQL: ActiveWorkflowExecution row must NOT exist (no resurrection)
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(
+                row, "Delayed dispatcher START must NOT resurrect completed execution"
+            )
+
+    async def test_queued_execution_remains_visible_during_handoff_and_cancels_cleanly(
+        self,
+    ) -> None:
+        """Prove that during the window between dispatcher relinquishing and worker active-row creation:
+        1. ACTIVE row is absent from ActiveWorkflowExecution.
+        2. Execution remains visible via list_persisted_active_executions_for_user.
+        3. Cancellation succeeds, sets queue error to None, result to cancelled.
+        4. Worker subsequently checking the queue observes cancellation and does not execute.
+        """
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+        from app.db.session import async_session_maker
+        from app.services.cluster.run_queue import STATUS_DONE, STATUS_QUEUED
+        from app.services.execution_cancellation import (
+            list_persisted_active_executions_for_user,
+            register_execution,
+            relinquish_execution,
+            request_persisted_execution_cancel,
+        )
+        from app.services.workflow_executor import WorkflowCancelledError
+
+        now = datetime.now(timezone.utc)
+        # 1. Dispatcher registers and immediately relinquishes
+        disp_event = register_execution(
+            workflow_id=self.wf_id,
+            execution_id=self.ex_id,
+            inputs={"test": "handoff"},
+        )
+        disp_handle = getattr(disp_event, "_execution_handle", None)
+        self.assertIsNotNone(disp_handle)
+        relinquish_execution(self.ex_id, handle=disp_handle)
+
+        # 2. Run is queued in WorkflowRunQueue, active row absent
+        async with async_session_maker() as session:
+            session.add(
+                WorkflowRunQueue(
+                    id=uuid.uuid4(),
+                    workflow_id=self.wf_id,
+                    execution_id=self.ex_id,
+                    placement="anywhere",
+                    target_instance_id="worker-instance",
+                    status=STATUS_QUEUED,
+                    inputs={"test": "handoff"},
+                    trigger_source="api",
+                    actor_user_id=self.user_id,
+                    credentials_owner_id=self.user_id,
+                    test_run=False,
+                    timeout_seconds=60.0,
+                    return_on_chart_output=False,
+                    enqueued_at=now,
+                    not_after=now + timedelta(seconds=120),
+                )
+            )
+            await session.commit()
+
+        # Invariant check: ACTIVE row is absent from PostgreSQL table
+        async with async_session_maker() as session:
+            active_row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == self.ex_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(
+                active_row, "ActiveWorkflowExecution row must be absent during handoff"
+            )
+
+            # 3. Query visibility: must be visible to the user
+            visible_items = await list_persisted_active_executions_for_user(session, self.user_id)
+            visible_ids = [item.execution_id for item in visible_items]
+            self.assertIn(self.ex_id, visible_ids, "Queued run must be visible during handoff")
+
+            # 4. Cancel during this window
+            cancelled = await request_persisted_execution_cancel(
+                session, workflow_id=self.wf_id, execution_id=self.ex_id
+            )
+            self.assertTrue(cancelled)
+
+        # 5. Verify database state after cancellation
+        async with async_session_maker() as session:
+            q_row = (
+                await session.execute(
+                    select(WorkflowRunQueue).where(WorkflowRunQueue.execution_id == self.ex_id)
+                )
+            ).scalar_one()
+            self.assertEqual(q_row.status, STATUS_DONE)
+            self.assertIsNone(
+                q_row.error, "Queue error must be None so dispatcher gets cancelled result"
+            )
+            self.assertEqual(q_row.result["status"], "cancelled")
+
+            hist = (
+                await session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == self.ex_id)
+                )
+            ).scalar_one_or_none()
+            self.assertIsNotNone(hist)
+            self.assertEqual(hist.status, "cancelled")
+
+            # 6. Worker subsequently checks queue row: detects cancellation and does not run
+            is_cancelled = (
+                q_row.status == STATUS_DONE and (q_row.result or {}).get("status") == "cancelled"
+            )
+            self.assertTrue(is_cancelled)
+            if is_cancelled:
+                with self.assertRaises(WorkflowCancelledError):
+                    raise WorkflowCancelledError("Workflow execution cancelled")
 
 
 if __name__ == "__main__":

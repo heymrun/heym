@@ -21,7 +21,7 @@ uv run ruff check .
 
 # Ensure PostgreSQL migrations are applied if DATABASE_URL is explicitly provided
 if [ -n "${DATABASE_URL:-}" ]; then
-    echo "Applying database migrations to ${DATABASE_URL}..."
+    echo "Applying database migrations using DATABASE_URL..."
     uv run alembic upgrade head
 fi
 
