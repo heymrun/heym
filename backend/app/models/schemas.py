@@ -1812,15 +1812,16 @@ class LLMPricingRow(BaseModel):
 
 
 class LLMPricingPatch(BaseModel):
-    input_per_1m_usd: Decimal = Field(gt=Decimal("0"))
-    output_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    # Zero is a real price: local models and some providers do not charge for a side.
+    input_per_1m_usd: Decimal = Field(ge=Decimal("0"))
+    output_per_1m_usd: Decimal = Field(ge=Decimal("0"))
     note: str | None = None
 
 
 class LLMPricingCustomCreate(BaseModel):
     model: str = Field(min_length=1, max_length=200)
-    input_per_1m_usd: Decimal = Field(gt=Decimal("0"))
-    output_per_1m_usd: Decimal = Field(gt=Decimal("0"))
+    input_per_1m_usd: Decimal = Field(ge=Decimal("0"))
+    output_per_1m_usd: Decimal = Field(ge=Decimal("0"))
     note: str | None = None
 
 

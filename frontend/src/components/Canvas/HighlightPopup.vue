@@ -99,6 +99,26 @@ function toggle(record: HighlightRecord): void {
   expanded.value = next;
 }
 
+const ROW_DRAG_THRESHOLD_PX = 4;
+let rowMouseDown: { x: number; y: number } | null = null;
+
+function handleRowMouseDown(event: MouseEvent): void {
+  rowMouseDown = { x: event.clientX, y: event.clientY };
+}
+
+/** A drag that selects text in the row header must not also toggle the row. */
+function handleRowClick(event: MouseEvent, record: HighlightRecord): void {
+  const start = rowMouseDown;
+  rowMouseDown = null;
+  if (
+    start &&
+    Math.hypot(event.clientX - start.x, event.clientY - start.y) > ROW_DRAG_THRESHOLD_PX
+  ) {
+    return;
+  }
+  toggle(record);
+}
+
 async function copy(record: HighlightRecord): Promise<void> {
   try {
     await navigator.clipboard.writeText(currentRun(record));
@@ -249,10 +269,15 @@ function previewHtml(record: HighlightRecord): string {
             : 'border-transparent hover:border-border'
         "
       >
-        <button
-          type="button"
-          class="flex w-full items-start gap-2 px-2 py-1.5 text-left"
-          @click="toggle(record)"
+        <div
+          role="button"
+          tabindex="0"
+          :aria-expanded="expanded.has(record.node_id)"
+          class="flex w-full cursor-pointer items-start gap-2 px-2 py-1.5 text-left"
+          @mousedown="handleRowMouseDown"
+          @click="handleRowClick($event, record)"
+          @keydown.enter.prevent="toggle(record)"
+          @keydown.space.prevent="toggle(record)"
         >
           <span
             class="shrink-0 rounded bg-muted px-1 text-[10px] uppercase leading-4 text-muted-foreground"
@@ -271,7 +296,7 @@ function previewHtml(record: HighlightRecord): string {
             />
             <!-- eslint-enable vue/no-v-html -->
           </span>
-        </button>
+        </div>
 
         <div
           v-if="expanded.has(record.node_id)"

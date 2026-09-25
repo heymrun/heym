@@ -68,6 +68,68 @@ class WorkflowTraceMetadataTests(unittest.TestCase):
         self.assertEqual(result.output["answer"], "ok")
         self.assertNotIn("_trace_id", result.output)
 
+    def test_json_output_moves_token_usage_to_metadata(self) -> None:
+        usage = {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+        for node_type, llm_method in (
+            ("llm", "_execute_llm_node"),
+            ("agent", "_execute_agent_node"),
+        ):
+            with self.subTest(node_type=node_type):
+                executor = WorkflowExecutor(
+                    nodes=[
+                        {
+                            "id": "node1",
+                            "type": node_type,
+                            "data": {
+                                "label": "parseReply",
+                                "credentialId": str(uuid.uuid4()),
+                                "model": "gpt-test",
+                                "userMessage": "hello",
+                                "jsonOutputEnabled": True,
+                            },
+                        }
+                    ],
+                    edges=[],
+                )
+
+                with patch.object(
+                    executor,
+                    llm_method,
+                    return_value={"text": '{"answer":"ok"}', "model": "gpt-test", "usage": usage},
+                ):
+                    result = executor.execute_node_parallel("node1", {})
+
+                self.assertEqual(result.metadata["usage"], usage)
+                self.assertEqual(result.output, {"answer": "ok", "model": "gpt-test"})
+
+    def test_plain_llm_output_keeps_token_usage_in_output(self) -> None:
+        usage = {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+        executor = WorkflowExecutor(
+            nodes=[
+                {
+                    "id": "llm1",
+                    "type": "llm",
+                    "data": {
+                        "label": "draftReply",
+                        "credentialId": str(uuid.uuid4()),
+                        "model": "gpt-test",
+                        "userMessage": "hello",
+                    },
+                }
+            ],
+            edges=[],
+        )
+
+        with patch.object(
+            executor,
+            "_execute_llm_node",
+            return_value={"text": "ok", "model": "gpt-test", "usage": usage},
+        ):
+            result = executor.execute_node_parallel("llm1", {})
+
+        self.assertEqual(result.output["usage"], usage)
+        self.assertNotIn("usage", result.metadata)
+
     def test_llm_error_preserves_trace_metadata(self) -> None:
         trace_id = str(uuid.uuid4())
         executor = WorkflowExecutor(

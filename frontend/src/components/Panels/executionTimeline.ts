@@ -67,6 +67,37 @@ export function readSpanModelRouting(result: {
   };
 }
 
+export interface SpanTokenUsage {
+  total: number;
+  prompt: number | null;
+  completion: number | null;
+}
+
+function readTokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** LLM token usage of a node run: JSON output keeps it in metadata, other nodes in the output. */
+export function readSpanTokenUsage(result: {
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+}): SpanTokenUsage | null {
+  const output = result.output;
+  const raw =
+    result.metadata?.usage ??
+    (typeof output === "object" && output !== null
+      ? (output as Record<string, unknown>).usage
+      : undefined);
+  if (!raw || typeof raw !== "object") return null;
+  const usage = raw as Record<string, unknown>;
+  const prompt = readTokenCount(usage.prompt_tokens);
+  const completion = readTokenCount(usage.completion_tokens);
+  const total =
+    readTokenCount(usage.total_tokens) ??
+    (prompt !== null && completion !== null ? prompt + completion : null);
+  return total === null ? null : { total, prompt, completion };
+}
+
 export interface SpanItem {
   key: string;
   /** Index into the execution `node_results` array for this span (disambiguates multiple runs of the same node). */
@@ -76,6 +107,8 @@ export interface SpanItem {
   nodeType: string;
   traceId: string | null;
   modelRouting: ModelRoutingSummary | null;
+  /** Only set once the node finished. */
+  tokenUsage: SpanTokenUsage | null;
   status: string;
   durationMs: number;
   startOffsetMs: number;
@@ -120,6 +153,7 @@ interface RawSpanItem {
   nodeType: string;
   traceId: string | null;
   modelRouting: ModelRoutingSummary | null;
+  tokenUsage: SpanTokenUsage | null;
   status: string;
   durationMs: number;
   error: string | null;
@@ -189,6 +223,37 @@ function canSynthesizeLiveHitlWait(result: TimelineEntry): boolean {
 
 function isLiveRunningSpan(result: TimelineEntry): boolean {
   return result.status === "running";
+}
+
+function isSettledStatus(status: string): boolean {
+  return status !== "running" && status !== "pending";
+}
+
+/** False while the span's node is still running or waiting, i.e. its output has not returned. */
+export function isSpanSettled(span: SpanItem): boolean {
+  return !span.isHitlWait && isSettledStatus(span.status);
+}
+
+/** Same span across timeline rebuilds, even when hidden rows shift the span keys. */
+export function isSameSpan(left: SpanItem, right: SpanItem): boolean {
+  return (
+    left.resultListIndex === right.resultListIndex &&
+    left.nodeId === right.nodeId &&
+    left.isHitlWait === right.isHitlWait
+  );
+}
+
+/** Spans in the order they started (ties top to bottom), for stepping through a run. */
+export function orderSpansByStart(rows: SpanRow[]): SpanItem[] {
+  return rows
+    .flatMap((row, rowIndex) => row.spans.map((span) => ({ span, rowIndex })))
+    .sort(
+      (left, right) =>
+        left.span.startOffsetMs - right.span.startOffsetMs ||
+        left.rowIndex - right.rowIndex ||
+        left.span.occurrence - right.span.occurrence,
+    )
+    .map(({ span }) => span);
 }
 
 function colorFor(result: TimelineEntry): string {
@@ -261,6 +326,31 @@ function hasRecordedTiming(nodeResults: TimelineEntry[]): boolean {
 export function formatTimelineMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.round(ms)}ms`;
+}
+
+export interface SpanOutputParts {
+  /** Reply text (`text`, or a plain-string output), read as prose rather than JSON. */
+  message: string | null;
+  /** The remaining output, shown as JSON; null when nothing is left. */
+  details: unknown;
+}
+
+/** Split a finished span's output into its reply text and the rest of its fields. */
+export function splitSpanOutput(output: unknown): SpanOutputParts {
+  if (typeof output === "string") return { message: output, details: null };
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+    return { message: null, details: output ?? null };
+  }
+  const { text, ...rest } = output as Record<string, unknown>;
+  if (typeof text !== "string") return { message: null, details: output };
+  return { message: text, details: Object.keys(rest).length > 0 ? rest : null };
+}
+
+/** USD cost as the Traces tab prints it, so one trace reads the same in both places. */
+export function formatSpanCost(value: string): string {
+  const parsed = parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed === 0) return "$0.00";
+  return parsed < 0.01 ? `$${parsed.toFixed(4)}` : `$${parsed.toFixed(2)}`;
 }
 
 export function getTimelineRowKey(
@@ -351,6 +441,8 @@ export function buildTimelineModel(
       nodeType: result.node_type,
       traceId: isHitlWait ? null : getTraceId(result),
       modelRouting: readSpanModelRouting(result),
+      tokenUsage:
+        !isHitlWait && isSettledStatus(result.status) ? readSpanTokenUsage(result) : null,
       status: isHitlWait ? "pending" : result.status,
       durationMs: Math.max(endMs - startMs, isHitlWait ? 0 : result.execution_time_ms, 0),
       error: isHitlWait ? null : result.error,
@@ -515,6 +607,7 @@ export function buildTimelineModel(
             nodeType: span.nodeType,
             traceId: span.traceId,
             modelRouting: span.modelRouting,
+            tokenUsage: span.tokenUsage,
             status: span.status,
             durationMs: span.durationMs,
             startOffsetMs: Math.max(span.startMs - timeWindow.startMs, 0),

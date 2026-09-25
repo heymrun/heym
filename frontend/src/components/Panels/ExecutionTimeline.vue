@@ -3,24 +3,33 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ExternalLink, Eye, EyeOff } from "lucide-vue-next";
 
+import type { NodeResult, WorkflowEdge } from "@/types/workflow";
+import type { SpanInputTarget } from "@/components/Panels/executionSpanInput";
 import type {
   SpanItem,
   SpanRow,
   TimelineEntry,
   TimelineSelectPayload,
 } from "@/components/Panels/executionTimeline";
+import { resolveSpanInput } from "@/components/Panels/executionSpanInput";
 import {
   buildTimelineModel,
   formatTimelineMs,
   getTimelineRowKey,
   getServerAlignedNowMs,
+  isSameSpan,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
+  orderSpansByStart,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 import ExecutionSpanDetails from "@/components/Panels/ExecutionSpanDetails.vue";
+import { useSpanTraceCost } from "@/components/Panels/useSpanTraceCost";
 
 interface Props {
   nodeResults: TimelineEntry[];
+  /** Full `node_results` of the run (span `resultListIndex` points here); source of span inputs. */
+  executionRows: NodeResult[];
+  edges: WorkflowEdge[];
   totalTimeMs: number;
   subAgentLabelToParentId: Map<string, string>;
   serverClockOffsetMs?: number;
@@ -35,6 +44,28 @@ const emit = defineEmits<{
 
 const selectedSpan = ref<SpanItem | null>(null);
 const detailsOpen = ref(false);
+
+// Live ticks replace selectedSpan every frame; a stable target stops the input rebuilding with it.
+const selectedSpanInputTarget = computed(
+  (previous?: SpanInputTarget | null): SpanInputTarget | null => {
+    const span = selectedSpan.value;
+    if (!span) return null;
+    if (
+      previous &&
+      previous.nodeId === span.nodeId &&
+      previous.nodeType === span.nodeType &&
+      previous.resultListIndex === span.resultListIndex
+    ) {
+      return previous;
+    }
+    return { nodeId: span.nodeId, nodeType: span.nodeType, resultListIndex: span.resultListIndex };
+  },
+);
+const selectedSpanInput = computed(() =>
+  selectedSpanInputTarget.value
+    ? resolveSpanInput(selectedSpanInputTarget.value, props.executionRows, props.edges)
+    : null,
+);
 
 function emitSelectNode(payload: TimelineSelectPayload, event: MouseEvent): void {
   event.stopPropagation();
@@ -213,14 +244,16 @@ watch(
 
 // selectedSpan is a snapshot of a span from the previous rows computation. When
 // rows recomputes (new results arrive, rows hidden/shown), the old object is stale,
-// so re-resolve it by key against the fresh rows — or close if it no longer exists.
+// so re-resolve it against the fresh rows — or close if it no longer exists. Match by
+// identity, not key: keys come from list positions, which shift when rows are hidden.
 watch(
-  rows,
+  visibleRows,
   (nextRows) => {
-    if (!selectedSpan.value) return;
+    const current = selectedSpan.value;
+    if (!current) return;
     const replacement = nextRows
       .flatMap((row) => row.spans)
-      .find((span) => span.key === selectedSpan.value?.key);
+      .find((span) => isSameSpan(span, current));
     if (replacement) {
       selectedSpan.value = replacement;
     } else {
@@ -229,6 +262,32 @@ watch(
   },
   { flush: "sync" },
 );
+
+const navigableSpans = computed(() => orderSpansByStart(visibleRows.value));
+const selectedSpanIndex = computed(() => {
+  const current = selectedSpan.value;
+  return current ? navigableSpans.value.findIndex((span) => isSameSpan(span, current)) : -1;
+});
+// Same array while the labels are unchanged, so live ticks do not re-render the jump menu.
+const navigableSpanLabels = computed((previous?: string[]): string[] => {
+  const labels = navigableSpans.value.map((span) => span.nodeLabel);
+  const unchanged =
+    previous?.length === labels.length && labels.every((label, index) => label === previous[index]);
+  return unchanged && previous ? previous : labels;
+});
+const selectedSpanCost = useSpanTraceCost(selectedSpan);
+
+function selectSpanAt(index: number): void {
+  const target = navigableSpans.value[index];
+  if (!target) return;
+  selectedSpan.value = target;
+  emit("selectNode", { nodeId: target.nodeId, resultListIndex: target.resultListIndex });
+}
+
+function stepSelectedSpan(offset: number, event: MouseEvent): void {
+  event.stopPropagation();
+  if (selectedSpanIndex.value >= 0) selectSpanAt(selectedSpanIndex.value + offset);
+}
 
 const timeMarkers = computed(() => {
   const totalMs = timelineModel.value.timeWindow.totalMs;
@@ -387,8 +446,15 @@ function showAllRows(): void {
       <ExecutionSpanDetails
         class="flex-1 min-h-0 overflow-y-auto"
         :span="selectedSpan"
+        :input="selectedSpanInput"
+        :span-labels="navigableSpanLabels"
+        :span-index="selectedSpanIndex"
+        :cost-usd="selectedSpanCost"
         @close="closeDetails"
         @open-trace="openTraceInNewTab(selectedSpan, $event)"
+        @previous="stepSelectedSpan(-1, $event)"
+        @next="stepSelectedSpan(1, $event)"
+        @jump="selectSpanAt"
       />
     </template>
     <div

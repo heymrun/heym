@@ -205,6 +205,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["fallbackUsed"] = llm_output["fallbackUsed"]
         if llm_output.get("model"):
             output["model"] = llm_output["model"]
+        if isinstance(llm_output.get("usage"), dict):
+            output["_usage"] = llm_output["usage"]
         if model_routing is not None:
             output["_model_routing"] = model_routing
     self._restore_internal_trace_id(output, trace_id)

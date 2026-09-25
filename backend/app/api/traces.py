@@ -393,6 +393,11 @@ async def get_trace(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trace not found")
     trace, credential_name, workflow_name = row
+    [(cost_usd, is_priced)] = await resolve_costs_for_user(
+        db,
+        current_user.id,
+        [(trace.model or "", int(trace.prompt_tokens or 0), int(trace.completion_tokens or 0))],
+    )
 
     return LLMTraceDetailResponse(
         id=trace.id,
@@ -414,6 +419,8 @@ async def get_trace(
         prompt_tokens=trace.prompt_tokens,
         completion_tokens=trace.completion_tokens,
         total_tokens=trace.total_tokens,
+        cost_usd=cost_usd,
+        is_priced=is_priced,
         request=trace.request,
         response=trace.response,
         error=trace.error,

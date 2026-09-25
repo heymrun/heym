@@ -33,7 +33,7 @@ import {
 } from "@/lib/canvasConnectionRules";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
-import { shouldUseNativeTextClipboard } from "@/lib/keyboardTargets";
+import { isTypingTarget, shouldUseNativeTextClipboard } from "@/lib/keyboardTargets";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 import { evalsApi, templatesApi } from "@/services/api";
@@ -1627,20 +1627,19 @@ function handleKeyDown(event: KeyboardEvent): void {
 
 const isShiftHeld = ref(false);
 
-function handleGlobalKeyDown(event: KeyboardEvent): void {
-  if (event.key === "Shift") {
-    isShiftHeld.value = true;
-  }
+// Read shiftKey off every key event: a Shift keyup lost to a window switch would otherwise
+// leave the flag stuck and block Cmd/Ctrl+A in every text field.
+function syncShiftHeld(event: KeyboardEvent): void {
+  isShiftHeld.value = event.shiftKey;
 }
 
-function handleGlobalKeyUp(event: KeyboardEvent): void {
-  if (event.key === "Shift") {
-    isShiftHeld.value = false;
-  }
+function resetShiftHeld(): void {
+  isShiftHeld.value = false;
 }
 
 function preventTextSelection(event: Event): void {
-  if (isShiftHeld.value) {
+  const target = event.target instanceof Text ? event.target.parentElement : event.target;
+  if (isShiftHeld.value && !isTypingTarget(target)) {
     event.preventDefault();
   }
 }
@@ -1665,8 +1664,9 @@ function handleSelectionRectContextMenu(event: MouseEvent): void {
 onMounted(() => {
   setTimeout(() => fitView({ padding: 0.2 }), 100);
   window.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("keydown", handleGlobalKeyDown);
-  window.addEventListener("keyup", handleGlobalKeyUp);
+  window.addEventListener("keydown", syncShiftHeld);
+  window.addEventListener("keyup", syncShiftHeld);
+  window.addEventListener("blur", resetShiftHeld);
   document.addEventListener("selectstart", preventTextSelection);
   document.addEventListener("contextmenu", handleSelectionRectContextMenu, true);
 });
@@ -1678,8 +1678,9 @@ onUnmounted(() => {
   }
   workflowStore.setAgentMemoryGraphDialogOpen(false);
   window.removeEventListener("keydown", handleKeyDown);
-  window.removeEventListener("keydown", handleGlobalKeyDown);
-  window.removeEventListener("keyup", handleGlobalKeyUp);
+  window.removeEventListener("keydown", syncShiftHeld);
+  window.removeEventListener("keyup", syncShiftHeld);
+  window.removeEventListener("blur", resetShiftHeld);
   document.removeEventListener("selectstart", preventTextSelection);
   document.removeEventListener("contextmenu", handleSelectionRectContextMenu, true);
 });

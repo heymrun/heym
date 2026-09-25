@@ -3734,6 +3734,8 @@ function renderContent(content: string): string {
       v-if="!isCollapsed && showTimeline && timelineResults.length > 0"
       class="flex-1 min-h-0"
       :node-results="timelineResults"
+      :execution-rows="extendedExecutionRows"
+      :edges="workflowStore.edges"
       :total-time-ms="executionResult?.execution_time_ms ?? 0"
       :sub-agent-label-to-parent-id="subAgentLabelToParentId"
       :server-clock-offset-ms="workflowStore.serverClockOffsetMs"

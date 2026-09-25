@@ -4,7 +4,13 @@ import type { TimelineEntry } from "@/components/Panels/executionTimeline";
 import * as executionTimeline from "@/components/Panels/executionTimeline";
 import {
   buildTimelineModel,
+  formatSpanCost,
+  isSameSpan,
+  isSpanSettled,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
+  orderSpansByStart,
+  readSpanTokenUsage,
+  splitSpanOutput,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 
@@ -322,5 +328,140 @@ describe("formatModelRoutingLabel", () => {
 
   it("returns null when nothing routed", () => {
     expect(executionTimeline.formatModelRoutingLabel(null)).toBeNull();
+  });
+});
+
+describe("span token usage", () => {
+  const usage = { prompt_tokens: 800, completion_tokens: 434, total_tokens: 1234 };
+
+  it("reads usage from metadata before the output, and derives a missing total", () => {
+    expect(readSpanTokenUsage({ output: { usage }, metadata: {} })).toEqual({
+      total: 1234,
+      prompt: 800,
+      completion: 434,
+    });
+    expect(
+      readSpanTokenUsage({
+        output: { answer: "ok" },
+        metadata: { usage: { prompt_tokens: 3, completion_tokens: 2 } },
+      }),
+    ).toEqual({ total: 5, prompt: 3, completion: 2 });
+    expect(readSpanTokenUsage({ output: { usage: "n/a" } })).toBeNull();
+    expect(readSpanTokenUsage({ output: { text: "no llm" } })).toBeNull();
+  });
+
+  it("only reports tokens once the node finished", () => {
+    const results = [
+      entry({
+        node_id: "llm-1",
+        node_label: "Writer",
+        node_type: "llm",
+        status: "success",
+        output: { text: "done", usage },
+        metadata: { started_at_ms: 1000, ended_at_ms: 2000 },
+      }),
+      entry({
+        node_id: "llm-2",
+        node_label: "Reviewer",
+        node_type: "llm",
+        status: "running",
+        output: { usage },
+        metadata: { started_at_ms: 2000, ended_at_ms: 2000 },
+      }),
+    ];
+
+    const { rows } = buildTimelineModel(results, 1000, new Map(), { nowMs: 2500 });
+
+    expect(rows[0].spans[0].tokenUsage?.total).toBe(1234);
+    expect(isSpanSettled(rows[0].spans[0])).toBe(true);
+    expect(rows[1].spans[0].tokenUsage).toBeNull();
+    expect(isSpanSettled(rows[1].spans[0])).toBe(false);
+  });
+});
+
+describe("span navigation", () => {
+  it("orders spans by start time across rows, ties top to bottom", () => {
+    const results = [
+      entry({
+        node_id: "loop",
+        node_label: "Loop",
+        node_type: "loop",
+        status: "success",
+        metadata: { started_at_ms: 0, ended_at_ms: 10 },
+      }),
+      entry({
+        node_id: "body",
+        node_label: "Body",
+        node_type: "set",
+        status: "success",
+        metadata: { started_at_ms: 10, ended_at_ms: 20 },
+      }),
+      entry({
+        node_id: "loop",
+        node_label: "Loop",
+        node_type: "loop",
+        status: "success",
+        metadata: { started_at_ms: 20, ended_at_ms: 30 },
+      }),
+      entry({
+        node_id: "side",
+        node_label: "Side",
+        node_type: "set",
+        status: "success",
+        metadata: { started_at_ms: 20, ended_at_ms: 25 },
+      }),
+    ];
+
+    const { rows } = buildTimelineModel(results, 30, new Map());
+    const ordered = orderSpansByStart(rows);
+
+    expect(ordered.map((span) => `${span.nodeId}#${span.resultListIndex}`)).toEqual([
+      "loop#0",
+      "body#1",
+      "loop#2",
+      "side#3",
+    ]);
+  });
+
+  it("recognises the same span after a rebuild shifts its key", () => {
+    const results = [
+      entry({ node_id: "a", node_label: "A", node_type: "set", status: "success", sourceNodeResultsIndex: 0 }),
+      entry({ node_id: "b", node_label: "B", node_type: "set", status: "success", sourceNodeResultsIndex: 1 }),
+    ];
+
+    const full = buildTimelineModel(results, 10, new Map()).rows[1].spans[0];
+    const withoutA = buildTimelineModel([results[1]], 10, new Map()).rows[0].spans[0];
+
+    expect(withoutA.key).not.toBe(full.key);
+    expect(isSameSpan(withoutA, full)).toBe(true);
+  });
+});
+
+describe("formatSpanCost", () => {
+  it("prints sub-cent costs with four decimals like the Traces tab", () => {
+    expect(formatSpanCost("0.004213")).toBe("$0.0042");
+    expect(formatSpanCost("1.5")).toBe("$1.50");
+    expect(formatSpanCost("0")).toBe("$0.00");
+  });
+});
+
+describe("splitSpanOutput", () => {
+  it("reads an LLM reply as the message and keeps the other fields as JSON", () => {
+    const usage = { prompt_tokens: 107, completion_tokens: 5534, total_tokens: 5641 };
+    expect(splitSpanOutput({ text: "Hi Akash", model: "glm-5.3-flash", usage })).toEqual({
+      message: "Hi Akash",
+      details: { model: "glm-5.3-flash", usage },
+    });
+    expect(splitSpanOutput({ text: "only text" })).toEqual({ message: "only text", details: null });
+    expect(splitSpanOutput("plain reply")).toEqual({ message: "plain reply", details: null });
+  });
+
+  it("leaves outputs without a text reply entirely as JSON", () => {
+    expect(splitSpanOutput({ status: 200, body: { ok: true } })).toEqual({
+      message: null,
+      details: { status: 200, body: { ok: true } },
+    });
+    expect(splitSpanOutput({ text: 42 })).toEqual({ message: null, details: { text: 42 } });
+    expect(splitSpanOutput(null)).toEqual({ message: null, details: null });
   });
 });
