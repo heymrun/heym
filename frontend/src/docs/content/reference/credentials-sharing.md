@@ -2,6 +2,17 @@
 
 Credentials can be shared with other users so their workflows can use your API keys. See [Credentials](./credentials.md) for an overview and [Credentials Tab](../tabs/credentials-tab.md) for adding and managing credentials.
 
+## Sharing Credentials with an LLM
+
+To let an LLM or an AI agent use an API key, store the key as a credential and let the node that makes the request attach it. The model decides what to call; the node authenticates the call when it runs.
+
+- **Store the secret as a credential.** Sensitive values are encrypted at rest and masked in the UI after creation.
+- **Reference it where the request is made.** The [LLM](../nodes/llm-node.md) and [Agent](../nodes/agent-node.md) nodes select their model credential by ID, and HTTP requests put `$credentials.CredentialName` in the auth header. Keep secrets out of prompt fields, because everything in a prompt is sent to the model provider as text.
+- **Give the agent tools, not keys.** When an Agent calls an HTTP node, an MCP server, or a sub-workflow as a tool, the credential is applied inside that tool and the model receives the tool's result.
+- **Outputs are masked.** When a credential value longer than seven characters appears in a node's output, only its first seven characters are kept, so a response that echoes a key shows only that prefix in results and traces. See [Output Masking](#output-masking).
+- **Let the assistant create credentials.** When the [AI Assistant](./ai-assistant.md#credentials) or the Chat tab creates a credential, it sees only the name and type, and you enter the secret in the regular credential form.
+- **Share with people the same way.** Share the credential with a user or a team, as described below, and their workflows can use your key through their own LLM and Agent nodes.
+
 ## Sharing Model
 
 - **CredentialShare** – Links `credential_id` to `user_id` (unique per pair)
@@ -85,7 +96,7 @@ The executor loads the credential directly from the database by ID and decrypts 
 
 ## Output Masking
 
-After execution, `mask_sensitive_output()` replaces credential values in outputs with placeholders so secrets are not exposed in results or traces.
+After execution, `mask_sensitive_output()` masks credential values in outputs, keeping the first seven characters of each secret longer than seven characters and replacing the rest with `**`, so secrets are not exposed in results or traces.
 
 ## Related
 
