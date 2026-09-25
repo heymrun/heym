@@ -10,13 +10,17 @@ import {
   isSpanSettled,
   splitSpanOutput,
 } from "@/components/Panels/executionTimeline";
+import ExecutionSpanImages from "@/components/Panels/ExecutionSpanImages.vue";
 import ExecutionSpanNavigator from "@/components/Panels/ExecutionSpanNavigator.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
+import { getOutputImageSrcs, maskImageDataForDisplay } from "@/lib/executionImages";
 
 const props = defineProps<{
   span: SpanItem;
   /** Null until the input has arrived; the section stays hidden meanwhile. */
   input: SpanInput | null;
+  /** Every image of the run in execution order, for the lightbox gallery. */
+  runImageSrcs: string[];
   /** Node labels of the timeline's spans in start order, for the jump menu. */
   spanLabels: string[];
   /** Position of this span in `spanLabels`; -1 when not listed. */
@@ -32,10 +36,15 @@ const emit = defineEmits<{
   jump: [index: number];
 }>();
 const traceIdCopied = ref(false);
-const outputParts = computed(() =>
-  isSpanSettled(props.span)
-    ? splitSpanOutput(props.span.output)
-    : { message: null, details: null },
+// Live ticks replace `span` every frame but keep its output reference, so the scans below stay cached.
+const settledOutput = computed((): unknown => (isSpanSettled(props.span) ? props.span.output : null));
+const outputParts = computed(() => {
+  const parts = splitSpanOutput(settledOutput.value);
+  return { message: parts.message, details: maskImageDataForDisplay(parts.details) };
+});
+const outputImageSrcs = computed(() => getOutputImageSrcs(settledOutput.value));
+const inputValue = computed(() =>
+  props.input?.value ? maskImageDataForDisplay(props.input.value) : null,
 );
 const hasJsonColumn = computed(() => props.input !== null || outputParts.value.details !== null);
 let traceIdCopiedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,11 +211,11 @@ onBeforeUnmount(() => {
             {{ input.note }}
           </div>
           <div
-            v-if="input.value"
+            v-if="inputValue"
             class="select-text text-[10px] font-mono"
           >
             <JsonTree
-              :data="input.value"
+              :data="inputValue"
               :root-expanded="true"
               :auto-expand-depth="1"
             />
@@ -219,6 +228,11 @@ onBeforeUnmount(() => {
           <div class="mb-1 text-[10px] font-medium text-muted-foreground">
             Output
           </div>
+          <ExecutionSpanImages
+            v-if="outputImageSrcs.length > 0"
+            :srcs="outputImageSrcs"
+            :gallery="runImageSrcs"
+          />
           <div class="select-text">
             <div
               v-if="typeof outputParts.details === 'object'"

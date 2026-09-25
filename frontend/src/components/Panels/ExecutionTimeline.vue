@@ -24,6 +24,7 @@ import {
 } from "@/components/Panels/executionTimeline";
 import ExecutionSpanDetails from "@/components/Panels/ExecutionSpanDetails.vue";
 import { useSpanTraceCost } from "@/components/Panels/useSpanTraceCost";
+import { collectRunImageSrcs } from "@/lib/executionImages";
 
 interface Props {
   nodeResults: TimelineEntry[];
@@ -66,6 +67,7 @@ const selectedSpanInput = computed(() =>
     ? resolveSpanInput(selectedSpanInputTarget.value, props.executionRows, props.edges)
     : null,
 );
+const runImageSrcs = computed((): string[] => collectRunImageSrcs(props.executionRows));
 
 function emitSelectNode(payload: TimelineSelectPayload, event: MouseEvent): void {
   event.stopPropagation();
@@ -447,6 +449,7 @@ function showAllRows(): void {
         class="flex-1 min-h-0 overflow-y-auto"
         :span="selectedSpan"
         :input="selectedSpanInput"
+        :run-image-srcs="runImageSrcs"
         :span-labels="navigableSpanLabels"
         :span-index="selectedSpanIndex"
         :cost-usd="selectedSpanCost"
