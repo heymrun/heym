@@ -258,7 +258,10 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value={}),
             ),
             patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
-            patch("app.services.hitl_service.build_default_public_base_url", return_value="http://test"),
+            patch(
+                "app.services.hitl_service.build_default_public_base_url",
+                return_value="http://test",
+            ),
             patch("app.services.cluster.dispatch.execute_workflow", side_effect=execute_stub),
             patch(
                 "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
