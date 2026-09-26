@@ -576,7 +576,7 @@ class RunQueueWorker:
             # A pending allowDownstream result is intentionally returned before its
             # background branch finishes. Publish the early result now, then retain
             # execution ownership until the worker has persisted the final state.
-            if result.allow_downstream_pending:
+            if getattr(result, "allow_downstream_pending", False):
                 worker_handle = getattr(cancel_event, "_execution_handle", None)
                 await run_queue.complete(
                     row.execution_id, result=summarize(result, row.execution_id), error=None
