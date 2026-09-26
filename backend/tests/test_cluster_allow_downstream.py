@@ -157,7 +157,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         )
         active_row = SimpleNamespace(cancel_requested_at=None)
         row = _row(workflow_id, execution_id, credentials_owner_id)
-        session, context = self._session_context(workflow, active_row)
+        _session, context = self._session_context(workflow, active_row)
         worker = RunQueueWorker()
         persist_history = AsyncMock()
         persist_globals = AsyncMock()
@@ -489,7 +489,3 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
 
-if __name__ == "__main__":
-    import unittest
-
-    unittest.main()
