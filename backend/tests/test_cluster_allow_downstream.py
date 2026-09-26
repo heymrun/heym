@@ -211,6 +211,8 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
     async def test_successful_retry_does_not_mark_deferred_run_failed(self) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
 
+        first_attempt_started = threading.Event()
+        first_attempt_release = threading.Event()
         release = threading.Event()
         started = threading.Event()
         attempts = 0
@@ -219,6 +221,9 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             nonlocal attempts
             attempts += 1
             if attempts == 1:
+                first_attempt_started.set()
+                if not first_attempt_release.wait(timeout=5):
+                    raise AssertionError("timed out waiting for first attempt release")
                 raise RuntimeError("transient downstream failure")
             started.set()
             if not release.wait(timeout=5):
@@ -253,10 +258,13 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": retrying_handler})
             )
             await worker._execute_claimed(row)
-            await self._wait_for(started)
-            self.assertEqual(attempts, 2)
+            await self._wait_for(first_attempt_started)
             complete = patches[5].new
             self.assertEqual(complete.await_count, 1)
+
+            first_attempt_release.set()
+            await self._wait_for(started)
+            self.assertEqual(attempts, 2)
 
             release.set()
             await self._wait_for_completion(worker, persist_history)
@@ -265,8 +273,8 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertEqual(final_result.status, "success")
             self.assertTrue(
                 any(
-                    node_result.get("status") == "error"
-                    and node_result.get("error") == "transient downstream failure"
+                    node_result.get("node_id") == "downstream"
+                    and node_result.get("status") == "success"
                     for node_result in final_result.node_results
                 )
             )
