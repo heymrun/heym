@@ -141,13 +141,23 @@ def _build_schema_user_prompt(prompt: str, existing_cols: list[DataTableColumnDe
     return prompt
 
 
+def _highest_permission(permissions: list[str]) -> str | None:
+    """Return "write" if any share grants it, else "read", else None when unshared."""
+    if not permissions:
+        return None
+    return "write" if "write" in permissions else "read"
+
+
 async def _get_data_table_with_access(
     table_id: uuid.UUID,
     user_id: uuid.UUID,
     db: AsyncSession,
     require_write: bool = False,
 ) -> DataTable:
-    """Return the DataTable if user has access, raising 404 otherwise."""
+    """Return the DataTable if user has access, raising 404 otherwise.
+
+    The highest permission across the user's direct share and every team share wins.
+    """
     # 1. Owner always has full access
     result = await db.execute(
         select(DataTable).where(DataTable.id == table_id, DataTable.owner_id == user_id)
@@ -156,40 +166,41 @@ async def _get_data_table_with_access(
     if table is not None:
         return table
 
-    # 2. User-level share
-    share_q = (
-        select(DataTable, DataTableShare.permission)
-        .join(DataTableShare, DataTableShare.table_id == DataTable.id)
-        .where(DataTable.id == table_id, DataTableShare.user_id == user_id)
-    )
-    share_result = await db.execute(share_q)
-    row = share_result.one_or_none()
-    if row is not None:
-        table, permission = row
-        if require_write and permission != "write":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Write access required"
+    # 2. Direct and team shares: collect every permission the user holds
+    user_permissions = (
+        (
+            await db.execute(
+                select(DataTableShare.permission).where(
+                    DataTableShare.table_id == table_id, DataTableShare.user_id == user_id
+                )
             )
-        return table
-
-    # 3. Team-level share
-    team_q = (
-        select(DataTable, DataTableTeamShare.permission)
-        .join(DataTableTeamShare, DataTableTeamShare.table_id == DataTable.id)
-        .join(TeamMember, TeamMember.team_id == DataTableTeamShare.team_id)
-        .where(DataTable.id == table_id, TeamMember.user_id == user_id)
+        )
+        .scalars()
+        .all()
     )
-    team_result = await db.execute(team_q)
-    row = team_result.first()
-    if row is not None:
-        table, permission = row
-        if require_write and permission != "write":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Write access required"
+    team_permissions = (
+        (
+            await db.execute(
+                select(DataTableTeamShare.permission)
+                .join(TeamMember, TeamMember.team_id == DataTableTeamShare.team_id)
+                .where(DataTableTeamShare.table_id == table_id, TeamMember.user_id == user_id)
             )
-        return table
+        )
+        .scalars()
+        .all()
+    )
+    permission = _highest_permission([*user_permissions, *team_permissions])
+    if permission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    if require_write and permission != "write":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Write access required")
 
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    shared = (
+        await db.execute(select(DataTable).where(DataTable.id == table_id))
+    ).scalar_one_or_none()
+    if shared is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    return shared
 
 
 async def _row_count(table_id: uuid.UUID, db: AsyncSession) -> int:
@@ -412,7 +423,17 @@ async def list_data_tables(
         )
         seen_ids.add(table.id)
 
+    # A table can be shared several ways (directly and through one or more teams). Keep
+    # the share with the highest permission; on a tie the earlier one (direct) is kept.
+    best_shares: dict[uuid.UUID, tuple[DataTable, str, str | None, str | None]] = {}
     for table, owner_email, permission in shared:
+        best_shares.setdefault(table.id, (table, permission, owner_email, None))
+    for table, team_name, permission in team_shared:
+        current = best_shares.get(table.id)
+        if current is None or (permission == "write" and current[1] != "write"):
+            best_shares[table.id] = (table, permission, None, team_name)
+
+    for table, permission, owner_email, team_name in best_shares.values():
         if table.id in seen_ids:
             continue
         seen_ids.add(table.id)
@@ -427,26 +448,6 @@ async def list_data_tables(
                 owner_id=table.owner_id,
                 is_shared=True,
                 shared_by=owner_email,
-                permission=permission,
-                created_at=table.created_at,
-                updated_at=table.updated_at,
-            )
-        )
-
-    for table, team_name, permission in team_shared:
-        if table.id in seen_ids:
-            continue
-        seen_ids.add(table.id)
-        count = await _row_count(table.id, db)
-        responses.append(
-            DataTableListResponse(
-                id=table.id,
-                name=table.name,
-                description=table.description,
-                column_count=len(table.columns or []),
-                row_count=count,
-                owner_id=table.owner_id,
-                is_shared=True,
                 shared_by_team=team_name,
                 permission=permission,
                 created_at=table.created_at,
