@@ -206,7 +206,6 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
     async def test_cancellation_after_early_response_reaches_downstream_finalizer(self) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
         from app.services.execution_cancellation import (
-            _ACTIVE_EXECUTIONS,
             cancel_execution,
             complete_execution,
             get_active_execution_handle,
