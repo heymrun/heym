@@ -418,7 +418,7 @@ class RunQueueWorker:
             trigger_source=row.trigger_source,
             result=result,
         )
-        if row.credentials_owner_id is not None:
+        if row.credentials_owner_id is not None and result.status != "cancelled":
             async with async_session_maker() as db:
                 await _persist_global_variables_from_execution(
                     db,
