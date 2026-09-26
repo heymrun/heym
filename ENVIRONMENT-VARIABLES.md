@@ -176,7 +176,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 
 ## Codex node
 
-The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH. Local `./run.sh` uses the native `codex` CLI. Docker deployments use the bundled `heym-codex-docker` wrapper, which starts a sibling container from the same Heym image so Codex's bubblewrap sandbox can create Linux namespaces outside the backend container.
+The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH. Local `./run.sh` uses the native `codex` CLI. Docker deployments use the bundled `heym-codex-docker` wrapper, which starts a sibling container from the same Heym image so Codex's bubblewrap sandbox can create Linux namespaces outside the backend container. That container also passes `--security-opt systempaths=unconfined` (Docker Engine 25+). Docker's default masked `/proc` paths otherwise reject bubblewrap's fresh proc mount, and every Codex command fails with `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`.
 
 | Variable | Description | Default |
 |----------|-------------|---------|

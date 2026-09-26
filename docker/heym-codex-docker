@@ -131,6 +131,13 @@ def main() -> int:
         "seccomp=unconfined",
         "--security-opt",
         "apparmor=unconfined",
+        # Docker masks and remounts parts of /proc by default. Codex's bubblewrap
+        # sandbox then fails every command with
+        # "bwrap: Can't mount proc on /newroot/proc: Operation not permitted"
+        # even after SYS_ADMIN, seccomp, and AppArmor are relaxed. Unmasking
+        # system paths lets it mount a fresh /proc. Requires Docker Engine 25+.
+        "--security-opt",
+        "systempaths=unconfined",
         "--pids-limit",
         _env_value("HEYM_CODEX_DOCKER_PIDS") or "1024",
         "--memory",

@@ -24,7 +24,7 @@ API keys are not accepted for the Codex credential. The node does not submit clo
 
 The node also requires a **GitHub** credential for cloning private repositories, pushing the working branch, and creating draft pull requests.
 
-In Docker deployments, Heym runs Codex inside a sibling container from the same Heym image (not a separate GHCR image). That container mounts only the Codex workspace volume and lets Codex's own bubblewrap sandbox create namespaces, which avoids the common Docker error `bwrap: No permissions to create a new namespace`.
+In Docker deployments, Heym runs Codex inside a sibling container from the same Heym image (not a separate GHCR image). That container mounts only the Codex workspace volume and lets Codex's own bubblewrap sandbox create namespaces and a fresh `/proc`. The runner adds `SYS_ADMIN`, unconfined seccomp and AppArmor, and `systempaths=unconfined` (Docker Engine 25+). Without the last flag, every command fails before launch with `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`.
 
 OpenAI references:
 
