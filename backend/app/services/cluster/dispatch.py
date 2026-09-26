@@ -369,9 +369,16 @@ class RunQueueWorker:
             _, pending = await asyncio.wait(finalizers, timeout=10.0)
             if pending:
                 logger.warning(
-                    "Run queue worker stopped with %d allow-downstream finalizer(s) still pending",
+                    "Run queue worker stopped with %d allow-downstream finalizer(s) still pending; cancelling",
                     len(pending),
                 )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in finalizers:
+                if not task.cancelled():
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        task.exception()
 
     async def _run_loop(self, bus: Any) -> None:
         while self._running:
@@ -411,7 +418,7 @@ class RunQueueWorker:
             trigger_source=row.trigger_source,
             result=result,
         )
-        if row.credentials_owner_id is not None:
+        if row.credentials_owner_id is not None and result.status == "success":
             async with async_session_maker() as db:
                 await _persist_global_variables_from_execution(
                     db,
@@ -437,32 +444,19 @@ class RunQueueWorker:
         """Finish an early-return run without blocking the worker's event loop."""
         try:
             await asyncio.to_thread(result.join_allow_downstream)
+            if any(
+                isinstance(node_result, dict) and node_result.get("status") == "error"
+                for node_result in (getattr(result, "node_results", None) or [])
+            ):
+                result.status = "error"
         except WorkflowCancelledError:
             logger.info("Allow-downstream run was cancelled: %s", row.execution_id)
             result.status = "cancelled"
-            with contextlib.suppress(Exception):
-                await self._persist_claimed_run(
-                    row=row,
-                    owner_id=owner_id,
-                    workflow_name=workflow_name,
-                    nodes=nodes,
-                    workflow_cache=workflow_cache,
-                    result=result,
-                )
-        except Exception as exc:
+        except Exception:
             logger.exception("Allow-downstream finalization failed: %s", row.execution_id)
             result.status = "error"
-            result.outputs = {"error": str(exc)}
-            with contextlib.suppress(Exception):
-                await self._persist_claimed_run(
-                    row=row,
-                    owner_id=owner_id,
-                    workflow_name=workflow_name,
-                    nodes=nodes,
-                    workflow_cache=workflow_cache,
-                    result=result,
-                )
-        else:
+            # Preserve the early response. The client may already have received it.
+        try:
             await self._persist_claimed_run(
                 row=row,
                 owner_id=owner_id,
@@ -470,6 +464,11 @@ class RunQueueWorker:
                 nodes=nodes,
                 workflow_cache=workflow_cache,
                 result=result,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist final allow-downstream history: %s",
+                row.execution_id,
             )
         finally:
             with contextlib.suppress(Exception):
@@ -578,12 +577,10 @@ class RunQueueWorker:
             # background branch finishes. Publish the early result now, then retain
             # execution ownership until the worker has persisted the final state.
             if result.allow_downstream_pending:
-                defer_cleanup = True
+                worker_handle = getattr(cancel_event, "_execution_handle", None)
                 await run_queue.complete(
                     row.execution_id, result=summarize(result, row.execution_id), error=None
                 )
-                await run_queue.notify_done(row.execution_id)
-                worker_handle = getattr(cancel_event, "_execution_handle", None)
                 try:
                     finalizer = asyncio.create_task(
                         self._finalize_claimed_allow_downstream(
@@ -598,9 +595,10 @@ class RunQueueWorker:
                     )
                     self._active_finalizers.add(finalizer)
                     finalizer.add_done_callback(self._active_finalizers.discard)
+                    defer_cleanup = True
                 except Exception:
                     # Task creation is exceptional, but the early result has already
-                    # been published. Finish inline rather than leaking execution state.
+                    # been published. Finish inline so execution state is not leaked.
                     await self._finalize_claimed_allow_downstream(
                         row=row,
                         result=result,
@@ -610,6 +608,8 @@ class RunQueueWorker:
                         workflow_cache=workflow_cache,
                         worker_handle=worker_handle,
                     )
+                    return
+                await run_queue.notify_done(row.execution_id)
                 return
 
             # History is written here, on the instance that ran it, stamped with
