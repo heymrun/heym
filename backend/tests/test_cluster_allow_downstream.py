@@ -38,6 +38,12 @@ class _DeferredResult:
         self._pending = False
 
 
+class _FailingDeferredResult(_DeferredResult):
+    def join_allow_downstream(self) -> None:
+        self.started.set()
+        raise RuntimeError("downstream finalizer failed")
+
+
 class _CancellableDeferredResult(_DeferredResult):
     def __init__(self, cancel_event: threading.Event) -> None:
         super().__init__()
@@ -235,7 +241,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         registered_event = None
         result_holder = {}
 
-        def execute_stub() -> _CancellableDeferredResult:
+        def execute_stub(*args, **kwargs) -> _CancellableDeferredResult:
             event = registered_event
             assert event is not None
             result = _CancellableDeferredResult(event)
@@ -272,6 +278,10 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             patch(
                 "app.services.cluster.dispatch.persist_run_history", new=AsyncMock()
             ) as persist_history,
+            patch(
+                "app.api.workflows._persist_global_variables_from_execution",
+                new=AsyncMock(),
+            ) as persist_globals,
             patch("app.services.cluster.dispatch.register_execution", side_effect=spy_register),
             patch(
                 "app.services.cluster.dispatch.complete_execution",
@@ -310,3 +320,198 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 {"output": {"result": "early"}},
                 [persist_history.await_args.kwargs["result"].outputs],
             )
+            self.assertEqual(persist_globals.await_count, 0)
+
+    async def test_downstream_failure_preserves_early_outputs(self) -> None:
+        from app.services.cluster.dispatch import RunQueueWorker
+        from app.services.execution_cancellation import (
+            complete_execution,
+            get_active_execution_handle,
+            register_execution,
+        )
+
+        run_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        credentials_owner_id = uuid.uuid4()
+        active_row = SimpleNamespace(cancel_requested_at=None)
+        workflow = SimpleNamespace(
+            nodes=[
+                {"id": "output", "type": "output", "data": {"label": "output"}},
+            ],
+            edges=[],
+            owner_id=uuid.uuid4(),
+            name="allow-downstream-failure",
+        )
+        row = SimpleNamespace(
+            id=None,
+            execution_id=run_id,
+            workflow_id=workflow_id,
+            inputs={},
+            trigger_source="api",
+            actor_user_id=None,
+            credentials_owner_id=credentials_owner_id,
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=False,
+        )
+        result = _FailingDeferredResult()
+        registered_event = None
+
+        def spy_register(*args, **kwargs):
+            nonlocal registered_event
+            registered_event = register_execution(*args, **kwargs)
+            return registered_event
+
+        session, context = self._session_context(workflow, active_row)
+        worker = RunQueueWorker()
+
+        with (
+            patch("app.db.session.async_session_maker", return_value=context),
+            patch("app.api.workflows.get_credentials_context", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.hitl_service.build_default_public_base_url",
+                return_value="http://test",
+            ),
+            patch("app.services.cluster.dispatch.execute_workflow", return_value=result),
+            patch(
+                "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
+            ) as complete,
+            patch(
+                "app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()
+            ) as notify_done,
+            patch(
+                "app.services.cluster.dispatch.persist_run_history", new=AsyncMock()
+            ) as persist_history,
+            patch(
+                "app.api.workflows._persist_global_variables_from_execution",
+                new=AsyncMock(),
+            ) as persist_globals,
+            patch("app.services.cluster.dispatch.register_execution", side_effect=spy_register),
+            patch(
+                "app.services.cluster.dispatch.complete_execution",
+                wraps=complete_execution,
+            ) as complete_execution_spy,
+        ):
+            await worker._execute_claimed(row)
+            await self._wait_for(result.started)
+
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if not worker._active_finalizers:
+                    break
+
+            self.assertEqual(persist_history.await_count, 1)
+            final_result = persist_history.await_args.kwargs["result"]
+            self.assertEqual(final_result.status, "error")
+            self.assertEqual(final_result.outputs, {"output": {"result": "early"}})
+            self.assertEqual(persist_globals.await_count, 0)
+            self.assertEqual(complete.await_count, 2)
+            self.assertEqual(notify_done.await_count, 2)
+            self.assertEqual(complete_execution_spy.call_count, 1)
+            self.assertIsNone(get_active_execution_handle(run_id))
+            self.assertEqual(session.commit.await_count, 0)
+            self.assertEqual(len(worker._active_finalizers), 0)
+
+    async def test_early_queue_completion_failure_cleans_execution_handle(self) -> None:
+        from app.services.cluster.dispatch import RunQueueWorker
+        from app.services.execution_cancellation import (
+            complete_execution,
+            get_active_execution_handle,
+            register_execution,
+        )
+
+        run_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        active_row = SimpleNamespace(cancel_requested_at=None)
+        workflow = SimpleNamespace(
+            nodes=[{"id": "output", "type": "output", "data": {"label": "output"}}],
+            edges=[],
+            owner_id=uuid.uuid4(),
+            name="allow-downstream-publish-failure",
+        )
+        row = SimpleNamespace(
+            id=None,
+            execution_id=run_id,
+            workflow_id=workflow_id,
+            inputs={},
+            trigger_source="api",
+            actor_user_id=None,
+            credentials_owner_id=None,
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=False,
+        )
+        result = _DeferredResult()
+        registered_event = None
+
+        def spy_register(*args, **kwargs):
+            nonlocal registered_event
+            registered_event = register_execution(*args, **kwargs)
+            return registered_event
+
+        _session, context = self._session_context(workflow, active_row)
+        worker = RunQueueWorker()
+
+        with (
+            patch("app.db.session.async_session_maker", return_value=context),
+            patch("app.api.workflows.get_credentials_context", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.hitl_service.build_default_public_base_url",
+                return_value="http://test",
+            ),
+            patch("app.services.cluster.dispatch.execute_workflow", return_value=result),
+            patch(
+                "app.services.cluster.dispatch.run_queue.complete",
+                new=AsyncMock(side_effect=[RuntimeError("queue unavailable"), None]),
+            ) as complete,
+            patch(
+                "app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()
+            ) as notify_done,
+            patch("app.services.cluster.dispatch.register_execution", side_effect=spy_register),
+            patch(
+                "app.services.cluster.dispatch.complete_execution",
+                wraps=complete_execution,
+            ) as complete_execution_spy,
+        ):
+            await worker._execute_claimed(row)
+
+            self.assertEqual(complete.await_count, 2)
+            self.assertEqual(complete_execution_spy.call_count, 1)
+            self.assertIsNone(get_active_execution_handle(run_id))
+            self.assertEqual(notify_done.await_count, 1)
+
+    async def test_stop_cancels_pending_allow_downstream_finalizers(self) -> None:
+        from app.services.cluster.dispatch import RunQueueWorker
+
+        worker = RunQueueWorker()
+        finished = asyncio.Event()
+
+        async def blocked_finalizer() -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                finished.set()
+
+        task = asyncio.create_task(blocked_finalizer())
+        worker._active_finalizers.add(task)
+
+        async def fake_wait(tasks, timeout):
+            self.assertEqual(timeout, 10.0)
+            return set(), {task}
+
+        with patch("app.services.cluster.dispatch.asyncio.wait", new=fake_wait):
+            await worker.stop()
+
+        await asyncio.wait_for(finished.wait(), timeout=1.0)
+        self.assertTrue(task.cancelled())
+        self.assertFalse(worker._active_finalizers)
