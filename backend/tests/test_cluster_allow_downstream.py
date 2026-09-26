@@ -315,7 +315,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertEqual(final_result.status, "error")
             self.assertEqual(final_result.outputs, {"output": {"result": "hello"}})
             self.assertEqual(persist_globals.await_count, 1)
-            global_results = persist_globals.await_args.kwargs["node_results"]
+            global_results = persist_globals.await_args.args[4]
             self.assertTrue(
                 any(
                     node_result.get("node_id") == "before_output"
