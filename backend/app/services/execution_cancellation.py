@@ -134,6 +134,8 @@ class ClaimedOrphan:
     trigger_source: str | None
     actor_user_id: uuid.UUID | None
     attempt: int
+    claim_owner: str | None = None
+    registration_token: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -167,21 +169,25 @@ def register_execution(
     actor_user_id: uuid.UUID | None = None,
     recoverable: bool = True,
     claim_owner: str | None = None,
+    registration_token: uuid.UUID | None = None,
 ) -> threading.Event:
     if event is None:
         event = threading.Event()
     started_at = started_at or _utcnow()
-    handle = ExecutionCancellationHandle(
-        workflow_id=workflow_id,
-        execution_id=execution_id,
-        event=event,
-        started_at=started_at,
-        inputs=inputs or {},
-        trigger_source=trigger_source,
-        actor_user_id=actor_user_id,
-        recoverable=recoverable,
-        claim_owner=claim_owner,
-    )
+    handle_kwargs: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "execution_id": execution_id,
+        "event": event,
+        "started_at": started_at,
+        "inputs": inputs or {},
+        "trigger_source": trigger_source,
+        "actor_user_id": actor_user_id,
+        "recoverable": recoverable,
+        "claim_owner": claim_owner,
+    }
+    if registration_token is not None:
+        handle_kwargs["registration_token"] = registration_token
+    handle = ExecutionCancellationHandle(**handle_kwargs)
     event._execution_handle = handle  # type: ignore[attr-defined]
     with _LOCK:
         _ACTIVE_EXECUTIONS[execution_id] = handle
@@ -1478,6 +1484,8 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
         _claim_failures.success("orphan candidate scan")
 
         for row in candidates:
+            recovery_token = uuid.uuid4()
+            recovery_claim_owner = f"{_WORKER_ID}:{recovery_token}"
             try:
                 async with session.begin_nested():
                     result = await session.execute(
@@ -1486,8 +1494,22 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                             ActiveWorkflowExecution.execution_id == row.execution_id,
                             ActiveWorkflowExecution.heartbeat_at < cutoff,
                         )
-                        .values(worker_id=_WORKER_ID, heartbeat_at=now, attempt=row.attempt + 1)
+                        .values(
+                            worker_id=recovery_claim_owner,
+                            heartbeat_at=now,
+                            attempt=row.attempt + 1,
+                        )
                     )
+                    if (result.rowcount or 0) == 1:
+                        await session.execute(
+                            update(WorkflowRunQueue)
+                            .where(WorkflowRunQueue.execution_id == row.execution_id)
+                            .values(
+                                claimed_by_process=recovery_claim_owner,
+                                claimed_at=now,
+                                status=STATUS_CLAIMED,
+                            )
+                        )
             except Exception as exc:
                 skipped += 1
                 _claim_failures.failure("orphan claim", exc, str(row.execution_id))
@@ -1501,6 +1523,8 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                         trigger_source=row.trigger_source,
                         actor_user_id=row.actor_user_id,
                         attempt=row.attempt + 1,
+                        claim_owner=recovery_claim_owner,
+                        registration_token=recovery_token,
                     )
                 )
         await session.commit()
