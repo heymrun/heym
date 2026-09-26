@@ -2,6 +2,7 @@ import asyncio
 import threading
 import uuid
 from types import SimpleNamespace
+from contextlib import ExitStack
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -163,10 +164,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
-        with (
-            *patches,
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": downstream_handler}),
-        ):
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(
+                patch.dict(node_registry._HANDLER_CACHE, {"wait": downstream_handler})
+            ):
             await worker._execute_claimed(row)
             await self._wait_for(started)
 
@@ -233,10 +236,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
-        with (
-            *patches,
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": retrying_handler}),
-        ):
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(
+                patch.dict(node_registry._HANDLER_CACHE, {"wait": retrying_handler})
+            ):
             await worker._execute_claimed(row)
             await self._wait_for(started)
             self.assertEqual(attempts, 2)
@@ -285,10 +290,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
-        with (
-            *patches,
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": failing_handler}),
-        ):
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(
+                patch.dict(node_registry._HANDLER_CACHE, {"wait": failing_handler})
+            ):
             await worker._execute_claimed(row)
             await self._wait_for(started)
             await self._wait_for_finalizer(worker)
@@ -340,10 +347,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
-        with (
-            *patches,
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": cancellable_handler}),
-        ):
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(
+                patch.dict(node_registry._HANDLER_CACHE, {"wait": cancellable_handler})
+            ):
             await worker._execute_claimed(row)
             await self._wait_for(started)
 
@@ -386,10 +395,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
-        with (
-            *patches,
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler}),
-        ):
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(
+                patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler})
+            ):
             await worker._execute_claimed(row)
             await self._wait_for_finalizer(worker)
 
