@@ -445,6 +445,13 @@ class RunQueueWorker:
         persistence_error: Exception | None = None
         try:
             await asyncio.to_thread(result.join_allow_downstream)
+            if any(
+                isinstance(node_result, dict)
+                and node_result.get("status") == "error"
+                and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
+                for node_result in (getattr(result, "node_results", None) or [])
+            ):
+                result.status = "error"
         except asyncio.CancelledError:
             logger.warning(
                 "Allow-downstream finalization cancelled during shutdown: %s",
