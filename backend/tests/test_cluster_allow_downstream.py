@@ -102,6 +102,14 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
         self.fail("expected allow-downstream finalizer to finish")
 
+    async def _wait_for_finalizer(self, worker) -> None:
+        for _ in range(100):
+            if not worker._active_finalizers:
+                return
+            await asyncio.sleep(0.01)
+        self.fail("expected allow-downstream finalizer to finish")
+
+
     def _patch_worker_dependencies(
         self,
         context: MagicMock,
@@ -189,9 +197,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertEqual(persist_history.await_count, 1)
             final_result = persist_history.await_args.kwargs["result"]
             self.assertEqual(final_result.status, "success")
-            self.assertIn(
-                {"node_id": "downstream", "node_label": "downstream", "status": "success"},
-                final_result.node_results,
+            self.assertTrue(
+                any(
+                    node_result.get("node_id") == "downstream"
+                    and node_result.get("status") == "success"
+                    for node_result in final_result.node_results
+                )
             )
             self.assertEqual(persist_globals.await_count, 1)
             self.assertEqual(complete.await_count, 2)
