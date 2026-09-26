@@ -79,6 +79,7 @@ Frontend E2E: Playwright specs live in `frontend/e2e/`; run them with `./run_e2e
 **New features must include backend tests** - run `./check.sh` before git push (includes backend tests via `./run_tests.sh`)
 **New UI behavior should include Playwright E2E coverage when practical.** E2E tests run as a separate required job in PR checks and are intentionally excluded from `./check.sh` to keep the default local check path fast.
 If the local environment does not export `SECRET_KEY`, prefix full-suite commands with `SECRET_KEY=test-secret-key-for-tests-only-32-bytes` (test-only value; never use it for runtime/prod).
+**PostgreSQL Integration Tests:** The active execution registry resilience tests (`backend/tests/test_active_execution_registry_resilience.py`) run deterministic race tests directly against real PostgreSQL. They require a reachable PostgreSQL instance (via `DATABASE_URL` or default `localhost:5432`/`localhost:6543`) with database migrations applied (`uv run alembic upgrade head`). When `DATABASE_URL` is explicitly provided in the environment, `./check.sh` applies database migrations before running backend tests.
 
 ### Secret handling (capability secrets)
 A capability secret is any value that grants access on its own: API keys, session tokens, share links, webhook auth headers. `backend/app/services/secret_tokens.py` holds the one hashing helper; do not add a second.

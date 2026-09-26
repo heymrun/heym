@@ -3132,7 +3132,9 @@ async def execute_workflow_endpoint(
             detail="Execution was cancelled",
         )
     finally:
-        clear_active_execution(execution_id)
+        clear_active_execution(
+            execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+        )
 
     if needs_local_pending_persist(execution_result):
         if is_codex_pending_execution(execution_result):

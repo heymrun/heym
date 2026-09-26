@@ -19,6 +19,20 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: heym
+        ports:
+          - 6543:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d heym"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,6 +84,14 @@ jobs:
         working-directory: backend
         run: uv sync
 
+      - name: Apply database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:6543/heym
+          SECRET_KEY: ci-test-secret-key-for-testing-only-not-for-production
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1' }}
+        run: uv run alembic upgrade head
+
       - name: Ruff format (check)
         working-directory: backend
         run: uv run ruff format --check .
@@ -80,6 +102,7 @@ jobs:
 
       - name: Backend unit tests
         env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:6543/heym
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1' }}
           SECRET_KEY: ci-test-secret-key-for-testing-only-not-for-production
         run: sh ./run_tests.sh

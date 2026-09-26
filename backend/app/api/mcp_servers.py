@@ -682,7 +682,9 @@ async def _dispatch_named_server_jsonrpc(
                 },
             }
         finally:
-            clear_active_execution(execution_id)
+            clear_active_execution(
+                execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+            )
 
     return {
         "jsonrpc": "2.0",

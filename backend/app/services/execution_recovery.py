@@ -11,6 +11,7 @@ from app.services.execution_cancellation import (
     RECOVERY_STALE_AFTER_SECONDS,  # noqa: F401  (re-exported for callers/tests)
     ClaimedOrphan,
     claim_orphaned_executions,
+    cleanup_completed_active_executions,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class ExecutionRecoveryService:
             await asyncio.sleep(_RECOVERY_POLL_SECONDS)
 
     async def _sweep_once(self) -> None:
+        await cleanup_completed_active_executions()
         orphans = await claim_orphaned_executions()
         for orphan in orphans:
             asyncio.create_task(self._recover_one(orphan))
@@ -103,14 +105,53 @@ class ExecutionRecoveryService:
 
     async def _finalize(self, *, orphan: ClaimedOrphan, workflow, status: str) -> None:
         """Write a terminal ExecutionHistory entry and drop the active row."""
-        from sqlalchemy import delete
+        from datetime import datetime, timezone
+
+        from sqlalchemy import delete, select, update
         from sqlalchemy.exc import IntegrityError
 
-        from app.db.models import ActiveWorkflowExecution, ExecutionHistory
+        from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
         from app.db.session import async_session_maker
+        from app.services.cluster.run_queue import STATUS_FAILED, STATUS_SKIPPED_LATE
 
         has_history = False
         async with async_session_maker() as session:
+            # Atomic lock acquisition in global lock order:
+            # 1. ActiveWorkflowExecution
+            # 2. WorkflowRunQueue
+            active_row = (
+                await session.execute(
+                    select(ActiveWorkflowExecution)
+                    .where(ActiveWorkflowExecution.execution_id == orphan.execution_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+
+            queue_row = (
+                await session.execute(
+                    select(WorkflowRunQueue)
+                    .where(WorkflowRunQueue.execution_id == orphan.execution_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+
+            if orphan.claim_owner is not None:
+                if (
+                    active_row is None
+                    or active_row.worker_id != orphan.claim_owner
+                    or (
+                        queue_row is not None and queue_row.claimed_by_process != orphan.claim_owner
+                    )
+                ):
+                    logger.warning(
+                        "Recovery finalize: execution %s ownership lost (expected owner %s, active worker %s, queue claim %s); discarding finalize.",
+                        orphan.execution_id,
+                        orphan.claim_owner,
+                        getattr(active_row, "worker_id", None),
+                        getattr(queue_row, "claimed_by_process", None),
+                    )
+                    return
+
             # A paused run already published history under this id, and its finish write
             # can be dropped by the registry, leaving a claimable active row. Inserting
             # again would collide on the primary key and overwrite real inputs.
@@ -146,11 +187,40 @@ class ExecutionRecoveryService:
                         orphan.execution_id,
                         orphan.workflow_id,
                     )
-            await session.execute(
-                delete(ActiveWorkflowExecution).where(
-                    ActiveWorkflowExecution.execution_id == orphan.execution_id
+            if orphan.claim_owner is not None:
+                await session.execute(
+                    delete(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == orphan.execution_id,
+                        ActiveWorkflowExecution.worker_id == orphan.claim_owner,
+                    )
                 )
-            )
+                await session.execute(
+                    update(WorkflowRunQueue)
+                    .where(
+                        WorkflowRunQueue.execution_id == orphan.execution_id,
+                        WorkflowRunQueue.claimed_by_process == orphan.claim_owner,
+                    )
+                    .values(
+                        status=STATUS_FAILED if status == "failed" else STATUS_SKIPPED_LATE,
+                        finished_at=datetime.now(timezone.utc),
+                        error=f"Execution {status} by recovery",
+                    )
+                )
+            else:
+                await session.execute(
+                    delete(ActiveWorkflowExecution).where(
+                        ActiveWorkflowExecution.execution_id == orphan.execution_id
+                    )
+                )
+                await session.execute(
+                    update(WorkflowRunQueue)
+                    .where(WorkflowRunQueue.execution_id == orphan.execution_id)
+                    .values(
+                        status=STATUS_FAILED if status == "failed" else STATUS_SKIPPED_LATE,
+                        finished_at=datetime.now(timezone.utc),
+                        error=f"Execution {status} by recovery",
+                    )
+                )
             await session.commit()
         # Whether the row is new or was already there, the board may still be waiting
         # for it: a previous pass can commit history and be interrupted before it syncs.
@@ -168,14 +238,20 @@ class ExecutionRecoveryService:
 
     async def _rerun(self, orphan: ClaimedOrphan, workflow) -> None:
         """Re-run the workflow from scratch with the original inputs."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy import delete, select, update
+
         from app.api.analytics import upsert_workflow_analytics_snapshot
         from app.api.workflows import (
             _persist_global_variables_from_execution,
             collect_referenced_workflows,
             get_credentials_context,
         )
-        from app.db.models import ExecutionHistory
+        from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
         from app.db.session import async_session_maker
+        from app.services.cluster.run_history import summarize
+        from app.services.cluster.run_queue import STATUS_DONE, STATUS_FAILED
         from app.services.execution_cancellation import (
             clear_execution,
             register_execution,
@@ -191,7 +267,7 @@ class ExecutionRecoveryService:
             credentials_context = await get_credentials_context(session, actor_user_id)
             global_variables_context = await get_global_variables_context(session, actor_user_id)
 
-        # Re-register the SAME execution_id so the claimed attempt count is preserved.
+        # Re-register the SAME execution_id with recovery claim ownership.
         cancel_event = register_execution(
             workflow_id=workflow.id,
             execution_id=orphan.execution_id,
@@ -199,6 +275,8 @@ class ExecutionRecoveryService:
             trigger_source=orphan.trigger_source,
             actor_user_id=actor_user_id,
             recoverable=True,
+            claim_owner=orphan.claim_owner,
+            registration_token=orphan.registration_token,
         )
         try:
             result = await asyncio.to_thread(
@@ -215,50 +293,130 @@ class ExecutionRecoveryService:
                 cancel_event=cancel_event,
                 execution_id=str(orphan.execution_id),
             )
-        finally:
-            clear_execution(orphan.execution_id)
 
-        async with async_session_maker() as session:
-            session.add(
-                ExecutionHistory(
-                    id=orphan.execution_id,
+            committed = False
+            async with async_session_maker() as session:
+                # Atomic lock acquisition in global lock order:
+                # 1. ActiveWorkflowExecution
+                # 2. WorkflowRunQueue
+                active_row = (
+                    await session.execute(
+                        select(ActiveWorkflowExecution)
+                        .where(ActiveWorkflowExecution.execution_id == orphan.execution_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+
+                queue_row = (
+                    await session.execute(
+                        select(WorkflowRunQueue)
+                        .where(WorkflowRunQueue.execution_id == orphan.execution_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+
+                if orphan.claim_owner is not None:
+                    if (
+                        active_row is None
+                        or active_row.worker_id != orphan.claim_owner
+                        or (
+                            queue_row is not None
+                            and queue_row.claimed_by_process != orphan.claim_owner
+                        )
+                    ):
+                        logger.warning(
+                            "Recovery rerun: execution %s ownership lost (expected owner %s, active worker %s, queue claim %s); discarding completion.",
+                            orphan.execution_id,
+                            orphan.claim_owner,
+                            getattr(active_row, "worker_id", None),
+                            getattr(queue_row, "claimed_by_process", None),
+                        )
+                        return
+
+                session.add(
+                    ExecutionHistory(
+                        id=orphan.execution_id,
+                        workflow_id=workflow.id,
+                        inputs=orphan.inputs,
+                        outputs=result.outputs,
+                        node_results=result.node_results,
+                        status=result.status,
+                        execution_time_ms=result.execution_time_ms,
+                        trigger_source=orphan.trigger_source,
+                        recovered=True,
+                    )
+                )
+                await upsert_workflow_analytics_snapshot(
+                    session,
                     workflow_id=workflow.id,
-                    inputs=orphan.inputs,
-                    outputs=result.outputs,
-                    node_results=result.node_results,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
-                    trigger_source=orphan.trigger_source,
-                    recovered=True,
                 )
-            )
-            await upsert_workflow_analytics_snapshot(
-                session,
-                workflow_id=workflow.id,
-                owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status=result.status,
-                execution_time_ms=result.execution_time_ms,
-            )
-            await _persist_global_variables_from_execution(
-                session,
-                workflow.owner_id,
-                workflow.nodes,
-                workflow_cache,
-                result.node_results,
-                result.sub_workflow_executions,
-            )
-            await session.commit()
-        if orphan.trigger_source == "board":
-            from app.services.board_run_service import sync_recovered_board_run
+                await _persist_global_variables_from_execution(
+                    session,
+                    workflow.owner_id,
+                    workflow.nodes,
+                    workflow_cache,
+                    result.node_results,
+                    result.sub_workflow_executions,
+                )
 
-            await sync_recovered_board_run(orphan.execution_id)
-        logger.info(
-            "Recovery re-ran execution %s -> %s (workflow %s)",
-            orphan.execution_id,
-            result.status,
-            workflow.id,
-        )
+                if orphan.claim_owner is not None:
+                    await session.execute(
+                        delete(ActiveWorkflowExecution).where(
+                            ActiveWorkflowExecution.execution_id == orphan.execution_id,
+                            ActiveWorkflowExecution.worker_id == orphan.claim_owner,
+                        )
+                    )
+                    await session.execute(
+                        update(WorkflowRunQueue)
+                        .where(
+                            WorkflowRunQueue.execution_id == orphan.execution_id,
+                            WorkflowRunQueue.claimed_by_process == orphan.claim_owner,
+                        )
+                        .values(
+                            status=STATUS_DONE if result.status == "success" else STATUS_FAILED,
+                            finished_at=datetime.now(timezone.utc),
+                            result=summarize(result, orphan.execution_id),
+                            error=None,
+                        )
+                    )
+                else:
+                    await session.execute(
+                        delete(ActiveWorkflowExecution).where(
+                            ActiveWorkflowExecution.execution_id == orphan.execution_id
+                        )
+                    )
+                    await session.execute(
+                        update(WorkflowRunQueue)
+                        .where(WorkflowRunQueue.execution_id == orphan.execution_id)
+                        .values(
+                            status=STATUS_DONE if result.status == "success" else STATUS_FAILED,
+                            finished_at=datetime.now(timezone.utc),
+                            result=summarize(result, orphan.execution_id),
+                            error=None,
+                        )
+                    )
+                await session.commit()
+                committed = True
+            if committed and orphan.trigger_source == "board":
+                from app.services.board_run_service import sync_recovered_board_run
+
+                await sync_recovered_board_run(orphan.execution_id)
+            if committed:
+                logger.info(
+                    "Recovery re-ran execution %s -> %s (workflow %s)",
+                    orphan.execution_id,
+                    result.status,
+                    workflow.id,
+                )
+        finally:
+            clear_execution(
+                orphan.execution_id,
+                handle=getattr(cancel_event, "_execution_handle", None),
+            )
 
 
 execution_recovery_service = ExecutionRecoveryService()

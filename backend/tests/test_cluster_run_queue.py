@@ -247,3 +247,56 @@ class ChooseTargetTests(unittest.IsolatedAsyncioTestCase):
 
         self.instances[1] = _instance("worker", role="worker", weight=30)
         self.assertEqual(await self._dispatch(100), {"main": 70, "worker": 30})
+
+
+class ExpireLateRowsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_expire_late_rows_atomically_cleans_active_workflow_executions(self) -> None:
+        from app.services.cluster.run_queue import expire_late_rows
+
+        ex_id_1 = uuid.uuid4()
+        ex_id_2 = uuid.uuid4()
+
+        update_result = MagicMock()
+        update_result.all.return_value = [(ex_id_1,), (ex_id_2,)]
+
+        executed_stmts = []
+
+        async def fake_execute(stmt):
+            executed_stmts.append(stmt)
+            return update_result
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=fake_execute)
+        session.commit = AsyncMock()
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.cluster.run_queue.async_session_maker", return_value=cm):
+            count = await expire_late_rows()
+
+        self.assertEqual(count, 2)
+        self.assertEqual(len(executed_stmts), 2)
+        session.commit.assert_awaited_once()
+
+    async def test_expire_late_rows_no_expired_rows_does_not_call_delete(self) -> None:
+        from app.services.cluster.run_queue import expire_late_rows
+
+        update_result = MagicMock()
+        update_result.all.return_value = []
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=update_result)
+        session.commit = AsyncMock()
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=session)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.cluster.run_queue.async_session_maker", return_value=cm):
+            count = await expire_late_rows()
+
+        self.assertEqual(count, 0)
+        session.execute.assert_awaited_once()
+        session.commit.assert_awaited_once()

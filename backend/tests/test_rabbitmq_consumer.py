@@ -284,6 +284,27 @@ class RabbitMQConsumerAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
         self.db.commit.assert_awaited()
         mock_pending.assert_not_called()
 
+    async def test_execution_cleanup_passes_dispatcher_handle(self) -> None:
+        """RabbitMQ consumer cleanup must pass the registered handle to clear_execution."""
+        result = SimpleNamespace(
+            status="success",
+            outputs={},
+            node_results=[],
+            sub_workflow_executions=[],
+            execution_time_ms=5.0,
+            history_written=False,
+        )
+        with patch("app.services.execution_cancellation.clear_execution") as mock_clear:
+            await self._handle_with_dispatch_result(result)
+            mock_clear.assert_called_once()
+            self.assertIn("handle", mock_clear.call_args.kwargs)
+            self.assertIsNotNone(mock_clear.call_args.kwargs["handle"])
+            handle = mock_clear.call_args.kwargs["handle"]
+            from app.services.execution_cancellation import ExecutionCancellationHandle
+
+            self.assertIsInstance(handle, ExecutionCancellationHandle)
+            self.assertEqual(mock_clear.call_args.args[0], handle.execution_id)
+
 
 if __name__ == "__main__":
     unittest.main()
