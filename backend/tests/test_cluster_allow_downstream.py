@@ -109,7 +109,6 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
         self.fail("expected allow-downstream finalizer to finish")
 
-
     def _patch_worker_dependencies(
         self,
         context: MagicMock,
@@ -304,9 +303,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         with ExitStack() as stack:
             for context_manager in patches:
                 stack.enter_context(context_manager)
-            stack.enter_context(
-                patch.dict(node_registry._HANDLER_CACHE, {"wait": failing_handler})
-            )
+            stack.enter_context(patch.dict(node_registry._HANDLER_CACHE, {"wait": failing_handler}))
             await worker._execute_claimed(row)
             await self._wait_for(started)
             await self._wait_for_finalizer(worker)
@@ -409,9 +406,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         with ExitStack() as stack:
             for context_manager in patches:
                 stack.enter_context(context_manager)
-            stack.enter_context(
-                patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler})
-            )
+            stack.enter_context(patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler}))
             await worker._execute_claimed(row)
             await self._wait_for_finalizer(worker)
 
@@ -509,5 +504,3 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
         release.set()
         await asyncio.sleep(0.05)
-
-
