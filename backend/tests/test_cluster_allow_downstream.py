@@ -86,7 +86,6 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
     async def test_early_result_is_published_before_final_persistence(self) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
         from app.services.execution_cancellation import (
-            _ACTIVE_EXECUTIONS,
             complete_execution,
             get_active_execution_handle,
             register_execution,
@@ -131,6 +130,13 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
         with (
             patch("app.db.session.async_session_maker", return_value=context),
+            patch("app.api.workflows.get_credentials_context", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch("app.services.hitl_service.build_default_public_base_url", return_value="http://test"),
             patch("app.services.cluster.dispatch.execute_workflow", return_value=result),
             patch(
                 "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
