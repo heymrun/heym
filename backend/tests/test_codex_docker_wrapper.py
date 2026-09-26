@@ -80,6 +80,39 @@ class TestCodexDockerWrapper(unittest.TestCase):
         ):
             self.wrapper._workspace_mount(Path("/app/data/codex-workspaces"))
 
+    def test_runner_unmasks_proc_so_bubblewrap_can_mount_it(self) -> None:
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(cmd: list[str], stdin: object = None, check: bool = False) -> object:
+            del stdin, check
+            captured["cmd"] = cmd
+            return type("Completed", (), {"returncode": 0})()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "codex-workspaces"
+            repo = workspace / "repo"
+            repo.mkdir(parents=True)
+            env = {
+                "HEYM_CODEX_DOCKER_IMAGE": "heym-backend:local",
+                "HEYM_CODEX_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces",
+                "HEYM_CODEX_WORKSPACE_DIR": str(workspace),
+                "CODEX_HOME": str(workspace / ".codex-home"),
+            }
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(self.wrapper.Path, "cwd", return_value=repo),
+                patch.object(self.wrapper.subprocess, "run", side_effect=fake_run),
+                patch.object(self.wrapper.sys, "argv", ["heym-codex-docker", "exec"]),
+            ):
+                self.assertEqual(self.wrapper.main(), 0)
+
+        cmd = captured["cmd"]
+        security_opts = [cmd[index + 1] for index, arg in enumerate(cmd) if arg == "--security-opt"]
+        self.assertIn("systempaths=unconfined", security_opts)
+        self.assertIn("seccomp=unconfined", security_opts)
+        self.assertIn("apparmor=unconfined", security_opts)
+        self.assertIn("SYS_ADMIN", cmd)
+
     def test_inspect_current_container_parses_docker_output(self) -> None:
         completed = type(
             "Completed",
