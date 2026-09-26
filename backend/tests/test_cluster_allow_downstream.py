@@ -133,10 +133,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
     async def test_real_executor_publishes_early_and_persists_after_join(self) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
-        from app.services.execution_cancellation import (
-            complete_execution,
-            get_active_execution_handle,
-        )
+        from app.services.execution_cancellation import get_active_execution_handle
 
         release = threading.Event()
         started = threading.Event()
@@ -313,7 +310,6 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         from app.services.cluster.dispatch import RunQueueWorker
         from app.services.execution_cancellation import (
             cancel_execution,
-            complete_execution,
             get_active_execution_handle,
         )
 
@@ -475,7 +471,12 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             ):
                 await worker._execute_claimed(row)
                 await self._wait_for(started)
-                await self._wait_for(lambda: bool(worker._active_finalizers))
+                for _ in range(100):
+                    if worker._active_finalizers:
+                        break
+                    await asyncio.sleep(0.01)
+                else:
+                    self.fail("expected an active allow-downstream finalizer")
 
                 async def fake_wait(tasks, timeout):
                     self.assertEqual(timeout, 10.0)
@@ -493,10 +494,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 self.assertIsNone(get_active_execution_handle(execution_id))
 
         release.set()
-        for _ in range(50):
-            await asyncio.sleep(0.01)
-            if not started.is_set():
-                break
+        await asyncio.sleep(0.05)
 
 
 if __name__ == "__main__":
