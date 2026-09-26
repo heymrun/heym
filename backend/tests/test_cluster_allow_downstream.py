@@ -147,9 +147,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 return_value="http://test",
             ),
             patch("app.services.cluster.dispatch.execute_workflow", return_value=result),
-            patch(
-                "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
-            ) as complete,
+            patch("app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()) as complete,
             patch(
                 "app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()
             ) as notify_done,
@@ -269,9 +267,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 return_value="http://test",
             ),
             patch("app.services.cluster.dispatch.execute_workflow", side_effect=execute_stub),
-            patch(
-                "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
-            ) as complete,
+            patch("app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()) as complete,
             patch(
                 "app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()
             ) as notify_done,
@@ -378,9 +374,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 return_value="http://test",
             ),
             patch("app.services.cluster.dispatch.execute_workflow", return_value=result),
-            patch(
-                "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
-            ) as complete,
+            patch("app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()) as complete,
             patch(
                 "app.services.cluster.dispatch.run_queue.notify_done", new=AsyncMock()
             ) as notify_done,
