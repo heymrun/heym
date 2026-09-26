@@ -1,8 +1,8 @@
 import asyncio
 import threading
 import uuid
-from types import SimpleNamespace
 from contextlib import ExitStack
+from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,7 +33,7 @@ def _allow_downstream_workflow() -> tuple[list[dict], list[dict]]:
             "type": "output",
             "data": {
                 "label": "output",
-                "message": "$input.text",
+                "message": "$beforeOutput.value",
                 "allowDownstream": True,
             },
         },
