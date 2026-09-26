@@ -504,6 +504,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(blocked_finalizer())
         worker._active_finalizers.add(task)
+        task.add_done_callback(worker._active_finalizers.discard)
 
         async def fake_wait(tasks, timeout):
             self.assertEqual(timeout, 10.0)
