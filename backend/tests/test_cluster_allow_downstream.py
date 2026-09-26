@@ -6,7 +6,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.node_execution import registry as node_registry
-from app.services.workflow_executor import WorkflowCancelledError, execute_workflow
+from app.services.workflow_executor import WorkflowCancelledError
 
 
 def _allow_downstream_workflow() -> tuple[list[dict], list[dict]]:
@@ -244,7 +244,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertEqual(complete.await_count, 1)
 
             release.set()
-            await self._wait_for_finalizer(worker)
+            await self._wait_for_completion(worker, persist_history)
 
             final_result = persist_history.await_args.kwargs["result"]
             self.assertEqual(final_result.status, "success")
