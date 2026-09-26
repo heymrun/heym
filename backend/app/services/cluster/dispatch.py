@@ -418,7 +418,7 @@ class RunQueueWorker:
             trigger_source=row.trigger_source,
             result=result,
         )
-        if row.credentials_owner_id is not None and result.status == "success":
+        if row.credentials_owner_id is not None:
             async with async_session_maker() as db:
                 await _persist_global_variables_from_execution(
                     db,
@@ -442,13 +442,15 @@ class RunQueueWorker:
         worker_handle: ExecutionCancellationHandle | None,
     ) -> None:
         """Finish an early-return run without blocking the worker's event loop."""
+        persistence_error: Exception | None = None
         try:
             await asyncio.to_thread(result.join_allow_downstream)
-            if any(
-                isinstance(node_result, dict) and node_result.get("status") == "error"
-                for node_result in (getattr(result, "node_results", None) or [])
-            ):
-                result.status = "error"
+        except asyncio.CancelledError:
+            logger.warning(
+                "Allow-downstream finalization cancelled during shutdown: %s",
+                row.execution_id,
+            )
+            result.status = "error"
         except WorkflowCancelledError:
             logger.info("Allow-downstream run was cancelled: %s", row.execution_id)
             result.status = "cancelled"
@@ -456,6 +458,7 @@ class RunQueueWorker:
             logger.exception("Allow-downstream finalization failed: %s", row.execution_id)
             result.status = "error"
             # Preserve the early response. The client may already have received it.
+
         try:
             await self._persist_claimed_run(
                 row=row,
@@ -465,16 +468,22 @@ class RunQueueWorker:
                 workflow_cache=workflow_cache,
                 result=result,
             )
-        except Exception:
+        except Exception as exc:
+            persistence_error = exc
+            result.status = "error"
             logger.exception(
                 "Failed to persist final allow-downstream history: %s",
                 row.execution_id,
             )
         finally:
+            summary = summarize(result, row.execution_id)
+            if persistence_error is not None:
+                summary["history_written"] = False
+                summary["error"] = str(persistence_error)
             with contextlib.suppress(Exception):
                 await run_queue.complete(
                     row.execution_id,
-                    result=summarize(result, row.execution_id),
+                    result=summary,
                     error=None,
                 )
             with contextlib.suppress(Exception):
