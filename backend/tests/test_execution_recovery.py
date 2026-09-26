@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.services.cluster.run_history import summarize
 from app.services.execution_recovery import MAX_RECOVERY_ATTEMPTS, decide_recovery_action
 
 
@@ -1310,7 +1311,7 @@ class RealPostgresExecutionRecoveryOwnershipTests(unittest.IsolatedAsyncioTestCa
                 )
             ).scalar_one()
             self.assertEqual(queue.status, STATUS_DONE)
-            self.assertEqual(queue.result, {"recovered_by": "B"})
+            self.assertEqual(queue.result, summarize(mock_result_b, self.ex_id))
 
     async def test_concurrent_recovery_fencing_prevents_toctou_races(self) -> None:
         """11. FOR UPDATE row locks serialize concurrent recovery finalize and orphan claims without races."""
@@ -1520,7 +1521,7 @@ class RealPostgresExecutionRecoveryOwnershipTests(unittest.IsolatedAsyncioTestCa
                 )
             ).scalar_one()
             self.assertEqual(queue.status, STATUS_DONE)
-            self.assertEqual(queue.result, {"recovered_text": "success_under_concurrent_drain"})
+            self.assertEqual(queue.result, summarize(mock_result, self.ex_id))
 
             # 3. Active row is cleanly absent (cleared atomically and/or by idempotent finish)
             active = (

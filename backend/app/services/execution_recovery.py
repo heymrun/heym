@@ -250,6 +250,7 @@ class ExecutionRecoveryService:
         )
         from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
         from app.db.session import async_session_maker
+        from app.services.cluster.run_history import summarize
         from app.services.cluster.run_queue import STATUS_DONE, STATUS_FAILED
         from app.services.execution_cancellation import (
             clear_execution,
@@ -378,10 +379,8 @@ class ExecutionRecoveryService:
                         .values(
                             status=STATUS_DONE if result.status == "success" else STATUS_FAILED,
                             finished_at=datetime.now(timezone.utc),
-                            result=result.outputs if result.status == "success" else None,
-                            error=None
-                            if result.status == "success"
-                            else f"Execution finished with status {result.status}",
+                            result=summarize(result, orphan.execution_id),
+                            error=None,
                         )
                     )
                 else:
@@ -396,10 +395,8 @@ class ExecutionRecoveryService:
                         .values(
                             status=STATUS_DONE if result.status == "success" else STATUS_FAILED,
                             finished_at=datetime.now(timezone.utc),
-                            result=result.outputs if result.status == "success" else None,
-                            error=None
-                            if result.status == "success"
-                            else f"Execution finished with status {result.status}",
+                            result=summarize(result, orphan.execution_id),
+                            error=None,
                         )
                     )
                 await session.commit()
