@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import uuid
 from types import SimpleNamespace
@@ -79,7 +80,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         for _ in range(50):
             if event.is_set():
                 return
-            await __import__("asyncio").sleep(0.01)
+            await asyncio.sleep(0.01)
         self.fail("background finalizer did not start")
 
     async def test_early_result_is_published_before_final_persistence(self) -> None:
@@ -167,8 +168,13 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
             result.release.set()
             for _ in range(100):
-                await __import__("asyncio").sleep(0.01)
+                await asyncio.sleep(0.01)
                 if persist_history.await_count == 1:
+                    break
+
+            for _ in range(50):
+                await asyncio.sleep(0.01)
+                if not worker._active_finalizers:
                     break
 
             self.assertEqual(persist_history.await_count, 1)
@@ -237,6 +243,10 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
         with (
             patch("app.db.session.async_session_maker", return_value=context),
+            patch("app.api.workflows.get_credentials_context", new=AsyncMock(return_value={})),
+            patch("app.services.global_variables_service.get_global_variables_context", new=AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch("app.services.hitl_service.build_default_public_base_url", return_value="http://test"),
             patch("app.services.cluster.dispatch.execute_workflow", side_effect=execute_stub),
             patch(
                 "app.services.cluster.dispatch.run_queue.complete", new=AsyncMock()
@@ -261,8 +271,13 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertTrue(registered_event.is_set())
 
             for _ in range(100):
-                await __import__("asyncio").sleep(0.01)
+                await asyncio.sleep(0.01)
                 if persist_history.await_count == 1:
+                    break
+
+            for _ in range(50):
+                await asyncio.sleep(0.01)
+                if not worker._active_finalizers:
                     break
 
             self.assertEqual(persist_history.await_count, 1)
