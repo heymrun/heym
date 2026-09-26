@@ -169,7 +169,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 stack.enter_context(context_manager)
             stack.enter_context(
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": downstream_handler})
-            ):
+            )
             await worker._execute_claimed(row)
             await self._wait_for(started)
 
@@ -241,7 +241,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 stack.enter_context(context_manager)
             stack.enter_context(
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": retrying_handler})
-            ):
+            )
             await worker._execute_claimed(row)
             await self._wait_for(started)
             self.assertEqual(attempts, 2)
@@ -295,7 +295,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 stack.enter_context(context_manager)
             stack.enter_context(
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": failing_handler})
-            ):
+            )
             await worker._execute_claimed(row)
             await self._wait_for(started)
             await self._wait_for_finalizer(worker)
@@ -352,7 +352,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 stack.enter_context(context_manager)
             stack.enter_context(
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": cancellable_handler})
-            ):
+            )
             await worker._execute_claimed(row)
             await self._wait_for(started)
 
@@ -400,7 +400,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 stack.enter_context(context_manager)
             stack.enter_context(
                 patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler})
-            ):
+            )
             await worker._execute_claimed(row)
             await self._wait_for_finalizer(worker)
 
