@@ -94,11 +94,11 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
         self.fail("expected background downstream work to start")
 
-    async def _wait_for_finalizer(self, worker) -> None:
+    async def _wait_for_completion(self, worker, persist_history) -> None:
         for _ in range(100):
-            await asyncio.sleep(0.01)
-            if not worker._active_finalizers:
+            if persist_history.await_count and not worker._active_finalizers:
                 return
+            await asyncio.sleep(0.01)
         self.fail("expected allow-downstream finalizer to finish")
 
     def _patch_worker_dependencies(
@@ -181,7 +181,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertIsNotNone(get_active_execution_handle(execution_id))
 
             release.set()
-            await self._wait_for_finalizer(worker)
+            await self._wait_for_completion(worker, persist_history)
 
             self.assertEqual(persist_history.await_count, 1)
             final_result = persist_history.await_args.kwargs["result"]
@@ -401,11 +401,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
     async def test_shutdown_cancels_real_finalizer_without_leaking_execution(self) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
-        from app.services.execution_cancellation import (
-            complete_execution,
-            get_active_execution_handle,
-            register_execution,
-        )
+        from app.services.execution_cancellation import get_active_execution_handle
 
         started = threading.Event()
         release = threading.Event()
@@ -433,13 +429,9 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         complete = AsyncMock()
         notify_done = AsyncMock()
 
-        with (
-            patch.dict(node_registry._HANDLER_CACHE, {"wait": blocking_handler}),
-            patch("app.services.cluster.dispatch.execute_workflow", side_effect=execute_workflow),
-            patch(
-                "app.services.execution_cancellation.register_execution",
-                wraps=register_execution,
-            ) as register,
+        with patch.dict(
+            node_registry._HANDLER_CACHE,
+            {"wait": blocking_handler},
         ):
             active_row = SimpleNamespace(cancel_requested_at=None)
             _session, context = self._session_context(workflow, active_row)
@@ -489,8 +481,8 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
                 final_result = persist_history.await_args.kwargs["result"]
                 self.assertEqual(final_result.status, "error")
                 self.assertFalse(worker._active_finalizers)
-                self.assertTrue(complete.await_count >= 2)
-                self.assertTrue(notify_done.await_count >= 1)
+                self.assertGreaterEqual(complete.await_count, 2)
+                self.assertGreaterEqual(notify_done.await_count, 1)
                 self.assertIsNone(get_active_execution_handle(execution_id))
 
         release.set()
