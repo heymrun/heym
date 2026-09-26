@@ -605,6 +605,9 @@ class RunQueueWorker:
                     self._active_finalizers.add(finalizer)
                     finalizer.add_done_callback(self._active_finalizers.discard)
                     defer_cleanup = True
+                    # Let the finalizer enter its cancellation/persistence guard
+                    # before _execute_claimed() returns and the worker can shut down.
+                    await asyncio.sleep(0)
                 except Exception:
                     # Task creation is exceptional, but the early result has already
                     # been published. Finish inline so execution state is not leaked.
