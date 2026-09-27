@@ -122,6 +122,10 @@ test("YOLO mode builds, runs and verifies a workflow on the canvas", async ({ pa
     await openAssistant(page, workflow.id);
     const checkbox = page.getByTestId("ai-assistant-yolo-checkbox");
     await expect(checkbox).not.toBeChecked();
+    const yoloInfo = page.getByTestId("ai-assistant-yolo-info");
+    await expect(yoloInfo).toBeVisible();
+    await yoloInfo.hover();
+    await expect(page.getByRole("tooltip")).toContainText("Runs the workflow after each change");
 
     // Scoped to the panel's mode toggle: the node palette also has an "Agent" button.
     const modeToggle = page.locator(".mode-toggle");
