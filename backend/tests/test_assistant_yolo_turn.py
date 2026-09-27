@@ -1,8 +1,10 @@
 """One YOLO turn: tool rounds, the edited-workflow guard, cancellation and tracing."""
 
+import asyncio
 import json
 import unittest
 import uuid
+from collections.abc import AsyncGenerator
 from threading import Event
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +18,7 @@ from app.services.assistant_yolo import (
     TOOL_BUDGET_MESSAGE,
     YOLO_EXECUTE_WORKFLOW_TOOL,
     YoloToolOutcome,
+    stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
 from app.services.llm_trace import LLMTraceContext
@@ -274,3 +277,64 @@ class YoloTurnOpenCodeSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events[-1], {"type": "done"})
         self.assertEqual(sessions, ["conversation-1", "conversation-1"])
+
+
+class StreamUntilDisconnectTests(unittest.IsolatedAsyncioTestCase):
+    async def test_forwards_chunks_until_the_source_ends(self) -> None:
+        async def source() -> AsyncGenerator[str, None]:
+            yield "data: one\n\n"
+            yield "data: two\n\n"
+
+        cancel_event = Event()
+        chunks = [
+            chunk
+            async for chunk in stream_until_disconnect(
+                source(),
+                is_disconnected=AsyncMock(return_value=False),
+                cancel_event=cancel_event,
+                heartbeat_seconds=5,
+            )
+        ]
+
+        self.assertEqual(chunks, ["data: one\n\n", "data: two\n\n"])
+        self.assertTrue(cancel_event.is_set())
+
+    async def test_sends_keepalives_while_the_source_is_quiet(self) -> None:
+        release = asyncio.Event()
+
+        async def source() -> AsyncGenerator[str, None]:
+            await release.wait()
+            yield "data: late\n\n"
+
+        stream = stream_until_disconnect(
+            source(),
+            is_disconnected=AsyncMock(return_value=False),
+            cancel_event=Event(),
+            heartbeat_seconds=0.01,
+        )
+
+        self.assertEqual(await stream.__anext__(), ": ping\n\n")
+        release.set()
+        remaining = [chunk async for chunk in stream]
+        self.assertIn("data: late\n\n", remaining)
+
+    async def test_cancels_the_source_when_the_client_disconnects(self) -> None:
+        cancel_event = Event()
+
+        async def source() -> AsyncGenerator[str, None]:
+            await asyncio.sleep(3600)
+            yield "data: never\n\n"
+
+        chunks = [
+            chunk
+            async for chunk in stream_until_disconnect(
+                source(),
+                is_disconnected=AsyncMock(return_value=True),
+                cancel_event=cancel_event,
+                heartbeat_seconds=0.01,
+                poll_seconds=0.01,
+            )
+        ]
+
+        self.assertTrue(cancel_event.is_set())
+        self.assertNotIn("data: never\n\n", chunks)

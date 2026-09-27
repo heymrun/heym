@@ -7,6 +7,7 @@ that loop. During the turn the model may run the user's other workflows through 
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
@@ -348,3 +349,60 @@ async def stream_yolo_assistant_turn(
             last_user_message=last_user_message,
             cancelled=cancel_event.is_set(),
         )
+
+
+async def stream_until_disconnect(
+    source: AsyncGenerator[str, None],
+    *,
+    is_disconnected: Callable[[], Awaitable[bool]],
+    cancel_event: Event,
+    heartbeat_seconds: float,
+    poll_seconds: float = 0.1,
+) -> AsyncGenerator[str, None]:
+    """Forward SSE lines with keepalives, and cancel the source when the client leaves.
+
+    The source runs on the request's event loop, so it may use the request's database
+    session. ``_stream_sse_with_heartbeat`` runs its source on another loop and cannot.
+    """
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
+
+    async def watch_disconnect() -> None:
+        while not cancel_event.is_set():
+            if await is_disconnected():
+                cancel_event.set()
+                return
+            await asyncio.sleep(poll_seconds)
+
+    async def produce() -> None:
+        try:
+            async for chunk in source:
+                await queue.put(chunk)
+        except Exception as exc:
+            await queue.put(exc)
+        finally:
+            await queue.put(None)
+
+    watcher = asyncio.create_task(watch_disconnect())
+    producer = asyncio.create_task(produce())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)
+            except TimeoutError:
+                if cancel_event.is_set():
+                    break
+                yield ": ping\n\n"
+                continue
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        cancel_event.set()
+        producer.cancel()
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await producer
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
