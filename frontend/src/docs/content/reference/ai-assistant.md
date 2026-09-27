@@ -47,6 +47,8 @@ In Agent mode, the **YOLO mode** box under the message field makes the assistant
 - Press **Enter** to send (Shift+Enter for newline)
 - The AI streams its response. In **Agent** mode, if the response includes a workflow in a \`\`\`json code block, it is automatically parsed and applied to the canvas. In **Ask** mode the canvas is never modified.
 - Use **Clear** to reset the conversation
+- Hover a message and click its copy icon to copy the text it shows, including any workflow JSON
+- Drag the line above the message box to make the box taller. The input area can grow to 60% of the panel, and it returns to its default height when the page reloads
 
 ## Workflow Auto-Apply
 
@@ -61,7 +63,7 @@ If parsing fails, a **Retry** button appears to regenerate the response.
 
 ## YOLO Mode
 
-**YOLO mode** lets the assistant test what it builds. Check the **YOLO mode** box under the message field, then send your request. The box appears in Agent mode only. It is off by default and resets to off when the page reloads.
+**YOLO mode** lets the assistant test what it builds. Check the **YOLO mode** box under the message field, then send your request. The box appears in Agent mode only. It is off by default and resets to off when the page reloads. Hover the info icon next to it for a short summary.
 
 With YOLO mode on, the assistant does not stop after it applies a workflow:
 

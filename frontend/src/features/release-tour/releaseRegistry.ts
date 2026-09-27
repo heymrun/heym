@@ -42,7 +42,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
           {
             type: "prose",
             markdown:
-              "Before the first run it asks for test inputs, filled with values it suggests, and reuses them until the input fields change. It can also run your other workflows when it needs their result. When it needs a decision or a credential, it asks with the usual question card. Runs are real, so YOLO mode is off by default and **Stop** ends the loop at any time.",
+              "Before the first run it asks for test inputs, filled with values it suggests, and reuses them until the input fields change. It can also run your other workflows when it needs their result. When it needs a decision or a credential, it asks with the usual question card. Runs are real, so YOLO mode is off by default and **Stop** ends the loop at any time. Every message in the assistant also has a copy icon now, and you can drag the line above the message box to make it taller.",
           },
         ],
         tour: {
