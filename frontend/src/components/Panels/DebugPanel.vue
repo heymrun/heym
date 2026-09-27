@@ -65,6 +65,7 @@ import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { aiApi, codexFollowupApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useAiAssistantPanelFrame } from "@/composables/useAiAssistantPanelFrame";
+import { useAssistantInputResize } from "@/composables/useAssistantInputResize";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
@@ -1609,6 +1610,12 @@ const aiConversationId = ref(crypto.randomUUID());
 const aiInputMessage = ref("");
 const aiMessagesContainer = ref<HTMLDivElement | null>(null);
 const aiTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const aiInputAreaRef = ref<HTMLElement | null>(null);
+const {
+  height: aiInputHeight,
+  resizing: aiInputResizing,
+  onHandlePointerDown: onAiInputResizePointerDown,
+} = useAssistantInputResize(aiTextareaRef, aiInputAreaRef, aiPanelRef);
 const availableWorkflows = ref<WorkflowWithInputs[]>([]);
 const speechRecognition = ref<SpeechRecognition | null>(null);
 const isSpeechSupported = ref(false);
@@ -4046,7 +4053,20 @@ function renderContent(content: string): string {
           @pointerdown="onAiPanelResizePointerDown('bottom', $event)"
         />
 
-        <div class="ai-input">
+        <div
+          ref="aiInputAreaRef"
+          class="ai-input"
+          :class="{ 'ai-input-resizing': aiInputResizing }"
+        >
+          <div
+            class="ai-input-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Drag to resize the message box"
+            title="Drag to resize"
+            data-testid="ai-assistant-input-resize"
+            @pointerdown="onAiInputResizePointerDown"
+          />
           <textarea
             ref="aiTextareaRef"
             v-model="aiInputMessage"
@@ -4054,6 +4074,7 @@ function renderContent(content: string): string {
             :placeholder="canvasMode === 'ask' ? 'Ask a question...' : 'What do you want to automate...'"
             class="ai-textarea"
             rows="2"
+            :style="aiInputHeight !== null ? { height: `${aiInputHeight}px` } : undefined"
             @keydown="handleAiKeydown"
           />
           <YoloModeToggle
@@ -4635,11 +4656,46 @@ function renderContent(content: string): string {
 }
 
 .ai-input {
+  position: relative;
   padding: 12px;
   border-top: 1px solid hsl(var(--border));
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.ai-input-resizing {
+  user-select: none;
+}
+
+/* Straddles the input area's top border; dragging it up makes the message box taller. */
+.ai-input-resize-handle {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.ai-input-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: hsl(var(--border));
+  transform: translateX(-50%);
+  transition: background 0.15s;
+}
+
+.ai-input-resize-handle:hover::after,
+.ai-input-resizing .ai-input-resize-handle::after {
+  background: hsl(var(--primary) / 0.6);
 }
 
 .ai-textarea {

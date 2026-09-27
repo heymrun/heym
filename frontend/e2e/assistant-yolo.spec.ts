@@ -214,3 +214,49 @@ test("copies what a message shows, for both sides of the conversation", async ({
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("drags the message box taller, within its limits", async ({ page }) => {
+  const workflow = await createWorkflow(page, `Assistant Resize ${Date.now()}`);
+
+  try {
+    await openAssistant(page, workflow.id);
+    const input = page.getByPlaceholder("What do you want to automate...");
+    const handle = page.getByTestId("ai-assistant-input-resize");
+    const inputHeight = (): Promise<number> =>
+      input.evaluate((element) => (element as HTMLElement).offsetHeight);
+    const initial = await inputHeight();
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("the page has no viewport");
+
+    async function dragHandleTo(targetY: number): Promise<void> {
+      const box = await handle.boundingBox();
+      if (!box) throw new Error("the resize handle is not visible");
+      const x = box.x + box.width / 2;
+      await page.mouse.move(x, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, targetY, { steps: 8 });
+      await page.mouse.up();
+    }
+
+    const start = await handle.boundingBox();
+    if (!start) throw new Error("the resize handle is not visible");
+    await dragHandleTo(start.y + start.height / 2 - 120);
+    await expect.poll(inputHeight).toBeGreaterThan(initial + 80);
+
+    // Dragging to the top stops where the input area reaches 60% of the panel.
+    await dragHandleTo(2);
+    const panelHeight = await page
+      .locator(".ai-panel")
+      .evaluate((element) => (element as HTMLElement).clientHeight);
+    const areaHeight = await page
+      .locator(".ai-input")
+      .evaluate((element) => (element as HTMLElement).offsetHeight);
+    expect(areaHeight).toBeLessThanOrEqual(Math.floor(panelHeight * 0.6) + 1);
+
+    // Dragging to the bottom stops at the default height.
+    await dragHandleTo(viewport.height - 2);
+    await expect.poll(inputHeight).toBe(initial);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
