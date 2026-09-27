@@ -182,3 +182,35 @@ test("Stop on the test inputs card ends the YOLO loop without a run", async ({ p
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("copies what a message shows, for both sides of the conversation", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockAssistantTurns(page, [BUILD_REPLY]);
+  const workflow = await createWorkflow(page, `Assistant Copy ${Date.now()}`);
+  const clipboard = (): Promise<string> =>
+    page.evaluate(() => navigator.clipboard.readText());
+
+  try {
+    await openAssistant(page, workflow.id);
+    await sendPrompt(page);
+
+    const userBubble = page.locator(".ai-message.user").first();
+    await userBubble.hover();
+    await userBubble.getByRole("button", { name: "Copy message" }).click();
+    await expect.poll(clipboard).toBe(PROMPT);
+
+    const assistantBubble = page.locator(".ai-message.assistant").first();
+    await expect(assistantBubble).toContainText("Here is an echo workflow.");
+    await assistantBubble.hover();
+    await assistantBubble.getByRole("button", { name: "Copy message" }).click();
+    await expect.poll(clipboard).toContain("Here is an echo workflow.");
+    const copied = await clipboard();
+    expect(copied).toContain('"nodes"');
+    expect(copied).not.toContain("heym-yolo");
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});

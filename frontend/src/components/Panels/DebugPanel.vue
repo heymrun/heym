@@ -22,6 +22,7 @@ import type { AssistantStreamHandlers, WorkflowWithInputs } from "@/services/api
 
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
+import CopyMessageButton from "@/components/ui/CopyMessageButton.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
@@ -2773,6 +2774,11 @@ function handleAiKeydown(event: KeyboardEvent): void {
   sendAiMessage();
 }
 
+/** What a bubble shows: the clarify card and the YOLO steps render their blocks instead. */
+function visibleMessageText(msg: ChatMessage): string {
+  return stripYoloBlock(msg.clarify ? stripClarifyBlock(msg.content) : msg.content);
+}
+
 function renderContent(content: string): string {
   const codeBlocks: string[] = [];
   let result = content.replace(/```(\w+)?\n?([\s\S]*?)```/g, (_match, lang, code) => {
@@ -3945,7 +3951,7 @@ function renderContent(content: string): string {
           <div
             v-for="msg in aiMessages"
             :key="msg.id"
-            :class="['ai-message', msg.role, msg.kind === 'yolo-report' && 'yolo-report']"
+            :class="['ai-message', msg.role, msg.kind === 'yolo-report' ? 'yolo-report' : 'group/message']"
           >
             <p
               v-if="msg.kind === 'yolo-report'"
@@ -3955,10 +3961,15 @@ function renderContent(content: string): string {
               {{ msg.yoloReportLabel }}
             </p>
             <template v-else>
+              <CopyMessageButton
+                v-if="visibleMessageText(msg)"
+                :text="visibleMessageText(msg)"
+                data-testid="ai-assistant-copy-message"
+              />
               <!-- eslint-disable vue/no-v-html -->
               <div
                 class="message-content"
-                v-html="renderContent(stripYoloBlock(msg.clarify ? stripClarifyBlock(msg.content) : msg.content))"
+                v-html="renderContent(visibleMessageText(msg))"
               />
               <!-- eslint-enable vue/no-v-html -->
               <ClarifyCard
@@ -4479,8 +4490,10 @@ function renderContent(content: string): string {
 }
 
 .ai-message {
+  position: relative;
   margin-bottom: 10px;
-  padding: 10px 14px;
+  /* The right padding keeps text clear of the copy button in the corner. */
+  padding: 10px 38px 10px 14px;
   border-radius: 10px;
   max-width: 90%;
   font-size: 14px;
