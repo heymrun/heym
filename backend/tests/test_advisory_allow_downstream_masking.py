@@ -3,13 +3,15 @@
 execute_workflow() masks the early result, but nodes that finish after an output node
 with allowDownstream are appended later by join_allow_downstream(). Every caller persists
 node_results after that join, so those rows reached history with raw credential values.
+Global variable rows are the exception: later runs read the value persisted from them.
 """
 
+import asyncio
 import json
 import threading
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.workflow_executor import ExecutionResult, WorkflowExecutor, execute_workflow
 
@@ -63,6 +65,8 @@ _THROW_NODES = [
     },
 ]
 _THROW_EDGES = [*_EDGES[:3], {"id": "e4", "source": "gate", "target": "boom"}]
+_GLOBAL_POST = _variable("post", "$credentials.apiKey")
+_GLOBAL_NODES = [*_NODES[:4], {**_GLOBAL_POST, "data": {**_GLOBAL_POST["data"], "isGlobal": True}}]
 
 
 class AllowDownstreamJoinMaskingTests(unittest.TestCase):
@@ -110,6 +114,28 @@ class AllowDownstreamJoinMaskingTests(unittest.TestCase):
         rows = {row["node_id"]: row for row in result.node_results}
         self.assertEqual(rows["boom"]["error"], f"rejected key {_MASKED}")
         self.assertNotIn(_SECRET, json.dumps(result.node_results))
+
+    def test_a_global_variable_added_by_the_join_keeps_the_raw_value(self) -> None:
+        """Later runs read this global, so masking history must not change what it stores."""
+        from app.api.workflows import _persist_global_variables_from_execution
+
+        result, early_ids = self._run({"apiKey": _SECRET}, _GLOBAL_NODES, _EDGES)
+        upsert = AsyncMock()
+        with patch("app.api.workflows.upsert_global_variable", upsert):
+            asyncio.run(
+                _persist_global_variables_from_execution(
+                    MagicMock(),
+                    uuid.uuid4(),
+                    _GLOBAL_NODES,
+                    {},
+                    result.node_results,
+                    result.sub_workflow_executions,
+                )
+            )
+
+        self.assertNotIn("post", early_ids)
+        stored = {call.args[2]: call.args[3] for call in upsert.await_args_list}
+        self.assertEqual(stored, {"post": _SECRET})
 
     def test_early_rows_stay_masked(self) -> None:
         result, _ = self._run({"apiKey": _SECRET})

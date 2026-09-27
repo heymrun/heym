@@ -222,7 +222,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
 
             masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
-                sub_result.outputs, sub_result.node_results, self.credentials_context
+                sub_result, self.credentials_context
             )
             sub_exec = SubWorkflowExecution(
                 workflow_id=execute_workflow_id,

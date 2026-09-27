@@ -1742,6 +1742,8 @@ class ExecutionResult:
     _started_at: float = 0.0
     # Set by execute_workflow() so rows appended by the join are masked like the early ones.
     _credentials_context: dict[str, str] = field(default_factory=dict, repr=False)
+    # Callers persist global variables from these rows, so their output stays as written.
+    _global_variable_node_ids: frozenset[str] = field(default_factory=frozenset, repr=False)
 
     @property
     def allow_downstream_pending(self) -> bool:
@@ -1758,7 +1760,11 @@ class ExecutionResult:
             if result.node_id not in existing_ids:
                 row = _serialize_node_result(result)
                 if self._credentials_context:
-                    _mask_node_result_row(row, self._credentials_context)
+                    _mask_node_result_row(
+                        row,
+                        self._credentials_context,
+                        keep_output=result.node_id in self._global_variable_node_ids,
+                    )
                 self.node_results.append(row)
                 existing_ids.add(result.node_id)
         if self._started_at:
@@ -3102,9 +3108,7 @@ class WorkflowExecutor:
             sub_res.join_allow_downstream()
         credentials_context = getattr(parent, "credentials_context", None) or {}
         if sub_res.status == "pending":
-            _, pending_rows = mask_sub_workflow_result(
-                {}, sub_res.node_results, credentials_context
-            )
+            _, pending_rows = mask_sub_workflow_result(sub_res, credentials_context)
             with parent.lock:
                 parent.sub_workflow_executions.append(
                     SubWorkflowExecution(
@@ -3119,9 +3123,7 @@ class WorkflowExecutor:
                     )
                 )
             return
-        masked_outputs, masked_rows = mask_sub_workflow_result(
-            sub_res.outputs, sub_res.node_results, credentials_context
-        )
+        masked_outputs, masked_rows = mask_sub_workflow_result(sub_res, credentials_context)
         sub_exec = SubWorkflowExecution(
             workflow_id=wf_id,
             inputs=inputs_snapshot,
@@ -3172,6 +3174,7 @@ class WorkflowExecutor:
                 allow_downstream_node_results if allow_downstream_node_results is not None else []
             ),
             _started_at=start_time,
+            _global_variable_node_ids=_collect_global_variable_node_ids(self.nodes),
         )
 
     def execute_node_parallel(
@@ -4073,7 +4076,7 @@ class WorkflowExecutor:
                 }
             elapsed_ms = round((time.time() * 1000) - start_ms)
             masked_outputs, masked_rows = mask_sub_workflow_result(
-                sub_result.outputs, sub_result.node_results, self.credentials_context
+                sub_result, self.credentials_context
             )
             with self.lock:
                 self.sub_workflow_executions.append(
@@ -8021,28 +8024,44 @@ def mask_sensitive_text(text: str, credentials_context: dict[str, str]) -> str:
     return text
 
 
-def _mask_node_result_row(row: dict, credentials_context: dict[str, str]) -> None:
+def _collect_global_variable_node_ids(nodes: dict[str, dict]) -> frozenset[str]:
+    """Variable nodes whose output callers persist as a global variable."""
+    return frozenset(
+        node_id
+        for node_id, node in nodes.items()
+        if node.get("type") == "variable" and (node.get("data") or {}).get("isGlobal")
+    )
+
+
+def _mask_node_result_row(
+    row: dict, credentials_context: dict[str, str], *, keep_output: bool = False
+) -> None:
     """Mask a serialized node result's output and error in place."""
-    if "output" in row:
+    if "output" in row and not keep_output:
         row["output"] = mask_sensitive_output(row["output"], credentials_context)
     if isinstance(row.get("error"), str):
         row["error"] = mask_sensitive_text(row["error"], credentials_context)
 
 
 def mask_sub_workflow_result(
-    outputs: dict, node_results: list, credentials_context: dict[str, str]
+    sub_result: "ExecutionResult", credentials_context: dict[str, str]
 ) -> tuple[dict, list]:
     """Masked copies of a sub-workflow's outputs and node results for its history row.
 
     Only the SubWorkflowExecution record gets the copies; the parent keeps the raw values.
+    Global variable rows keep their output, since callers persist globals from these rows.
     """
+    outputs, node_results = sub_result.outputs, sub_result.node_results
     if not credentials_context:
         return outputs, node_results
+    keep_ids = getattr(sub_result, "_global_variable_node_ids", frozenset())
     masked_rows = []
     for row in node_results:
         if isinstance(row, dict):
             row = dict(row)
-            _mask_node_result_row(row, credentials_context)
+            _mask_node_result_row(
+                row, credentials_context, keep_output=row.get("node_id") in keep_ids
+            )
         masked_rows.append(row)
     return mask_sensitive_output(outputs, credentials_context), masked_rows
 

@@ -3,14 +3,18 @@
 Masking covered only each node's `output`. A node's `error` text (a throwError message,
 an exception quoting a key) was stored as-is, and sub-workflow runs never passed through
 execute_workflow(), so their history rows kept raw outputs and node results.
+Global variable rows keep their output: later runs read the value persisted from them.
 """
 
+import asyncio
+import copy
 import json
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.workflow_executor import (
+    ExecutionResult,
     WorkflowExecutor,
     execute_workflow,
     mask_sub_workflow_result,
@@ -167,12 +171,25 @@ class SubWorkflowHistoryMaskingTests(unittest.TestCase):
         self.assertNotIn(_SECRET, json.dumps(record.node_results))
 
 
+def _sub_result(outputs: dict, rows: list, global_ids: frozenset[str] = frozenset()):
+    return ExecutionResult(
+        workflow_id=uuid.uuid4(),
+        status="success",
+        outputs=outputs,
+        execution_time_ms=1.0,
+        node_results=rows,
+        _global_variable_node_ids=global_ids,
+    )
+
+
 class MaskSubWorkflowResultTests(unittest.TestCase):
     def test_the_original_values_are_left_untouched(self) -> None:
         outputs = {"output": {"result": _SECRET}}
         rows = [{"node_id": "s2", "output": {"value": _SECRET}, "error": f"bad {_SECRET}"}]
 
-        masked_outputs, masked_rows = mask_sub_workflow_result(outputs, rows, _CREDENTIALS)
+        masked_outputs, masked_rows = mask_sub_workflow_result(
+            _sub_result(outputs, rows), _CREDENTIALS
+        )
 
         self.assertEqual(masked_outputs, {"output": {"result": _MASKED}})
         self.assertEqual(masked_rows[0]["output"], {"value": _MASKED})
@@ -181,14 +198,98 @@ class MaskSubWorkflowResultTests(unittest.TestCase):
         self.assertEqual(rows[0]["output"]["value"], _SECRET)
         self.assertEqual(rows[0]["error"], f"bad {_SECRET}")
 
+    def test_global_variable_rows_keep_their_output(self) -> None:
+        rows = [
+            {"node_id": "g1", "output": {"value": _SECRET}, "error": f"bad {_SECRET}"},
+            {"node_id": "s2", "output": {"value": _SECRET}},
+        ]
+
+        _, masked_rows = mask_sub_workflow_result(
+            _sub_result({}, rows, frozenset({"g1"})), _CREDENTIALS
+        )
+
+        self.assertEqual(masked_rows[0]["output"], {"value": _SECRET})
+        self.assertEqual(masked_rows[0]["error"], f"bad {_MASKED}")
+        self.assertEqual(masked_rows[1]["output"], {"value": _MASKED})
+
     def test_without_credentials_nothing_is_copied(self) -> None:
         outputs = {"output": {"result": "plain"}}
         rows = [{"node_id": "s2", "output": {"value": "plain"}}]
 
-        masked_outputs, masked_rows = mask_sub_workflow_result(outputs, rows, {})
+        masked_outputs, masked_rows = mask_sub_workflow_result(_sub_result(outputs, rows), {})
 
         self.assertIs(masked_outputs, outputs)
         self.assertIs(masked_rows, rows)
+
+
+def _persisted_globals(nodes: list[dict], cache: dict, result: ExecutionResult) -> dict:
+    """Run the real global-variable persistence and return what it would store."""
+    from app.api.workflows import _persist_global_variables_from_execution
+
+    upsert = AsyncMock()
+    with patch("app.api.workflows.upsert_global_variable", upsert):
+        asyncio.run(
+            _persist_global_variables_from_execution(
+                MagicMock(),
+                uuid.uuid4(),
+                nodes,
+                cache,
+                result.node_results,
+                result.sub_workflow_executions,
+            )
+        )
+    return {call.args[2]: call.args[3] for call in upsert.await_args_list}
+
+
+class GlobalVariableCompatibilityTests(unittest.TestCase):
+    """Masking history must not change what a global variable stores for later runs."""
+
+    def test_a_sub_workflow_global_keeps_the_raw_value(self) -> None:
+        cache = copy.deepcopy(_SUB_CACHE)
+        cache[_SUB_ID]["nodes"][1]["data"]["isGlobal"] = True
+        nodes, edges = _parent()
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs=_INPUTS,
+            workflow_cache=cache,
+            credentials_context=_CREDENTIALS,
+        )
+
+        self.assertEqual(_persisted_globals(nodes, cache, result), {"k": _SECRET})
+        (record,) = result.sub_workflow_executions
+        self.assertEqual(record.outputs, {"output": {"result": _MASKED}})
+
+    def test_a_top_level_global_is_stored_as_before(self) -> None:
+        nodes = [
+            {
+                "id": "n1",
+                "type": "textInput",
+                "data": {"label": "userInput", "inputFields": [{"key": "text"}]},
+            },
+            {
+                "id": "g1",
+                "type": "variable",
+                "data": {
+                    "label": "g1",
+                    "variableName": "g1",
+                    "variableValue": "$credentials.apiKey",
+                    "variableType": "string",
+                    "isGlobal": True,
+                },
+            },
+        ]
+        edges = [{"id": "e1", "source": "n1", "target": "g1"}]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs=_INPUTS,
+            credentials_context=_CREDENTIALS,
+        )
+
+        self.assertEqual(_persisted_globals(nodes, {}, result), {"g1": _MASKED})
 
 
 if __name__ == "__main__":
