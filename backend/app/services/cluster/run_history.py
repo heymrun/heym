@@ -213,12 +213,18 @@ class OffloadedRun:
 
 
 def from_summary(summary: dict[str, Any]) -> OffloadedRun:
+    history_written = summary.get("history_written")
+    if history_written is None:
+        history_written = True
+    else:
+        history_written = bool(history_written)
     return OffloadedRun(
         status=str(summary.get("status") or "error"),
         outputs=summary.get("outputs") or {},
         workflow_id=str(summary.get("workflow_id") or ""),
         execution_time_ms=float(summary.get("execution_time_ms") or 0.0),
         error=summary.get("error"),
+        history_written=history_written,
         instance=str(summary.get("instance") or ""),
         failed_node=summary.get("failed_node"),
     )

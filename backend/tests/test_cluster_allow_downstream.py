@@ -512,3 +512,91 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
         release.set()
         await asyncio.sleep(0.05)
+
+    async def test_cancellation_during_final_persistence_reports_history_not_written(
+        self,
+    ) -> None:
+        from app.services.cluster.dispatch import RunQueueWorker
+        from app.services.execution_cancellation import get_active_execution_handle
+
+        def fast_handler(_ctx):
+            return {"value": "done"}
+
+        persist_started = asyncio.Event()
+        persist_never = asyncio.Event()
+
+        async def hanging_persist(*args, **kwargs):
+            persist_started.set()
+            await persist_never.wait()
+
+        nodes, edges = _allow_downstream_workflow()
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=uuid.uuid4(),
+            name="allow-downstream-cancel-persistence",
+            nodes=nodes,
+            edges=edges,
+        )
+        active_row = SimpleNamespace(cancel_requested_at=None)
+        row = _row(workflow_id, execution_id, None)
+        _session, context = self._session_context(workflow, active_row)
+        worker = RunQueueWorker()
+        persist_history = AsyncMock(side_effect=hanging_persist)
+        persist_globals = AsyncMock()
+
+        patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler}))
+            await worker._execute_claimed(row)
+            await persist_started.wait()
+
+            self.assertEqual(len(worker._active_finalizers), 1)
+            finalizer_task = next(iter(worker._active_finalizers))
+            finalizer_task.cancel()
+            await self._wait_for_finalizer(worker)
+
+            complete = patches[5].new
+            notify_done = patches[6].new
+
+            self.assertGreaterEqual(complete.await_count, 2)
+            final_summary = complete.await_args_list[-1].kwargs["result"]
+            self.assertNotEqual(final_summary["status"], "success")
+            self.assertEqual(final_summary["status"], "error")
+            self.assertFalse(final_summary["history_written"])
+            self.assertEqual(final_summary["outputs"], {"output": {"result": "hello"}})
+            self.assertEqual(final_summary["error"], "History persistence was cancelled")
+            self.assertIsNone(get_active_execution_handle(execution_id))
+            self.assertGreaterEqual(notify_done.await_count, 1)
+
+    async def test_wait_for_result_preserves_history_written_false(self) -> None:
+        from app.services.cluster import run_result_bus as bus_module
+        from app.services.cluster.dispatch import wait_for_result
+
+        execution_id = uuid.uuid4()
+        event = bus_module.run_result_bus.register(execution_id)
+        event.set()
+        with patch(
+            "app.services.cluster.dispatch.run_queue.read_terminal_result",
+            new=AsyncMock(
+                return_value=(
+                    "done",
+                    {
+                        "status": "error",
+                        "outputs": {"output": {"result": "hello"}},
+                        "error": "History persistence was cancelled",
+                        "history_written": False,
+                    },
+                    None,
+                )
+            ),
+        ):
+            result = await wait_for_result(execution_id, timeout_seconds=1.0)
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.outputs, {"output": {"result": "hello"}})
+        self.assertEqual(result.error, "History persistence was cancelled")
+        self.assertFalse(result.history_written)

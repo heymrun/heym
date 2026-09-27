@@ -475,19 +475,34 @@ class RunQueueWorker:
                 workflow_cache=workflow_cache,
                 result=result,
             )
-        except Exception as exc:
+        except (asyncio.CancelledError, Exception) as exc:
             persistence_error = exc
-            result.status = "error"
-            logger.exception(
-                "Failed to persist final allow-downstream history: %s",
-                row.execution_id,
-            )
+            if result.status == "success":
+                result.status = "error"
+            if isinstance(exc, asyncio.CancelledError):
+                logger.warning(
+                    "Allow-downstream history persistence cancelled: %s",
+                    row.execution_id,
+                )
+            else:
+                logger.exception(
+                    "Failed to persist final allow-downstream history: %s",
+                    row.execution_id,
+                )
         finally:
+            task = asyncio.current_task()
+            if task is not None and hasattr(task, "uncancel"):
+                while task.uncancel() > 0:
+                    pass
             summary = summarize(result, row.execution_id)
             if persistence_error is not None:
                 summary["history_written"] = False
-                summary["error"] = str(persistence_error)
-            with contextlib.suppress(Exception):
+                summary["error"] = (
+                    str(persistence_error)
+                    if str(persistence_error)
+                    else "History persistence was cancelled"
+                )
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await run_queue.complete(
                     row.execution_id,
                     result=summary,
@@ -500,7 +515,7 @@ class RunQueueWorker:
                     result={},
                     handle=worker_handle,
                 )
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await run_queue.notify_done(row.execution_id)
 
     async def _execute_claimed(self, row: WorkflowRunQueue) -> None:
