@@ -1758,7 +1758,7 @@ class ExecutionResult:
             if result.node_id not in existing_ids:
                 row = _serialize_node_result(result)
                 if self._credentials_context:
-                    row["output"] = mask_sensitive_output(row["output"], self._credentials_context)
+                    _mask_node_result_row(row, self._credentials_context)
                 self.node_results.append(row)
                 existing_ids.add(result.node_id)
         if self._started_at:
@@ -3100,7 +3100,11 @@ class WorkflowExecutor:
             return
         if sub_res.allow_downstream_pending:
             sub_res.join_allow_downstream()
+        credentials_context = getattr(parent, "credentials_context", None) or {}
         if sub_res.status == "pending":
+            _, pending_rows = mask_sub_workflow_result(
+                {}, sub_res.node_results, credentials_context
+            )
             with parent.lock:
                 parent.sub_workflow_executions.append(
                     SubWorkflowExecution(
@@ -3109,19 +3113,22 @@ class WorkflowExecutor:
                         outputs={"error": SUB_WORKFLOW_HITL_UNSUPPORTED},
                         status="error",
                         execution_time_ms=sub_res.execution_time_ms,
-                        node_results=sub_res.node_results,
+                        node_results=pending_rows,
                         workflow_name=wf_name,
                         trigger_source=bg_trigger_source,
                     )
                 )
             return
+        masked_outputs, masked_rows = mask_sub_workflow_result(
+            sub_res.outputs, sub_res.node_results, credentials_context
+        )
         sub_exec = SubWorkflowExecution(
             workflow_id=wf_id,
             inputs=inputs_snapshot,
-            outputs=sub_res.outputs,
+            outputs=masked_outputs,
             status=sub_res.status,
             execution_time_ms=sub_res.execution_time_ms,
-            node_results=sub_res.node_results,
+            node_results=masked_rows,
             workflow_name=wf_name,
             trigger_source=bg_trigger_source,
         )
@@ -4065,15 +4072,18 @@ class WorkflowExecutor:
                     "error": "HITL is not supported inside sub-workflow tools.",
                 }
             elapsed_ms = round((time.time() * 1000) - start_ms)
+            masked_outputs, masked_rows = mask_sub_workflow_result(
+                sub_result.outputs, sub_result.node_results, self.credentials_context
+            )
             with self.lock:
                 self.sub_workflow_executions.append(
                     SubWorkflowExecution(
                         workflow_id=workflow_id_str,
                         inputs=inputs,
-                        outputs=sub_result.outputs,
+                        outputs=masked_outputs,
                         status=sub_result.status,
                         execution_time_ms=sub_result.execution_time_ms,
-                        node_results=sub_result.node_results,
+                        node_results=masked_rows,
                         workflow_name=target_workflow.get("name", ""),
                         trigger_source="AI Agents",
                     )
@@ -8002,6 +8012,41 @@ def mask_sensitive_output(output: dict, credentials_context: dict[str, str]) -> 
     return json.loads(output_str)
 
 
+def mask_sensitive_text(text: str, credentials_context: dict[str, str]) -> str:
+    """Mask credential values inside free text, such as a node's error message."""
+    for value in credentials_context.values():
+        for secret in _credential_secret_parts(value or ""):
+            if len(secret) > 7:
+                text = text.replace(secret, secret[:7] + "**")
+    return text
+
+
+def _mask_node_result_row(row: dict, credentials_context: dict[str, str]) -> None:
+    """Mask a serialized node result's output and error in place."""
+    if "output" in row:
+        row["output"] = mask_sensitive_output(row["output"], credentials_context)
+    if isinstance(row.get("error"), str):
+        row["error"] = mask_sensitive_text(row["error"], credentials_context)
+
+
+def mask_sub_workflow_result(
+    outputs: dict, node_results: list, credentials_context: dict[str, str]
+) -> tuple[dict, list]:
+    """Masked copies of a sub-workflow's outputs and node results for its history row.
+
+    Only the SubWorkflowExecution record gets the copies; the parent keeps the raw values.
+    """
+    if not credentials_context:
+        return outputs, node_results
+    masked_rows = []
+    for row in node_results:
+        if isinstance(row, dict):
+            row = dict(row)
+            _mask_node_result_row(row, credentials_context)
+        masked_rows.append(row)
+    return mask_sensitive_output(outputs, credentials_context), masked_rows
+
+
 def mask_credentials_context(credentials_context: dict[str, str] | None) -> dict[str, str]:
     """Return a preview-safe credentials context with secret values masked."""
     if not credentials_context:
@@ -8076,9 +8121,7 @@ def execute_workflow(
         result.outputs = mask_sensitive_output(result.outputs, credentials_context)
         for node_result in result.node_results:
             if isinstance(node_result, dict):
-                node_result["output"] = mask_sensitive_output(
-                    node_result["output"], credentials_context
-                )
+                _mask_node_result_row(node_result, credentials_context)
         result._credentials_context = credentials_context
 
     return result
@@ -8619,9 +8662,7 @@ def resume_workflow_execution(
         result.outputs = mask_sensitive_output(result.outputs, credentials_context)
         for node_result in result.node_results:
             if isinstance(node_result, dict):
-                node_result["output"] = mask_sensitive_output(
-                    node_result["output"], credentials_context
-                )
+                _mask_node_result_row(node_result, credentials_context)
 
     return result
 

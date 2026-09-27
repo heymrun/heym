@@ -53,8 +53,25 @@ _EDGES = [
 ]
 
 
+_THROW_NODES = [
+    *_NODES[:3],
+    _variable("gate", "released"),
+    {
+        "id": "boom",
+        "type": "throwError",
+        "data": {"label": "boom", "errorMessage": "rejected key $credentials.apiKey"},
+    },
+]
+_THROW_EDGES = [*_EDGES[:3], {"id": "e4", "source": "gate", "target": "boom"}]
+
+
 class AllowDownstreamJoinMaskingTests(unittest.TestCase):
-    def _run(self, credentials_context: dict[str, str] | None) -> tuple[ExecutionResult, list]:
+    def _run(
+        self,
+        credentials_context: dict[str, str] | None,
+        nodes: list[dict] = _NODES,
+        edges: list[dict] = _EDGES,
+    ) -> tuple[ExecutionResult, list]:
         """Run the workflow, holding the downstream branch until the early result exists."""
         release = threading.Event()
         real_logic = WorkflowExecutor._execute_node_logic
@@ -67,8 +84,8 @@ class AllowDownstreamJoinMaskingTests(unittest.TestCase):
         with patch.object(WorkflowExecutor, "_execute_node_logic", gated_logic):
             result = execute_workflow(
                 workflow_id=uuid.uuid4(),
-                nodes=_NODES,
-                edges=_EDGES,
+                nodes=nodes,
+                edges=edges,
                 inputs={"headers": {}, "query": {}, "body": {"text": "x"}},
                 credentials_context=credentials_context,
             )
@@ -84,6 +101,14 @@ class AllowDownstreamJoinMaskingTests(unittest.TestCase):
         self.assertNotIn("post", early_ids)
         rows = {row["node_id"]: row for row in result.node_results}
         self.assertEqual(rows["post"]["output"]["value"], _MASKED)
+        self.assertNotIn(_SECRET, json.dumps(result.node_results))
+
+    def test_error_of_a_row_added_by_the_join_is_masked(self) -> None:
+        result, early_ids = self._run({"apiKey": _SECRET}, _THROW_NODES, _THROW_EDGES)
+
+        self.assertNotIn("boom", early_ids)
+        rows = {row["node_id"]: row for row in result.node_results}
+        self.assertEqual(rows["boom"]["error"], f"rejected key {_MASKED}")
         self.assertNotIn(_SECRET, json.dumps(result.node_results))
 
     def test_early_rows_stay_masked(self) -> None:

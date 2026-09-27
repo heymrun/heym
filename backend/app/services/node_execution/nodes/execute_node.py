@@ -221,13 +221,16 @@ def execute(ctx: NodeExecutionContext) -> object:
             if sub_result.status == "pending":
                 raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
 
+            masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
+                sub_result.outputs, sub_result.node_results, self.credentials_context
+            )
             sub_exec = SubWorkflowExecution(
                 workflow_id=execute_workflow_id,
                 inputs=execute_inputs,
-                outputs=sub_result.outputs,
+                outputs=masked_outputs,
                 status=sub_result.status,
                 execution_time_ms=sub_result.execution_time_ms,
-                node_results=sub_result.node_results,
+                node_results=masked_rows,
                 workflow_name=target_workflow.get("name", ""),
                 trigger_source=("AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"),
             )
