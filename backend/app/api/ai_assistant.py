@@ -2145,6 +2145,7 @@ async def run_execute_workflow_tool(
     public_base_url: str,
     cancel_event: Event | None = None,
     llm_session_id: str | None = None,
+    trigger_source: str = "dashboard_chat",
 ) -> str:
     """Execute a workflow and return JSON string result for tool. Raises no exception; errors are returned in the result."""
     if cancel_event is not None and cancel_event.is_set():
@@ -2193,7 +2194,7 @@ async def run_execute_workflow_tool(
                 workflow=workflow,
                 enriched_inputs=enriched_inputs,
                 execution_result=execution_result,
-                trigger_source="dashboard_chat",
+                trigger_source=trigger_source,
                 credentials_owner_id=user_id,
                 trace_user_id=user_id,
                 public_base_url=public_base_url,
@@ -2215,7 +2216,7 @@ async def run_execute_workflow_tool(
                 node_results=execution_result.node_results,
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
-                trigger_source="dashboard_chat",
+                trigger_source=trigger_source,
             )
             db.add(history_entry)
             await upsert_workflow_analytics_snapshot(

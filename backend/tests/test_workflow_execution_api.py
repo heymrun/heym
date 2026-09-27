@@ -318,6 +318,61 @@ class RunExecuteWorkflowToolActorForwardingTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(mock_execute.call_args.kwargs["actor_user_id"], user_id)
 
 
+class RunExecuteWorkflowToolTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
+    async def _recorded_history(self, **kwargs: object) -> object:
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Demo",
+            nodes=[{"id": "n1", "type": "input"}],
+            edges=[],
+        )
+        execution_result = ExecutionResult(
+            workflow_id=workflow.id,
+            status="success",
+            outputs={},
+            execution_time_ms=1.0,
+        )
+        db = MagicMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.ai_assistant.collect_referenced_workflows",
+                AsyncMock(return_value={}),
+            ),
+            patch("app.api.ai_assistant.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.ai_assistant.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch(
+                "app.api.ai_assistant.execute_workflow",
+                MagicMock(return_value=execution_result),
+            ),
+        ):
+            result = await run_execute_workflow_tool(
+                db=db,
+                user_id=uuid.uuid4(),
+                workflow_id_str=str(workflow.id),
+                inputs={},
+                public_base_url="http://localhost",
+                **kwargs,
+            )
+
+        self.assertEqual(json.loads(result)["status"], "success")
+        return db.add.call_args_list[0].args[0]
+
+    async def test_records_dashboard_chat_by_default(self) -> None:
+        history = await self._recorded_history()
+
+        self.assertEqual(history.trigger_source, "dashboard_chat")
+
+    async def test_records_the_given_trigger_source(self) -> None:
+        history = await self._recorded_history(trigger_source="ai_assistant")
+
+        self.assertEqual(history.trigger_source, "ai_assistant")
+
+
 class PortalCancelExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_returns_cancel_requested_when_active_execution_exists(self) -> None:
         workflow_id = uuid.uuid4()
