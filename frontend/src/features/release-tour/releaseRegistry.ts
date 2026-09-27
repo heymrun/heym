@@ -17,6 +17,53 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.16",
+    publishedAt: new Date("2026-09-27T00:00:00Z"),
+    headline: "Let the AI Assistant run and fix the workflow it builds",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["assistant-yolo-mode"],
+    },
+    sections: [
+      {
+        id: "assistant-yolo-mode",
+        title: "YOLO mode: the AI Assistant tests what it builds",
+        publishedAt: new Date("2026-09-27T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Check **YOLO mode** in the canvas **AI Assistant** and it no longer stops after applying a workflow. It runs the workflow on the canvas like **Run**, reads the result, and fixes the workflow until the run does what you asked, for up to five runs per message. Each reply lists its steps as they happen. You see the changes being applied, each attempt with the node it is executing, and a final **Verified** with a short summary.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Before the first run it asks for test inputs, filled with values it suggests, and reuses them until the input fields change. It can also run your other workflows when it needs their result. When it needs a decision or a credential, it asks with the usual question card. Runs are real, so YOLO mode is off by default and **Stop** ends the loop at any time.",
+          },
+        ],
+        tour: {
+          description:
+            "The AI Assistant runs the workflow it builds, reads the result and fixes it until it works.",
+          useCases: [
+            "Describe a workflow and get one that has already run successfully",
+            "Let the assistant chase down a failing node without pasting errors back",
+            "Check what another workflow returns before wiring it into an Execute node",
+          ],
+          tourVisual: "assistant-yolo-mode",
+          docTarget: {
+            categoryId: "reference",
+            slug: "ai-assistant",
+            title: "AI Assistant",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.15",
     publishedAt: new Date("2026-09-23T00:00:00Z"),
     headline:
@@ -185,58 +232,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "credentials",
             title: "Credentials",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.13",
-    publishedAt: new Date("2026-09-21T00:00:00Z"),
-    headline: "Ask a model for a decision, not an essay",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["decision-node"],
-    },
-    sections: [
-      {
-        id: "decision-node",
-        title: "Get a typed answer instead of a paragraph",
-        publishedAt: new Date("2026-09-21T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The new **Decision** node asks a decision model typed questions about whatever the run has produced so far. You give it a **state**, such as a ticket, a diff or a form submission, plus a list of questions, and it answers each one with a probability instead of a paragraph you then have to parse.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Questions come in three shapes. **Noul** asks whether a condition holds and returns how likely a yes is. **Choice** picks one option from a set you define and shows the full distribution. **Score** rates the state along levels you write, and can land between them. Choice and score answers carry their own confidence, so a **Switch** can branch on the answer while a **Condition** gates on how certain the model was.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Write the questions yourself, or describe what you want judged and let **Generate with AI** draft them. If your endpoint speaks a different contract, turn on **Custom request body** and send the JSON you need. Connect it with a **Decision Model** credential pointing at a hosted or self-hosted endpoint, and every call shows up in Traces.",
-          },
-        ],
-        tour: {
-          description:
-            "Ask a model typed questions about the run's state and branch on the answer instead of parsing prose.",
-          useCases: [
-            "Route a ticket to the right team and branch on how confident the call was",
-            "Score how risky a change looks before a step that cannot be undone",
-            "Draft the questions from a plain sentence with Generate with AI",
-          ],
-          tourVisual: "decision-node",
-          docTarget: {
-            categoryId: "nodes",
-            slug: "decision-node",
-            title: "Decision",
           },
         },
       },
