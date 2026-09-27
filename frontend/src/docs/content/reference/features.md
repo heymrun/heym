@@ -479,6 +479,8 @@ See also [Canvas Features](./canvas-features.md), [Quick Drawer](./quick-drawer.
 
 The AI Assistant is a chat panel opened from the Debug panel that lets you create or modify workflows with natural language. Select a [credential](./credentials.md) and model, then describe what you want; the AI streams a response and any valid [workflow JSON](./workflow-structure.md) in a code block is automatically parsed and applied to the canvas. Voice input is supported on compatible browsers.
 
+Turn on **YOLO mode** (Agent mode, off by default) and the assistant tests what it builds. After each change it runs the workflow on the canvas, reads the result and fixes the workflow until it does what you asked, for up to 5 runs per message. It asks for test inputs before the first run, can run your other workflows when it needs their result, and shows each step as it works. See [AI Assistant › YOLO Mode](./ai-assistant.md#yolo-mode).
+
 When the current workflow contains [Agent Node](../nodes/agent-node.md) skills, the assistant sends only each skill's `SKILL.md` into the workflow context. Attached `.py` files and binary skill assets are excluded before the request so large skill bundles do not overflow the model context window.
 
 Pairs well with [Chat with Heym](./chat-with-heym.md), [Agent Architecture](./agent-architecture.md), and [Expression DSL](./expression-dsl.md).

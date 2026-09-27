@@ -39,6 +39,8 @@ The panel has two modes, toggled with the **Agent / Ask** chip in the panel head
 
 Switch modes at any time. Changing the mode does not clear the conversation.
 
+In Agent mode, the **YOLO mode** box under the message field makes the assistant run and fix what it builds. See [YOLO Mode](#yolo-mode).
+
 ## Using the Chat
 
 - Type your request in the input (e.g. "Create a workflow that takes user input and sends it to an LLM")
@@ -56,6 +58,41 @@ When the AI response contains a valid workflow JSON block (with `nodes` and opti
 4. Marks the workflow as unsaved
 
 If parsing fails, a **Retry** button appears to regenerate the response.
+
+## YOLO Mode
+
+**YOLO mode** lets the assistant test what it builds. Check the **YOLO mode** box under the message field, then send your request. The box appears in Agent mode only. It is off by default and resets to off when the page reloads.
+
+With YOLO mode on, the assistant does not stop after it applies a workflow:
+
+1. It applies the workflow to the canvas.
+2. Before the first run it asks for test inputs. The card lists the workflow's input fields, filled with values the assistant suggests. Edit them and press **Run**. Later runs reuse these values. The card only comes back when the input fields change or the assistant needs different test data.
+3. It runs the workflow on the canvas exactly like the **Run** button: unsaved changes are saved first, nodes light up, and the run appears in the Debug panel and [Execution History](./execution-history.md).
+4. It reads the result. If the run did what you asked, it finishes with **Verified** and a short summary. If not, it fixes the workflow and runs it again.
+
+It makes at most **5 runs** per message. Press **Stop** at any time to end the loop and stop a run in progress.
+
+Each reply shows its steps as they happen:
+- `Applying changes to canvas`;
+- `Running workflow · attempt 2/5`, with an `Executing <node>` row for each node;
+- the final verdict.
+
+After each run a short line such as *Attempt 1 result sent · error in 1.2s* shows that the result went back to the assistant.
+
+### Running your other workflows
+
+In YOLO mode the assistant can also run your other workflows when it needs their result. For example, it can check what a workflow returns before calling it from an [Execute](../nodes/execute-node.md) node. These runs show as `Running workflow "<name>"...` steps and are recorded in Execution History with the trigger source `ai_assistant`. The workflow being edited is always tested on the canvas.
+
+### When it stops early
+
+| Situation | What happens |
+|---|---|
+| The assistant needs a decision, information or a credential | It asks with the usual question card. Answering continues the loop. |
+| The run waits for a [human review](./human-in-the-loop.md) | The loop stops. Approve the review, then send a message. |
+| The workflow waits for a file upload | The loop stops. YOLO mode cannot test upload-triggered runs. |
+| A newer version of the workflow was saved elsewhere | The loop stops. Resolve the save conflict, then send a message. |
+
+> **Runs are real.** Emails, messages and API calls in the workflow are actually sent on every attempt. Every run saves the workflow, so earlier versions stay in [Edit History](./edit-history.md).
 
 ## Voice Input
 
