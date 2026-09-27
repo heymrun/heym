@@ -2115,6 +2115,7 @@ export interface AIAssistantRequest {
     output_node?: OutputNodeInfo | null;
   }>;
   askMode?: boolean;
+  yoloMode?: boolean;
   executionLog?: {
     execution_status: string;
     execution_time_ms: number | null;
@@ -2130,6 +2131,26 @@ export interface AIAssistantRequest {
       metadata?: Record<string, unknown>;
     }>;
   } | null;
+}
+
+export interface AssistantToolStartEvent {
+  id: string;
+  name: string;
+  label: string;
+  args: Record<string, unknown>;
+}
+
+export interface AssistantToolEndEvent {
+  id: string;
+  response_summary: string;
+  elapsed_ms: number;
+  status: ToolCallTerminalStatus;
+}
+
+/** Handlers for the tool steps a YOLO-mode assistant turn streams. */
+export interface AssistantStreamHandlers {
+  onToolStart?: (event: AssistantToolStartEvent) => void;
+  onToolEnd?: (event: AssistantToolEndEvent) => void;
 }
 
 export interface FixTranscriptionRequest {
@@ -2706,6 +2727,7 @@ export const aiApi = {
     onDone: () => void,
     onError: (error: Error) => void,
     signal?: AbortSignal,
+    handlers?: AssistantStreamHandlers,
   ): void => {
     const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -2726,6 +2748,7 @@ export const aiApi = {
         available_workflows: request.availableWorkflows,
         ask_mode: request.askMode ?? false,
         execution_log: request.executionLog ?? null,
+        ...(request.yoloMode ? { yolo_mode: true } : {}),
       }),
       signal,
     })
@@ -2763,6 +2786,21 @@ export const aiApi = {
                 onDone();
               } else if (data.type === "error") {
                 throw new Error(data.message);
+              } else if (data.type === "tool_start" && typeof data.id === "string") {
+                handlers?.onToolStart?.({
+                  id: data.id,
+                  name: typeof data.name === "string" ? data.name : "",
+                  label: typeof data.label === "string" ? data.label : "",
+                  args: data.args && typeof data.args === "object" ? data.args : {},
+                });
+              } else if (data.type === "tool_end" && typeof data.id === "string") {
+                handlers?.onToolEnd?.({
+                  id: data.id,
+                  response_summary:
+                    typeof data.response_summary === "string" ? data.response_summary : "",
+                  elapsed_ms: typeof data.elapsed_ms === "number" ? data.elapsed_ms : 0,
+                  status: parseToolCallTerminalStatus(data.status),
+                });
               }
             }
           }
