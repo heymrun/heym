@@ -513,7 +513,74 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         release.set()
         await asyncio.sleep(0.05)
 
-    async def test_cancellation_during_final_persistence_reports_history_not_written(
+    async def test_global_variable_failure_preserves_history_written_true(
+        self,
+    ) -> None:
+        from app.services.cluster import run_result_bus as bus_module
+        from app.services.cluster.dispatch import RunQueueWorker, wait_for_result
+        from app.services.execution_cancellation import get_active_execution_handle
+
+        def fast_handler(_ctx):
+            return {"value": "done"}
+
+        nodes, edges = _allow_downstream_workflow()
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        credentials_owner_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=uuid.uuid4(),
+            name="allow-downstream-gv-failure",
+            nodes=nodes,
+            edges=edges,
+        )
+        active_row = SimpleNamespace(cancel_requested_at=None)
+        row = _row(workflow_id, execution_id, credentials_owner_id)
+        _session, context = self._session_context(workflow, active_row)
+        worker = RunQueueWorker()
+        persist_history = AsyncMock()
+        persist_globals = AsyncMock(side_effect=RuntimeError("global variables update failed"))
+
+        patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler}))
+            await worker._execute_claimed(row)
+            await self._wait_for_finalizer(worker)
+
+            complete = patches[5].new
+            notify_done = patches[6].new
+
+            # History commit succeeded
+            self.assertEqual(persist_history.await_count, 1)
+            # Global variable transaction failed
+            self.assertEqual(persist_globals.await_count, 1)
+
+            final_summary = complete.await_args_list[-1].kwargs["result"]
+            # Overall result is error due to global variables failure
+            self.assertEqual(final_summary["status"], "error")
+            # history_written MUST remain True because ExecutionHistory committed
+            self.assertTrue(final_summary["history_written"])
+            self.assertEqual(final_summary["error"], "global variables update failed")
+            self.assertIsNone(get_active_execution_handle(execution_id))
+            self.assertGreaterEqual(notify_done.await_count, 1)
+
+            # Verify dispatcher behavior: reading this summary marks history as already written,
+            # so the dispatcher will not attempt to insert a duplicate ExecutionHistory row.
+            event = bus_module.run_result_bus.register(execution_id)
+            event.set()
+            with patch(
+                "app.services.cluster.dispatch.run_queue.read_terminal_result",
+                new=AsyncMock(return_value=("done", final_summary, None)),
+            ):
+                offloaded_result = await wait_for_result(execution_id, timeout_seconds=1.0)
+
+            self.assertTrue(offloaded_result.history_written)
+            self.assertTrue(getattr(offloaded_result, "history_written", False))
+            self.assertEqual(offloaded_result.status, "error")
+
+    async def test_cancellation_during_persistence_allows_history_to_finish(
         self,
     ) -> None:
         from app.services.cluster.dispatch import RunQueueWorker
@@ -523,11 +590,11 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             return {"value": "done"}
 
         persist_started = asyncio.Event()
-        persist_never = asyncio.Event()
+        persist_release = asyncio.Event()
 
-        async def hanging_persist(*args, **kwargs):
+        async def controlled_persist(*args, **kwargs):
             persist_started.set()
-            await persist_never.wait()
+            await persist_release.wait()
 
         nodes, edges = _allow_downstream_workflow()
         workflow_id = uuid.uuid4()
@@ -535,7 +602,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         workflow = SimpleNamespace(
             id=workflow_id,
             owner_id=uuid.uuid4(),
-            name="allow-downstream-cancel-persistence",
+            name="allow-downstream-shield-persistence",
             nodes=nodes,
             edges=edges,
         )
@@ -543,7 +610,7 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
         row = _row(workflow_id, execution_id, None)
         _session, context = self._session_context(workflow, active_row)
         worker = RunQueueWorker()
-        persist_history = AsyncMock(side_effect=hanging_persist)
+        persist_history = AsyncMock(side_effect=controlled_persist)
         persist_globals = AsyncMock()
 
         patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
@@ -556,19 +623,24 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
 
             self.assertEqual(len(worker._active_finalizers), 1)
             finalizer_task = next(iter(worker._active_finalizers))
+            # Cancel the finalizer while persistence is active
             finalizer_task.cancel()
+
+            # Release persistence to let it finish
+            persist_release.set()
             await self._wait_for_finalizer(worker)
 
             complete = patches[5].new
             notify_done = patches[6].new
 
+            # Verifies persistence completes and ExecutionHistory is considered written
+            self.assertEqual(persist_history.await_count, 1)
             self.assertGreaterEqual(complete.await_count, 2)
             final_summary = complete.await_args_list[-1].kwargs["result"]
-            self.assertNotEqual(final_summary["status"], "success")
-            self.assertEqual(final_summary["status"], "error")
-            self.assertFalse(final_summary["history_written"])
+            self.assertEqual(final_summary["status"], "success")
+            self.assertTrue(final_summary["history_written"])
             self.assertEqual(final_summary["outputs"], {"output": {"result": "hello"}})
-            self.assertEqual(final_summary["error"], "History persistence was cancelled")
+            # Execution tracking cleaned up
             self.assertIsNone(get_active_execution_handle(execution_id))
             self.assertGreaterEqual(notify_done.await_count, 1)
 

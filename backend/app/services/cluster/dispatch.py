@@ -326,6 +326,10 @@ async def dispatch_workflow(
     return result
 
 
+class GlobalVariablesPersistenceError(Exception):
+    """Raised when global variables persistence fails after history is committed."""
+
+
 class RunQueueWorker:
     """Claims queued rows for this instance and executes them.
 
@@ -409,6 +413,7 @@ class RunQueueWorker:
         from app.api.workflows import _persist_global_variables_from_execution
         from app.db.session import async_session_maker
 
+        # 1. History transaction
         await persist_run_history(
             execution_id=row.execution_id,
             workflow_id=row.workflow_id,
@@ -418,17 +423,22 @@ class RunQueueWorker:
             trigger_source=row.trigger_source,
             result=result,
         )
+
+        # 2. Global variables transaction (separate from history)
         if row.credentials_owner_id is not None and result.status != "cancelled":
-            async with async_session_maker() as db:
-                await _persist_global_variables_from_execution(
-                    db,
-                    row.credentials_owner_id,
-                    nodes,
-                    workflow_cache,
-                    result.node_results,
-                    result.sub_workflow_executions,
-                )
-                await db.commit()
+            try:
+                async with async_session_maker() as db:
+                    await _persist_global_variables_from_execution(
+                        db,
+                        row.credentials_owner_id,
+                        nodes,
+                        workflow_cache,
+                        result.node_results,
+                        result.sub_workflow_executions,
+                    )
+                    await db.commit()
+            except (asyncio.CancelledError, Exception) as exc:
+                raise GlobalVariablesPersistenceError(exc) from exc
 
     async def _finalize_claimed_allow_downstream(
         self,
@@ -442,6 +452,7 @@ class RunQueueWorker:
         worker_handle: ExecutionCancellationHandle | None,
     ) -> None:
         """Finish an early-return run without blocking the worker's event loop."""
+        history_written = False
         persistence_error: Exception | None = None
         try:
             await asyncio.to_thread(result.join_allow_downstream)
@@ -466,8 +477,8 @@ class RunQueueWorker:
             result.status = "error"
             # Preserve the early response. The client may already have received it.
 
-        try:
-            await self._persist_claimed_run(
+        persist_task = asyncio.create_task(
+            self._persist_claimed_run(
                 row=row,
                 owner_id=owner_id,
                 workflow_name=workflow_name,
@@ -475,7 +486,36 @@ class RunQueueWorker:
                 workflow_cache=workflow_cache,
                 result=result,
             )
+        )
+        try:
+            while not persist_task.done():
+                try:
+                    await asyncio.shield(persist_task)
+                except asyncio.CancelledError:
+                    logger.warning(
+                        "Allow-downstream finalizer cancelled while persistence active: %s",
+                        row.execution_id,
+                    )
+            if not persist_task.cancelled():
+                persist_task.result()
+            history_written = True
+        except GlobalVariablesPersistenceError as gv_err:
+            history_written = True
+            inner_exc = gv_err.__cause__ or gv_err
+            persistence_error = inner_exc
+            result.status = "error"
+            if isinstance(inner_exc, asyncio.CancelledError):
+                logger.warning(
+                    "Allow-downstream global variables persistence cancelled: %s",
+                    row.execution_id,
+                )
+            else:
+                logger.exception(
+                    "Failed to persist global variables for allow-downstream run: %s",
+                    row.execution_id,
+                )
         except (asyncio.CancelledError, Exception) as exc:
+            history_written = False
             persistence_error = exc
             if result.status == "success":
                 result.status = "error"
@@ -490,13 +530,21 @@ class RunQueueWorker:
                     row.execution_id,
                 )
         finally:
+            if not persist_task.done():
+                persist_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await persist_task
+            elif not persist_task.cancelled():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    persist_task.exception()
+
             task = asyncio.current_task()
             if task is not None and hasattr(task, "uncancel"):
                 while task.uncancel() > 0:
                     pass
             summary = summarize(result, row.execution_id)
+            summary["history_written"] = history_written
             if persistence_error is not None:
-                summary["history_written"] = False
                 summary["error"] = (
                     str(persistence_error)
                     if str(persistence_error)
