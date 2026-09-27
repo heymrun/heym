@@ -57,6 +57,13 @@ from app.models.board_schemas import CardCreateRequest
 from app.services import template_service
 from app.services.active_execution_overview import build_active_execution_overview
 from app.services.agent_tool_observability import summarize_tool_calls
+from app.services.assistant_yolo import (
+    YOLO_TRACE_NODE_LABEL,
+    YOLO_TRIGGER_SOURCE,
+    YoloToolOutcome,
+    stream_until_disconnect,
+    stream_yolo_assistant_turn,
+)
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import (
     CredentialPromptMode,
@@ -99,6 +106,7 @@ from app.services.timezone_utils import get_configured_timezone
 from app.services.workflow_dsl_prompt import (
     CLARIFY_PROTOCOL_PROMPT,
     DASHBOARD_WIDGET_PROMPT_HINT,
+    YOLO_PROTOCOL_PROMPT,
     build_assistant_prompt,
     is_dashboard_widget_workflow,
 )
@@ -150,6 +158,7 @@ class AIAssistantRequest(BaseModel):
     available_workflows: list[dict] | None = None
     ask_mode: bool = False
     execution_log: dict | None = None
+    yolo_mode: bool = False
 
 
 class AnalyzeWorkflowRequest(BaseModel):
@@ -4897,8 +4906,82 @@ async def analyze_workflow_stream(
     )
 
 
+def _workflow_names(available_workflows: list[dict] | None) -> dict[str, str]:
+    """Map workflow ids to names so a YOLO step can say which workflow it runs."""
+    names: dict[str, str] = {}
+    for item in available_workflows or []:
+        if isinstance(item, dict) and item.get("id"):
+            names[str(item["id"])] = str(item.get("name") or "")
+    return names
+
+
+def _yolo_assistant_response(
+    *,
+    http_request: Request,
+    db: AsyncSession,
+    user: User,
+    client: OpenAI,
+    model: str,
+    provider: str,
+    system_prompt: str,
+    messages: list[dict],
+    session_id: str,
+    workflow_id: uuid.UUID | None,
+    available_workflows: list[dict] | None,
+    trace_context: LLMTraceContext | None,
+) -> StreamingResponse:
+    """Stream a YOLO turn, in which the model may run the user's other workflows."""
+    cancel_event = Event()
+    public_base_url = build_public_base_url(http_request)
+
+    async def run_other_workflow(target_id: str, inputs: dict[str, Any]) -> YoloToolOutcome:
+        result = await run_execute_workflow_tool(
+            db=db,
+            user_id=user.id,
+            workflow_id_str=target_id,
+            inputs=inputs,
+            public_base_url=public_base_url,
+            cancel_event=cancel_event,
+            llm_session_id=session_id,
+            trigger_source=YOLO_TRIGGER_SOURCE,
+        )
+        return YoloToolOutcome(
+            llm_content=_sanitize_tool_result_for_llm(result, "execute_workflow"),
+            summary=_summarize_tool_result("execute_workflow", result),
+            status=_chat_tool_lifecycle_status("execute_workflow", result),
+        )
+
+    turn = stream_yolo_assistant_turn(
+        client=client,
+        model=model,
+        provider=provider,
+        system_prompt=system_prompt,
+        messages=messages,
+        run_workflow=run_other_workflow,
+        workflow_names=_workflow_names(available_workflows),
+        editing_workflow_id=str(workflow_id) if workflow_id else None,
+        cancel_event=cancel_event,
+        trace_context=trace_context,
+    )
+    return StreamingResponse(
+        stream_until_disconnect(
+            turn,
+            is_disconnected=http_request.is_disconnected,
+            cancel_event=cancel_event,
+            heartbeat_seconds=WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/workflow-assistant")
 async def workflow_assistant_stream(
+    http_request: Request,
     request: AIAssistantRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -4919,6 +5002,7 @@ async def workflow_assistant_stream(
 
     config = decrypt_config(credential.encrypted_config)
     session_id = str(request.conversation_id or uuid.uuid4())
+    use_yolo = request.yolo_mode and not request.ask_mode
 
     node_templates = await template_service.list_node_templates(db, current_user, None)
     node_template_payload = [
@@ -4962,6 +5046,9 @@ async def workflow_assistant_stream(
     if is_dashboard_widget_workflow(request.current_workflow):
         system_prompt += DASHBOARD_WIDGET_PROMPT_HINT
 
+    if use_yolo:
+        system_prompt += YOLO_PROTOCOL_PROMPT
+
     system_prompt = _append_execution_log_to_prompt(system_prompt, request.execution_log)
 
     logger.debug(
@@ -4990,7 +5077,9 @@ async def workflow_assistant_stream(
         user_id=current_user.id,
         credential_id=credential.id,
         workflow_id=workflow_id,
-        node_label="AI Ask" if request.ask_mode else "AI Builder",
+        node_label=(
+            YOLO_TRACE_NODE_LABEL if use_yolo else ("AI Ask" if request.ask_mode else "AI Builder")
+        ),
         source="assistant",
     )
     client, provider, model, trace_context = resolve_model_binding(
@@ -5002,6 +5091,22 @@ async def workflow_assistant_stream(
         system_prompt=system_prompt,
         message=request.message,
     )
+
+    if use_yolo:
+        return _yolo_assistant_response(
+            http_request=http_request,
+            db=db,
+            user=current_user,
+            client=client,
+            model=model,
+            provider=provider,
+            system_prompt=system_prompt,
+            messages=messages,
+            session_id=session_id,
+            workflow_id=workflow_id,
+            available_workflows=request.available_workflows,
+            trace_context=trace_context,
+        )
 
     assistant_stream = stream_llm_response(
         client,

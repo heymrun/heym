@@ -3,7 +3,7 @@ import unittest
 import uuid
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.ai_assistant import AIAssistantRequest, workflow_assistant_stream
 from app.db.models import CredentialType
@@ -40,6 +40,7 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.ai_assistant.WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS", 0.001),
         ):
             response = await workflow_assistant_stream(
+                http_request=MagicMock(),
                 request=AIAssistantRequest(
                     credential_id=credential_id,
                     model="gpt-test",
@@ -110,6 +111,7 @@ class WorkflowAssistantCredentialsTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.ai_assistant.stream_llm_response", fake_stream_llm_response),
         ):
             response = await workflow_assistant_stream(
+                http_request=MagicMock(),
                 request=AIAssistantRequest(
                     credential_id=credential_id,
                     model="gpt-test",

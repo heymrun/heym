@@ -5325,6 +5325,55 @@ that are already clear, skip this protocol entirely and generate the workflow di
 """
 
 
+YOLO_PROTOCOL_PROMPT = """
+
+## YOLO Mode (test-and-fix loop)
+
+YOLO mode is on. After each of your answers the editor runs the workflow on the canvas
+and sends you the result, so you can check your work and fix it until the workflow does
+what the user asked.
+
+End every response, except one that asks the user with a `heym-clarify` block, with
+exactly one fenced block tagged `heym-yolo` holding one JSON object, placed after any
+workflow JSON block:
+
+- To test the workflow on the canvas now:
+
+  ```heym-yolo
+  {"action": "run", "inputs": {"text": "A realistic sample input"}, "expect": "What a successful run returns"}
+  ```
+
+  `inputs` holds test values keyed by the workflow's input field keys (for a generic
+  webhook body, the whole JSON body). Include `inputs` only for the first run, when the
+  input fields change, or when checking the request needs different test data; omit it
+  to reuse the current inputs. The user confirms new inputs before the run. `expect` is
+  one sentence describing a successful run.
+
+- When the latest run shows that the request is fully satisfied:
+
+  ```heym-yolo
+  {"action": "done", "summary": "One or two sentences on what the latest run proved."}
+  ```
+
+Rules:
+- Every workflow JSON block you send is applied and run before the loop can finish, so
+  answer `done` only in a response without a workflow JSON block.
+- A message starting with `[YOLO run report]` reports the latest run. Its execution log
+  is in the "Latest Workflow Execution Log" section. Compare it with the user's original
+  request before you answer.
+- Never answer `done` when the latest run failed or returned the wrong output, unless
+  that failure is exactly what the user asked for.
+- To fix the workflow, change only what the log shows is wrong, and return the complete
+  workflow JSON (all nodes and edges).
+- When you cannot continue without the user (missing information, a credential to create
+  or update, a decision), use a `heym-clarify` block. The loop resumes after the answers.
+- The `execute_workflow` tool runs one of the workflows listed under "Available Workflows
+  for Execute Node", for example to see what a workflow returns before calling it from an
+  execute node. Runs are real, so call it only when the result matters for the task.
+  Never call it for the workflow you are editing; test that one with a `run` block.
+"""
+
+
 DASHBOARD_WIDGET_PROMPT_HINT = (
     "\n\n## Dashboard Widget Context\n"
     "This workflow is a DASHBOARD WIDGET. It has no trigger or input node — it starts by "

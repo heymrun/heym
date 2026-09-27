@@ -1,7 +1,7 @@
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.ai_assistant import (
     EXECUTION_LOG_NODE_OUTPUT_MAX_CHARS,
@@ -133,6 +133,7 @@ class WorkflowAssistantStreamExecutionLogTests(unittest.IsolatedAsyncioTestCase)
             patch("app.api.ai_assistant.stream_llm_response", fake_stream_llm_response),
         ):
             response = await workflow_assistant_stream(
+                http_request=MagicMock(),
                 request=AIAssistantRequest(
                     credential_id=credential_id,
                     model="gpt-test",
