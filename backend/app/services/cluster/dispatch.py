@@ -492,12 +492,12 @@ class RunQueueWorker:
                 try:
                     await asyncio.shield(persist_task)
                 except asyncio.CancelledError:
-                    logger.warning(
-                        "Allow-downstream finalizer cancelled while persistence active: %s",
-                        row.execution_id,
-                    )
-            if not persist_task.cancelled():
-                persist_task.result()
+                    if not persist_task.done():
+                        logger.warning(
+                            "Allow-downstream finalizer cancelled while persistence active: %s",
+                            row.execution_id,
+                        )
+            persist_task.result()
             history_written = True
         except GlobalVariablesPersistenceError as gv_err:
             history_written = True

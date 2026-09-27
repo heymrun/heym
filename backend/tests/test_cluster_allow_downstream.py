@@ -644,6 +644,70 @@ class ClusterAllowDownstreamFinalizationTests(IsolatedAsyncioTestCase):
             self.assertIsNone(get_active_execution_handle(execution_id))
             self.assertGreaterEqual(notify_done.await_count, 1)
 
+    async def test_underlying_persistence_task_cancellation_routes_to_error_handling(
+        self,
+    ) -> None:
+        from app.services.cluster.dispatch import RunQueueWorker
+        from app.services.execution_cancellation import get_active_execution_handle
+
+        def fast_handler(_ctx):
+            return {"value": "done"}
+
+        persist_started = asyncio.Event()
+        underlying_task_holder: list[asyncio.Task] = []
+
+        async def controlled_persist(*args, **kwargs):
+            current = asyncio.current_task()
+            if current is not None:
+                underlying_task_holder.append(current)
+            persist_started.set()
+            await asyncio.sleep(10)
+
+        nodes, edges = _allow_downstream_workflow()
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=uuid.uuid4(),
+            name="allow-downstream-cancel-underlying-persist",
+            nodes=nodes,
+            edges=edges,
+        )
+        active_row = SimpleNamespace(cancel_requested_at=None)
+        row = _row(workflow_id, execution_id, None)
+        _session, context = self._session_context(workflow, active_row)
+        worker = RunQueueWorker()
+        persist_history = AsyncMock(side_effect=controlled_persist)
+        persist_globals = AsyncMock()
+
+        patches = self._patch_worker_dependencies(context, persist_history, persist_globals)
+        with ExitStack() as stack:
+            for context_manager in patches:
+                stack.enter_context(context_manager)
+            stack.enter_context(patch.dict(node_registry._HANDLER_CACHE, {"wait": fast_handler}))
+            await worker._execute_claimed(row)
+            await persist_started.wait()
+
+            self.assertEqual(len(worker._active_finalizers), 1)
+            underlying_persist_task = underlying_task_holder[0]
+            # Cancel the underlying persistence task directly
+            underlying_persist_task.cancel()
+            await self._wait_for_finalizer(worker)
+
+            complete = patches[5].new
+            notify_done = patches[6].new
+
+            self.assertGreaterEqual(complete.await_count, 2)
+            final_summary = complete.await_args_list[-1].kwargs["result"]
+            # Overall result must not report successful persistence
+            self.assertEqual(final_summary["status"], "error")
+            # history_written must remain False
+            self.assertFalse(final_summary["history_written"])
+            self.assertEqual(final_summary["error"], "History persistence was cancelled")
+            # Terminal execution cleanup and notification occurred
+            self.assertIsNone(get_active_execution_handle(execution_id))
+            self.assertGreaterEqual(notify_done.await_count, 1)
+
     async def test_wait_for_result_preserves_history_written_false(self) -> None:
         from app.services.cluster import run_result_bus as bus_module
         from app.services.cluster.dispatch import wait_for_result
