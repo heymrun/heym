@@ -1740,6 +1740,8 @@ class ExecutionResult:
     _allow_downstream_pending: list[Future] = field(default_factory=list)
     _allow_downstream_node_results: list[NodeResult] = field(default_factory=list)
     _started_at: float = 0.0
+    # Set by execute_workflow() so rows appended by the join are masked like the early ones.
+    _credentials_context: dict[str, str] = field(default_factory=dict, repr=False)
 
     @property
     def allow_downstream_pending(self) -> bool:
@@ -1754,7 +1756,10 @@ class ExecutionResult:
         existing_ids = {item.get("node_id") for item in self.node_results if isinstance(item, dict)}
         for result in self._allow_downstream_node_results:
             if result.node_id not in existing_ids:
-                self.node_results.append(_serialize_node_result(result))
+                row = _serialize_node_result(result)
+                if self._credentials_context:
+                    row["output"] = mask_sensitive_output(row["output"], self._credentials_context)
+                self.node_results.append(row)
                 existing_ids.add(result.node_id)
         if self._started_at:
             self.execution_time_ms = (time.time() - self._started_at) * 1000
@@ -8074,6 +8079,7 @@ def execute_workflow(
                 node_result["output"] = mask_sensitive_output(
                     node_result["output"], credentials_context
                 )
+        result._credentials_context = credentials_context
 
     return result
 
