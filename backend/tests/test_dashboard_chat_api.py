@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.ai_assistant import (
+    DASHBOARD_CHAT_SYSTEM_PROMPT,
+    DASHBOARD_CHAT_TOOLS,
     DashboardChatRequest,
     FileAttachment,
     _append_date_to_user_messages,
@@ -21,7 +23,9 @@ from app.api.ai_assistant import (
 )
 from app.db.models import CredentialType, WebhookBodyMode, WorkflowAuthType, WorkflowVersion
 from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
+from app.services.data_table_catalog import CatalogColumn, CatalogDataTable
 from app.services.generated_credentials import CredentialChoice
+from app.services.generated_data_tables import DataTableChoice
 from app.services.llm_trace import LLMTraceContext
 
 
@@ -54,15 +58,20 @@ _MINIMAL_BUILDER_CONTENT = """
 
 
 def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncMock]:
-    """Stub the credential catalog queries, which a bare AsyncMock db cannot answer."""
+    """Stub the credential and data table catalog queries a bare AsyncMock db cannot answer."""
     prompt_patcher = patch(
         "app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")
     )
     catalog_patcher = patch(
         "app.api.ai_assistant.load_credential_catalog", AsyncMock(return_value=[])
     )
+    tables_patcher = patch(
+        "app.api.ai_assistant.load_data_table_catalog", AsyncMock(return_value=[])
+    )
     test.addCleanup(prompt_patcher.stop)
     test.addCleanup(catalog_patcher.stop)
+    test.addCleanup(tables_patcher.stop)
+    tables_patcher.start()
     return prompt_patcher.start(), catalog_patcher.start()
 
 
@@ -1696,3 +1705,227 @@ class DashboardChatCredentialChoiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(summary, "Needs credentials: github, slack")
+
+
+_DATA_TABLE_BUILDER_CONTENT = """
+```json
+{
+  "name": "Save Leads",
+  "description": "Stores each lead.",
+  "nodes": [
+    {
+      "id": "save",
+      "type": "dataTable",
+      "position": {"x": 0, "y": 0},
+      "data": {
+        "label": "saveLead",
+        "dataTableId": "datatable-uuid",
+        "dataTableOperation": "insert",
+        "dataTableData": "{\\"email\\": \\"$request.text\\", \\"phone\\": \\"$request.text\\"}"
+      }
+    }
+  ],
+  "edges": []
+}
+```
+"""
+
+
+class DashboardChatDataTableChoiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        self.leads = CatalogDataTable(
+            uuid.uuid4(),
+            "leads",
+            "Website leads",
+            "owner",
+            None,
+            (CatalogColumn("email", "string", unique=True), CatalogColumn("name", "string")),
+        )
+        patcher = patch(
+            "app.api.ai_assistant.load_data_table_catalog",
+            AsyncMock(return_value=[self.leads]),
+        )
+        self.addCleanup(patcher.stop)
+        self.table_catalog = patcher.start()
+
+    async def _create(self, client: MagicMock, **kwargs: object) -> tuple[dict, MagicMock]:
+        user, credential = _owner_and_llm_credential()
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.flush = AsyncMock()
+        with patch(
+            "app.api.ai_assistant.template_service.list_node_templates",
+            AsyncMock(return_value=[]),
+        ):
+            raw = await create_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=client,
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                goal="Save each lead in a table",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+                **kwargs,
+            )
+        return json.loads(raw), db
+
+    async def test_undecided_new_node_is_not_saved(self) -> None:
+        payload, db = await self._create(_builder_client(_DATA_TABLE_BUILDER_CONTENT))
+
+        self.assertEqual(payload["status"], "requires_data_table")
+        self.assertEqual(
+            payload["needs"], [{"node": "saveLead", "operation": "insert", "writes": True}]
+        )
+        db.add.assert_not_called()
+
+    async def test_chosen_table_is_wired_and_unknown_columns_are_reported(self) -> None:
+        client = _builder_client(_DATA_TABLE_BUILDER_CONTENT)
+
+        payload, db = await self._create(
+            client, data_table_choices=[DataTableChoice(str(self.leads.id))]
+        )
+
+        self.assertEqual(payload["status"], "created")
+        saved = db.add.call_args.args[0]
+        self.assertEqual(saved.nodes[0]["data"]["dataTableId"], str(self.leads.id))
+        self.assertEqual(
+            payload["data_table_warnings"],
+            [{"node": "saveLead", "table": "leads", "unknown_columns": ["phone"]}],
+        )
+        messages = client.chat.completions.create.call_args.kwargs["messages"]
+        self.assertIn("## Data tables", messages[0]["content"])
+        self.assertIn(
+            "Put a chosen table's id in each new `dataTable` node it fits", messages[0]["content"]
+        )
+        self.assertIn(f"- `leads` (id `{self.leads.id}`)", messages[1]["content"])
+
+    async def test_leave_empty_choice_saves_the_node_empty(self) -> None:
+        payload, db = await self._create(
+            _builder_client(_DATA_TABLE_BUILDER_CONTENT),
+            data_table_choices=[DataTableChoice("")],
+        )
+
+        self.assertEqual(payload["status"], "created")
+        self.assertEqual(db.add.call_args.args[0].nodes[0]["data"]["dataTableId"], "")
+
+    async def test_edit_does_not_ask_again_for_a_node_that_already_existed(self) -> None:
+        user, credential = _owner_and_llm_credential()
+        workflow = MagicMock()
+        workflow.id = uuid.uuid4()
+        workflow.name = "Save Leads"
+        workflow.description = "Stores each lead."
+        workflow.nodes = [
+            {
+                "id": "save",
+                "type": "dataTable",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "saveLead", "dataTableId": ""},
+            }
+        ]
+        workflow.edges = []
+        workflow.auth_type = WorkflowAuthType.anonymous
+        workflow.auth_header_key = None
+        workflow.auth_header_value = None
+        workflow.webhook_body_mode = WebhookBodyMode.generic
+        workflow.cache_ttl_seconds = None
+        workflow.rate_limit_requests = None
+        workflow.rate_limit_window_seconds = None
+        max_version_result = MagicMock()
+        max_version_result.scalar.return_value = 1
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[max_version_result])
+        db.flush = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch(
+                "app.api.ai_assistant.template_service.list_node_templates",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            raw = await edit_and_run_generated_workflow_tool(
+                db=db,
+                user=user,
+                client=_builder_client(_DATA_TABLE_BUILDER_CONTENT),
+                model="gpt-4o-mini",
+                selected_credential=credential,
+                selected_model="gpt-4o-mini",
+                workflow_id=str(workflow.id),
+                instructions="Rename it",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+            )
+
+        payload = json.loads(raw)
+        self.assertEqual(payload["status"], "edited")
+        self.assertEqual(workflow.nodes[0]["data"]["dataTableId"], "")
+
+    async def test_stream_hands_data_table_choices_to_create_workflow(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        tool_message = MagicMock(content=None)
+        tool_call = MagicMock()
+        tool_call.id = "create-call"
+        tool_call.function.name = "create_workflow"
+        tool_call.function.arguments = json.dumps(
+            {"goal": "Save each lead", "data_table_choices": [{"table_id": "leads"}]}
+        )
+        tool_message.tool_calls = [tool_call]
+        final_message = MagicMock(content="Saved.", tool_calls=None)
+        usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=tool_message)], usage=usage),
+            MagicMock(choices=[MagicMock(message=final_message)], usage=usage),
+        ]
+        selected = MagicMock(id=uuid.uuid4(), owner_id=user.id, type=CredentialType.openai)
+
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.api.ai_assistant.create_and_run_generated_workflow_tool",
+                AsyncMock(return_value=json.dumps({"status": "requires_data_table", "needs": []})),
+            ) as create_tool,
+        ):
+            _ = [
+                chunk
+                async for chunk in stream_dashboard_chat(
+                    client,
+                    "gpt-4o-mini",
+                    "system",
+                    [{"role": "user", "content": "save each lead"}],
+                    AsyncMock(),
+                    user,
+                    "OpenAI",
+                    "http://localhost",
+                    selected_credential=selected,
+                )
+            ]
+
+        self.assertEqual(
+            create_tool.await_args.kwargs["data_table_choices"], [DataTableChoice("leads")]
+        )
+
+    def test_requires_data_table_result_is_summarized(self) -> None:
+        for tool_name in ("create_workflow", "edit_workflow"):
+            summary = _summarize_tool_result(
+                tool_name, json.dumps({"status": "requires_data_table", "needs": []})
+            )
+            self.assertEqual(summary, "Data table choice required")
+
+    def test_builder_tools_and_prompt_accept_data_table_choices(self) -> None:
+        for name in ("create_workflow", "edit_workflow"):
+            tool = next(t for t in DASHBOARD_CHAT_TOOLS if t["function"]["name"] == name)
+            self.assertIn("data_table_choices", tool["function"]["parameters"]["properties"])
+        self.assertIn("in data_table_choices", DASHBOARD_CHAT_SYSTEM_PROMPT)
+        self.assertIn("requires_data_table", DASHBOARD_CHAT_SYSTEM_PROMPT)
+        self.assertIn("data_table_warnings", DASHBOARD_CHAT_SYSTEM_PROMPT)

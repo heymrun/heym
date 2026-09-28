@@ -79,6 +79,7 @@ from app.services.data_table_catalog import (
     DataTablePromptMode,
     build_data_tables_prompt,
     catalog_columns,
+    format_data_tables_prompt,
     list_data_tables_payload,
     load_data_table_catalog,
     table_summary,
@@ -92,6 +93,15 @@ from app.services.generated_credentials import (
     format_credential_choices,
     parse_credential_choices,
     requires_credentials_payload,
+)
+from app.services.generated_data_tables import (
+    DataTableChoice,
+    DataTablePassResult,
+    apply_generated_data_tables,
+    data_table_warnings_payload,
+    format_data_table_choices,
+    parse_data_table_choices,
+    requires_data_table_payload,
 )
 from app.services.hitl_service import (
     build_hitl_resolved_output,
@@ -477,7 +487,7 @@ When the user asks for something you cannot do with your tools (e.g. console log
 13. When the user asks you to create, build, generate, or set up a new workflow/automation, call create_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL and saves it. It does NOT run the workflow; the user runs it from the Run button on the workflow card. Do not run the workflow yourself unless the user explicitly asks you to. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
 14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow.
 15. When the user asks about alerts — what alerts exist, whether something is being monitored, which alerts are firing, or why/when an alert triggered — use list_alerts, get_alert_detail, and get_alert_events. For a "why did it fire" question always call get_alert_events and quote the actual observed value, the threshold, and the time window from the event, plus the contributing detail in its context (failing executions and error messages, per-model spend, or trigger source). Do not guess a reason and do not recompute the numbers yourself; the event stores what was true when it fired. Respond in the user's language.
-16. Heym DataTables store records inside Heym. Call list_data_tables when a workflow will save, store, log or look up records and the user names no other store, or when the user mentions a data table, asks to create one, or asks which tables or columns they have. Never read or write rows yourself; workflows do that. When the user names a table that fits, use it. Otherwise emit one single heym-clarify question with up to five fitting tables as table options and one createTable option (see the Clarification Protocol), with allowOther, then stop. An answer `Created data table "<name>" (id <id>)` means the table exists: never create it again. Call create_data_table when an answer picks your createTable option without saying Created (a typed answer), or when the user asks for a table and names its columns; when the user asks for a table without naming its columns, emit the same question with only the createTable option. Never change an existing table's columns: when a table lacks a column, say which one and offer a new table; columns are added in the DataTable tab."""
+16. Heym DataTables store records inside Heym. Call list_data_tables when a workflow will save, store, log or look up records and the user names no other store, or when the user mentions a data table, asks to create one, or asks which tables or columns they have. Never read or write rows yourself; workflows do that. When the user names a table that fits, use it. Otherwise emit one single heym-clarify question with up to five fitting tables as table options and one createTable option (see the Clarification Protocol), with allowOther, then stop. An answer `Created data table "<name>" (id <id>)` means the table exists: never create it again. Call create_data_table when an answer picks your createTable option without saying Created (a typed answer), or when the user asks for a table and names its columns; when the user asks for a table without naming its columns, emit the same question with only the createTable option. Never change an existing table's columns: when a table lacks a column, say which one and offer a new table; columns are added in the DataTable tab. Pass the chosen tables to create_workflow and edit_workflow in data_table_choices, with an empty table_id when the user wants to pick the table later. If a tool returns requires_data_table, ask the same way, then call it again. If a result lists data_table_warnings, tell the user which columns the table lacks and that columns are added in the DataTable tab."""
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
@@ -501,6 +511,21 @@ _CREDENTIAL_CHOICES_SCHEMA: dict[str, Any] = {
             },
         },
         "required": ["credential_type", "credential_name"],
+    },
+}
+
+_DATA_TABLE_CHOICES_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": "The Heym DataTables the user chose for this workflow, from a heym-clarify answer, list_data_tables or create_data_table. Use an empty table_id when the user chose to leave the table empty and pick it later.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "table_id": {
+                "type": "string",
+                "description": "Id of the chosen table, or its exact name; empty to leave the table empty.",
+            },
+        },
+        "required": ["table_id"],
     },
 }
 
@@ -551,6 +576,7 @@ DASHBOARD_CHAT_TOOLS = [
                         "description": "Values to prefill on the generated workflow's input fields when known, keyed by expected input field names.",
                     },
                     "credential_choices": _CREDENTIAL_CHOICES_SCHEMA,
+                    "data_table_choices": _DATA_TABLE_CHOICES_SCHEMA,
                 },
                 "required": ["goal"],
             },
@@ -577,6 +603,7 @@ DASHBOARD_CHAT_TOOLS = [
                         "description": "Values to prefill on the edited workflow's input fields when known.",
                     },
                     "credential_choices": _CREDENTIAL_CHOICES_SCHEMA,
+                    "data_table_choices": _DATA_TABLE_CHOICES_SCHEMA,
                 },
                 "required": ["workflow_id", "instructions"],
             },
@@ -1874,6 +1901,7 @@ def _build_workflow_builder_user_message(
     inputs: dict[str, Any],
     attachment: FileAttachment | None,
     credential_choices: list[CredentialChoice] | None = None,
+    data_table_choices_text: str = "",
 ) -> str:
     parts = [
         "Create a complete Heym workflow for this dashboard chat request.",
@@ -1897,6 +1925,8 @@ def _build_workflow_builder_user_message(
     choices_text = format_credential_choices(credential_choices or [])
     if choices_text:
         parts.append("\n" + choices_text)
+    if data_table_choices_text:
+        parts.append("\n" + data_table_choices_text)
     return "\n".join(parts)
 
 
@@ -1906,6 +1936,7 @@ def _build_workflow_editor_user_message(
     inputs: dict[str, Any],
     attachment: FileAttachment | None,
     credential_choices: list[CredentialChoice] | None = None,
+    data_table_choices_text: str = "",
 ) -> str:
     current_workflow = {
         "id": str(workflow.id),
@@ -1938,6 +1969,8 @@ def _build_workflow_editor_user_message(
     choices_text = format_credential_choices(credential_choices or [])
     if choices_text:
         parts.append("\n" + choices_text)
+    if data_table_choices_text:
+        parts.append("\n" + data_table_choices_text)
     return "\n".join(parts)
 
 
@@ -1994,6 +2027,18 @@ def _unassigned_credentials_extra(
     return credentials_to_assign_payload(result.needs) or None
 
 
+def _saved_workflow_extra(
+    credential_pass: CredentialPassResult,
+    builder_mode: CredentialPromptMode,
+    table_pass: DataTablePassResult,
+) -> dict[str, Any] | None:
+    extra = {
+        **(_unassigned_credentials_extra(credential_pass, builder_mode) or {}),
+        **data_table_warnings_payload(table_pass.warnings),
+    }
+    return extra or None
+
+
 async def create_and_run_generated_workflow_tool(
     *,
     db: AsyncSession,
@@ -2010,6 +2055,7 @@ async def create_and_run_generated_workflow_tool(
     cancel_event: Event | None = None,
     credential_choices: list[CredentialChoice] | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
+    data_table_choices: list[DataTableChoice] | None = None,
 ) -> str:
     """Generate a workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -2029,8 +2075,10 @@ async def create_and_run_generated_workflow_tool(
             for t in node_templates
         ]
         catalog = await load_credential_catalog(db, user.id)
+        table_catalog = await load_data_table_catalog(db, user.id)
         builder_mode = _builder_credential_mode(credential_mode)
         choices = [] if builder_mode is CredentialPromptMode.OFF else list(credential_choices or [])
+        table_choices = list(data_table_choices or [])
         system_prompt = build_assistant_prompt(
             None,
             available_workflows,
@@ -2038,12 +2086,21 @@ async def create_and_run_generated_workflow_tool(
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
             credentials_prompt=format_credentials_prompt(catalog, builder_mode),
+            data_tables_prompt=format_data_tables_prompt(
+                table_catalog, DataTablePromptMode.APPLY_CHOICES
+            ),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": _build_workflow_builder_user_message(goal, inputs, attachment, choices),
+                "content": _build_workflow_builder_user_message(
+                    goal,
+                    inputs,
+                    attachment,
+                    choices,
+                    format_data_table_choices(table_choices, table_catalog),
+                ),
             },
         ]
         builder_kwargs: dict[str, Any] = {
@@ -2072,7 +2129,15 @@ async def create_and_run_generated_workflow_tool(
         )
         if credential_pass.needs and builder_mode is not CredentialPromptMode.OFF:
             return json.dumps(requires_credentials_payload(credential_pass.needs))
-        nodes = credential_pass.nodes
+        table_pass = apply_generated_data_tables(
+            credential_pass.nodes,
+            catalog=table_catalog,
+            choices=table_choices,
+            previous_nodes=None,
+        )
+        if table_pass.needs:
+            return json.dumps(requires_data_table_payload(table_pass.needs))
+        nodes = table_pass.nodes
         edges = workflow_config["edges"]
         workflow = Workflow(
             id=uuid.uuid4(),
@@ -2103,7 +2168,7 @@ async def create_and_run_generated_workflow_tool(
             run_inputs,
             None,
             status_value="created",
-            extra=_unassigned_credentials_extra(credential_pass, builder_mode),
+            extra=_saved_workflow_extra(credential_pass, builder_mode, table_pass),
         )
     except Exception as exc:
         logger.exception("Dashboard chat create_workflow failed")
@@ -2127,6 +2192,7 @@ async def edit_and_run_generated_workflow_tool(
     cancel_event: Event | None = None,
     credential_choices: list[CredentialChoice] | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
+    data_table_choices: list[DataTableChoice] | None = None,
 ) -> str:
     """Edit a saved workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -2164,8 +2230,10 @@ async def edit_and_run_generated_workflow_tool(
         old_nodes = copy.deepcopy(workflow.nodes or [])
         old_edges = copy.deepcopy(workflow.edges or [])
         catalog = await load_credential_catalog(db, user.id)
+        table_catalog = await load_data_table_catalog(db, user.id)
         builder_mode = _builder_credential_mode(credential_mode)
         choices = [] if builder_mode is CredentialPromptMode.OFF else list(credential_choices or [])
+        table_choices = list(data_table_choices or [])
         system_prompt = build_assistant_prompt(
             current_workflow,
             available_workflows,
@@ -2173,13 +2241,21 @@ async def edit_and_run_generated_workflow_tool(
             available_node_templates=node_template_payload,
             installed_plugins=await _load_installed_plugins(db),
             credentials_prompt=format_credentials_prompt(catalog, builder_mode),
+            data_tables_prompt=format_data_tables_prompt(
+                table_catalog, DataTablePromptMode.APPLY_CHOICES
+            ),
         )
         builder_messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": _build_workflow_editor_user_message(
-                    workflow, instructions, inputs, attachment, choices
+                    workflow,
+                    instructions,
+                    inputs,
+                    attachment,
+                    choices,
+                    format_data_table_choices(table_choices, table_catalog),
                 ),
             },
         ]
@@ -2211,7 +2287,15 @@ async def edit_and_run_generated_workflow_tool(
         )
         if credential_pass.needs and builder_mode is not CredentialPromptMode.OFF:
             return json.dumps(requires_credentials_payload(credential_pass.needs))
-        nodes = credential_pass.nodes
+        table_pass = apply_generated_data_tables(
+            credential_pass.nodes,
+            catalog=table_catalog,
+            choices=table_choices,
+            previous_nodes=old_nodes,
+        )
+        if table_pass.needs:
+            return json.dumps(requires_data_table_payload(table_pass.needs))
+        nodes = table_pass.nodes
         edges = workflow_config["edges"]
         workflow.name = workflow_config["name"]
         workflow.description = workflow_config["description"]
@@ -2245,7 +2329,7 @@ async def edit_and_run_generated_workflow_tool(
             run_inputs,
             None,
             status_value="edited",
-            extra=_unassigned_credentials_extra(credential_pass, builder_mode),
+            extra=_saved_workflow_extra(credential_pass, builder_mode, table_pass),
         )
     except Exception as exc:
         logger.exception("Dashboard chat edit_workflow failed")
@@ -2993,6 +3077,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
                 }
             )
             return f"Needs credentials: {', '.join(types)}"[:200]
+        if data.get("status") == "requires_data_table":
+            return "Data table choice required"
         workflow_name = str(data.get("workflow_name") or "").strip()
         if workflow_name:
             return f"Created workflow: {workflow_name}"
@@ -3011,6 +3097,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
                 }
             )
             return f"Needs credentials: {', '.join(types)}"[:200]
+        if data.get("status") == "requires_data_table":
+            return "Data table choice required"
         workflow_name = str(data.get("workflow_name") or "").strip()
         if workflow_name:
             return f"Updated workflow: {workflow_name}"
@@ -3829,6 +3917,7 @@ async def stream_dashboard_chat(
                         goal = str(args.get("goal") or "").strip() or last_user_message
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
                         choices = parse_credential_choices(args.get("credential_choices"))
+                        table_choices = parse_data_table_choices(args.get("data_table_choices"))
                         step_label = "Building a new workflow..."
                         yield (
                             "data: "
@@ -3860,11 +3949,13 @@ async def stream_dashboard_chat(
                             cancel_event=cancel_event,
                             credential_choices=choices,
                             credential_mode=credential_mode,
+                            data_table_choices=table_choices,
                         )
                         tool_request = {
                             "goal": goal,
                             "inputs": inputs,
                             "credential_choices": args.get("credential_choices") or [],
+                            "data_table_choices": args.get("data_table_choices") or [],
                         }
                         if cancel_event is not None and cancel_event.is_set():
                             yield _cancelled_tool_end_yield(
@@ -3987,6 +4078,7 @@ async def stream_dashboard_chat(
                         )
                         inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
                         choices = parse_credential_choices(args.get("credential_choices"))
+                        table_choices = parse_data_table_choices(args.get("data_table_choices"))
                         step_label = "Updating the workflow..."
                         try:
                             wid = uuid.UUID(workflow_id_str)
@@ -4026,12 +4118,14 @@ async def stream_dashboard_chat(
                             cancel_event=cancel_event,
                             credential_choices=choices,
                             credential_mode=credential_mode,
+                            data_table_choices=table_choices,
                         )
                         tool_request = {
                             "workflow_id": workflow_id_str,
                             "instructions": instructions,
                             "inputs": inputs,
                             "credential_choices": args.get("credential_choices") or [],
+                            "data_table_choices": args.get("data_table_choices") or [],
                         }
                         if cancel_event is not None and cancel_event.is_set():
                             yield _cancelled_tool_end_yield(
