@@ -9,6 +9,7 @@ import { marked } from "marked";
 import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, ChevronsUp, Clock, Copy, Download, ExternalLink, GripHorizontal, LayoutGrid, Loader2, Maximize2, Mic, MicOff, Minimize2, Pencil, RefreshCcw, RotateCcw, Send, Sparkles, Square, Terminal, Timer, Trash2, Upload, X } from "lucide-vue-next";
 
 import type { CredentialListItem, LLMModel } from "@/types/credential";
+import type { DataTable, DataTableListItem } from "@/types/dataTable";
 import type {
   AgentProgressEntry,
   AgentSkill,
@@ -62,7 +63,7 @@ import { looksLikeMarkdown } from "@/lib/markdown";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
-import { aiApi, codexFollowupApi, credentialsApi, hitlApi, workflowApi } from "@/services/api";
+import { aiApi, codexFollowupApi, credentialsApi, dataTablesApi, hitlApi, workflowApi } from "@/services/api";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { useAiAssistantPanelFrame } from "@/composables/useAiAssistantPanelFrame";
 import { useAssistantInputResize } from "@/composables/useAssistantInputResize";
@@ -70,6 +71,7 @@ import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
 import { sanitizeGeneratedCredentialFields } from "@/utils/generatedCredentialFields";
+import { dataTableListItemFrom, sanitizeGeneratedDataTableFields } from "@/utils/generatedDataTableFields";
 
 const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
@@ -1588,6 +1590,8 @@ const yoloLoopActive = yoloLoop.isActive;
 const aiCredentials = ref<CredentialListItem[]>([]);
 /** Full credential list (owned + shared) for stripping shared IDs when applying AI-generated workflows */
 const allCredentialsForSanitize = ref<CredentialListItem[]>([]);
+/** Tables the user can reach, for checking dataTableId on AI-generated nodes */
+const dataTablesForSanitize = ref<DataTableListItem[]>([]);
 const aiModels = ref<LLMModel[]>([]);
 const selectedCredentialId = ref("");
 const selectedModel = ref("");
@@ -1771,6 +1775,22 @@ async function loadAllCredentialsForSanitize(): Promise<void> {
   }
 }
 
+async function loadDataTablesForSanitize(): Promise<void> {
+  try {
+    dataTablesForSanitize.value = await dataTablesApi.list();
+  } catch {
+    dataTablesForSanitize.value = [];
+  }
+}
+
+/** A table the question card just created: usable at once, before the list reloads. */
+function rememberCreatedDataTable(table: DataTable): void {
+  if (!dataTablesForSanitize.value.some((listed) => listed.id === table.id)) {
+    dataTablesForSanitize.value = [...dataTablesForSanitize.value, dataTableListItemFrom(table)];
+  }
+  void loadDataTablesForSanitize();
+}
+
 async function loadAiModels(): Promise<void> {
   if (!selectedCredentialId.value) {
     aiModels.value = [];
@@ -1816,6 +1836,7 @@ onMounted(() => {
   setupSpeechRecognition();
   void loadAiCredentials();
   void loadAllCredentialsForSanitize();
+  void loadDataTablesForSanitize();
   loadAvailableWorkflows();
   window.addEventListener("keydown", handleDebugPanelWindowKeyDown, true);
   window.addEventListener("keydown", handleDownloadDialogKeyDown, true);
@@ -1848,6 +1869,7 @@ function openAiPanel(): void {
     void loadAiCredentials();
   }
   void loadAllCredentialsForSanitize();
+  void loadDataTablesForSanitize();
   nextTick(() => {
     aiTextareaRef.value?.focus();
   });
@@ -2551,6 +2573,15 @@ function shouldClearIntegrationCredentialId(credentialId: string | undefined): b
   return false;
 }
 
+/** Credential and data table ids on an AI-generated node, both limited to what the user can use. */
+function sanitizeGeneratedNodeIds(node: WorkflowNode): WorkflowNode {
+  return sanitizeGeneratedDataTableFields(
+    sanitizeIntegrationCredentialFields(node),
+    dataTablesForSanitize.value,
+    findMatchingExistingNode(node),
+  );
+}
+
 function sanitizeIntegrationCredentialFields(node: WorkflowNode): WorkflowNode {
   const sanitized = sanitizeGeneratedCredentialFields(
     node,
@@ -2704,7 +2735,7 @@ function applyWorkflowJson(workflowJson: { nodes: WorkflowNode[]; edges: Workflo
   const sanitizedNodes = newNodes.map((node): WorkflowNode => {
     const mergedNode = preserveAgentSkillFiles(node);
     if (mergedNode.type !== "llm" && mergedNode.type !== "agent") {
-      return sanitizeIntegrationCredentialFields(mergedNode);
+      return sanitizeGeneratedNodeIds(mergedNode);
     }
 
     const data = { ...mergedNode.data };
@@ -2733,7 +2764,7 @@ function applyWorkflowJson(workflowJson: { nodes: WorkflowNode[]; edges: Workflo
       data.guardrailModel = "";
     }
 
-    return sanitizeIntegrationCredentialFields({ ...mergedNode, data });
+    return sanitizeGeneratedNodeIds({ ...mergedNode, data });
   });
 
   let edgesToApply = newEdges;
@@ -3985,6 +4016,7 @@ function renderContent(content: string): string {
                 :disabled="msg.clarifyAnswered || aiStreaming"
                 @submit="(answers: ClarifyAnswer[]) => handleClarifySubmit(msg, answers)"
                 @credential-saved="() => void loadAllCredentialsForSanitize()"
+                @data-table-created="rememberCreatedDataTable"
               />
               <YoloTestInputsCard
                 v-if="msg.yoloInputs"
