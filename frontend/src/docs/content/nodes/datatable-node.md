@@ -114,6 +114,10 @@ You can also filter on row metadata — `id`, `table_id`, `created_at`, `updated
 
 Unlike external integrations, DataTable operates on Heym's internal database. The workflow owner's access permissions are checked automatically.
 
+## Built by the AI Assistant
+
+When the [AI Assistant](../reference/ai-assistant.md#data-tables) or [Chat](../tabs/chat-tab.md) builds this node, it picks or creates the table with you and writes the table's exact column names into `dataTableData` and `dataTableFilter`.
+
 ## Related
 
 - [DataTable Tab](../tabs/datatable-tab.md) - Create and manage tables

@@ -75,6 +75,10 @@ Share tables with other users or teams:
 3. Add teams with **read** or **write** permission
 4. Read-only users can view data; write users can modify rows
 
+## Creating Tables from the AI Assistant
+
+The canvas [AI Assistant](../reference/ai-assistant.md#data-tables), [Chat](./chat-tab.md) and the `heym_chat` tool on the [MCP tab](./mcp-tab.md) can pick one of your tables for a workflow they build, or create a new one. They propose a name and columns, and create the table when you submit the question card. They never change an existing table's columns or touch its rows: add or edit columns here.
+
 ## Using in Workflows
 
 The [DataTable node](../nodes/datatable-node.md) connects tables to workflows. Operations include find, getAll, getById, insert, update, remove, and upsert. No credentials are required.

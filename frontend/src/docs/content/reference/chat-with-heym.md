@@ -17,7 +17,7 @@ On smaller screens the trigger is icon-only; on larger screens it shows the full
 - The backend still uses the existing dashboard chat endpoint and documentation search tools
 - Your account-level [User Rules](./user-settings.md) continue to apply because the same chat backend is reused
 - Live preparation steps stream into the assistant bubble before the final answer, similar to the dashboard chat
-- Clarification questions appear as cards, the same as in the [Chat tab](../tabs/chat-tab.md). When a workflow request needs a credential, you can pick one or create it from the card.
+- Clarification questions appear as cards, the same as in the [Chat tab](../tabs/chat-tab.md). When a workflow request needs a credential, you can pick one or create it from the card. When it needs a data table, you can pick one of your tables or create a new one the same way.
 
 When you open the dialog on a specific article, a small badge shows the active docs path so you can confirm which page is being prioritized.
 

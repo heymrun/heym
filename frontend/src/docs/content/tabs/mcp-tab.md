@@ -44,12 +44,15 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Report analytics, recent executions, and upcoming cron schedules
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
+- List your data tables with their columns, create new ones, and wire them into the workflows it builds
 - Read teams and global variables, and search the documentation
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
 
 Credentials stay in the UI: `heym_chat` never lists, chooses or creates them. When it builds or edits a workflow, new nodes that need a credential are left empty and the reply names them, so you can set them in the editor.
+
+Data tables are different. A table holds no secret, so `heym_chat` can list your tables, ask which one a workflow should use, and create a new one with its columns. It never reads or writes rows.
 
 ### Credential and model
 

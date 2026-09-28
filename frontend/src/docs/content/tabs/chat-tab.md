@@ -23,6 +23,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
 - **Credentials** – When a workflow Chat creates or edits needs a credential, Chat asks which one to use, offers to create a new one in the conversation, or lets you continue without. You can also ask Chat to create a credential or to update one you own; it opens the credential form in the conversation. The model sees the credential's name and type, never its values. See [AI Assistant › Credentials](../reference/ai-assistant.md#credentials)
+- **Data tables** – When a workflow Chat creates or edits stores records, Chat asks which [data table](./datatable-tab.md) to use or offers to create one with the columns the workflow needs. It can also list your tables and their columns. It never reads or writes rows. See [AI Assistant › Data tables](../reference/ai-assistant.md#data-tables)
 - **Streaming responses** – See the model's output as it streams
 - **Stop response** – Interrupt the current streaming answer at any time; stopping also clears queued messages for that conversation
 - **Markdown rendering** – Responses support markdown formatting, including inline images
@@ -40,6 +41,8 @@ The Chat engine can also be reached from outside the browser. Enable the **Heym 
 Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
 
 Over MCP, Chat does not list, pick or create credentials. Workflows it builds leave credential fields empty, and the reply names the nodes that need a credential so you can set them in the editor.
+
+Data tables work over MCP too: Chat lists your tables, creates new ones and wires them into the workflows it builds. Its table question arrives as text in the result, so answer it with the same `conversation_id`.
 
 ## Context Limit
 

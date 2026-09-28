@@ -89,12 +89,12 @@ In YOLO mode the assistant can also run your other workflows when it needs their
 
 | Situation | What happens |
 |---|---|
-| The assistant needs a decision, information or a credential | It asks with the usual question card. Answering continues the loop. |
+| The assistant needs a decision, information, a credential or a data table | It asks with the usual question card. Answering continues the loop. |
 | The run waits for a [human review](./human-in-the-loop.md) | The loop stops. Approve the review, then send a message. |
 | The workflow waits for a file upload | The loop stops. YOLO mode cannot test upload-triggered runs. |
 | A newer version of the workflow was saved elsewhere | The loop stops. Resolve the save conflict, then send a message. |
 
-> **Runs are real.** Emails, messages and API calls in the workflow are actually sent on every attempt. Every run saves the workflow, so earlier versions stay in [Edit History](./edit-history.md).
+> **Runs are real.** Emails, messages and API calls in the workflow are actually sent on every attempt, and DataTable nodes write real rows. Every run saves the workflow, so earlier versions stay in [Edit History](./edit-history.md).
 
 ## Voice Input
 
@@ -121,6 +121,7 @@ The AI Assistant is powered by a **workflow DSL** (domain-specific language) tha
    - The current workflow JSON when you are editing an existing workflow
    - The list of available workflows if you use the Execute node
    - The names, types and ids of your own credentials (never their values)
+   - The names, ids, descriptions and columns of the data tables you can use (never their rows)
 3. The model returns a single workflow JSON block (with `nodes` and `edges`). The frontend parses it and applies it to the canvas.
 
 ### Credentials
@@ -138,6 +139,14 @@ Clarification questions that the workflow can do without say **Optional** in the
 The DSL enforces camelCase labels, unified expression rules, and node-specific fields. If a field value is a single `$expr`, the backend preserves the native type; if the value mixes prose with `$refs`, the result is a string. The one-`$` rule still applies: no `$` inside parentheses. [Settings](./user-settings.md) User Rules are injected into this system prompt so your preferences apply to every AI-generated workflow.
 
 If the current workflow contains Agent skills, the AI Assistant includes only each skill's `SKILL.md` in that workflow context. Attached `.py` files and binary skill assets are stripped before the request so the builder stays within model context limits even when skills contain large implementations.
+
+### Data tables
+
+When a workflow saves, stores or looks up records and you have not named another store, the assistant uses a [DataTable](../nodes/datatable-node.md) node. If you name one of your tables and it has the columns the workflow needs, the assistant uses it. Otherwise it asks which table to use. The card lists the tables that fit, each with its description and column types, plus **Create a new table** with a proposed name and columns. Tables shared with you are offered too; one you can only read is offered only for reading.
+
+Pick the new table and press **Submit answers**: the card creates the table, and the assistant puts its id on the node and uses its exact column names. You can also ask for a table on its own, for example "create a table for my leads".
+
+The assistant sees table names, descriptions and columns, never rows. It never changes the columns of an existing table: if a table lacks a column the workflow needs, it names the column and offers a new table instead. Add columns in the [DataTable tab](../tabs/datatable-tab.md).
 
 ## Related
 
