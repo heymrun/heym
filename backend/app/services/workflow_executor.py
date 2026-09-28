@@ -8479,6 +8479,8 @@ def resume_workflow_execution(
         else:
             schedule_downstream(paused_node_id)
 
+    allow_downstream_node_results: list[NodeResult] = []
+    allow_downstream_future: Future | None = None
     while (
         running_futures and not has_error and pending_result is None and early_return_output is None
     ):
@@ -8515,6 +8517,9 @@ def resume_workflow_execution(
                         for future_bg in done_bg:
                             nid = remaining_futures.pop(future_bg)
                             res = future_bg.result()
+                            with pending_lock:
+                                node_results.append(res)
+                                allow_downstream_node_results.append(res)
                             skip_add_to_completed = False
                             if res.status == "success":
                                 with pending_lock:
@@ -8597,8 +8602,9 @@ def resume_workflow_execution(
                                                     remaining_futures[new_future] = tgt
                             if not skip_add_to_completed:
                                 completed_nodes.add(nid)
+                        wf_executor.drain_bg_futures()
 
-                _submit_allow_downstream_work(run_remaining_downstream)
+                allow_downstream_future = _submit_allow_downstream_work(run_remaining_downstream)
                 break
 
     if pending_result is not None:
@@ -8630,6 +8636,8 @@ def resume_workflow_execution(
             outputs=early_return_output,
             start_time=start_time,
             node_results=node_results,
+            allow_downstream_pending=[allow_downstream_future] if allow_downstream_future else None,
+            allow_downstream_node_results=allow_downstream_node_results,
         )
     elif has_error and error_result:
         error_flow_final_output = None
@@ -8682,6 +8690,7 @@ def resume_workflow_execution(
         for node_result in result.node_results:
             if isinstance(node_result, dict):
                 _mask_node_result_row(node_result, credentials_context)
+        result._credentials_context = credentials_context
 
     return result
 

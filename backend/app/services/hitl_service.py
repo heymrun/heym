@@ -7,12 +7,15 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
+from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
 from app.db.models import ExecutionHistory, HITLRequest, Workflow
 from app.db.session import async_session_maker
 from app.services.workflow_executor import (
     ExecutionResult,
+    _to_json_compatible,
     execute_hitl_notification_branch,
     resume_workflow_execution,
 )
@@ -423,10 +426,42 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             await db.commit()
             return
 
+        if getattr(resumed_result, "allow_downstream_pending", False):
+            await asyncio.to_thread(resumed_result.join_allow_downstream)
+            if any(
+                isinstance(node_result, dict)
+                and node_result.get("status") == "error"
+                and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
+                for node_result in (getattr(resumed_result, "node_results", None) or [])
+            ):
+                resumed_result.status = "error"
+
         history_entry.status = resumed_result.status
-        history_entry.outputs = copy.deepcopy(resumed_result.outputs)
-        history_entry.node_results = copy.deepcopy(resumed_result.node_results)
+        history_entry.outputs = _to_json_compatible(resumed_result.outputs)
+        history_entry.node_results = _to_json_compatible(resumed_result.node_results)
         history_entry.execution_time_ms = resumed_result.execution_time_ms
+        flag_modified(history_entry, "outputs")
+        flag_modified(history_entry, "node_results")
+
+        for sub_exec in resumed_result.sub_workflow_executions:
+            sub_history = ExecutionHistory(
+                workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
+                inputs=_to_json_compatible(sub_exec.inputs),
+                outputs=_to_json_compatible(sub_exec.outputs),
+                node_results=_to_json_compatible(sub_exec.node_results),
+                status=sub_exec.status,
+                execution_time_ms=sub_exec.execution_time_ms,
+                trigger_source=sub_exec.trigger_source,
+            )
+            db.add(sub_history)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
+                owner_id=None,
+                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                status=sub_exec.status,
+                execution_time_ms=sub_exec.execution_time_ms,
+            )
 
         await _persist_global_variables_from_execution(
             db,
@@ -435,6 +470,14 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             snapshot.get("workflow_cache") or {},
             resumed_result.node_results,
             resumed_result.sub_workflow_executions,
+        )
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=workflow.id,
+            owner_id=workflow.owner_id,
+            workflow_name_snapshot=workflow.name,
+            status=resumed_result.status,
+            execution_time_ms=resumed_result.execution_time_ms,
         )
         await db.commit()
         await _resume_board_chain(history_entry.id)
