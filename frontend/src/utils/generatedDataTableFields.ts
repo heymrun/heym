@@ -22,6 +22,19 @@ export function dataTableListItemFrom(table: DataTable): DataTableListItem {
   };
 }
 
+/**
+ * The listed tables plus the ones question cards created. The server commits after it responds,
+ * so a list loaded right after a create can miss the new table; keeping it separately means a
+ * reload never drops it.
+ */
+export function withCreatedDataTables(
+  listed: DataTableListItem[],
+  created: DataTableListItem[],
+): DataTableListItem[] {
+  const ids = new Set(listed.map((table) => table.id));
+  return [...listed, ...created.filter((table) => !ids.has(table.id))];
+}
+
 /** The listed table a generated value names (an id, or an exact name), or undefined. */
 export function resolveDataTable(
   value: unknown,

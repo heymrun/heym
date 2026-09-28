@@ -7,6 +7,7 @@ import {
   dataTableListItemFrom,
   resolveDataTable,
   sanitizeGeneratedDataTableFields,
+  withCreatedDataTables,
 } from "./generatedDataTableFields";
 
 function listed(id: string, name: string, permission?: string): DataTableListItem {
@@ -88,6 +89,19 @@ describe("sanitizeGeneratedDataTableFields", () => {
     const http = { id: "h", type: "http", position: { x: 0, y: 0 }, data: { label: "call" } } as unknown as WorkflowNode;
 
     expect(sanitize(http)).toBe(http);
+  });
+});
+
+describe("withCreatedDataTables", () => {
+  const CREATED = listed("55555555-5555-4555-8555-555555555555", "leads_new");
+
+  it("keeps a table the card created when a list load does not show it yet", () => {
+    // The server commits after it responds, so a load right after the create can miss it.
+    expect(withCreatedDataTables([LEADS], [CREATED])).toEqual([LEADS, CREATED]);
+  });
+
+  it("lists a table once when the load already shows it", () => {
+    expect(withCreatedDataTables([LEADS, CREATED], [CREATED])).toEqual([LEADS, CREATED]);
   });
 });
 

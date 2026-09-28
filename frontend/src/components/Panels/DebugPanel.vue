@@ -71,7 +71,11 @@ import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
 import { sanitizeGeneratedCredentialFields } from "@/utils/generatedCredentialFields";
-import { dataTableListItemFrom, sanitizeGeneratedDataTableFields } from "@/utils/generatedDataTableFields";
+import {
+  dataTableListItemFrom,
+  sanitizeGeneratedDataTableFields,
+  withCreatedDataTables,
+} from "@/utils/generatedDataTableFields";
 
 const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
@@ -1592,6 +1596,8 @@ const aiCredentials = ref<CredentialListItem[]>([]);
 const allCredentialsForSanitize = ref<CredentialListItem[]>([]);
 /** Tables the user can reach, for checking dataTableId on AI-generated nodes */
 const dataTablesForSanitize = ref<DataTableListItem[]>([]);
+/** Tables question cards created here; kept apart so a list reload cannot drop them */
+const createdDataTables = ref<DataTableListItem[]>([]);
 const aiModels = ref<LLMModel[]>([]);
 const selectedCredentialId = ref("");
 const selectedModel = ref("");
@@ -1783,12 +1789,12 @@ async function loadDataTablesForSanitize(): Promise<void> {
   }
 }
 
-/** A table the question card just created: usable at once, before the list reloads. */
+/** A table the question card just created: usable at once, whatever a list load returns. */
 function rememberCreatedDataTable(table: DataTable): void {
-  if (!dataTablesForSanitize.value.some((listed) => listed.id === table.id)) {
-    dataTablesForSanitize.value = [...dataTablesForSanitize.value, dataTableListItemFrom(table)];
-  }
-  void loadDataTablesForSanitize();
+  createdDataTables.value = [
+    ...createdDataTables.value.filter((created) => created.id !== table.id),
+    dataTableListItemFrom(table),
+  ];
 }
 
 async function loadAiModels(): Promise<void> {
@@ -2577,7 +2583,7 @@ function shouldClearIntegrationCredentialId(credentialId: string | undefined): b
 function sanitizeGeneratedNodeIds(node: WorkflowNode): WorkflowNode {
   return sanitizeGeneratedDataTableFields(
     sanitizeIntegrationCredentialFields(node),
-    dataTablesForSanitize.value,
+    withCreatedDataTables(dataTablesForSanitize.value, createdDataTables.value),
     findMatchingExistingNode(node),
   );
 }
