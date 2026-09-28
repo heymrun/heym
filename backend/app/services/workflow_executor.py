@@ -1764,7 +1764,7 @@ class ExecutionResult:
                     _mask_node_result_row(
                         row,
                         self._credentials_context,
-                        keep_output=result.node_id in self._downstream_global_node_ids,
+                        keep_output=result.node_id in self._global_variable_node_ids,
                     )
                 self.node_results.append(row)
                 existing_ids.add(result.node_id)
