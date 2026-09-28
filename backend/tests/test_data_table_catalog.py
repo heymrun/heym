@@ -18,6 +18,7 @@ from app.services.data_table_catalog import (
     list_data_tables_payload,
     load_data_table_catalog,
 )
+from app.services.workflow_dsl_prompt import CLARIFY_PROTOCOL_PROMPT, build_assistant_prompt
 
 ASK = DataTablePromptMode.ASK
 APPLY = DataTablePromptMode.APPLY_CHOICES
@@ -191,6 +192,16 @@ class DataTablesPromptTests(unittest.TestCase):
         self.assertIn("and 5 more", prompt)
         self.assertNotIn("x" * 201, prompt)
         self.assertIn("- 3 more tables are not shown", prompt)
+
+    def test_assistant_prompt_places_the_section_before_the_clarify_protocol(self) -> None:
+        section = format_data_tables_prompt([self.leads], ASK)
+
+        prompt = build_assistant_prompt(data_tables_prompt=section)
+
+        self.assertIn(section + CLARIFY_PROTOCOL_PROMPT, prompt)
+
+    def test_assistant_prompt_has_no_section_by_default(self) -> None:
+        self.assertNotIn("## Data tables", build_assistant_prompt())
 
 
 class ListDataTablesPayloadTests(unittest.TestCase):

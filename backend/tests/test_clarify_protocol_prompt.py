@@ -5,6 +5,7 @@ from pathlib import Path
 from app.services.workflow_dsl_prompt import (
     CLARIFY_PROTOCOL_PROMPT,
     WORKFLOW_DSL_SYSTEM_PROMPT,
+    YOLO_PROTOCOL_PROMPT,
 )
 
 
@@ -41,6 +42,15 @@ class TestClarifyProtocolConstant(unittest.TestCase):
         self.assertIn('`"optional": true`', text)
         self.assertIn("`(skipped)`", text)
 
+    def test_constant_documents_data_table_options(self) -> None:
+        """The answer formats must match what ClarifyCard serializes for data tables."""
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn('"table": {"id": "<table id>"}', text)
+        self.assertIn('`Data table "<name>" (id <id>)`', text)
+        self.assertIn('"createTable": {"name": "<table name>"', text)
+        self.assertIn('`Created data table "<name>" (id <id>)`', text)
+        self.assertIn("Never add `id` or `created_at` columns", text)
+
     def test_synced_dsl_prompt_stays_clean(self) -> None:
         # heymweb sync extracts only WORKFLOW_DSL_SYSTEM_PROMPT; it must NOT
         # contain the clarify protocol, or /convert would start asking questions.
@@ -72,6 +82,11 @@ class TestClarifyProtocolInjection(unittest.TestCase):
 
     def test_dashboard_chat_prompt_includes_protocol(self) -> None:
         self.assertIn("heym-clarify", DASHBOARD_CHAT_SYSTEM_PROMPT)
+
+
+class TestYoloProtocolDataTables(unittest.TestCase):
+    def test_yolo_stops_to_pick_or_create_a_data_table(self) -> None:
+        self.assertIn("a data table to pick or create", YOLO_PROTOCOL_PROMPT)
 
 
 if __name__ == "__main__":

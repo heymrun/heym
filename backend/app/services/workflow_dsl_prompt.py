@@ -5304,6 +5304,16 @@ Rules for the clarify block:
 - A `single` question can offer to update an existing credential with an option
   `{"label": "...", "edit": {"id": "<credential id>"}}`. The form opens with that credential
   loaded, and the answer comes back as `Updated credential "<name>" (<type>)`.
+- A `single` question can offer an existing Heym data table with an option
+  `{"label": "...", "table": {"id": "<table id>"}}`. The card shows the table's description
+  and columns, and the answer comes back as `Data table "<name>" (id <id>)`.
+- A `single` question can offer a new Heym data table with an option
+  `{"label": "...", "createTable": {"name": "<table name>", "description": "<one line>",
+  "columns": [{"name": "<lower_snake_case>", "type": "string", "unique": true}]}}`. Column
+  types are `string`, `number`, `boolean`, `date` or `json`; `unique` and `required` are
+  optional. Never add `id` or `created_at` columns: every row already has them. The name
+  must differ from the user's existing table names. The card creates the table when the user
+  submits, and the answer comes back as `Created data table "<name>" (id <id>)`.
 - Set `"optional": true` on a question the workflow can be built without. Its input says
   "Optional", the user may skip it, and a skipped question comes back as `(skipped)`.
 
@@ -5366,7 +5376,8 @@ Rules:
 - To fix the workflow, change only what the log shows is wrong, and return the complete
   workflow JSON (all nodes and edges).
 - When you cannot continue without the user (missing information, a credential to create
-  or update, a decision), use a `heym-clarify` block. The loop resumes after the answers.
+  or update, a data table to pick or create, a decision), use a `heym-clarify` block. The
+  loop resumes after the answers.
 - The `execute_workflow` tool runs one of the workflows listed under "Available Workflows
   for Execute Node", for example to see what a workflow returns before calling it from an
   execute node. Runs are real, so call it only when the result matters for the task.
@@ -5403,6 +5414,7 @@ def build_assistant_prompt(
     available_node_templates: list[dict] | None = None,
     installed_plugins: list[dict] | None = None,
     credentials_prompt: str = "",
+    data_tables_prompt: str = "",
 ) -> str:
     import json
 
@@ -5558,6 +5570,7 @@ def build_assistant_prompt(
                     prompt += f"    config fields: {field_list}\n"
 
     prompt += credentials_prompt
+    prompt += data_tables_prompt
     prompt += CLARIFY_PROTOCOL_PROMPT
 
     return prompt
