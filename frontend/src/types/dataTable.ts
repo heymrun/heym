@@ -8,6 +8,14 @@ export interface DataTableColumn {
   order: number;
 }
 
+export const DATA_TABLE_COLUMN_TYPES: readonly DataTableColumn["type"][] = [
+  "string",
+  "number",
+  "boolean",
+  "date",
+  "json",
+];
+
 export interface DataTable {
   id: string;
   name: string;

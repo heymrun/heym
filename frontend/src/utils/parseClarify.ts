@@ -2,23 +2,29 @@ import { jsonrepair } from "jsonrepair";
 
 import type {
   ClarifyAnswer,
-  ClarifyCredentialEdit,
   ClarifyCredentialRef,
   ClarifyOption,
   ClarifyPayload,
   ClarifyQuestion,
   ClarifyQuestionType,
+  ClarifyTableColumn,
+  ClarifyTableDraft,
 } from "@/types/clarify";
 import type { CredentialType } from "@/types/credential";
+import type { DataTableColumn } from "@/types/dataTable";
 
 import { CREDENTIAL_TYPE_LABELS } from "@/types/credential";
+import { DATA_TABLE_COLUMN_TYPES } from "@/types/dataTable";
 
 const FENCE = "```heym-clarify";
 const MAX_CREDENTIAL_NAME_LENGTH = 100;
+const MAX_TABLE_NAME_LENGTH = 255;
+const MAX_TABLE_COLUMNS = 50;
 const CREDENTIAL_TYPES = new Set<string>(Object.keys(CREDENTIAL_TYPE_LABELS));
-const CREDENTIAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const COLUMN_TYPES = new Set<string>(DATA_TABLE_COLUMN_TYPES);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Options arrive as plain strings or `{label, prefill?, create?, edit?}` objects.
+// Options arrive as plain strings or `{label, prefill?, create?, edit?, table?, createTable?}` objects.
 interface RawClarifyQuestion {
   id: string;
   text: string;
@@ -65,11 +71,51 @@ function parseCreate(value: unknown): ClarifyCredentialRef | undefined {
   return { type: type as CredentialType, name: trimmed };
 }
 
-function parseEdit(value: unknown): ClarifyCredentialEdit | undefined {
+// An `edit` credential or a `table` option: an object holding a UUID `id`.
+function parseIdRef(value: unknown): { id: string } | undefined {
   if (!value || typeof value !== "object") return undefined;
   const { id } = value as Record<string, unknown>;
-  if (typeof id !== "string" || !CREDENTIAL_ID.test(id.trim())) return undefined;
+  if (typeof id !== "string" || !UUID.test(id.trim())) return undefined;
   return { id: id.trim() };
+}
+
+// Names are trimmed, blank and repeated (case-insensitive) names dropped, unknown types
+// become "string": the rules the backend's AI schema generator applies.
+function parseTableColumns(value: unknown): ClarifyTableColumn[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const columns: ClarifyTableColumn[] = [];
+  for (const item of value) {
+    if (columns.length >= MAX_TABLE_COLUMNS) break;
+    if (!item || typeof item !== "object") continue;
+    const { name, type, required, unique } = item as Record<string, unknown>;
+    const columnName = typeof name === "string" ? name.trim() : "";
+    const key = columnName.toLowerCase();
+    if (!columnName || columnName.length > MAX_TABLE_NAME_LENGTH || seen.has(key)) continue;
+    seen.add(key);
+    const columnType = typeof type === "string" ? type.trim().toLowerCase() : "";
+    const column: ClarifyTableColumn = {
+      name: columnName,
+      type: COLUMN_TYPES.has(columnType) ? (columnType as DataTableColumn["type"]) : "string",
+    };
+    if (required === true) column.required = true;
+    if (unique === true) column.unique = true;
+    columns.push(column);
+  }
+  return columns;
+}
+
+function parseCreateTable(value: unknown): ClarifyTableDraft | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { name, description, columns } = value as Record<string, unknown>;
+  const tableName = typeof name === "string" ? name.trim() : "";
+  if (!tableName || tableName.length > MAX_TABLE_NAME_LENGTH) return undefined;
+  const parsedColumns = parseTableColumns(columns);
+  if (parsedColumns.length === 0) return undefined;
+  const draft: ClarifyTableDraft = { name: tableName, columns: parsedColumns };
+  const text = typeof description === "string" ? description.trim() : "";
+  if (text) draft.description = text;
+  return draft;
 }
 
 function normalizeOption(option: unknown, singleChoice: boolean): ClarifyOption {
@@ -78,10 +124,15 @@ function normalizeOption(option: unknown, singleChoice: boolean): ClarifyOption 
   const normalized: ClarifyOption = { label: raw.label as string };
   if (!singleChoice) return normalized;
   if (typeof raw.prefill === "string") normalized.prefill = raw.prefill;
+  // An option opens at most one form or table: the first valid key wins.
   const create = parseCreate(raw.create);
-  const edit = create ? undefined : parseEdit(raw.edit);
+  const edit = create ? undefined : parseIdRef(raw.edit);
+  const table = create || edit ? undefined : parseIdRef(raw.table);
+  const createTable = create || edit || table ? undefined : parseCreateTable(raw.createTable);
   if (create) normalized.create = create;
   if (edit) normalized.edit = edit;
+  if (table) normalized.table = table;
+  if (createTable) normalized.createTable = createTable;
   return normalized;
 }
 
@@ -156,6 +207,12 @@ function answerLabel(q: ClarifyQuestion, label: string, a: ClarifyAnswer): strin
   if (a.credential && (option?.create || option?.edit)) {
     const verb = option.create ? "Created" : "Updated";
     return `${verb} credential "${a.credential.name}" (${a.credential.type})`;
+  }
+  if (a.dataTable && option?.createTable) {
+    return `Created data table "${a.dataTable.name}" (id ${a.dataTable.id})`;
+  }
+  if (a.dataTable && option?.table?.id === a.dataTable.id) {
+    return `Data table "${a.dataTable.name}" (id ${a.dataTable.id})`;
   }
   return withPrefill(q, label, a.prefill);
 }

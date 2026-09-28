@@ -288,3 +288,123 @@ describe("optional questions", () => {
     expect(text).toBe("[Plan answers]\n- Any label filter? → (skipped)");
   });
 });
+
+const TABLE_ID = "7d4f1c2a-9b3e-4f5a-8c6d-1e2f3a4b5c6d";
+
+const tableQuestion: ClarifyQuestion = {
+  id: "table",
+  text: "Which table should the leads go to?",
+  type: "single",
+  options: [
+    { label: "leads_2025", table: { id: TABLE_ID } },
+    {
+      label: "Create a new table",
+      createTable: { name: "leads", columns: [{ name: "email", type: "string", unique: true }] },
+    },
+  ],
+};
+
+function tableMessage(options: unknown[], type = "single"): string {
+  return clarifyMessage({ questions: [{ id: "table", text: "Which table?", type, options }] });
+}
+
+describe("data table options", () => {
+  it("keeps a table option with a table id", () => {
+    const questions = extractClarifyBlock(tableMessage([{ label: "leads_2025", table: { id: ` ${TABLE_ID} ` } }]));
+
+    expect(questions?.[0].options).toEqual([{ label: "leads_2025", table: { id: TABLE_ID } }]);
+  });
+
+  it("keeps a createTable option and normalizes its columns", () => {
+    const questions = extractClarifyBlock(
+      tableMessage([
+        {
+          label: "Create a new table",
+          createTable: {
+            name: " leads ",
+            description: " Website leads ",
+            columns: [
+              { name: " email ", type: "String", unique: true },
+              { name: "Email", type: "string" },
+              { name: "score", type: "decimal", required: true },
+              { name: "  ", type: "string" },
+              "phone",
+            ],
+          },
+        },
+      ]),
+    );
+
+    expect(questions?.[0].options?.[0]).toEqual({
+      label: "Create a new table",
+      createTable: {
+        name: "leads",
+        description: "Website leads",
+        columns: [
+          { name: "email", type: "string", unique: true },
+          { name: "score", type: "string", required: true },
+        ],
+      },
+    });
+  });
+
+  it("caps a proposed table at fifty columns", () => {
+    const columns = Array.from({ length: 60 }, (_, index) => ({ name: `col_${index}`, type: "string" }));
+
+    const questions = extractClarifyBlock(tableMessage([{ label: "New", createTable: { name: "wide", columns } }]));
+
+    expect(questions?.[0].options?.[0].createTable?.columns).toHaveLength(50);
+  });
+
+  it("falls back to a plain label for a bad table id or a table without columns", () => {
+    for (const option of [
+      { label: "Pick", table: { id: "leads" } },
+      { label: "Pick", createTable: { name: "leads", columns: [] } },
+      { label: "Pick", createTable: { name: " ", columns: [{ name: "email", type: "string" }] } },
+      { label: "Pick", createTable: "leads" },
+    ]) {
+      expect(extractClarifyBlock(tableMessage([option]))?.[0].options).toEqual([{ label: "Pick" }]);
+    }
+  });
+
+  it("drops table options on multi-choice questions", () => {
+    const questions = extractClarifyBlock(tableMessage([{ label: "leads", table: { id: TABLE_ID } }], "multi"));
+
+    expect(questions?.[0].options).toEqual([{ label: "leads" }]);
+  });
+
+  it("lets a credential key win over a table key on the same option", () => {
+    const questions = extractClarifyBlock(
+      tableMessage([{ label: "Both", create: { type: "github", name: "gh" }, table: { id: TABLE_ID } }]),
+    );
+
+    expect(questions?.[0].options?.[0]).toEqual({ label: "Both", create: { type: "github", name: "gh" } });
+  });
+
+  it("sends a picked table's name and id", () => {
+    const text = serializeAnswers(
+      [tableQuestion],
+      [{ id: "table", text: tableQuestion.text, selected: ["leads_2025"], other: "", dataTable: { id: TABLE_ID, name: "leads_2025" } }],
+    );
+
+    expect(text).toBe(`[Plan answers]\n- Which table should the leads go to? → Data table "leads_2025" (id ${TABLE_ID})`);
+  });
+
+  it("sends a created table's saved name and id", () => {
+    const text = serializeAnswers(
+      [tableQuestion],
+      [{ id: "table", text: tableQuestion.text, selected: ["Create a new table"], other: "", dataTable: { id: "t-new", name: "leads" } }],
+    );
+
+    expect(text).toBe('[Plan answers]\n- Which table should the leads go to? → Created data table "leads" (id t-new)');
+  });
+
+  it("sends only the label when a picked table did not load", () => {
+    const text = serializeAnswers(
+      [tableQuestion],
+      [{ id: "table", text: tableQuestion.text, selected: ["leads_2025"], other: "" }],
+    );
+
+    expect(text).toBe("[Plan answers]\n- Which table should the leads go to? → leads_2025");
+  });
+});

@@ -1,4 +1,5 @@
 import type { CredentialType } from "@/types/credential";
+import type { DataTable, DataTableColumn } from "@/types/dataTable";
 
 export type ClarifyQuestionType = "single" | "multi" | "text";
 
@@ -13,6 +14,35 @@ export interface ClarifyCredentialEdit {
   id: string;
 }
 
+// An existing Heym data table a `table` option picks.
+export interface ClarifyTableRef {
+  id: string;
+}
+
+// A column of the table a `createTable` option proposes.
+export interface ClarifyTableColumn {
+  name: string;
+  type: DataTableColumn["type"];
+  required?: boolean;
+  unique?: boolean;
+}
+
+// The new table a `createTable` option proposes; the card creates it on submit.
+export interface ClarifyTableDraft {
+  name: string;
+  description?: string;
+  columns: ClarifyTableColumn[];
+}
+
+// The data table an answer settled on: picked, or created by the card.
+export interface ClarifyDataTableRef {
+  id: string;
+  name: string;
+}
+
+// A `table` option's table: undefined while it loads, null when it is not available.
+export type ClarifyTableState = DataTable | null | undefined;
+
 export interface ClarifyOption {
   label: string;
   // Editable value shown once this option is picked; single-choice questions only.
@@ -21,6 +51,10 @@ export interface ClarifyOption {
   create?: ClarifyCredentialRef;
   // Opens the credential dialog on this credential; single-choice questions only.
   edit?: ClarifyCredentialEdit;
+  // Picks an existing data table; single-choice questions only.
+  table?: ClarifyTableRef;
+  // Proposes a new data table the card creates on submit; single-choice questions only.
+  createTable?: ClarifyTableDraft;
 }
 
 export interface ClarifyQuestion {
@@ -50,4 +84,6 @@ export interface ClarifyAnswer {
   prefill?: string;
   // The credential a `create` or `edit` option saved.
   credential?: ClarifyCredentialRef;
+  // The data table a `table` or `createTable` option settled on.
+  dataTable?: ClarifyDataTableRef;
 }
