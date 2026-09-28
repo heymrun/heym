@@ -3,8 +3,11 @@ import { computed, reactive } from "vue";
 
 import type { ClarifyAnswer, ClarifyOption, ClarifyQuestion } from "@/types/clarify";
 import type { Credential } from "@/types/credential";
+import type { DataTable } from "@/types/dataTable";
 
 import CredentialFormButton from "@/components/Credentials/CredentialFormButton.vue";
+import DataTableOptionDetails from "@/components/DataTable/DataTableOptionDetails.vue";
+import { selectedTableOption, useClarifyDataTables } from "@/composables/useClarifyDataTables";
 
 const props = defineProps<{
   questions: ClarifyQuestion[];
@@ -14,9 +17,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "submit", answers: ClarifyAnswer[]): void;
   (e: "credential-saved", credential: Credential): void;
+  (e: "data-table-created", table: DataTable): void;
 }>();
 
 const state = reactive<Record<string, ClarifyAnswer>>({});
+const tables = useClarifyDataTables();
+// Top-level aliases, so the template unwraps the ref.
+const creatingTables = tables.creating;
+const tableErrors = tables.errors;
 
 for (const q of props.questions) {
   state[q.id] = { id: q.id, text: q.text, selected: [], other: "", prefill: "" };
@@ -30,6 +38,7 @@ function selectSingle(q: ClarifyQuestion, option: ClarifyOption): void {
   state[q.id].selected = [option.label];
   state[q.id].other = "";
   state[q.id].prefill = option.prefill ?? "";
+  tables.select(q, option);
 }
 
 function toggleMulti(q: ClarifyQuestion, option: ClarifyOption): void {
@@ -64,6 +73,10 @@ function selectedCredentialOption(q: ClarifyQuestion): ClarifyOption | undefined
   return q.options?.find((o) => (o.create || o.edit) && isSelected(q, o));
 }
 
+function selectedTable(q: ClarifyQuestion): ClarifyOption | undefined {
+  return selectedTableOption(q, state[q.id]);
+}
+
 function isAnswered(q: ClarifyQuestion): boolean {
   const a = state[q.id];
   if (selectedCredentialOption(q)) return a.credential !== undefined;
@@ -76,12 +89,15 @@ function otherPlaceholder(q: ClarifyQuestion): string {
 }
 
 const canSubmit = computed(() => {
-  if (props.disabled) return false;
+  if (props.disabled || creatingTables.value) return false;
   return props.questions.every((q) => q.optional || isAnswered(q));
 });
 
-function submit(): void {
+async function submit(): Promise<void> {
   if (!canSubmit.value) return;
+  // Proposed data tables are created here, so the answers can carry their ids.
+  const ready = await tables.prepare(props.questions, state, (table) => emit("data-table-created", table));
+  if (!ready) return;
   emit(
     "submit",
     props.questions.map((q) => ({ ...state[q.id] })),
@@ -149,6 +165,14 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
         @saved="(credential: Credential) => onCredentialSaved(q, credential)"
       />
 
+      <DataTableOptionDetails
+        v-if="selectedTable(q)"
+        :key="selectedTable(q)!.label"
+        :option="selectedTable(q)!"
+        :table="tables.tableState(selectedTable(q)!)"
+        :error="tableErrors[q.id]"
+      />
+
       <input
         v-if="q.type === 'text' || q.allowOther"
         v-model="state[q.id].other"
@@ -164,9 +188,9 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
       type="button"
       class="clarify-submit"
       :disabled="!canSubmit"
-      @click="submit"
+      @click="() => void submit()"
     >
-      Submit answers
+      {{ creatingTables ? "Creating table…" : "Submit answers" }}
     </button>
   </div>
 </template>
