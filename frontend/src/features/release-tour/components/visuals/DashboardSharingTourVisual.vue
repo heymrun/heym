@@ -81,7 +81,7 @@ const viewer = computed<boolean>(() => step.value === 3);
         class="absolute inset-0 flex items-center gap-2 rounded-md bg-background px-2 transition-opacity duration-500"
         :class="shareShown ? 'opacity-100' : 'opacity-0'"
       >
-        <span class="truncate text-[10px] leading-none text-foreground">sam@acme.dev</span>
+        <span class="truncate text-[10px] leading-snug text-foreground">sam@acme.dev</span>
         <span
           class="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none text-foreground"
         >

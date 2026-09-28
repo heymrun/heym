@@ -56,7 +56,8 @@ const verified = computed<boolean>(() => step.value === 3);
             'bg-destructive': row.state === 'failed',
           }"
         />
-        <span class="truncate">{{ row.label }}</span>
+        <!-- Taller than the row's leading-none: `truncate` clips at the line box, which would cut descenders. -->
+        <span class="truncate leading-snug">{{ row.label }}</span>
       </div>
     </div>
     <!-- One line, two captions crossfading, so the footer never wraps. -->

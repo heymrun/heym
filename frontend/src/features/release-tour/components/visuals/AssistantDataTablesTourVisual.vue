@@ -61,7 +61,7 @@ const created = computed<boolean>(() => step.value >= 2);
       :class="step >= 3 ? 'border-primary opacity-100' : 'border-border opacity-30'"
     >
       <span class="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">DataTable</span>
-      <span class="truncate font-mono text-foreground">saveLead · insert → leads</span>
+      <span class="truncate font-mono leading-snug text-foreground">saveLead · insert → leads</span>
     </div>
 
     <!-- One line, two captions crossfading, so the footer never wraps. -->

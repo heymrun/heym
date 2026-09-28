@@ -89,7 +89,7 @@ function scoreClass(score: number): string {
         History
       </span>
       <span
-        class="truncate text-[10px] leading-none text-foreground transition-opacity duration-500"
+        class="truncate text-[10px] leading-snug text-foreground transition-opacity duration-500"
         :class="showHistory ? 'opacity-100' : 'opacity-0'"
       >
         Run #3 &middot; LLM-as-Judge (jev-latest)
