@@ -20,6 +20,7 @@ from app.services.credential_catalog import (
     CredentialField,
     CredentialPromptMode,
 )
+from app.services.generated_node_match import node_label, previous_node_version
 
 REQUIRES_CREDENTIALS_INSTRUCTIONS = (
     "The workflow was not saved. Ask one heym-clarify question per service: offer the "
@@ -97,28 +98,6 @@ def format_credential_choices(choices: list[CredentialChoice]) -> str:
     return "\n".join(lines)
 
 
-def _label(node: dict[str, Any]) -> str:
-    data = node.get("data")
-    label = data.get("label") if isinstance(data, dict) else None
-    return str(label) if label else ""
-
-
-def _previous_version(
-    node: dict[str, Any], previous: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    node_type = node.get("type")
-    for old in previous:
-        if old.get("id") == node.get("id") and old.get("type") == node_type:
-            return old
-    label = _label(node)
-    if not label:
-        return None
-    for old in previous:
-        if old.get("type") == node_type and _label(old) == label:
-            return old
-    return None
-
-
 def _canonical_uuid(text: str) -> str:
     try:
         return str(uuid.UUID(text))
@@ -173,7 +152,7 @@ def _need(
     node: dict[str, Any], spec: CredentialField, catalog: list[CatalogCredential]
 ) -> CredentialNeed:
     return CredentialNeed(
-        node=_label(node) or str(node.get("id") or ""),
+        node=node_label(node) or str(node.get("id") or ""),
         node_type=str(node.get("type") or ""),
         field=spec.name,
         credential_types=tuple(sorted(t.value for t in spec.types)),
@@ -209,7 +188,7 @@ def apply_generated_credentials(
         data = node.get("data")
         if not fields or not isinstance(data, dict):
             continue
-        before = _previous_version(node, previous)
+        before = previous_node_version(node, previous)
         old_data = before.get("data") if before is not None else None
         old_data = old_data if isinstance(old_data, dict) else {}
         for spec in fields:
