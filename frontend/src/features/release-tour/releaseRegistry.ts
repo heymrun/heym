@@ -19,14 +19,14 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.16",
     publishedAt: new Date("2026-09-27T00:00:00Z"),
-    headline: "Let the AI Assistant run and fix the workflow it builds",
+    headline: "The AI Assistant tests what it builds and sets up your data tables",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
-      sectionOrder: ["assistant-yolo-mode"],
+      tourEnabled: true,
+      sectionOrder: ["assistant-yolo-mode", "assistant-data-tables"],
     },
     sections: [
       {
@@ -54,6 +54,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             "Check what another workflow returns before wiring it into an Execute node",
           ],
           tourVisual: "assistant-yolo-mode",
+          docTarget: {
+            categoryId: "reference",
+            slug: "ai-assistant",
+            title: "AI Assistant",
+          },
+        },
+      },
+      {
+        id: "assistant-data-tables",
+        title: "The AI Assistant picks or creates your data tables",
+        publishedAt: new Date("2026-09-28T10:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "When a workflow stores records, the **AI Assistant** now knows your **DataTables**. Name one and it uses it. Otherwise it asks which table to use: the question card lists the tables that fit, each with its description and column types, plus **Create a new table** with the columns the workflow needs. Press **Submit answers** and the card creates the table, then the assistant wires it into the **DataTable** node with its exact column names.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "It works in the canvas assistant, YOLO mode included, in **Chat**, in **Chat with Heym** on the docs, and over MCP through `heym_chat`. The assistant sees table names and columns, never rows, and never changes an existing table's columns: that stays in the **DataTable** tab.",
+          },
+        ],
+        tour: {
+          description:
+            "The AI Assistant asks which data table a workflow should use, or creates one with the right columns.",
+          useCases: [
+            "Ask to save every lead in a table and get the table and the workflow together",
+            "Pick one of your tables from a card that shows its columns and types",
+            "Create and wire tables from Chat or an MCP client, not just the canvas",
+          ],
+          tourVisual: "assistant-data-tables",
           docTarget: {
             categoryId: "reference",
             slug: "ai-assistant",
@@ -180,58 +212,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "tabs",
             slug: "dashboard-tab",
             title: "Dashboard",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.14",
-    publishedAt: new Date("2026-09-22T00:00:00Z"),
-    headline: "Let a model pick the model",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["model-router"],
-    },
-    sections: [
-      {
-        id: "model-router",
-        title: "One credential, the right model every time",
-        publishedAt: new Date("2026-09-22T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The new **Model Router** credential does not hold a key. It holds a decision model, a list of your existing OpenAI, Google and Custom credentials, and a sentence for each one saying when it should be used. Pick the router in any model dropdown, choose **Auto**, and the decision model reads each request and sends it to the model you described.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "It works everywhere a model is chosen: the **LLM** and **Agent** nodes, **Chat**, **AI Defaults**, **Dashboards** and the expression builder. An agent re-routes as its tool loop progresses, so a cheap model can take the early turns and a stronger one can take the turn that actually needs it.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Nothing is hidden. **Traces** shows `Auto Model / GPT-5` rather than just the model, costs are still attributed to the model that ran, and the canvas **Execution Log** and **Span View** show which turn went where. Mark one option as the fallback and a decision model outage never stops a run.",
-          },
-        ],
-        tour: {
-          description:
-            "A credential that picks the model per request, with both the router and the model it chose visible in every trace.",
-          useCases: [
-            "Send short questions to a cheap model and hard ones to a strong one, automatically",
-            "Let an agent start cheap and escalate only on the turn that needs it",
-            "See Auto Model / GPT-5 in Traces, the Execution Log and the Span View",
-          ],
-          tourVisual: "model-router",
-          docTarget: {
-            categoryId: "reference",
-            slug: "credentials",
-            title: "Credentials",
           },
         },
       },
