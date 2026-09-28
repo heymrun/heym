@@ -38,7 +38,7 @@ function onChange(event: Event): void {
       >
       <Zap
         class="h-3.5 w-3.5"
-        :class="{ 'text-primary': modelValue }"
+        :class="{ 'text-primary dark:text-brand-primary-soft': modelValue }"
       />
       <span>YOLO mode</span>
     </label>

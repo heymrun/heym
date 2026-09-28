@@ -88,7 +88,7 @@ function handleSelect(): void {
     :class="cn(
       'group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors overflow-hidden',
       isActive
-        ? 'bg-primary/10 text-primary'
+        ? 'bg-primary/10 text-primary dark:bg-primary/20 dark:text-brand-primary-soft'
         : 'hover:bg-muted/60 text-foreground'
     )"
     @click="handleSelect"

@@ -21,6 +21,7 @@ const {
 const HEADER_FOREGROUND_TOKENS: Partial<Record<string, string>> = {
   agent: "--node-agent-header-foreground",
   code: "--node-code-header-foreground",
+  llm: "--node-llm-header-foreground",
 };
 
 function typeLabelColor(nodeType: string): string {
