@@ -372,7 +372,6 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
             for call in upsert_analytics.await_args_list
             if call.kwargs.get("workflow_id") == workflow_id
         )
-        self.assertIs(parent_call.kwargs.get("count_execution"), False)
         self.assertEqual(parent_call.kwargs.get("started_at"), mock_history.started_at)
 
     async def test_hitl_background_resume_marks_error_when_downstream_fails(
@@ -556,7 +555,6 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
             for call in upsert_analytics.await_args_list
             if call.kwargs.get("workflow_id") == workflow_id
         )
-        self.assertIs(parent_call.kwargs.get("count_execution"), False)
         self.assertEqual(parent_call.kwargs.get("started_at"), mock_history.started_at)
 
 
@@ -589,7 +587,7 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
         await engine.dispose()
 
     async def test_analytics_snapshot_counts_execution_once_across_pause_and_resume(self) -> None:
-        """Pausing records 1 execution; resuming records outcome with count_execution=False without incrementing."""
+        """Pausing does not prematurely count an execution; resuming records outcome and counts once in started_at bucket."""
         from sqlalchemy import select
 
         from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
@@ -617,7 +615,7 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
 
             t0 = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
 
-            # 1. Workflow pauses: records total_executions = 1, success_count = 0, error_count = 0
+            # 1. Workflow pauses: status="pending" does not count an execution
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=workflow.id,
@@ -632,13 +630,12 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             stmt = select(WorkflowAnalyticsSnapshot).where(
                 WorkflowAnalyticsSnapshot.workflow_id == workflow.id
             )
-            res = (await db.execute(stmt)).scalar_one()
-            self.assertEqual(res.total_executions, 1)
-            self.assertEqual(res.success_count, 0)
-            self.assertEqual(res.error_count, 0)
-            self.assertEqual(res.latency_sample_count, 1)
+            res = (await db.execute(stmt)).scalar_one_or_none()
+            self.assertIsNone(
+                res, "Paused execution must not prematurely create an analytics record"
+            )
 
-            # 2. Workflow resumes and succeeds: updates final outcome without counting execution again
+            # 2. Workflow resumes and succeeds: records final outcome and counts execution once
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=workflow.id,
@@ -647,19 +644,16 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 status="success",
                 execution_time_ms=250.0,
                 started_at=t0,
-                count_execution=False,
             )
             await db.commit()
-            await db.refresh(res)
-            self.assertEqual(res.total_executions, 1, "Total executions must remain 1 after resume")
+            res = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(res.total_executions, 1, "Total executions must be 1 after resume")
             self.assertEqual(res.success_count, 1, "Success count must be updated to 1")
             self.assertEqual(res.error_count, 0)
-            self.assertEqual(
-                res.latency_sample_count, 1, "Latency sample count must not be incremented again"
-            )
+            self.assertEqual(res.latency_sample_count, 1)
 
     async def test_analytics_snapshot_records_error_outcome_without_double_counting(self) -> None:
-        """When a resumed workflow encounters an error, error_count is incremented without incrementing total_executions."""
+        """When a resumed workflow encounters an error, error_count is incremented and execution is counted once."""
         from sqlalchemy import select
 
         from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
@@ -707,7 +701,6 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 status="error",
                 execution_time_ms=120.0,
                 started_at=t0,
-                count_execution=False,
             )
             await db.commit()
 
@@ -718,6 +711,229 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res.total_executions, 1)
             self.assertEqual(res.success_count, 0)
             self.assertEqual(res.error_count, 1)
+
+    async def test_hour_boundary_crossed_before_pausing_counted_in_single_bucket(self) -> None:
+        """When a run crosses an hour boundary before pausing, resuming counts it once in started_at's bucket, not pause bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Hour Boundary WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            # Started at 10:55
+            t_start = datetime(2026, 4, 1, 10, 55, tzinfo=timezone.utc)
+            # Pauses at 11:05 (hour boundary crossed)
+            t_pause = datetime(2026, 4, 1, 11, 5, tzinfo=timezone.utc)
+
+            # Trigger pause event at 11:05 (current time is 11:05, status is pending)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=100.0,
+                started_at=t_pause,
+            )
+            await db.commit()
+
+            # Resumes later at 11:30 and finalizes with history_entry.started_at (10:55)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=250.0,
+                started_at=t_start,
+            )
+            await db.commit()
+
+            # Verify: exactly 1 bucket exists for this workflow (the 10:00 bucket), and 11:00 has 0
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            snapshots = (await db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots), 1, "Only one bucket must exist for the execution")
+            snapshot = snapshots[0]
+            self.assertEqual(
+                snapshot.bucket_start, datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
+            )
+            self.assertEqual(snapshot.total_executions, 1, "Must be counted exactly once")
+            self.assertEqual(snapshot.success_count, 1, "Success outcome must be recorded once")
+            self.assertEqual(snapshot.error_count, 0)
+
+    async def test_board_resume_with_existing_analytics_bucket(self) -> None:
+        """Board pause skips initial count; resuming with an existing analytics bucket increments both executions and success."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Board Resume WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t0 = datetime(2026, 4, 1, 10, 10, tzinfo=timezone.utc)
+            # 1. Pre-existing analytics bucket with 2 executions and 2 successes
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=100.0,
+                started_at=t0,
+            )
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=120.0,
+                started_at=t0,
+            )
+            await db.commit()
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            initial = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(initial.total_executions, 2)
+            self.assertEqual(initial.success_count, 2)
+
+            # 2. Board run starts and pauses (board pause events skip the initial count)
+            t_board = datetime(2026, 4, 1, 10, 25, tzinfo=timezone.utc)
+
+            # 3. Board run resumes and succeeds
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=300.0,
+                started_at=t_board,
+            )
+            await db.commit()
+            await db.refresh(initial)
+
+            # Both total_executions and success_count must be incremented by 1 (from 2 to 3)
+            self.assertEqual(
+                initial.total_executions, 3, "Resumed board run must increment total_executions"
+            )
+            self.assertEqual(
+                initial.success_count, 3, "Resumed board run must increment success_count"
+            )
+            self.assertEqual(initial.error_count, 0)
+
+    async def test_portal_resume_with_existing_analytics_bucket(self) -> None:
+        """Portal pause skips initial count; resuming with an existing analytics bucket increments both executions and success."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Portal Resume WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t0 = datetime(2026, 4, 1, 10, 5, tzinfo=timezone.utc)
+            # 1. Pre-existing analytics bucket with 1 execution
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=80.0,
+                started_at=t0,
+            )
+            await db.commit()
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            initial = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(initial.total_executions, 1)
+            self.assertEqual(initial.success_count, 1)
+
+            # 2. Portal run starts and pauses (portal pause skips initial count)
+            t_portal = datetime(2026, 4, 1, 10, 40, tzinfo=timezone.utc)
+
+            # 3. Portal run resumes and succeeds
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=210.0,
+                started_at=t_portal,
+            )
+            await db.commit()
+            await db.refresh(initial)
+
+            # Both total_executions and success_count must be incremented by 1 (from 1 to 2)
+            self.assertEqual(
+                initial.total_executions, 2, "Resumed portal run must increment total_executions"
+            )
+            self.assertEqual(
+                initial.success_count, 2, "Resumed portal run must increment success_count"
+            )
+            self.assertEqual(initial.error_count, 0)
 
 
 class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):
@@ -935,3 +1151,81 @@ class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):
         persisted = self._persist(nodes, result)
         self.assertEqual(persisted["pre_global"], _MASKED)
         self.assertEqual(persisted["post_global"], _SECRET)
+
+    def test_normal_execution_skipped_allow_downstream_output_keeps_global_masked(self) -> None:
+        """When an allowDownstream output is skipped, globals in other branches must stay masked (preserving main)."""
+        nodes = [
+            {"id": "in1", "type": "textInput", "data": {"label": "in", "inputFields": []}},
+            {"id": "cond1", "type": "condition", "data": {"label": "cond", "condition": "1 == 2"}},
+            {
+                "id": "out_skip",
+                "type": "output",
+                "data": {"label": "out_skip", "allowDownstream": True},
+            },
+            _variable("other_global", "$credentials.apiKey", is_global=True),
+        ]
+        edges = [
+            {"id": "e1", "source": "in1", "target": "cond1"},
+            {"id": "e2", "source": "cond1", "target": "out_skip", "sourceHandle": "true"},
+            {"id": "e3", "source": "out_skip", "target": "other_global"},
+            {"id": "e4", "source": "cond1", "target": "other_global", "sourceHandle": "false"},
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"headers": {}, "query": {}, "body": {}},
+            credentials_context={"apiKey": _SECRET},
+        )
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertEqual(rows["out_skip"]["status"], "skipped")
+        self.assertEqual(rows["other_global"]["status"], "success")
+        self.assertEqual(rows["other_global"]["output"]["value"], _MASKED)
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("other_global"), _MASKED)
+
+    def test_resumed_execution_skipped_allow_downstream_output_keeps_global_masked(self) -> None:
+        """When an allowDownstream output is skipped in a resumed workflow, reachable globals stay masked."""
+        nodes = [
+            {"id": "agent-1", "type": "agent", "data": {"label": "agent-1"}},
+            {"id": "cond1", "type": "condition", "data": {"label": "cond", "condition": "1 == 2"}},
+            {
+                "id": "out_skip",
+                "type": "output",
+                "data": {"label": "out_skip", "allowDownstream": True},
+            },
+            _variable("other_global", "$credentials.apiKey", is_global=True),
+        ]
+        edges = [
+            {"id": "e1", "source": "agent-1", "target": "cond1"},
+            {"id": "e2", "source": "cond1", "target": "out_skip", "sourceHandle": "true"},
+            {"id": "e3", "source": "out_skip", "target": "other_global"},
+            {"id": "e4", "source": "cond1", "target": "other_global", "sourceHandle": "false"},
+        ]
+        snapshot = {
+            "workflow_id": str(uuid.uuid4()),
+            "workflow_name": "test",
+            "initial_inputs": {"headers": {}, "query": {}, "body": {}},
+            "nodes": nodes,
+            "edges": edges,
+            "node_results": [],
+            "pending_count": {"cond1": 1, "out_skip": 1, "other_global": 2},
+            "completed_nodes": ["agent-1"],
+            "paused_node_id": "agent-1",
+            "paused_node_label": "agent-1",
+            "workflow_cache": {},
+            "team_id": None,
+        }
+        result = resume_workflow_execution(
+            snapshot=snapshot,
+            resolved_output={"decision": "accepted"},
+            credentials_context={"apiKey": _SECRET},
+        )
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertEqual(rows["out_skip"]["status"], "skipped")
+        self.assertEqual(rows["other_global"]["status"], "success")
+        self.assertEqual(rows["other_global"]["output"]["value"], _MASKED)
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("other_global"), _MASKED)

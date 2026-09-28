@@ -111,6 +111,8 @@ async def upsert_workflow_analytics_snapshot(
     """Store metadata-only hourly analytics snapshot for UI analytics and chat analytics tools."""
     if workflow_id is None and owner_id is None:
         return
+    if status == "pending":
+        return
 
     run_at = started_at or datetime.now(timezone.utc)
     bucket_start = normalize_bucket_start(run_at)

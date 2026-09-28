@@ -1764,10 +1764,7 @@ class ExecutionResult:
                     _mask_node_result_row(
                         row,
                         self._credentials_context,
-                        keep_output=(
-                            result.node_id in self._downstream_global_node_ids
-                            or result.node_id in self._global_variable_node_ids
-                        ),
+                        keep_output=result.node_id in self._downstream_global_node_ids,
                     )
                 self.node_results.append(row)
                 existing_ids.add(result.node_id)
@@ -7649,9 +7646,7 @@ class WorkflowExecutor:
                 self.return_on_chart_output and node.get("type") == "chartOutput"
             ):
                 output_nodes_with_downstream.add(node_id)
-        self._downstream_global_node_ids = _collect_downstream_global_node_ids(
-            self, output_nodes_with_downstream, active_edges
-        )
+        self._downstream_global_node_ids = frozenset()
 
         def schedule_downstream(
             source_node_id: str, source_result: NodeResult | None = None
@@ -7804,6 +7799,9 @@ class WorkflowExecutor:
 
                 if node_id in output_nodes_with_downstream and result.status == "success":
                     early_return_output = {result.node_label: result.output}
+                    self._downstream_global_node_ids = _collect_downstream_global_node_ids(
+                        self, {node_id}, active_edges
+                    )
 
                 with pending_lock:
                     schedule_downstream(node_id, result)
@@ -8396,9 +8394,7 @@ def resume_workflow_execution(
             and node.get("data", {}).get("allowDownstream")
         ):
             output_nodes_with_downstream.add(node_id)
-    wf_executor._downstream_global_node_ids = _collect_downstream_global_node_ids(
-        wf_executor, output_nodes_with_downstream, active_edges
-    )
+    wf_executor._downstream_global_node_ids = frozenset()
 
     def schedule_downstream(source_node_id: str, source_result: NodeResult | None = None) -> None:
         skip_source_handles = (
@@ -8534,6 +8530,9 @@ def resume_workflow_execution(
 
             if node_id in output_nodes_with_downstream and result.status == "success":
                 early_return_output = {result.node_label: result.output}
+                wf_executor._downstream_global_node_ids = _collect_downstream_global_node_ids(
+                    wf_executor, {node_id}, active_edges
+                )
 
             with pending_lock:
                 schedule_downstream(node_id, result)

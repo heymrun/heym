@@ -479,7 +479,6 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             status=resumed_result.status,
             execution_time_ms=resumed_result.execution_time_ms,
             started_at=history_entry.started_at,
-            count_execution=False,
         )
         await db.commit()
         await _resume_board_chain(history_entry.id)
