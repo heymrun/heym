@@ -62,6 +62,7 @@ async def _call(request: AIAssistantRequest) -> dict[str, Any]:
         ),
         patch("app.api.ai_assistant._load_installed_plugins", AsyncMock(return_value=[])),
         patch("app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")),
+        patch("app.api.ai_assistant.build_data_tables_prompt", AsyncMock(return_value="")),
         patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
         patch("app.api.ai_assistant.stream_yolo_assistant_turn", fake_turn),
         patch("app.api.ai_assistant.stream_llm_response", fake_stream),

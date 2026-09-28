@@ -71,6 +71,7 @@ from app.services.credential_catalog import (
     format_credentials_prompt,
     load_credential_catalog,
 )
+from app.services.data_table_catalog import DataTablePromptMode, build_data_tables_prompt
 from app.services.encryption import decrypt_config
 from app.services.generated_credentials import (
     CredentialChoice,
@@ -5040,6 +5041,9 @@ async def workflow_assistant_stream(
             installed_plugins=await _load_installed_plugins(db),
             credentials_prompt=await build_credentials_prompt(
                 db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
+            ),
+            data_tables_prompt=await build_data_tables_prompt(
+                db, current_user.id, DataTablePromptMode.ASK
             ),
         )
 
