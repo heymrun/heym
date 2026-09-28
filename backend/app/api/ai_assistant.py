@@ -16,12 +16,13 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import compute_analytics_stats, upsert_workflow_analytics_snapshot
 from app.api.boards import create_card as create_board_card
+from app.api.data_tables import create_data_table as create_data_table_route
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
 from app.api.workflows import (
@@ -54,6 +55,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
+from app.models.schemas import DataTableColumnDef, DataTableCreate
 from app.services import template_service
 from app.services.active_execution_overview import build_active_execution_overview
 from app.services.agent_tool_observability import summarize_tool_calls
@@ -71,7 +73,16 @@ from app.services.credential_catalog import (
     format_credentials_prompt,
     load_credential_catalog,
 )
-from app.services.data_table_catalog import DataTablePromptMode, build_data_tables_prompt
+from app.services.data_table_catalog import (
+    COLUMN_TYPES,
+    CatalogDataTable,
+    DataTablePromptMode,
+    build_data_tables_prompt,
+    catalog_columns,
+    list_data_tables_payload,
+    load_data_table_catalog,
+    table_summary,
+)
 from app.services.encryption import decrypt_config
 from app.services.generated_credentials import (
     CredentialChoice,
@@ -459,13 +470,14 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can list your data tables and their columns. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
 13. When the user asks you to create, build, generate, or set up a new workflow/automation, call create_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL and saves it. It does NOT run the workflow; the user runs it from the Run button on the workflow card. Do not run the workflow yourself unless the user explicitly asks you to. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
 14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow.
-15. When the user asks about alerts — what alerts exist, whether something is being monitored, which alerts are firing, or why/when an alert triggered — use list_alerts, get_alert_detail, and get_alert_events. For a "why did it fire" question always call get_alert_events and quote the actual observed value, the threshold, and the time window from the event, plus the contributing detail in its context (failing executions and error messages, per-model spend, or trigger source). Do not guess a reason and do not recompute the numbers yourself; the event stores what was true when it fired. Respond in the user's language."""
+15. When the user asks about alerts — what alerts exist, whether something is being monitored, which alerts are firing, or why/when an alert triggered — use list_alerts, get_alert_detail, and get_alert_events. For a "why did it fire" question always call get_alert_events and quote the actual observed value, the threshold, and the time window from the event, plus the contributing detail in its context (failing executions and error messages, per-model spend, or trigger source). Do not guess a reason and do not recompute the numbers yourself; the event stores what was true when it fired. Respond in the user's language.
+16. Heym DataTables store records inside Heym. Call list_data_tables when a workflow will save, store, log or look up records and the user names no other store, or when the user mentions a data table, asks to create one, or asks which tables or columns they have. Never read or write rows yourself; workflows do that. When the user names a table that fits, use it. Otherwise emit one single heym-clarify question with up to five fitting tables as table options and one createTable option (see the Clarification Protocol), with allowOther, then stop. An answer `Created data table "<name>" (id <id>)` means the table exists: never create it again. Call create_data_table when an answer picks your createTable option without saying Created (a typed answer), or when the user asks for a table and names its columns; when the user asks for a table without naming its columns, emit the same question with only the createTable option. Never change an existing table's columns: when a table lacks a column, say which one and offer a new table; columns are added in the DataTable tab."""
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
@@ -933,6 +945,52 @@ DASHBOARD_CHAT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_data_tables",
+            "description": "List the Heym DataTables the user can use: their own tables and tables shared with them directly or through a team. Returns each table's id, name, description, access (owner, write or read), who shared it, and its columns with their types. Never returns rows. Use it when a workflow will save, store, log or look up records, when the user mentions a data table, or when the user asks which tables or columns they have.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_data_table",
+            "description": "Create a new Heym DataTable owned by the user, with its columns. Call it when the user asks for a table and names its columns, or when an answer picks your createTable option without saying 'Created data table' (a typed answer, for example over MCP). Never call it for a table an answer says was created. It cannot change an existing table or touch rows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Table name, different from the user's existing table names.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional one-line description of what the table holds.",
+                    },
+                    "columns": {
+                        "type": "array",
+                        "description": "1 to 50 columns with lower_snake_case names. Never add id or created_at columns: every row already has them.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["string", "number", "boolean", "date", "json"],
+                                },
+                                "required": {"type": "boolean"},
+                                "unique": {"type": "boolean"},
+                            },
+                            "required": ["name", "type"],
+                        },
+                    },
+                },
+                "required": ["name", "columns"],
+            },
+        },
+    },
 ]
 
 
@@ -1338,6 +1396,88 @@ async def get_card_detail_for_chat(db: AsyncSession, user_id: uuid.UUID, card_id
             for r in runs
         ],
     }
+
+
+MAX_CHAT_TABLE_COLUMNS = 50
+
+
+async def list_data_tables_for_chat(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Tables the user can use, with their columns and access; never rows."""
+    return list_data_tables_payload(await load_data_table_catalog(db, user_id))
+
+
+def _chat_table_columns(raw: object) -> list[DataTableColumnDef]:
+    """Validate create_data_table's `columns`, raising ValueError with a reason to show."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("At least one column is required")
+    if len(raw) > MAX_CHAT_TABLE_COLUMNS:
+        raise ValueError(f"A table can have at most {MAX_CHAT_TABLE_COLUMNS} columns here")
+    columns: list[DataTableColumnDef] = []
+    seen: set[str] = set()
+    for order, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError("Each column must be an object with a name and a type")
+        name = str(item.get("name") or "").strip()
+        column_type = str(item.get("type") or "string").strip().lower()
+        if not name:
+            raise ValueError("Each column needs a name")
+        if name.lower() in seen:
+            raise ValueError(f"Duplicate column name: {name}")
+        if column_type not in COLUMN_TYPES:
+            raise ValueError(
+                f"Unknown column type for {name}: {column_type}. "
+                "Use string, number, boolean, date or json"
+            )
+        seen.add(name.lower())
+        columns.append(
+            DataTableColumnDef(
+                name=name,
+                type=column_type,
+                required=bool(item.get("required", False)),
+                unique=bool(item.get("unique", False)),
+                order=order,
+            )
+        )
+    return columns
+
+
+async def create_data_table_for_chat(
+    db: AsyncSession,
+    user: User,
+    *,
+    name: object,
+    description: object,
+    columns: object,
+) -> dict:
+    """Create a table owned by the user through the DataTable router.
+
+    The router owns name uniqueness, column ids and the audit line, so the chat and the
+    DataTable tab create tables the same way.
+    """
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        return {"error": "Table name is required"}
+    try:
+        payload = DataTableCreate(
+            name=clean_name,
+            description=(description.strip() or None) if isinstance(description, str) else None,
+            columns=_chat_table_columns(columns),
+        )
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first.get("loc", ()))
+        message = str(first.get("msg") or "Invalid table")
+        return {"error": f"{location}: {message}" if location else message}
+    except ValueError as exc:
+        return {"error": str(exc)}
+    try:
+        table = await create_data_table_route(payload, current_user=user, db=db)
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+    created = CatalogDataTable(
+        table.id, table.name, table.description, "owner", None, catalog_columns(table.columns)
+    )
+    return {"created": True, "table": table_summary(created)}
 
 
 def get_openai_client(
@@ -2971,6 +3111,18 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
             board = data.get("board") or {}
             return f"Created task {task.get('title')!r} on board {board.get('name')!r}"
         return result_json[:200] + ("..." if len(result_json) > 200 else "")
+    if tool_name == "list_data_tables":
+        if isinstance(data, dict) and "count" in data:
+            return f"{int(data.get('count') or 0)} data table(s) listed"
+        return result_json[:150] + ("..." if len(result_json) > 150 else "")
+    if tool_name == "create_data_table":
+        if isinstance(data, dict) and data.get("error"):
+            return f"Error: {str(data.get('error'))[:150]}"
+        if isinstance(data, dict) and data.get("created"):
+            table = data.get("table") or {}
+            column_count = len(table.get("columns") or [])
+            return f"Created data table {table.get('name')!r} with {column_count} column(s)"
+        return result_json[:200] + ("..." if len(result_json) > 200 else "")
     if tool_name == "get_board_tasks":
         if isinstance(data, dict) and "error" in data:
             return f"Error: {str(data.get('error'))[:150]}"
@@ -4526,6 +4678,80 @@ async def stream_dashboard_chat(
                             title=args.get("title") or "",
                             description=args.get("description"),
                             board_id=args.get("board_id") or None,
+                        )
+                    )
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name == "list_data_tables":
+                    step_label = "Checking data tables..."
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(await list_data_tables_for_chat(db, user_id))
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": {},
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name == "create_data_table":
+                    step_label = "Creating data table..."
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(
+                        await create_data_table_for_chat(
+                            db,
+                            user,
+                            name=args.get("name"),
+                            description=args.get("description"),
+                            columns=args.get("columns"),
                         )
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
