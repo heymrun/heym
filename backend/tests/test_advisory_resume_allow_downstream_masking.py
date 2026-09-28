@@ -12,16 +12,22 @@ When a workflow execution pauses (e.g. for HITL review or Codex followup) and is
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import unittest
 import uuid
+from concurrent.futures import Future
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.services.workflow_executor import (
     ExecutionResult,
+    NodeResult,
     SubWorkflowExecution,
     WorkflowExecutor,
+    execute_workflow,
     resume_workflow_execution,
 )
 
@@ -169,6 +175,95 @@ class ResumeAllowDownstreamMaskingTests(unittest.TestCase):
         self.assertIn("post", rows)
         self.assertIn("post_global", rows)
 
+    def test_parent_progress_while_background_child_is_running(self) -> None:
+        """executeDoNotWait background child must not hold up later nodes in resumed downstream branch."""
+        bg_started = threading.Event()
+        bg_can_finish = threading.Event()
+        node_after_executed = threading.Event()
+
+        class FakeBgFuture:
+            def __init__(self):
+                self._done = False
+
+            def result(self, timeout=None):
+                bg_started.set()
+                if not bg_can_finish.wait(timeout=5):
+                    raise TimeoutError(
+                        "Background future was drained prematurely while downstream nodes were waiting to execute!"
+                    )
+                self._done = True
+                return None
+
+            def done(self):
+                return self._done
+
+            def cancel(self):
+                return False
+
+        fake_fut = FakeBgFuture()
+
+        nodes = [
+            {"id": "agent-1", "type": "agent", "data": {"label": "agent-1"}},
+            {
+                "id": "out1",
+                "type": "output",
+                "data": {"label": "output", "message": "ok", "allowDownstream": True},
+            },
+            _variable("launcher", "dispatched"),
+            _variable("after_launcher", "progress_made"),
+        ]
+        edges = [
+            {"id": "e1", "source": "agent-1", "target": "out1"},
+            {"id": "e2", "source": "out1", "target": "launcher"},
+            {"id": "e3", "source": "launcher", "target": "after_launcher"},
+        ]
+
+        snapshot = _build_snapshot(nodes, edges)
+        snapshot["pending_count"] = {"out1": 1, "launcher": 1, "after_launcher": 1}
+
+        real_logic = WorkflowExecutor._execute_node_logic
+
+        def mock_execute_node(executor: WorkflowExecutor, node_id: str, *args, **kwargs):
+            if node_id == "launcher":
+                with executor._bg_futures_lock:
+                    executor._bg_futures.append((fake_fut, None, "child-wf", "child", {}))
+                return NodeResult(
+                    node_id="launcher",
+                    node_label="launcher",
+                    node_type="variable",
+                    status="success",
+                    output={"status": "dispatched"},
+                    execution_time_ms=10.0,
+                )
+            elif node_id == "after_launcher":
+                if fake_fut.done():
+                    raise AssertionError(
+                        "Child future was already drained before after_launcher executed!"
+                    )
+                node_after_executed.set()
+                bg_can_finish.set()
+                return NodeResult(
+                    node_id="after_launcher",
+                    node_label="after_launcher",
+                    node_type="variable",
+                    status="success",
+                    output={"value": "progress_made"},
+                    execution_time_ms=10.0,
+                )
+            return real_logic(executor, node_id, *args, **kwargs)
+
+        with patch.object(WorkflowExecutor, "_execute_node_logic", mock_execute_node):
+            result = resume_workflow_execution(
+                snapshot=snapshot,
+                resolved_output={"decision": "accepted"},
+                credentials_context=None,
+            )
+            self.assertTrue(result.allow_downstream_pending)
+            result.join_allow_downstream()
+
+        self.assertTrue(node_after_executed.is_set(), "after_launcher node should have executed")
+        self.assertTrue(fake_fut.done(), "fake background future should be drained upon completion")
+
 
 class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_hitl_background_resume_joins_downstream_and_persists_sub_workflows(
@@ -212,6 +307,7 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
         mock_history.node_results = []
         mock_history.status = "pending"
         mock_history.execution_time_ms = 0.0
+        mock_history.started_at = datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
 
         resumed_result = ExecutionResult(
             workflow_id=workflow_id,
@@ -270,6 +366,14 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn(uuid.UUID(sub_wf_id), analytics_wf_ids)
         self.assertIn(workflow_id, analytics_wf_ids)
+
+        parent_call = next(
+            call
+            for call in upsert_analytics.await_args_list
+            if call.kwargs.get("workflow_id") == workflow_id
+        )
+        self.assertIs(parent_call.kwargs.get("count_execution"), False)
+        self.assertEqual(parent_call.kwargs.get("started_at"), mock_history.started_at)
 
     async def test_hitl_background_resume_marks_error_when_downstream_fails(
         self,
@@ -381,6 +485,7 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
         mock_history.node_results = []
         mock_history.status = "pending"
         mock_history.execution_time_ms = 0.0
+        mock_history.started_at = datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
 
         resumed_result = ExecutionResult(
             workflow_id=workflow_id,
@@ -445,3 +550,388 @@ class BackgroundResumeHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn(uuid.UUID(sub_wf_id), analytics_wf_ids)
         self.assertIn(workflow_id, analytics_wf_ids)
+
+        parent_call = next(
+            call
+            for call in upsert_analytics.await_args_list
+            if call.kwargs.get("workflow_id") == workflow_id
+        )
+        self.assertIs(parent_call.kwargs.get("count_execution"), False)
+        self.assertEqual(parent_call.kwargs.get("started_at"), mock_history.started_at)
+
+
+class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        from app.db.session import engine
+
+        await engine.dispose()
+        self.users_to_clean: list[uuid.UUID] = []
+        self.workflows_to_clean: list[uuid.UUID] = []
+
+    async def asyncTearDown(self) -> None:
+        from sqlalchemy import delete
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker, engine
+
+        async with async_session_maker() as db:
+            if self.workflows_to_clean:
+                await db.execute(
+                    delete(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id.in_(self.workflows_to_clean)
+                    )
+                )
+                await db.execute(delete(Workflow).where(Workflow.id.in_(self.workflows_to_clean)))
+            if self.users_to_clean:
+                await db.execute(delete(User).where(User.id.in_(self.users_to_clean)))
+            await db.commit()
+
+        await engine.dispose()
+
+    async def test_analytics_snapshot_counts_execution_once_across_pause_and_resume(self) -> None:
+        """Pausing records 1 execution; resuming records outcome with count_execution=False without incrementing."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Analytics Test WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t0 = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
+
+            # 1. Workflow pauses: records total_executions = 1, success_count = 0, error_count = 0
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=100.0,
+                started_at=t0,
+            )
+            await db.commit()
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            res = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(res.total_executions, 1)
+            self.assertEqual(res.success_count, 0)
+            self.assertEqual(res.error_count, 0)
+            self.assertEqual(res.latency_sample_count, 1)
+
+            # 2. Workflow resumes and succeeds: updates final outcome without counting execution again
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=250.0,
+                started_at=t0,
+                count_execution=False,
+            )
+            await db.commit()
+            await db.refresh(res)
+            self.assertEqual(res.total_executions, 1, "Total executions must remain 1 after resume")
+            self.assertEqual(res.success_count, 1, "Success count must be updated to 1")
+            self.assertEqual(res.error_count, 0)
+            self.assertEqual(
+                res.latency_sample_count, 1, "Latency sample count must not be incremented again"
+            )
+
+    async def test_analytics_snapshot_records_error_outcome_without_double_counting(self) -> None:
+        """When a resumed workflow encounters an error, error_count is incremented without incrementing total_executions."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Analytics Error Test WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t0 = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t0,
+            )
+            await db.commit()
+
+            # Resumed workflow errors out
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="error",
+                execution_time_ms=120.0,
+                started_at=t0,
+                count_execution=False,
+            )
+            await db.commit()
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            res = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(res.total_executions, 1)
+            self.assertEqual(res.success_count, 0)
+            self.assertEqual(res.error_count, 1)
+
+
+class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):
+    """Verify that downstream globals keep raw values while pre-output globals stay masked,
+    consistently across both fast and delayed completion in normal and resumed execution."""
+
+    def _setup_workflow(self, paused: bool = False) -> tuple[list[dict], list[dict]]:
+        first_node = (
+            {"id": "agent-1", "type": "agent", "data": {"label": "agent-1"}}
+            if paused
+            else {
+                "id": "in1",
+                "type": "textInput",
+                "data": {"label": "userInput", "inputFields": [{"key": "text"}]},
+            }
+        )
+        nodes = [
+            first_node,
+            _variable("pre_global", "$credentials.apiKey", is_global=True),
+            {
+                "id": "out1",
+                "type": "output",
+                "data": {"label": "output", "message": "ok", "allowDownstream": True},
+            },
+            _variable("gate", "released"),
+            _variable("post_global", "$credentials.apiKey", is_global=True),
+            _variable("post_non_global", "$credentials.apiKey", is_global=False),
+        ]
+        first_id = first_node["id"]
+        edges = [
+            {"id": "e1", "source": first_id, "target": "pre_global"},
+            {"id": "e2", "source": "pre_global", "target": "out1"},
+            {"id": "e3", "source": "out1", "target": "gate"},
+            {"id": "e4", "source": "gate", "target": "post_global"},
+            {"id": "e5", "source": "post_global", "target": "post_non_global"},
+        ]
+        return nodes, edges
+
+    def _sync_submit(self, work):
+        fut = Future()
+        work()
+        fut.set_result(None)
+        return fut
+
+    def _persist(self, nodes: list[dict], result: ExecutionResult) -> dict[str, str]:
+        from app.api.workflows import _persist_global_variables_from_execution
+
+        upsert = AsyncMock()
+        with patch("app.api.workflows.upsert_global_variable", upsert):
+            asyncio.run(
+                _persist_global_variables_from_execution(
+                    MagicMock(),
+                    uuid.uuid4(),
+                    nodes,
+                    {},
+                    result.node_results,
+                    result.sub_workflow_executions,
+                )
+            )
+        return {call.args[2]: call.args[3] for call in upsert.await_args_list}
+
+    def test_normal_execution_fast_downstream_global_keeps_raw_value(self) -> None:
+        """When downstream finishes fast, execute_workflow's initial masking pass must not mask downstream globals."""
+        nodes, edges = self._setup_workflow(paused=False)
+
+        with patch(
+            "app.services.workflow_executor._submit_allow_downstream_work",
+            side_effect=self._sync_submit,
+        ):
+            result = execute_workflow(
+                workflow_id=uuid.uuid4(),
+                nodes=nodes,
+                edges=edges,
+                inputs={"headers": {}, "query": {}, "body": {"text": "hello"}},
+                credentials_context={"apiKey": _SECRET},
+            )
+
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertIn("pre_global", rows)
+        self.assertIn("post_global", rows)
+        self.assertIn("post_non_global", rows)
+
+        # Pre-output global is masked
+        self.assertEqual(rows["pre_global"]["output"]["value"], _MASKED)
+        # Downstream global keeps raw secret
+        self.assertEqual(rows["post_global"]["output"]["value"], _SECRET)
+        # Downstream non-global is masked
+        self.assertEqual(rows["post_non_global"]["output"]["value"], _MASKED)
+
+        # Global persistence stores raw value for downstream global, masked for pre-output global
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("pre_global"), _MASKED)
+        self.assertEqual(persisted.get("post_global"), _SECRET)
+
+    def test_normal_execution_delayed_downstream_global_keeps_raw_value(self) -> None:
+        """When downstream finishes delayed, join_allow_downstream must preserve downstream global raw value."""
+        nodes, edges = self._setup_workflow(paused=False)
+        release = threading.Event()
+        real_logic = WorkflowExecutor._execute_node_logic
+
+        def gated_logic(executor: WorkflowExecutor, node_id: str, *args, **kwargs):
+            if node_id == "gate" and not release.wait(timeout=5):
+                raise AssertionError("gate was never released")
+            return real_logic(executor, node_id, *args, **kwargs)
+
+        with patch.object(WorkflowExecutor, "_execute_node_logic", gated_logic):
+            result = execute_workflow(
+                workflow_id=uuid.uuid4(),
+                nodes=nodes,
+                edges=edges,
+                inputs={"headers": {}, "query": {}, "body": {"text": "hello"}},
+                credentials_context={"apiKey": _SECRET},
+            )
+            early_ids = [r["node_id"] for r in result.node_results if isinstance(r, dict)]
+            self.assertIn("pre_global", early_ids)
+            self.assertNotIn("post_global", early_ids)
+
+            release.set()
+            result.join_allow_downstream()
+
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertEqual(rows["pre_global"]["output"]["value"], _MASKED)
+        self.assertEqual(rows["post_global"]["output"]["value"], _SECRET)
+        self.assertEqual(rows["post_non_global"]["output"]["value"], _MASKED)
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("pre_global"), _MASKED)
+        self.assertEqual(persisted.get("post_global"), _SECRET)
+
+    def test_resume_execution_fast_downstream_global_keeps_raw_value(self) -> None:
+        """When resumed downstream finishes fast, initial masking pass in resume_workflow_execution preserves downstream globals."""
+        nodes, edges = self._setup_workflow(paused=True)
+        snapshot = _build_snapshot(nodes, edges)
+        snapshot["pending_count"] = {
+            "pre_global": 1,
+            "out1": 1,
+            "gate": 1,
+            "post_global": 1,
+            "post_non_global": 1,
+        }
+
+        with patch(
+            "app.services.workflow_executor._submit_allow_downstream_work",
+            side_effect=self._sync_submit,
+        ):
+            result = resume_workflow_execution(
+                snapshot=snapshot,
+                resolved_output={"decision": "accepted"},
+                credentials_context={"apiKey": _SECRET},
+            )
+
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertEqual(rows["pre_global"]["output"]["value"], _MASKED)
+        self.assertEqual(rows["post_global"]["output"]["value"], _SECRET)
+        self.assertEqual(rows["post_non_global"]["output"]["value"], _MASKED)
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("pre_global"), _MASKED)
+        self.assertEqual(persisted.get("post_global"), _SECRET)
+
+    def test_resume_execution_delayed_downstream_global_keeps_raw_value(self) -> None:
+        """When resumed downstream finishes delayed, join_allow_downstream preserves downstream global raw value."""
+        nodes, edges = self._setup_workflow(paused=True)
+        snapshot = _build_snapshot(nodes, edges)
+        snapshot["pending_count"] = {
+            "pre_global": 1,
+            "out1": 1,
+            "gate": 1,
+            "post_global": 1,
+            "post_non_global": 1,
+        }
+        release = threading.Event()
+        real_logic = WorkflowExecutor._execute_node_logic
+
+        def gated_logic(executor: WorkflowExecutor, node_id: str, *args, **kwargs):
+            if node_id == "gate" and not release.wait(timeout=5):
+                raise AssertionError("gate was never released")
+            return real_logic(executor, node_id, *args, **kwargs)
+
+        with patch.object(WorkflowExecutor, "_execute_node_logic", gated_logic):
+            result = resume_workflow_execution(
+                snapshot=snapshot,
+                resolved_output={"decision": "accepted"},
+                credentials_context={"apiKey": _SECRET},
+            )
+            early_ids = [r["node_id"] for r in result.node_results if isinstance(r, dict)]
+            self.assertIn("pre_global", early_ids)
+            self.assertNotIn("post_global", early_ids)
+
+            release.set()
+            result.join_allow_downstream()
+
+        rows = {r["node_id"]: r for r in result.node_results if isinstance(r, dict)}
+        self.assertEqual(rows["pre_global"]["output"]["value"], _MASKED)
+        self.assertEqual(rows["post_global"]["output"]["value"], _SECRET)
+        self.assertEqual(rows["post_non_global"]["output"]["value"], _MASKED)
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted.get("pre_global"), _MASKED)
+        self.assertEqual(persisted.get("post_global"), _SECRET)
+
+    def test_pre_output_global_remains_masked_in_normal_and_resumed_execution(self) -> None:
+        """Top-level globals written before the output node must stay masked upon persistence."""
+        nodes, edges = self._setup_workflow(paused=False)
+
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"headers": {}, "query": {}, "body": {"text": "hello"}},
+            credentials_context={"apiKey": _SECRET},
+        )
+        result.join_allow_downstream()
+
+        persisted = self._persist(nodes, result)
+        self.assertEqual(persisted["pre_global"], _MASKED)
+        self.assertEqual(persisted["post_global"], _SECRET)

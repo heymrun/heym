@@ -106,6 +106,7 @@ async def upsert_workflow_analytics_snapshot(
     status: str,
     execution_time_ms: float,
     started_at: datetime | None = None,
+    count_execution: bool = True,
 ) -> None:
     """Store metadata-only hourly analytics snapshot for UI analytics and chat analytics tools."""
     if workflow_id is None and owner_id is None:
@@ -115,8 +116,11 @@ async def upsert_workflow_analytics_snapshot(
     bucket_start = normalize_bucket_start(run_at)
     is_success = 1 if status == "success" else 0
     is_error = 1 if status == "error" else 0
+    exec_increment = 1 if count_execution else 0
     has_latency = 1 if execution_time_ms > 0 else 0
     latency = execution_time_ms if execution_time_ms > 0 else 0.0
+    latency_sample_increment = has_latency if count_execution else 0
+    latency_increment = latency if count_execution else 0.0
     snapshot_name = workflow_name_snapshot or "Untitled workflow"
 
     stmt = insert(WorkflowAnalyticsSnapshot).values(
@@ -136,11 +140,12 @@ async def upsert_workflow_analytics_snapshot(
         constraint="uq_workflow_analytics_snapshot_scope",
         set_={
             "workflow_name_snapshot": snapshot_name,
-            "total_executions": WorkflowAnalyticsSnapshot.total_executions + 1,
+            "total_executions": WorkflowAnalyticsSnapshot.total_executions + exec_increment,
             "success_count": WorkflowAnalyticsSnapshot.success_count + is_success,
             "error_count": WorkflowAnalyticsSnapshot.error_count + is_error,
-            "latency_sample_count": WorkflowAnalyticsSnapshot.latency_sample_count + has_latency,
-            "total_latency_ms": WorkflowAnalyticsSnapshot.total_latency_ms + latency,
+            "latency_sample_count": WorkflowAnalyticsSnapshot.latency_sample_count
+            + latency_sample_increment,
+            "total_latency_ms": WorkflowAnalyticsSnapshot.total_latency_ms + latency_increment,
             "max_latency_ms": WorkflowAnalyticsSnapshot.max_latency_ms
             if latency <= 0
             else func.greatest(WorkflowAnalyticsSnapshot.max_latency_ms, latency),
