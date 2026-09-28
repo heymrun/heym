@@ -3698,7 +3698,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   `[{"month": "Jan", "revenue": 120}, ...]`).
 - **Data fields**:
   - `label`: Node identifier (camelCase)
-  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"text"` (required)
+  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"text"` | `"hitl"` (required)
   - `orientation`: `"horizontal"` | `"vertical"` (bar only, default `"vertical"`)
   - `dataPath`: optional dot path to the rows array inside the upstream output (e.g. `"data"` or `"result.items"`)
   - `labelField`: row key used as the category label (pie/bar/line)
@@ -3802,6 +3802,14 @@ syntax (`- [ ]` / `- [x]`) in `text` — do not use plain bullets for checkbox i
 Text checklist (three items, one checked — put markdown in `text` so dashboard toggles persist):
 ```json
 {"type": "chartOutput", "data": {"label": "todoList", "chartType": "text", "text": "- [x] Option 1\\n- [ ] Option 2\\n- [ ] Option 3", "title": "Tasks"}}
+```
+
+**HITL inbox (`chartType: "hitl"`):** a dashboard carousel of the signed-in user's pending human
+reviews. It needs no upstream rows and no `dataPath`. The header shows `1/n pending`. The workflow
+name opens that run on the canvas. Each card has approve, request changes, and reject. The history
+icon beside the widget title opens that run in the history dialog on the same page.
+```json
+{"type": "chartOutput", "data": {"label": "reviews", "chartType": "hitl"}}
 ```
 
 **Numbered text lists (including descending):** prefix each line with the explicit number to

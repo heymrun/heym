@@ -48,6 +48,7 @@ interface Props {
   open: boolean;
   workflowId?: string;
   initialStatus?: string;
+  initialExecutionId?: string;
 }
 
 const props = defineProps<Props>();
@@ -239,6 +240,43 @@ async function ensureEntryLoaded(entryId: string): Promise<void> {
   }
 }
 
+async function withPreferredRun(
+  items: AllExecutionHistoryEntryLight[],
+): Promise<AllExecutionHistoryEntryLight[]> {
+  const preferred = props.initialExecutionId;
+  if (!preferred || items.some((item) => item.id === preferred)) return items;
+  try {
+    const entry = await workflowApi.getHistoryEntry(preferred);
+    const cache = new Map(entryDetailsCache.value);
+    cache.set(entry.id, entry);
+    entryDetailsCache.value = cache;
+    return [
+      {
+        id: entry.id,
+        workflow_id: entry.workflow_id,
+        workflow_name: entry.workflow_name,
+        run_type: entry.run_type ?? "workflow",
+        started_at: entry.started_at,
+        status: entry.status,
+        execution_time_ms: entry.execution_time_ms,
+        trigger_source: entry.trigger_source,
+        recovered: entry.recovered,
+        executed_by_instance_id: entry.executed_by_instance_id,
+        executed_by_instance_name: entry.executed_by_instance_name,
+      },
+      ...items,
+    ];
+  } catch {
+    return items;
+  }
+}
+
+function chooseSelectedId(items: AllExecutionHistoryEntryLight[]): string | null {
+  const preferred = props.initialExecutionId;
+  if (preferred && items.some((item) => item.id === preferred)) return preferred;
+  return items[0]?.id ?? null;
+}
+
 async function loadHistory(): Promise<void> {
   loading.value = true;
   error.value = "";
@@ -256,11 +294,18 @@ async function loadHistory(): Promise<void> {
       workflowApi.getActiveExecutions(),
     ]);
     if (historyResult.status === "fulfilled") {
-      executionHistory.value = historyResult.value.items;
+      const items = await withPreferredRun(historyResult.value.items);
+      executionHistory.value = items;
       totalCount.value = historyResult.value.total;
-      selectedId.value = historyResult.value.items[0]?.id ?? null;
+      selectedId.value = chooseSelectedId(items);
       if (selectedId.value) {
         await ensureEntryLoaded(selectedId.value);
+        if (props.initialExecutionId && selectedId.value === props.initialExecutionId) {
+          await nextTick();
+          document
+            .querySelector(`[data-execution-id="${selectedId.value}"]`)
+            ?.scrollIntoView({ block: "nearest" });
+        }
       }
     } else {
       executionHistory.value = [];
@@ -363,7 +408,11 @@ watch(filteredExecutionHistory, async (items) => {
     return;
   }
 
-  const nextId = items[0]?.id ?? null;
+  const preferred = props.initialExecutionId;
+  const nextId =
+    preferred && items.some((entry) => entry.id === preferred)
+      ? preferred
+      : items[0]?.id ?? null;
   selectedId.value = nextId;
   expandedNodes.value = new Set();
 
@@ -1038,6 +1087,7 @@ function bringToCanvas(): void {
             class="w-full text-left p-3 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
             :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
             title="Double-click to bring this run to the canvas"
+            :data-execution-id="entry.id"
             :data-testid="`all-execution-history-entry-${entry.id}`"
             @click="selectEntry(entry.id)"
             @dblclick="openEntryOnCanvas(entry.id)"

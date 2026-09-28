@@ -1357,6 +1357,26 @@ class HITLDecisionResponse(BaseModel):
     status: str
 
 
+class HITLInboxItem(BaseModel):
+    id: uuid.UUID
+    workflow_id: uuid.UUID
+    execution_history_id: uuid.UUID
+    workflow_name: str
+    agent_label: str
+    summary: str
+    text: str
+    created_at: datetime
+
+
+class HITLInboxResponse(BaseModel):
+    pending_total: int
+    items: list[HITLInboxItem]
+
+
+class HITLInboxLinkResponse(BaseModel):
+    url: str
+
+
 class CodexFollowupPublicResponse(BaseModel):
     request_id: uuid.UUID
     workflow_name: str

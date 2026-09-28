@@ -26,7 +26,7 @@ When you only have example/sample data (no real source), produce these rows with
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, or `text` |
+| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, `text`, or `hitl` |
 | `orientation` | string | `vertical` or `horizontal` (bar charts only) |
 | `dataPath` | string | Dot path to the rows array inside the upstream output (e.g. `data` or `result.items`). Leave empty to auto-detect. |
 | `labelField` | string | Row key used as the category label (pie/bar/line) |
@@ -49,6 +49,7 @@ When you only have example/sample data (no real source), produce these rows with
 - **proportion** — a single horizontal bar split into shares with a percentage legend (e.g. a language breakdown). Uses `labelField` + `valueField`.
 - **barGauge** — one horizontal gauge per row with a red→green gradient and a value (e.g. free disk space). Uses `labelField` + `valueField`, optional `unit` and `max` (defaults to the largest row value).
 - **text** — a markdown message (e.g. a status note like "Last execution at 19:47"). Put the markdown in `text` for a static message, or leave `text` empty and set `valueField` to render a string produced upstream. Supports headings, bold/italic, [lists](../nodes/chart-output-node.md#interactive-task-lists), links, and inline code.
+- **hitl** — a carousel of your pending human reviews. The header shows `1/n pending`; the left arrow is disabled on the first card and the right arrow on the last. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it, and the history icon beside the widget title opens that run in the history dialog on the same page. This chart type ignores upstream rows, so the widget workflow is only the Chart Output node. Each signed-in person sees the reviews on workflows they own.
 
 ### Interactive task lists
 

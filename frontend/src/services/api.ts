@@ -73,6 +73,7 @@ import type {
   FolderTree,
   FolderWithContents,
   HITLDecisionPayload,
+  HITLInbox,
   HITLReview,
   HistoryListResponse,
   InputField,
@@ -2995,6 +2996,27 @@ export const hitlApi = {
   ): Promise<{ request_id: string; status: string }> => {
     const response = await api.post<{ request_id: string; status: string }>(
       `/hitl/${token}/decision`,
+      payload,
+    );
+    return response.data;
+  },
+
+  inbox: async (): Promise<HITLInbox> => {
+    const response = await api.get<HITLInbox>("/hitl/inbox");
+    return response.data;
+  },
+
+  inboxLink: async (requestId: string): Promise<{ url: string }> => {
+    const response = await api.get<{ url: string }>(`/hitl/inbox/${requestId}/link`);
+    return response.data;
+  },
+
+  inboxDecide: async (
+    requestId: string,
+    payload: HITLDecisionPayload,
+  ): Promise<{ request_id: string; status: string }> => {
+    const response = await api.post<{ request_id: string; status: string }>(
+      `/hitl/inbox/${requestId}/decision`,
       payload,
     );
     return response.data;

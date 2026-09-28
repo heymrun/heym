@@ -25,13 +25,14 @@ A widget is a single chart on the grid. Supported chart types:
 - **Proportion** (one bar split into shares with a percentage legend, e.g. a language breakdown)
 - **Bar gauge** (one horizontal gauge per row with a red→green gradient and a value, e.g. free disk space)
 - **Text** (a markdown message, e.g. a status note like "Last execution at 19:47"; supports [interactive checkboxes](../nodes/chart-output-node.md#interactive-task-lists) when the markdown is static, and [explicit numbered lists](../nodes/chart-output-node.md#numbered-lists) for custom or descending numbering)
+- **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue)
 
 Each widget loads its data asynchronously when you open the tab, so the page stays responsive while charts populate.
 
 ## Adding a widget
 
 1. Click **Add widget**, give it a title, and pick a chart type. Below the picker, the dialog draws an example of that chart type with sample data and names the rows it expects, so you can compare types before you build anything.
-2. The widget opens in the workflow editor with a starter graph: a [Set](../nodes/set-node.md) node that produces the rows, connected to a [Chart Output](../nodes/chart-output-node.md) node. Replace the Set node with any data source.
+2. The widget opens in the workflow editor with a starter graph: a [Set](../nodes/set-node.md) node that produces the rows, connected to a [Chart Output](../nodes/chart-output-node.md) node. Replace the Set node with any data source. A **HITL** widget is only the Chart Output node; it reads your pending reviews and does not need a data source.
 3. Build the workflow so the node feeding **Chart Output** produces an array of rows, then configure the Chart Output node's field mapping (label field, value field, etc.).
 4. Save, return to the Dashboard tab, and the widget renders.
 

@@ -1200,7 +1200,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
         | "scatter"
         | "proportion"
         | "barGauge"
-        | "text",
+        | "text"
+        | "hitl",
       orientation: "vertical" as "horizontal" | "vertical",
       dataPath: "",
       labelField: "",

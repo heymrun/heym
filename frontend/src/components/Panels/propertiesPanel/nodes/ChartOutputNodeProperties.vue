@@ -35,6 +35,7 @@ const {
           { value: 'proportion', label: 'Proportion' },
           { value: 'barGauge', label: 'Bar gauge' },
           { value: 'text', label: 'Text' },
+          { value: 'hitl', label: 'HITL' },
         ]"
         @update:model-value="updateNodeData('chartType', $event)"
       />
@@ -111,7 +112,18 @@ const {
       />
     </div>
 
-    <div class="space-y-2">
+    <p
+      v-if="selectedNode.data.chartType === 'hitl'"
+      class="text-xs text-muted-foreground"
+    >
+      Shows your pending human reviews. The header reads 1/n pending. The name opens that run on the canvas.
+      Approve, request changes, or reject from the card. The history icon beside the title opens that run.
+    </p>
+
+    <div
+      v-if="selectedNode.data.chartType !== 'hitl'"
+      class="space-y-2"
+    >
       <Label>Data path</Label>
       <ExpressionInput
         :ref="(el: unknown) => setChartOutputExpressionInputRef('dataPath', el)"
@@ -339,7 +351,10 @@ const {
       />
     </div>
 
-    <div class="space-y-2">
+    <div
+      v-if="selectedNode.data.chartType !== 'hitl'"
+      class="space-y-2"
+    >
       <Label>Title</Label>
       <ExpressionInput
         :ref="(el: unknown) => setChartOutputExpressionInputRef('title', el)"
@@ -362,7 +377,10 @@ const {
       />
     </div>
 
-    <div class="space-y-2">
+    <div
+      v-if="selectedNode.data.chartType !== 'hitl'"
+      class="space-y-2"
+    >
       <Label>Website URL</Label>
       <ExpressionInput
         :ref="(el: unknown) => setChartOutputExpressionInputRef('url', el)"

@@ -32,8 +32,20 @@ _CHART_PAYLOAD_TYPES = frozenset(
         "proportion",
         "barGauge",
         "text",
+        "hitl",
     )
 )
+
+
+def _is_hitl_chart_workflow(nodes: list[dict[str, Any]] | None) -> bool:
+    """True when the widget's terminal chart is the pending-review inbox."""
+    for node in nodes or []:
+        if not isinstance(node, dict) or node.get("type") != "chartOutput":
+            continue
+        data = node.get("data")
+        if isinstance(data, dict) and data.get("chartType") == "hitl":
+            return True
+    return False
 
 
 async def _record_widget_execution(
@@ -260,6 +272,17 @@ async def compute_widget_data(
             cached=False,
             computed_at=None,
             error=blocked_error,
+        )
+
+    # Pending reviews belong to whoever is signed in, and the widget cache is shared
+    # with every dashboard viewer. Return only the chart marker. The inbox is loaded
+    # separately and never written into cached_payload.
+    if _is_hitl_chart_workflow(workflow.nodes):
+        return WidgetDataResponse(
+            widget_id=widget.id,
+            payload={"type": "hitl"},
+            cached=False,
+            computed_at=datetime.now(timezone.utc),
         )
 
     version = _version_token(workflow)

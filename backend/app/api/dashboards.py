@@ -80,7 +80,7 @@ DEFAULT_DASHBOARD_NAME = "Dashboard"
 _AI_WIDGET_SUFFIX = (
     " The workflow MUST end with a single chartOutput node that produces the chart. "
     "Choose an appropriate chartType (pie, bar, line, area, table, numeric, gauge, scatter, "
-    "proportion, barGauge, or text) and set "
+    "proportion, barGauge, text, or hitl) and set "
     "labelField/valueField (or series for multi-series line/area, or xField/yField for scatter, "
     "or min/max for gauge, or text for a markdown message) on the "
     "chartOutput node so it renders the requested metric. When the user only describes example or "
@@ -90,7 +90,9 @@ _AI_WIDGET_SUFFIX = (
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
     "explicit number to display (e.g. 9. Title\\n8. Title); use a loop with total - index "
-    "to count down and join lines before chartOutput valueField. Do not include trigger, "
+    "to count down and join lines before chartOutput valueField. "
+    "When the user wants pending human reviews on the dashboard, use chartType hitl and no "
+    "upstream data nodes. Do not include trigger, "
     "input, error-handler, or RabbitMQ nodes in dashboard widget workflows."
 )
 
@@ -210,6 +212,21 @@ async def _revoke_widget_tokens_without_access(db: AsyncSession, dashboard_id: u
 
 
 def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
+    # A HITL widget is an inbox. It does not read upstream rows.
+    if chart_type == "hitl":
+        chart_id = str(uuid.uuid4())
+        return (
+            [
+                {
+                    "id": chart_id,
+                    "type": "chartOutput",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"label": "reviews", "chartType": "hitl"},
+                }
+            ],
+            [],
+        )
+
     # Dashboard widgets have no trigger/input — they start with a data-producing
     # node (a `set` node) that feeds the chartOutput. Replace it with a real data
     # source (http, bigquery, rag, ...) when building the widget.

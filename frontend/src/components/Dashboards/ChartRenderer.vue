@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
+import HitlCarousel from "@/components/Dashboards/HitlCarousel.vue";
 import MarkdownTextContent from "@/components/Dashboards/MarkdownTextContent.vue";
 import { renderChartMarkdown } from "@/lib/markdown";
 import { hasTaskItems } from "@/lib/markdownTaskList";
@@ -47,6 +48,7 @@ const CHART_TYPES = new Set<ChartPayload["type"]>([
   "proportion",
   "barGauge",
   "text",
+  "hitl",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,6 +176,7 @@ const isEmpty = computed((): boolean => {
   if (p.type === "numeric") return p.value === null || p.value === undefined;
   if (p.type === "gauge") return p.value === null || p.value === undefined;
   if (p.type === "text") return !p.text || p.text.trim().length === 0;
+  if (p.type === "hitl") return false;
   return !p.series || p.series.length === 0;
 });
 
@@ -345,6 +348,12 @@ const apexOptions = computed((): Record<string, unknown> => {
     >
       No data
     </div>
+
+    <HitlCarousel
+      v-else-if="chartPayload && chartPayload.type === 'hitl'"
+      :seed-items="chartPayload.items"
+      :seed-total="chartPayload.pending_total"
+    />
 
     <div
       v-else-if="chartPayload && chartPayload.type === 'numeric'"

@@ -1035,7 +1035,8 @@ export interface NodeData {
     | "scatter"
     | "proportion"
     | "barGauge"
-    | "text";
+    | "text"
+    | "hitl";
   orientation?: "horizontal" | "vertical";
   dataPath?: string;
   labelField?: string;
@@ -1312,6 +1313,22 @@ export interface HITLDecisionPayload {
   action: "accept" | "edit" | "refuse";
   edited_text?: string;
   refusal_reason?: string;
+}
+
+export interface HITLInboxItem {
+  id: string;
+  workflow_id: string;
+  execution_history_id: string;
+  workflow_name: string;
+  agent_label: string;
+  summary: string;
+  text: string;
+  created_at: string;
+}
+
+export interface HITLInbox {
+  pending_total: number;
+  items: HITLInboxItem[];
 }
 
 export interface CodexFollowup {

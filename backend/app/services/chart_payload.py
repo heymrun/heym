@@ -87,6 +87,14 @@ def build_chart_payload(config: dict, data: Any) -> dict:
     """Transform resolved upstream data into a ChartPayload for the given chart type."""
     chart_type = config.get("chartType", "bar")
     title = config.get("title")
+    if chart_type == "hitl":
+        # The dashboard fills this from the signed-in user's inbox. Upstream rows
+        # are ignored so a HITL widget does not need a data source.
+        payload: dict = {"type": "hitl"}
+        if title:
+            payload["title"] = title
+        return payload
+
     rows = _resolve_rows(data, config.get("dataPath"))
 
     payload: dict = {"type": chart_type}

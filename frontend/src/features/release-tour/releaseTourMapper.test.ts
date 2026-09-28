@@ -356,7 +356,6 @@ describe("shipped release registry", () => {
       "assistant-yolo-mode",
       "dashboard-sharing",
       "evals-judge",
-      "chat-credentials",
     ]);
   });
 

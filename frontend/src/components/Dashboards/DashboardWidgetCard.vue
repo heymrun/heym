@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import type { Component } from "vue";
 import { onClickOutside } from "@vueuse/core";
 import {
   Copy,
   ExternalLink,
+  History,
   Loader2,
   MoreVertical,
   Pencil,
@@ -16,6 +17,11 @@ import {
 
 import type { ChartPayload, DashboardWidget } from "@/types/dashboard";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
+import {
+  openHitlHistoryKey,
+  setHitlHistoryTargetKey,
+  type HitlHistoryTarget,
+} from "@/components/Dashboards/hitlHistory";
 import { toggleTaskItemLocal, updateOrRemoveTaskItemLocal } from "@/lib/markdownTaskList";
 import { dashboardApi } from "@/services/api";
 
@@ -101,10 +107,33 @@ const actions: WidgetAction[] = [
   },
 ];
 
+const openHitlHistory = inject(openHitlHistoryKey, null);
+const hitlTarget = ref<HitlHistoryTarget | null>(null);
+provide(setHitlHistoryTargetKey, (target) => {
+  hitlTarget.value = target;
+});
+
+function openWidgetHistory(): void {
+  const target = hitlTarget.value;
+  if (!target || !openHitlHistory) return;
+  openHitlHistory(target.workflowId, target.executionId);
+}
+
 // A read-only share keeps only Refresh; every other action changes the widget.
-const visibleActions = computed<WidgetAction[]>(() =>
-  props.canWrite ? actions : actions.filter((action) => action.key === "refresh"),
-);
+// History stays first so it shares the same gap as the widget icons.
+const visibleActions = computed<WidgetAction[]>(() => {
+  const base = props.canWrite ? actions : actions.filter((action) => action.key === "refresh");
+  if (!hitlTarget.value) return base;
+  return [
+    {
+      key: "history",
+      icon: History,
+      label: "Open history",
+      run: openWidgetHistory,
+    },
+    ...base,
+  ];
+});
 
 // Read-only viewers see task lists as plain checkboxes they cannot tick.
 const displayPayload = computed<ChartPayload | null>(() =>

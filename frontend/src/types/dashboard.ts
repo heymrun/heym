@@ -6,6 +6,18 @@ export interface ChartSeries {
   data: number[] | (number | null)[][];
 }
 
+/** One pending human review shown in a HITL widget carousel. */
+export interface HitlWidgetItem {
+  id: string;
+  workflow_id?: string;
+  execution_history_id?: string;
+  workflow_name: string;
+  agent_label: string;
+  summary: string;
+  text: string;
+  created_at?: string;
+}
+
 export interface ChartPayload {
   type:
     | "pie"
@@ -18,7 +30,8 @@ export interface ChartPayload {
     | "scatter"
     | "proportion"
     | "barGauge"
-    | "text";
+    | "text"
+    | "hitl";
   orientation?: "horizontal" | "vertical";
   labels?: string[];
   series?: ChartSeries[];
@@ -36,6 +49,10 @@ export interface ChartPayload {
   title?: string;
   // Optional external link set on the chartOutput node; rendered as an icon in the widget title.
   url?: string;
+  // HITL carousel. Live widgets omit items and load the signed-in user's inbox.
+  // The add-widget preview passes sample items so the carousel renders offline.
+  pending_total?: number;
+  items?: HitlWidgetItem[];
 }
 
 export interface WidgetLayout {

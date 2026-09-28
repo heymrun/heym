@@ -254,3 +254,8 @@ class TestBuildChartPayload(unittest.TestCase):
         config = {"chartType": "text"}
         payload = build_chart_payload(config, "just a string")
         self.assertEqual(payload["text"], "just a string")
+
+    def test_hitl_ignores_upstream_rows(self):
+        config = {"chartType": "hitl", "title": "Reviews"}
+        payload = build_chart_payload(config, [{"secret": "do-not-copy"}])
+        self.assertEqual(payload, {"type": "hitl", "title": "Reviews"})

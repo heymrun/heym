@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -317,6 +317,61 @@ async def persist_pending_hitl_execution(
     history_entry.node_results = copy.deepcopy(execution_result.node_results)
     history_entry.execution_time_ms = execution_result.execution_time_ms
     return history_entry, hitl_request
+
+
+def _owned_pending_filters(owner_id: uuid.UUID, now: datetime) -> tuple:
+    return (
+        Workflow.owner_id == owner_id,
+        HITLRequest.status == "pending",
+        HITLRequest.expires_at > now,
+    )
+
+
+async def list_pending_hitl_for_owner(
+    db: AsyncSession, owner_id: uuid.UUID, *, limit: int = 100
+) -> tuple[int, list[HITLRequest]]:
+    """Return the pending-review count and the oldest reviews owned by this user.
+
+    The count is the full queue. ``limit`` only caps the rows returned for the carousel.
+    """
+    now = datetime.now(timezone.utc)
+    filters = _owned_pending_filters(owner_id, now)
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(HITLRequest)
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(*filters)
+    )
+    total = int(count_result.scalar_one())
+    rows_result = await db.execute(
+        select(HITLRequest)
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(*filters)
+        .order_by(HITLRequest.created_at.asc())
+        .limit(limit)
+    )
+    return total, list(rows_result.scalars().all())
+
+
+async def get_owned_hitl_request(
+    db: AsyncSession, request_id: uuid.UUID, owner_id: uuid.UUID
+) -> HITLRequest:
+    """Load a review only when the caller owns its workflow.
+
+    A missing row and a row owned by someone else both 404, so an inbox id
+    cannot be used to probe other people's reviews.
+    """
+    result = await db.execute(
+        select(HITLRequest)
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(HITLRequest.id == request_id, Workflow.owner_id == owner_id)
+    )
+    hitl_request = result.scalar_one_or_none()
+    if hitl_request is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Review request not found"
+        )
+    return hitl_request
 
 
 async def get_hitl_request_by_token(db: AsyncSession, token: str) -> HITLRequest | None:

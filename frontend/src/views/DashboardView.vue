@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import JSZip from "jszip";
 import { useRoute, useRouter } from "vue-router";
@@ -41,6 +41,7 @@ import BoardPanel from "@/components/Board/BoardPanel.vue";
 import DashboardChatComposer from "@/components/Chat/DashboardChatComposer.vue";
 import CredentialsPanel from "@/components/Credentials/CredentialsPanel.vue";
 import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
+import { openHitlHistoryKey } from "@/components/Dashboards/hitlHistory";
 import DataTablePanel from "@/components/DataTable/DataTablePanel.vue";
 import DrivePanel from "@/components/Drive/DrivePanel.vue";
 import WorkflowActionSheet from "@/components/Dialogs/WorkflowActionSheet.vue";
@@ -234,6 +235,7 @@ const editing = ref(false);
 const historyOpen = ref(false);
 const historyWorkflowId = ref<string | undefined>(undefined);
 const historyInitialStatus = ref<string | undefined>(undefined);
+const historyExecutionId = ref<string | undefined>(undefined);
 const copyingId = ref<string | null>(null);
 const toastMessage = ref("");
 const toastVisible = ref(false);
@@ -243,14 +245,24 @@ function closeExecutionHistory(): void {
   historyOpen.value = false;
   historyWorkflowId.value = undefined;
   historyInitialStatus.value = undefined;
+  historyExecutionId.value = undefined;
 }
 
 function openExecutionHistory(workflowId?: string, status?: string): void {
   historyWorkflowId.value = workflowId;
   historyInitialStatus.value = status;
+  historyExecutionId.value = undefined;
   historyOpen.value = true;
   pushOverlayState();
 }
+
+provide(openHitlHistoryKey, (workflowId: string, executionId: string): void => {
+  historyWorkflowId.value = workflowId;
+  historyExecutionId.value = executionId;
+  historyInitialStatus.value = undefined;
+  historyOpen.value = true;
+  pushOverlayState();
+});
 
 const showFolderDialog = ref(false);
 const newFolderName = ref("");
@@ -2498,6 +2510,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
       <ExecutionHistoryAllDialog
         :open="historyOpen"
         :workflow-id="historyWorkflowId"
+        :initial-execution-id="historyExecutionId"
         :initial-status="historyInitialStatus"
         @close="closeExecutionHistory"
       />

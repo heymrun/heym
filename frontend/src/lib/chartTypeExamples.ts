@@ -131,6 +131,35 @@ export const CHART_TYPE_EXAMPLES: ChartTypeExample[] = [
       text: "**Nightly sync** finished at 19:47.\n\n- [x] Backups verified\n- [ ] Rotate API keys",
     },
   },
+  {
+    value: "hitl",
+    label: "HITL",
+    hint: "Pending human reviews. The header shows 1/n pending. The name opens that run on the canvas.",
+    payload: {
+      type: "hitl",
+      pending_total: 2,
+      items: [
+        {
+          id: "preview-1",
+          workflow_id: "preview-workflow-1",
+          execution_history_id: "preview-run-1",
+          workflow_name: "Lead intake",
+          agent_label: "Qualifier",
+          summary: "Draft reply is ready for review.",
+          text: "Thanks for reaching out. I can share pricing tomorrow morning.",
+        },
+        {
+          id: "preview-2",
+          workflow_id: "preview-workflow-2",
+          execution_history_id: "preview-run-2",
+          workflow_name: "Invoice OCR",
+          agent_label: "Extractor",
+          summary: "Confirm the extracted total before posting.",
+          text: "Invoice **1042** from Northwind, total `$1,280.00`.",
+        },
+      ],
+    },
+  },
 ];
 
 export function chartTypeExample(type: ChartPayload["type"]): ChartTypeExample {

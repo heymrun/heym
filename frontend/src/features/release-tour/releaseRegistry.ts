@@ -17,6 +17,48 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.17",
+    publishedAt: new Date("2026-09-28T18:00:00Z"),
+    headline: "Review pending human approvals from the dashboard",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["dashboard-hitl"],
+    },
+    sections: [
+      {
+        id: "dashboard-hitl",
+        title: "Clear pending reviews from a dashboard widget",
+        publishedAt: new Date("2026-09-28T18:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Add a **HITL** widget and the header shows how many reviews are waiting, as `1/n pending`. Move left and right through each one; the arrows stop at the ends. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve the draft. The history icon beside the widget title opens that run in the history dialog on the same page. The queue is yours: a shared dashboard does not reveal someone else's drafts.",
+          },
+        ],
+        tour: {
+          description:
+            "A dashboard carousel of your pending human reviews, with the count in the header.",
+          useCases: [
+            "See how many reviews are waiting before you open the first one",
+            "Approve, request changes, or reject a draft without leaving the dashboard",
+            "Open that run in the history dialog from the icon beside the widget title",
+          ],
+          tourVisual: "dashboard-hitl",
+          docTarget: {
+            categoryId: "tabs",
+            slug: "dashboard-tab",
+            title: "Dashboard",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.16",
     publishedAt: new Date("2026-09-27T00:00:00Z"),
     headline: "The AI Assistant tests what it builds and sets up your data tables",
@@ -98,54 +140,16 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.15",
     publishedAt: new Date("2026-09-23T00:00:00Z"),
-    headline:
-      "Add a credential without leaving the conversation, give your evals an independent judge, and share your dashboards",
+    headline: "Give your evals an independent judge, and share your dashboards",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["chat-credentials", "evals-judge", "dashboard-sharing"],
+      sectionOrder: ["evals-judge", "dashboard-sharing"],
     },
     sections: [
-      {
-        id: "chat-credentials",
-        title: "Create the credential a workflow needs, right in chat",
-        publishedAt: new Date("2026-09-23T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "When a workflow you ask for needs a credential, the assistant asks which one to use. If you have a fitting credential it is listed next to **Create a new credential**; if you have none, the assistant asks whether to create one. You can always continue without one. Creating opens the credential form in the conversation, preset to the right type and a suggested name. You can also ask for a credential on its own, or ask to update one you own, and the same form opens on it.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "The values go straight to Heym. The model only learns the name and type, says it added the credential, and carries on building. OAuth credentials such as Google Sheets connect in a popup, with a link to open the authorization page yourself if the popup is blocked.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "It works in the canvas **AI Assistant**, the **Chat** tab (including the workflows Chat creates and edits for you) and **Chat with Heym**. When no node covers an operation, such as adding a tab to a Google Sheet, the assistant sends the same credential in an **HTTP** request.",
-          },
-        ],
-        tour: {
-          description:
-            "Pick, create or update a credential inside the conversation; the model sees only its name and type.",
-          useCases: [
-            "Ask for a GitHub workflow and add the missing token without leaving chat",
-            "Connect or reconnect a Google Sheets account through OAuth from the assistant's question",
-            "Reach operations a node lacks through HTTP with the same credential",
-          ],
-          tourVisual: "chat-credentials",
-          docTarget: {
-            categoryId: "reference",
-            slug: "credentials",
-            title: "Credentials",
-          },
-        },
-      },
       {
         id: "evals-judge",
         title: "Give your evals an independent judge",
