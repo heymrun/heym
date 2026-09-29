@@ -237,14 +237,6 @@ async def resolve_execution_analytics_bucket(
             if h_utc in bucket_map:
                 return bucket_map[h_utc]
 
-        # Check adjacent hour (+1h / -1h)
-        next_hour = t_utc + timedelta(hours=1)
-        prev_hour = t_utc - timedelta(hours=1)
-        if next_hour in bucket_map and prev_hour not in bucket_map:
-            return bucket_map[next_hour]
-        if prev_hour in bucket_map and next_hour not in bucket_map:
-            return bucket_map[prev_hour]
-
     return target_bucket
 
 

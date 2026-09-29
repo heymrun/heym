@@ -2703,6 +2703,150 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.total_executions, 1)
             self.assertEqual(snapshot.error_count, 1)
 
+    async def test_legacy_pause_without_snapshot_metadata_never_contaminates_adjacent_execution_bucket(
+        self,
+    ) -> None:
+        """Execution A without snapshot metadata must never finalize into execution B's nearby (+-1h) bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Cross Execution Contamination WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t_a = datetime(2026, 4, 1, 10, 30, tzinfo=timezone.utc)
+            t_b = datetime(2026, 4, 1, 11, 15, tzinfo=timezone.utc)
+
+            # Execution B ran at 11:15 and created a snapshot bucket at 11:00:00
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=120.0,
+                started_at=t_b,
+                count_execution=True,
+            )
+            await db.commit()
+
+            # Concrete database state:
+            # Execution A paused at 10:30 (bucket 10:00:00).
+            # It has NO analytics_bucket_time in its snapshot (legacy execution),
+            # and NO 10:00:00 snapshot exists in WorkflowAnalyticsSnapshot.
+            # Only ONE nearby bucket exists: Execution B's bucket at 11:00:00 (+1 hour).
+            history_entry_a = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=45.0,
+                started_at=t_a,
+                trigger_source="manual",
+            )
+            db.add(history_entry_a)
+            await db.flush()
+
+            hitl_req_a = HITLRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry_a.id,
+                public_token=f"token-a-{uuid.uuid4()}",
+                workflow_name=workflow.name,
+                agent_node_id="agent-1",
+                agent_label="Agent",
+                status="resolved",
+                decision="accepted",
+                created_at=t_a,
+                expires_at=t_a + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                    # Crucial: NO analytics_bucket_time in snapshot
+                },
+            )
+            db.add(hitl_req_a)
+            await db.commit()
+
+            resumed_result_a = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                outputs={"done": True},
+                execution_time_ms=80.0,
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    hitl_service, "resume_workflow_execution", return_value=resumed_result_a
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req_a.id)
+
+            async with async_session_maker() as verify_db:
+                stmt = (
+                    select(WorkflowAnalyticsSnapshot)
+                    .where(WorkflowAnalyticsSnapshot.workflow_id == workflow.id)
+                    .order_by(WorkflowAnalyticsSnapshot.bucket_start.asc())
+                )
+                snapshots = (await verify_db.execute(stmt)).scalars().all()
+
+                # There must be two separate buckets: 10:00:00 (Execution A) and 11:00:00 (Execution B)
+                self.assertEqual(len(snapshots), 2)
+
+                bucket_10 = next(
+                    s
+                    for s in snapshots
+                    if s.bucket_start == datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
+                )
+                bucket_11 = next(
+                    s
+                    for s in snapshots
+                    if s.bucket_start == datetime(2026, 4, 1, 11, 0, tzinfo=timezone.utc)
+                )
+
+                # Execution B's bucket at 11:00 must be UNTOUCHED:
+                self.assertEqual(bucket_11.total_executions, 1)
+                self.assertEqual(bucket_11.success_count, 1)
+                self.assertEqual(bucket_11.error_count, 0)
+
+                # Execution A finalized into its own 10:00 bucket without contaminating Execution B:
+                self.assertEqual(bucket_10.total_executions, 0)
+                self.assertEqual(bucket_10.success_count, 1)
+                self.assertEqual(bucket_10.error_count, 0)
+
 
 class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):
     """Verify that downstream globals keep raw values while pre-output globals stay masked,
