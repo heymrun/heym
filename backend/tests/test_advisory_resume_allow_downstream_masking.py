@@ -2885,14 +2885,31 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
             t_pause_app = datetime(2026, 4, 1, 10, 59, 59, tzinfo=timezone.utc)
+            t_after_boundary = datetime(2026, 4, 1, 11, 0, 5, tzinfo=timezone.utc)
+            clock_now = [t_pause_app]
+
+            mock_hitl_dt = MagicMock(wraps=datetime)
+            mock_hitl_dt.now.side_effect = lambda tz=None: clock_now[0]
+            mock_hitl_dt.fromisoformat.side_effect = datetime.fromisoformat
+
+            mock_analytics_dt = MagicMock(wraps=datetime)
+            mock_analytics_dt.now.side_effect = lambda tz=None: clock_now[0]
+            mock_analytics_dt.fromisoformat.side_effect = datetime.fromisoformat
 
             pending_result = ExecutionResult(
                 workflow_id=workflow.id,
                 status="pending",
                 execution_time_ms=75.0,
                 outputs={"Agent": {"summary": "Review"}},
-                node_results=[],
-                pending_review={"kind": "hitl", "summary": "Review", "draft_text": "Draft"},
+                node_results=[
+                    {"node_id": "agent-1", "node_name": "Agent", "status": "pending", "output": {}}
+                ],
+                pending_review={
+                    "kind": "hitl",
+                    "summary": "Review",
+                    "draft_text": "Draft",
+                    "resume_mode": "inject_output",
+                },
                 resume_snapshot={
                     "workflow_id": str(workflow.id),
                     "workflow_name": workflow.name,
@@ -2904,48 +2921,26 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-            history_entry = ExecutionHistory(
-                id=uuid.uuid4(),
-                workflow_id=workflow.id,
-                inputs={"data": "test"},
-                outputs={},
-                node_results=[],
-                status="pending",
-                execution_time_ms=75.0,
-                started_at=t_pause_app,
-                trigger_source="rabbitmq",
-            )
-            hitl_req = HITLRequest(
-                id=uuid.uuid4(),
-                workflow_id=workflow.id,
-                execution_history_id=history_entry.id,
-                public_token=f"token-rmq-{uuid.uuid4()}",
-                workflow_name=workflow.name,
-                agent_node_id="agent-1",
-                agent_label="Agent",
-                status="resolved",
-                decision="accepted",
-                created_at=t_pause_app,
-                expires_at=t_pause_app + timedelta(hours=24),
-                execution_snapshot={
-                    "credentials_owner_id": str(user.id),
-                    "trigger_source": "rabbitmq",
-                    "analytics_bucket_time": t_pause_app.isoformat(),
-                },
-            )
-
             consumer_manager = RabbitMQConsumerManager()
             mock_message = MagicMock()
             mock_message.ack = AsyncMock()
             mock_message.nack = AsyncMock()
             mock_message.body = b'{"data": "test"}'
+            mock_message.headers = {}
+            mock_message.message_id = "msg-123"
+            mock_message.routing_key = "test-rk"
+            mock_message.exchange = "test-ex"
+            mock_message.timestamp = None
 
-            async def mock_persist(*args, **kwargs):
-                async with async_session_maker() as sdb:
-                    sdb.add(history_entry)
-                    sdb.add(hitl_req)
-                    await sdb.commit()
-                return history_entry, hitl_req
+            from app.services.pending_execution import persist_pending_execution
+
+            real_persist = persist_pending_execution
+
+            async def timed_real_persist(*args: Any, **kwargs: Any) -> Any:
+                entry, req = await real_persist(*args, **kwargs)
+                # Advance clock into next hour simulating notification delay
+                clock_now[0] = t_after_boundary
+                return entry, req
 
             real_upsert = upsert_workflow_analytics_snapshot
             captured_upsert_kwargs: list[dict[str, Any]] = []
@@ -2955,6 +2950,8 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 await real_upsert(*args, **kwargs)
 
             with (
+                patch("app.services.hitl_service.datetime", mock_hitl_dt),
+                patch("app.api.analytics.datetime", mock_analytics_dt),
                 patch(
                     "app.services.rabbitmq_consumer.collect_referenced_workflows",
                     AsyncMock(return_value={}),
@@ -2973,7 +2970,7 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch(
                     "app.services.rabbitmq_consumer.persist_pending_execution",
-                    side_effect=mock_persist,
+                    side_effect=timed_real_persist,
                 ),
                 patch(
                     "app.services.rabbitmq_consumer.upsert_workflow_analytics_snapshot",
@@ -2987,6 +2984,23 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(captured_upsert_kwargs[0]["started_at"], t_pause_app)
 
             async with async_session_maker() as verify_db:
+                # Real persist_pending_execution wrote ExecutionHistory and HITLRequest to PostgreSQL
+                hist_stmt = select(ExecutionHistory).where(
+                    ExecutionHistory.workflow_id == workflow.id
+                )
+                persisted_entry = (await verify_db.execute(hist_stmt)).scalar_one()
+                self.assertEqual(persisted_entry.started_at, t_pause_app)
+                self.assertEqual(persisted_entry.status, "pending")
+
+                req_stmt = select(HITLRequest).where(HITLRequest.workflow_id == workflow.id)
+                persisted_req = (await verify_db.execute(req_stmt)).scalar_one()
+                self.assertEqual(persisted_req.execution_history_id, persisted_entry.id)
+                self.assertEqual(
+                    persisted_req.execution_snapshot.get("analytics_bucket_time"),
+                    t_pause_app.isoformat(),
+                )
+
+                # Snapshot must land in 10:00 bucket despite the clock advancing to 11:00:05 before upsert
                 stmt = select(WorkflowAnalyticsSnapshot).where(
                     WorkflowAnalyticsSnapshot.workflow_id == workflow.id
                 )
@@ -2996,6 +3010,15 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                     snapshots[0].bucket_start, datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc)
                 )
                 self.assertEqual(snapshots[0].total_executions, 1)
+                self.assertEqual(snapshots[0].success_count, 0)
+
+            # Resolve the HITL request and resume
+            async with async_session_maker() as resolve_db:
+                req_to_resolve = await resolve_db.get(HITLRequest, persisted_req.id)
+                self.assertIsNotNone(req_to_resolve)
+                req_to_resolve.status = "resolved"
+                req_to_resolve.decision = "accepted"
+                await resolve_db.commit()
 
             resumed_result = ExecutionResult(
                 workflow_id=workflow.id,
@@ -3016,7 +3039,7 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
                 patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
             ):
-                await hitl_service.resume_hitl_request_in_background(hitl_req.id)
+                await hitl_service.resume_hitl_request_in_background(persisted_req.id)
 
             async with async_session_maker() as verify_db:
                 stmt = select(WorkflowAnalyticsSnapshot).where(
@@ -3422,6 +3445,293 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 snap_p = (await verify_db.execute(stmt_p)).scalar_one()
                 self.assertEqual(snap_p.total_executions, 1)
                 self.assertEqual(snap_p.success_count, 1)
+
+    async def test_legacy_hitl_and_codex_resume_error_preserves_analytics(self) -> None:
+        """Error finalization during resume of legacy HITL and Codex runs preserves earlier bucket analytics."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            wf = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Legacy Resume Error WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(wf.id)
+            db.add(user)
+            db.add(wf)
+            await db.commit()
+
+            t_earlier = datetime(2026, 4, 1, 10, 10, tzinfo=timezone.utc)
+            t_pause = datetime(2026, 4, 1, 10, 45, tzinfo=timezone.utc)
+
+            # Earlier bucket at 10:00:00 already has 1 execution and 1 success from a separate run
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=wf.id,
+                owner_id=user.id,
+                workflow_name_snapshot=wf.name,
+                status="success",
+                execution_time_ms=100.0,
+                started_at=t_earlier,
+                count_execution=True,
+            )
+            await db.commit()
+
+            # 1. Legacy HITL run that encounters an error on resume
+            h_hitl = ExecutionHistory(
+                workflow_id=wf.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t_pause,
+                trigger_source="manual",
+            )
+            db.add(h_hitl)
+            await db.flush()
+
+            hitl_req = HITLRequest(
+                workflow_id=wf.id,
+                execution_history_id=h_hitl.id,
+                public_token=f"tok-err-hitl-{uuid.uuid4()}",
+                workflow_name=wf.name,
+                agent_node_id="agent-1",
+                agent_label="Agent",
+                status="resolved",
+                decision="accepted",
+                created_at=t_pause,
+                expires_at=t_pause + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                },
+            )
+            db.add(hitl_req)
+
+            # 2. Legacy Codex run that encounters an error on resume
+            h_codex = ExecutionHistory(
+                workflow_id=wf.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t_pause,
+                trigger_source="manual",
+            )
+            db.add(h_codex)
+            await db.flush()
+
+            codex_req = CodexFollowupRequest(
+                workflow_id=wf.id,
+                execution_history_id=h_codex.id,
+                public_token=f"tok-err-cdx-{uuid.uuid4()}",
+                workflow_name=wf.name,
+                codex_node_id="codex-1",
+                codex_label="Codex",
+                status="answered",
+                answer_text="ok",
+                created_at=t_pause,
+                expires_at=t_pause + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                },
+            )
+            db.add(codex_req)
+            await db.commit()
+
+            with (
+                patch.object(
+                    hitl_service,
+                    "resume_workflow_execution",
+                    side_effect=RuntimeError("Simulated HITL resume error"),
+                ),
+                patch.object(
+                    codex_followup_service,
+                    "resume_workflow_execution",
+                    side_effect=RuntimeError("Simulated Codex resume error"),
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req.id)
+                await codex_followup_service.resume_codex_followup_in_background(codex_req.id)
+
+            async with async_session_maker() as verify_db:
+                # History entries are updated with status="error"
+                eh_h = await verify_db.get(ExecutionHistory, h_hitl.id)
+                self.assertIsNotNone(eh_h)
+                self.assertEqual(eh_h.status, "error")
+
+                eh_c = await verify_db.get(ExecutionHistory, h_codex.id)
+                self.assertIsNotNone(eh_c)
+                self.assertEqual(eh_c.status, "error")
+
+                # The earlier bucket must be completely UNTOUCHED (still 1 execution, 1 success, 0 errors)
+                stmt = select(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.workflow_id == wf.id
+                )
+                snapshots = (await verify_db.execute(stmt)).scalars().all()
+                self.assertEqual(len(snapshots), 1)
+                self.assertEqual(snapshots[0].total_executions, 1)
+                self.assertEqual(snapshots[0].success_count, 1)
+                self.assertEqual(snapshots[0].error_count, 0)
+
+    async def test_legacy_codex_pause_without_snapshot_metadata_never_contaminates_adjacent_execution_bucket(
+        self,
+    ) -> None:
+        """Legacy Codex execution without snapshot metadata must never finalize into execution B's nearby bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            ExecutionHistory,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Cross Execution Contamination Codex WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t_a = datetime(2026, 4, 1, 10, 30, tzinfo=timezone.utc)
+            t_b = datetime(2026, 4, 1, 11, 15, tzinfo=timezone.utc)
+
+            # Execution B ran at 11:15 and created a snapshot bucket at 11:00:00
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=120.0,
+                started_at=t_b,
+                count_execution=True,
+            )
+            await db.commit()
+
+            # Execution A paused at 10:30 (bucket 10:00:00) with NO analytics_bucket_time
+            history_entry_a = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=45.0,
+                started_at=t_a,
+                trigger_source="manual",
+            )
+            db.add(history_entry_a)
+            await db.flush()
+
+            codex_req_a = CodexFollowupRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry_a.id,
+                public_token=f"token-cdx-a-{uuid.uuid4()}",
+                workflow_name=workflow.name,
+                codex_node_id="codex-1",
+                codex_label="Codex",
+                status="answered",
+                answer_text="ok",
+                created_at=t_a,
+                expires_at=t_a + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                },
+            )
+            db.add(codex_req_a)
+            await db.commit()
+
+            resumed_result_a = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                outputs={"done": True},
+                execution_time_ms=80.0,
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    codex_followup_service,
+                    "resume_workflow_execution",
+                    return_value=resumed_result_a,
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await codex_followup_service.resume_codex_followup_in_background(codex_req_a.id)
+
+            async with async_session_maker() as verify_db:
+                stmt = (
+                    select(WorkflowAnalyticsSnapshot)
+                    .where(WorkflowAnalyticsSnapshot.workflow_id == workflow.id)
+                    .order_by(WorkflowAnalyticsSnapshot.bucket_start.asc())
+                )
+                snapshots = (await verify_db.execute(stmt)).scalars().all()
+                self.assertEqual(len(snapshots), 1)
+
+                bucket_11 = snapshots[0]
+                self.assertEqual(
+                    bucket_11.bucket_start, datetime(2026, 4, 1, 11, 0, tzinfo=timezone.utc)
+                )
+
+                # Execution B's bucket at 11:00 must be UNTOUCHED:
+                self.assertEqual(bucket_11.total_executions, 1)
+                self.assertEqual(bucket_11.success_count, 1)
+                self.assertEqual(bucket_11.error_count, 0)
 
 
 class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):
