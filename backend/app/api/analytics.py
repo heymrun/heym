@@ -167,12 +167,16 @@ async def resolve_execution_analytics_bucket(
     snapshot: dict | None = None,
     history_started_at: datetime | None = None,
     is_already_counted: bool = True,
-) -> datetime:
+) -> datetime | None:
     """Resolve the canonical, stable analytics bucket timestamp for an execution.
 
     For executions that were already counted at pause time, the final outcome must
     land in the EXACT bucket where the execution was originally counted, even across
     multiple approval pauses, cross-hour resumes, or DB vs app clock mismatches.
+
+    If an already-counted execution lacks reliable bucket metadata (legacy run),
+    returns None so callers preserve main's analytics behavior rather than guessing
+    and potentially corrupting an existing bucket.
     """
     if not is_already_counted:
         return history_started_at or candidate_time or datetime.now(timezone.utc)
@@ -192,11 +196,10 @@ async def resolve_execution_analytics_bucket(
                 except (ValueError, TypeError):
                     initial_time = None
 
-    if initial_time is None and history_started_at is not None:
-        initial_time = history_started_at
-
-    if initial_time is None:
-        initial_time = candidate_time or datetime.now(timezone.utc)
+    # For already-counted runs, if the snapshot lacks reliable bucket metadata,
+    # the original bucket is not known. Preserve main's behavior by returning None.
+    if not has_snapshot_bucket:
+        return None
 
     if workflow_id is None:
         return initial_time
@@ -218,24 +221,6 @@ async def resolve_execution_analytics_bucket(
 
     if t_utc in bucket_map:
         return bucket_map[t_utc]
-
-    # If the snapshot explicitly pinned an analytics bucket, trust that target bucket
-    # directly rather than searching for other buckets.
-    if has_snapshot_bucket:
-        return target_bucket
-
-    # Legacy fallback: when snapshot had no analytics_bucket_time, check candidate_time
-    # or history_started_at for an existing bucket.
-    if bucket_map:
-        if candidate_time:
-            c_utc = _to_utc(normalize_bucket_start(candidate_time))
-            if c_utc in bucket_map:
-                return bucket_map[c_utc]
-
-        if history_started_at:
-            h_utc = _to_utc(normalize_bucket_start(history_started_at))
-            if h_utc in bucket_map:
-                return bucket_map[h_utc]
 
     return target_bucket
 

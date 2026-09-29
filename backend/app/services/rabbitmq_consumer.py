@@ -385,7 +385,7 @@ class RabbitMQConsumerManager:
                     return
 
                 if needs_local_pending_persist(result):
-                    await persist_pending_execution(
+                    history_entry, _ = await persist_pending_execution(
                         db=db,
                         workflow=workflow,
                         enriched_inputs=inputs,
@@ -403,6 +403,7 @@ class RabbitMQConsumerManager:
                         workflow_name_snapshot=workflow.name,
                         status=result.status,
                         execution_time_ms=result.execution_time_ms,
+                        started_at=getattr(history_entry, "started_at", None),
                     )
                     await db.commit()
                     await message.ack()

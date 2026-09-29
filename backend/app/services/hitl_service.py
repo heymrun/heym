@@ -371,6 +371,11 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
         trigger_source = snapshot.get("trigger_source")
         effective_trigger_source = trigger_source or history_entry.trigger_source
         is_already_counted = effective_trigger_source not in ("board", "portal")
+        has_known_bucket = bool(
+            snapshot
+            and isinstance(snapshot, dict)
+            and (snapshot.get("analytics_bucket_time") or snapshot.get("analytics_bucket_start"))
+        )
         try:
             analytics_bucket_time = await resolve_execution_analytics_bucket(
                 db,
@@ -506,38 +511,54 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
                 resumed_result.node_results,
                 resumed_result.sub_workflow_executions,
             )
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=workflow.id,
-                owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status=resumed_result.status,
-                execution_time_ms=resumed_result.execution_time_ms,
-                started_at=analytics_bucket_time,
-                count_execution=not is_already_counted,
-            )
+            if analytics_bucket_time is not None:
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status=resumed_result.status,
+                    execution_time_ms=resumed_result.execution_time_ms,
+                    started_at=analytics_bucket_time,
+                    count_execution=not is_already_counted,
+                )
             await db.commit()
             await _resume_board_chain(history_entry.id)
         except Exception as exc:
-            fallback_bucket = (
-                history_entry.started_at or hitl_request.created_at or datetime.now(timezone.utc)
-            )
-            bucket_to_use = locals().get("analytics_bucket_time") or fallback_bucket
+            bucket_to_use = locals().get("analytics_bucket_time")
+            if bucket_to_use is None and has_known_bucket:
+                raw = snapshot.get("analytics_bucket_time") or snapshot.get(
+                    "analytics_bucket_start"
+                )
+                if isinstance(raw, datetime):
+                    bucket_to_use = raw
+                elif isinstance(raw, str):
+                    try:
+                        bucket_to_use = datetime.fromisoformat(raw)
+                    except (ValueError, TypeError):
+                        bucket_to_use = None
+            if bucket_to_use is None and not is_already_counted:
+                bucket_to_use = (
+                    history_entry.started_at
+                    or hitl_request.created_at
+                    or datetime.now(timezone.utc)
+                )
             hitl_request.resume_error = str(exc)
             history_entry.status = "error"
             history_entry.outputs = {"error": str(exc)}
             history_entry.execution_time_ms = 0
             flag_modified(history_entry, "outputs")
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=workflow.id,
-                owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status="error",
-                execution_time_ms=0.0,
-                started_at=bucket_to_use,
-                count_execution=not is_already_counted,
-            )
+            if bucket_to_use is not None:
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status="error",
+                    execution_time_ms=0.0,
+                    started_at=bucket_to_use,
+                    count_execution=not is_already_counted,
+                )
             await db.commit()
             await _resume_board_chain(history_entry.id)
             return
