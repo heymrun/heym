@@ -11,7 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
+from app.api.analytics import (
+    resolve_execution_analytics_bucket,
+    upsert_workflow_analytics_snapshot,
+)
 from app.db.models import CodexFollowupRequest, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.hitl_service import build_default_public_base_url
@@ -148,6 +151,7 @@ async def persist_pending_codex_followup_execution(
     snapshot["hitl_resume_mode"] = "rerun_agent"
 
     if history_entry is None:
+        first_pause_at = datetime.now(timezone.utc)
         history_entry = ExecutionHistory(
             **({"id": history_entry_id} if history_entry_id is not None else {}),
             workflow_id=workflow.id,
@@ -157,8 +161,20 @@ async def persist_pending_codex_followup_execution(
             status="pending",
             execution_time_ms=execution_result.execution_time_ms,
             trigger_source=trigger_source,
+            started_at=first_pause_at,
         )
         db.add(history_entry)
+    elif history_entry.started_at is None:
+        history_entry.started_at = datetime.now(timezone.utc)
+
+    bucket_time_str = (
+        snapshot.get("analytics_bucket_time")
+        or (history_entry.started_at.isoformat() if history_entry.started_at else None)
+        or datetime.now(timezone.utc).isoformat()
+    )
+    snapshot["analytics_bucket_time"] = bucket_time_str
+    if isinstance(execution_result.resume_snapshot, dict):
+        execution_result.resume_snapshot["analytics_bucket_time"] = bucket_time_str
 
     history_entry.status = "pending"
     history_entry.inputs = enriched_inputs
@@ -226,6 +242,7 @@ async def persist_pending_codex_followup_execution(
             "trigger_source",
             "public_base_url",
             "hitl_resume_mode",
+            "analytics_bucket_time",
         ):
             if key in snapshot:
                 merged_snapshot[key] = copy.deepcopy(snapshot[key])
@@ -273,10 +290,14 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
         trigger_source = snapshot.get("trigger_source")
         effective_trigger_source = trigger_source or history_entry.trigger_source
         is_already_counted = effective_trigger_source not in ("board", "portal")
-        analytics_bucket_time = (
-            followup.created_at
-            if (is_already_counted and followup.created_at)
-            else (history_entry.started_at or datetime.now(timezone.utc))
+        analytics_bucket_time = await resolve_execution_analytics_bucket(
+            db,
+            workflow_id=workflow.id,
+            owner_id=workflow.owner_id,
+            candidate_time=followup.created_at,
+            snapshot=snapshot,
+            history_started_at=history_entry.started_at,
+            is_already_counted=is_already_counted,
         )
 
         try:
@@ -311,6 +332,22 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
             )
 
             if resumed_result.status == "pending":
+                if isinstance(resumed_result.resume_snapshot, dict):
+                    if (
+                        "analytics_bucket_time" in snapshot
+                        and "analytics_bucket_time" not in resumed_result.resume_snapshot
+                    ):
+                        resumed_result.resume_snapshot["analytics_bucket_time"] = snapshot[
+                            "analytics_bucket_time"
+                        ]
+                    elif (
+                        history_entry.started_at
+                        and "analytics_bucket_time" not in resumed_result.resume_snapshot
+                    ):
+                        resumed_result.resume_snapshot["analytics_bucket_time"] = (
+                            history_entry.started_at.isoformat()
+                        )
+
                 if is_codex_pending_execution(resumed_result):
                     await persist_pending_codex_followup_execution(
                         db=db,

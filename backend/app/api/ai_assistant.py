@@ -2216,6 +2216,7 @@ async def run_execute_workflow_tool(
                 workflow_name_snapshot=workflow.name,
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
+                started_at=getattr(history_entry, "started_at", None),
             )
         else:
             history_entry = ExecutionHistory(

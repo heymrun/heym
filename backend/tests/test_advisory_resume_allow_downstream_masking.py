@@ -21,7 +21,10 @@ from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.analytics import upsert_workflow_analytics_snapshot
+from app.api.analytics import (
+    normalize_bucket_start,
+    upsert_workflow_analytics_snapshot,
+)
 from app.services.workflow_executor import (
     ExecutionResult,
     NodeResult,
@@ -1582,6 +1585,601 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 initial.success_count, 2, "Resumed portal run must increment success_count"
             )
             self.assertEqual(initial.error_count, 0)
+
+    async def test_empty_bucket_insert_with_count_execution_false_writes_zero_total_executions(
+        self,
+    ) -> None:
+        """When an uncounted execution lands in an empty bucket, total_executions is 0 and outcome is recorded."""
+        from sqlalchemy import select
+
+        from app.db.models import User, Workflow, WorkflowAnalyticsSnapshot
+        from app.db.session import async_session_maker
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Empty Bucket Zero WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t0 = datetime(2026, 4, 1, 14, 0, tzinfo=timezone.utc)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=100.0,
+                started_at=t0,
+                count_execution=False,
+            )
+            await db.commit()
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            row = (await db.execute(stmt)).scalar_one()
+            self.assertEqual(
+                row.total_executions,
+                0,
+                "Insert with count_execution=False must set total_executions=0",
+            )
+            self.assertEqual(row.success_count, 1)
+            self.assertEqual(row.error_count, 0)
+            self.assertEqual(row.latency_sample_count, 0)
+
+    async def test_multiple_approval_pauses_across_hours_finalize_in_original_bucket(self) -> None:
+        """Resumed runs with multiple approval steps hours apart must preserve the original pause bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Multi-Pause WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            # 1. First pause: workflow pauses at 10:15
+            t1_pause = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
+            pending_result_1 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=45.0,
+                outputs={"Agent": {"draft": "hello"}},
+                node_results=[],
+                pending_review={
+                    "summary": "First review",
+                    "draft_text": "hello",
+                    "agent_state": {},
+                    "resume_mode": "inject_output",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "agent-1",
+                    "paused_node_label": "Agent",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1"],
+                },
+            )
+
+            history_entry, hitl_req_1 = await hitl_service.persist_pending_hitl_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs={},
+                execution_result=pending_result_1,
+                trigger_source="manual",
+                credentials_owner_id=user.id,
+                trace_user_id=user.id,
+                public_base_url="http://test.local",
+            )
+            history_entry.started_at = t1_pause
+            hitl_req_1.created_at = t1_pause
+            hitl_req_1.execution_snapshot["analytics_bucket_time"] = t1_pause.isoformat()
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=pending_result_1.execution_time_ms,
+                started_at=history_entry.started_at,
+            )
+            await db.commit()
+
+            # Initial analytics row must be at 10:00:00 with total_executions=1
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            snapshots = (await db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots), 1)
+            self.assertEqual(snapshots[0].total_executions, 1)
+            self.assertEqual(snapshots[0].success_count, 0)
+            self.assertEqual(snapshots[0].bucket_start, normalize_bucket_start(t1_pause))
+
+            # 2. Resuming first pause at 12:30 -> triggers second approval (Codex node)
+            t2_pause = datetime(2026, 4, 1, 12, 30, tzinfo=timezone.utc)
+            hitl_req_1.status = "resolved"
+            hitl_req_1.decision = "accepted"
+            await db.commit()
+
+            pending_result_2 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=90.0,
+                outputs={"Codex": {"question": "Need API key"}},
+                node_results=[],
+                pending_review={
+                    "kind": "codex",
+                    "summary": "Codex needs input",
+                    "question": "Need API key",
+                    "task_prompt": "prompt",
+                    "thread_id": "thread-1",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "codex-1",
+                    "paused_node_label": "Codex",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1", "codex-1"],
+                },
+            )
+
+            with (
+                patch.object(
+                    hitl_service, "resume_workflow_execution", return_value=pending_result_2
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req_1.id)
+
+            # Query the newly created CodexFollowupRequest
+            f_stmt = select(CodexFollowupRequest).where(
+                CodexFollowupRequest.workflow_id == workflow.id
+            )
+            followup = (await db.execute(f_stmt)).scalar_one()
+            followup.created_at = t2_pause
+            await db.commit()
+
+            # Ensure the execution snapshot carried analytics_bucket_time forward
+            self.assertEqual(
+                followup.execution_snapshot.get("analytics_bucket_time"),
+                t1_pause.isoformat(),
+            )
+
+            # 3. Resuming second pause at 15:45 -> succeeds!
+            followup.status = "answered"
+            followup.answer_text = "api-key-value"
+            await db.commit()
+
+            final_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                execution_time_ms=180.0,
+                outputs={"result": "done"},
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    codex_followup_service, "resume_workflow_execution", return_value=final_result
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await codex_followup_service.resume_codex_followup_in_background(followup.id)
+
+            # Final analytics check:
+            # - EXACTLY 1 row across all time buckets
+            # - Landed in the original 10:00:00 bucket
+            # - total_executions=1, success_count=1, error_count=0
+            async with async_session_maker() as verify_db:
+                snapshots_after = (await verify_db.execute(stmt)).scalars().all()
+            self.assertEqual(
+                len(snapshots_after),
+                1,
+                "Must only have 1 analytics bucket across all hours, no orphaned later buckets",
+            )
+            final_snapshot = snapshots_after[0]
+            self.assertEqual(final_snapshot.bucket_start, normalize_bucket_start(t1_pause))
+            self.assertEqual(
+                final_snapshot.total_executions,
+                1,
+                "Resumed run across multiple approvals must NOT double-count total_executions",
+            )
+            self.assertEqual(
+                final_snapshot.success_count,
+                1,
+                "Original bucket must record the final success outcome",
+            )
+            self.assertEqual(final_snapshot.error_count, 0)
+
+    async def test_db_timestamp_skew_across_hour_boundary_finalizes_in_original_bucket(
+        self,
+    ) -> None:
+        """When DB transaction start timestamp crosses an hour boundary (10:59:59.999 vs 11:00:00.001), final outcome remains in original bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Clock Skew WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            # App clock at pause: 10:59:59.999 (bucket: 10:00:00)
+            t_pause_app = datetime(2026, 4, 1, 10, 59, 59, 999000, tzinfo=timezone.utc)
+            # DB func.now() committed at: 11:00:00.001 (bucket: 11:00:00)
+            t_pause_db = datetime(2026, 4, 1, 11, 0, 0, 1000, tzinfo=timezone.utc)
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=60.0,
+                started_at=t_pause_app,
+            )
+
+            history_entry = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=60.0,
+                started_at=t_pause_app,
+                trigger_source="manual",
+            )
+            db.add(history_entry)
+            await db.flush()
+
+            hitl_req = HITLRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry.id,
+                public_token="token-clock-skew",
+                workflow_name=workflow.name,
+                agent_node_id="agent-1",
+                agent_label="Agent",
+                status="resolved",
+                decision="accepted",
+                created_at=t_pause_db,
+                expires_at=t_pause_db + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                    "analytics_bucket_time": t_pause_app.isoformat(),
+                },
+            )
+            db.add(hitl_req)
+            await db.commit()
+
+            resumed_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                outputs={"done": True},
+                execution_time_ms=110.0,
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    hitl_service, "resume_workflow_execution", return_value=resumed_result
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req.id)
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            snapshots = (await db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots), 1, "Must not create a separate bucket in hour 11")
+            self.assertEqual(
+                snapshots[0].bucket_start,
+                normalize_bucket_start(t_pause_app),
+                "Outcome must be recorded in hour 10 bucket",
+            )
+            self.assertEqual(snapshots[0].total_executions, 1)
+            self.assertEqual(snapshots[0].success_count, 1)
+
+    async def test_multiple_approval_pauses_with_error_outcome(self) -> None:
+        """When a multi-pause execution encounters an error on final resume, error_count is updated in original bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Multi-Pause Error WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t1_pause = datetime(2026, 4, 1, 9, 30, tzinfo=timezone.utc)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=40.0,
+                started_at=t1_pause,
+            )
+
+            history_entry = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=40.0,
+                started_at=t1_pause,
+                trigger_source="manual",
+            )
+            db.add(history_entry)
+            await db.flush()
+
+            t2_pause = datetime(2026, 4, 1, 14, 15, tzinfo=timezone.utc)
+            hitl_req = HITLRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry.id,
+                public_token="token-multi-err",
+                workflow_name=workflow.name,
+                agent_node_id="agent-1",
+                agent_label="Agent",
+                status="resolved",
+                decision="accepted",
+                created_at=t2_pause,
+                expires_at=t2_pause + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                    "analytics_bucket_time": t1_pause.isoformat(),
+                },
+            )
+            db.add(hitl_req)
+            await db.commit()
+
+            with (
+                patch.object(
+                    hitl_service,
+                    "resume_workflow_execution",
+                    side_effect=RuntimeError("Fatal execution failure"),
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req.id)
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            snapshots = (await db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots), 1)
+            self.assertEqual(snapshots[0].bucket_start, normalize_bucket_start(t1_pause))
+            self.assertEqual(snapshots[0].total_executions, 1)
+            self.assertEqual(snapshots[0].error_count, 1)
+            self.assertEqual(snapshots[0].success_count, 0)
+
+    async def test_legacy_pause_without_snapshot_bucket_time_with_hour_mismatch(
+        self,
+    ) -> None:
+        """A legacy pause (no analytics_bucket_time in snapshot) with DB created_at in next hour still resolves to pause bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Legacy Skew WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            # Pause bucket recorded at 10:00:00
+            t_pause = datetime(2026, 4, 1, 10, 59, 59, tzinfo=timezone.utc)
+            # PostgreSQL request timestamp recorded at 11:00:00
+            t_db = datetime(2026, 4, 1, 11, 0, 1, tzinfo=timezone.utc)
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t_pause,
+            )
+
+            history_entry = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t_pause,
+                trigger_source="manual",
+            )
+            db.add(history_entry)
+            await db.flush()
+
+            # Snapshot has NO analytics_bucket_time (legacy pre-upgrade)
+            hitl_req = HITLRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry.id,
+                public_token="token-legacy-skew",
+                workflow_name=workflow.name,
+                agent_node_id="agent-1",
+                agent_label="Agent",
+                status="resolved",
+                decision="accepted",
+                created_at=t_db,
+                expires_at=t_db + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                },
+            )
+            db.add(hitl_req)
+            await db.commit()
+
+            resumed_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                outputs={"done": True},
+                execution_time_ms=100.0,
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    hitl_service, "resume_workflow_execution", return_value=resumed_result
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req.id)
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            snapshots = (await db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots), 1)
+            self.assertEqual(snapshots[0].bucket_start, normalize_bucket_start(t_pause))
+            self.assertEqual(snapshots[0].total_executions, 1)
+            self.assertEqual(snapshots[0].success_count, 1)
 
 
 class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):

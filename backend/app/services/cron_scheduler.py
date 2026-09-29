@@ -259,6 +259,7 @@ class CronScheduler:
                     workflow_name_snapshot=workflow.name,
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
+                    started_at=getattr(history_entry, "started_at", None),
                 )
                 await db.commit()
                 logger.info(

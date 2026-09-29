@@ -128,12 +128,12 @@ async def upsert_workflow_analytics_snapshot(
         owner_id=owner_id,
         workflow_name_snapshot=snapshot_name,
         bucket_start=bucket_start,
-        total_executions=1,
+        total_executions=exec_increment,
         success_count=is_success,
         error_count=is_error,
-        latency_sample_count=has_latency,
-        total_latency_ms=latency,
-        max_latency_ms=latency,
+        latency_sample_count=latency_sample_increment,
+        total_latency_ms=latency_increment,
+        max_latency_ms=latency_increment,
         last_run_at=run_at,
     )
     stmt = stmt.on_conflict_do_update(
@@ -154,6 +154,82 @@ async def upsert_workflow_analytics_snapshot(
         },
     )
     await db.execute(stmt)
+
+
+async def resolve_execution_analytics_bucket(
+    db: AsyncSession,
+    *,
+    workflow_id: uuid.UUID | None,
+    owner_id: uuid.UUID | None,
+    candidate_time: datetime | None = None,
+    snapshot: dict | None = None,
+    history_started_at: datetime | None = None,
+    is_already_counted: bool = True,
+) -> datetime:
+    """Resolve the canonical, stable analytics bucket timestamp for an execution.
+
+    For executions that were already counted at pause time, the final outcome must
+    land in the EXACT bucket where the execution was originally counted, even across
+    multiple approval pauses, cross-hour resumes, or DB vs app clock mismatches.
+    """
+    if not is_already_counted:
+        return history_started_at or candidate_time or datetime.now(timezone.utc)
+
+    initial_time: datetime | None = None
+    if snapshot and isinstance(snapshot, dict):
+        raw = snapshot.get("analytics_bucket_time") or snapshot.get("analytics_bucket_start")
+        if raw:
+            if isinstance(raw, datetime):
+                initial_time = raw
+            elif isinstance(raw, str):
+                try:
+                    initial_time = datetime.fromisoformat(raw)
+                except (ValueError, TypeError):
+                    initial_time = None
+
+    if initial_time is None:
+        initial_time = history_started_at or candidate_time or datetime.now(timezone.utc)
+
+    if workflow_id is None:
+        return initial_time
+
+    def _to_utc(dt: datetime) -> datetime:
+        return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    target_bucket = normalize_bucket_start(initial_time)
+    t_utc = _to_utc(target_bucket)
+
+    where_clauses = [WorkflowAnalyticsSnapshot.workflow_id == workflow_id]
+    if owner_id is None:
+        where_clauses.append(WorkflowAnalyticsSnapshot.owner_id.is_(None))
+    else:
+        where_clauses.append(WorkflowAnalyticsSnapshot.owner_id == owner_id)
+    stmt = select(WorkflowAnalyticsSnapshot.bucket_start).where(*where_clauses)
+    raw_buckets = (await db.execute(stmt)).scalars().all()
+    bucket_map = {_to_utc(b): b for b in raw_buckets}
+
+    if t_utc in bucket_map:
+        return bucket_map[t_utc]
+
+    if bucket_map:
+        if candidate_time:
+            c_utc = _to_utc(normalize_bucket_start(candidate_time))
+            if c_utc in bucket_map:
+                return bucket_map[c_utc]
+
+        if history_started_at:
+            h_utc = _to_utc(normalize_bucket_start(history_started_at))
+            if h_utc in bucket_map:
+                return bucket_map[h_utc]
+
+        past_or_current = [b for b in bucket_map if b <= t_utc]
+        candidates = past_or_current if past_or_current else list(bucket_map.keys())
+
+        closest = min(candidates, key=lambda b: abs((b - t_utc).total_seconds()))
+        if abs((closest - t_utc).total_seconds()) <= 7200:
+            return bucket_map[closest]
+
+    return target_bucket
 
 
 def _bucket_by_size(dt: datetime, bucket_delta: timedelta) -> datetime:
