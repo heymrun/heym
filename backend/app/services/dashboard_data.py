@@ -70,6 +70,7 @@ async def _record_widget_execution(
                 workflow_name_snapshot=workflow.name,
                 status=result.status,
                 execution_time_ms=result.execution_time_ms,
+                started_at=getattr(paused_entry, "started_at", None),
             )
             return paused_entry
 

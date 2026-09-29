@@ -277,7 +277,7 @@ class HeymEventDispatcher:
                 return
 
             if needs_local_pending_persist(result):
-                await persist_pending_execution(
+                history_entry, _ = await persist_pending_execution(
                     db=db,
                     workflow=fresh_workflow,
                     enriched_inputs=inputs,
@@ -295,6 +295,7 @@ class HeymEventDispatcher:
                     workflow_name_snapshot=fresh_workflow.name,
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
+                    started_at=getattr(history_entry, "started_at", None),
                 )
                 await db.commit()
                 logger.info(

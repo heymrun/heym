@@ -290,17 +290,17 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
         trigger_source = snapshot.get("trigger_source")
         effective_trigger_source = trigger_source or history_entry.trigger_source
         is_already_counted = effective_trigger_source not in ("board", "portal")
-        analytics_bucket_time = await resolve_execution_analytics_bucket(
-            db,
-            workflow_id=workflow.id,
-            owner_id=workflow.owner_id,
-            candidate_time=followup.created_at,
-            snapshot=snapshot,
-            history_started_at=history_entry.started_at,
-            is_already_counted=is_already_counted,
-        )
-
         try:
+            analytics_bucket_time = await resolve_execution_analytics_bucket(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                candidate_time=followup.created_at,
+                snapshot=snapshot,
+                history_started_at=history_entry.started_at,
+                is_already_counted=is_already_counted,
+            )
+
             if not credentials_owner_value:
                 raise ValueError("Missing credentials_owner_id in Codex snapshot")
 
@@ -435,6 +435,10 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
             await db.commit()
             await _resume_board_chain(history_entry.id)
         except Exception as exc:
+            fallback_bucket = (
+                history_entry.started_at or followup.created_at or datetime.now(timezone.utc)
+            )
+            bucket_to_use = locals().get("analytics_bucket_time") or fallback_bucket
             followup.resume_error = str(exc)
             history_entry.status = "error"
             history_entry.outputs = {"error": str(exc)}
@@ -447,7 +451,7 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
                 workflow_name_snapshot=workflow.name,
                 status="error",
                 execution_time_ms=0.0,
-                started_at=analytics_bucket_time,
+                started_at=bucket_to_use,
                 count_execution=not is_already_counted,
             )
             await db.commit()

@@ -174,6 +174,7 @@ async def persist_pending_run_history(
             workflow_name_snapshot=workflow_name,
             status=result.status,
             execution_time_ms=result.execution_time_ms,
+            started_at=getattr(history_entry, "started_at", None),
         )
         await db.commit()
 

@@ -580,7 +580,7 @@ async def _dispatch_named_server_jsonrpc(
             )
 
             if needs_local_pending_persist(execution_result):
-                await persist_pending_execution(
+                history_entry, _ = await persist_pending_execution(
                     db=db,
                     workflow=target_workflow,
                     enriched_inputs=enriched_inputs,
@@ -598,6 +598,7 @@ async def _dispatch_named_server_jsonrpc(
                     workflow_name_snapshot=target_workflow.name,
                     status=execution_result.status,
                     execution_time_ms=execution_result.execution_time_ms,
+                    started_at=getattr(history_entry, "started_at", None),
                 )
                 await db.flush()
             # An offloaded run already wrote its history and analytics on the

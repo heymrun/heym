@@ -146,9 +146,11 @@ async def upsert_workflow_analytics_snapshot(
             "latency_sample_count": WorkflowAnalyticsSnapshot.latency_sample_count
             + latency_sample_increment,
             "total_latency_ms": WorkflowAnalyticsSnapshot.total_latency_ms + latency_increment,
-            "max_latency_ms": WorkflowAnalyticsSnapshot.max_latency_ms
-            if latency <= 0
-            else func.greatest(WorkflowAnalyticsSnapshot.max_latency_ms, latency),
+            "max_latency_ms": (
+                func.greatest(WorkflowAnalyticsSnapshot.max_latency_ms, latency)
+                if (count_execution and latency > 0)
+                else WorkflowAnalyticsSnapshot.max_latency_ms
+            ),
             "last_run_at": run_at,
             "updated_at": datetime.now(timezone.utc),
         },
@@ -176,19 +178,25 @@ async def resolve_execution_analytics_bucket(
         return history_started_at or candidate_time or datetime.now(timezone.utc)
 
     initial_time: datetime | None = None
+    has_snapshot_bucket = False
     if snapshot and isinstance(snapshot, dict):
         raw = snapshot.get("analytics_bucket_time") or snapshot.get("analytics_bucket_start")
         if raw:
             if isinstance(raw, datetime):
                 initial_time = raw
+                has_snapshot_bucket = True
             elif isinstance(raw, str):
                 try:
                     initial_time = datetime.fromisoformat(raw)
+                    has_snapshot_bucket = True
                 except (ValueError, TypeError):
                     initial_time = None
 
+    if initial_time is None and history_started_at is not None:
+        initial_time = history_started_at
+
     if initial_time is None:
-        initial_time = history_started_at or candidate_time or datetime.now(timezone.utc)
+        initial_time = candidate_time or datetime.now(timezone.utc)
 
     if workflow_id is None:
         return initial_time
@@ -211,6 +219,13 @@ async def resolve_execution_analytics_bucket(
     if t_utc in bucket_map:
         return bucket_map[t_utc]
 
+    # If the snapshot explicitly pinned an analytics bucket, trust that target bucket
+    # directly rather than searching for other buckets.
+    if has_snapshot_bucket:
+        return target_bucket
+
+    # Legacy fallback: when snapshot had no analytics_bucket_time, check candidate_time
+    # or history_started_at for an existing bucket.
     if bucket_map:
         if candidate_time:
             c_utc = _to_utc(normalize_bucket_start(candidate_time))
@@ -222,12 +237,13 @@ async def resolve_execution_analytics_bucket(
             if h_utc in bucket_map:
                 return bucket_map[h_utc]
 
-        past_or_current = [b for b in bucket_map if b <= t_utc]
-        candidates = past_or_current if past_or_current else list(bucket_map.keys())
-
-        closest = min(candidates, key=lambda b: abs((b - t_utc).total_seconds()))
-        if abs((closest - t_utc).total_seconds()) <= 7200:
-            return bucket_map[closest]
+        # Check adjacent hour (+1h / -1h)
+        next_hour = t_utc + timedelta(hours=1)
+        prev_hour = t_utc - timedelta(hours=1)
+        if next_hour in bucket_map and prev_hour not in bucket_map:
+            return bucket_map[next_hour]
+        if prev_hour in bucket_map and next_hour not in bucket_map:
+            return bucket_map[prev_hour]
 
     return target_bucket
 
