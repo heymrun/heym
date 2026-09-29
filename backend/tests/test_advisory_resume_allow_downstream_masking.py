@@ -1846,6 +1846,351 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(final_snapshot.error_count, 0)
 
+    async def test_new_run_multi_pause_across_transitions_preserves_canonical_bucket_on_error(
+        self,
+    ) -> None:
+        """New run with multiple approval pauses across hours records error in original pause bucket without double counting."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Multi-Pause Error WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t1_pause = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
+            pending_result_1 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=45.0,
+                outputs={"Agent": {"draft": "hello"}},
+                node_results=[],
+                pending_review={
+                    "summary": "First review",
+                    "draft_text": "hello",
+                    "agent_state": {},
+                    "resume_mode": "inject_output",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "agent-1",
+                    "paused_node_label": "Agent",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1"],
+                },
+            )
+
+            history_entry, hitl_req_1 = await hitl_service.persist_pending_hitl_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs={},
+                execution_result=pending_result_1,
+                trigger_source="manual",
+                credentials_owner_id=user.id,
+                trace_user_id=user.id,
+                public_base_url="http://test.local",
+            )
+            history_entry.started_at = t1_pause
+            hitl_req_1.execution_snapshot["analytics_bucket_time"] = t1_pause.isoformat()
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=pending_result_1.execution_time_ms,
+                started_at=history_entry.started_at,
+            )
+            await db.commit()
+
+            hitl_req_1.status = "resolved"
+            hitl_req_1.decision = "accepted"
+            await db.commit()
+
+            pending_result_2 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=90.0,
+                outputs={"Codex": {"question": "Need API key"}},
+                node_results=[],
+                pending_review={
+                    "kind": "codex",
+                    "summary": "Codex needs input",
+                    "question": "Need API key",
+                    "task_prompt": "prompt",
+                    "thread_id": "thread-1",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "codex-1",
+                    "paused_node_label": "Codex",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1", "codex-1"],
+                },
+            )
+
+            with (
+                patch.object(
+                    hitl_service, "resume_workflow_execution", return_value=pending_result_2
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req_1.id)
+
+            f_stmt = select(CodexFollowupRequest).where(
+                CodexFollowupRequest.workflow_id == workflow.id
+            )
+            followup = (await db.execute(f_stmt)).scalar_one()
+            self.assertEqual(
+                followup.execution_snapshot.get("analytics_bucket_time"),
+                t1_pause.isoformat(),
+            )
+
+            followup.status = "answered"
+            followup.answer_text = "api-key-value"
+            await db.commit()
+
+            final_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status="error",
+                execution_time_ms=180.0,
+                outputs={"error": "Agent execution failed"},
+                node_results=[],
+            )
+
+            with (
+                patch.object(
+                    codex_followup_service, "resume_workflow_execution", return_value=final_result
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await codex_followup_service.resume_codex_followup_in_background(followup.id)
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            async with async_session_maker() as verify_db:
+                snapshots_after = (await verify_db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots_after), 1)
+            final_snapshot = snapshots_after[0]
+            self.assertEqual(final_snapshot.bucket_start, normalize_bucket_start(t1_pause))
+            self.assertEqual(final_snapshot.total_executions, 1)
+            self.assertEqual(final_snapshot.success_count, 0)
+            self.assertEqual(final_snapshot.error_count, 1)
+
+    async def test_new_run_codex_to_hitl_multi_pause_preserves_canonical_bucket(
+        self,
+    ) -> None:
+        """New run pausing as Codex then HITL preserves original bucket on final completion."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Codex to HITL Multi-Pause WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t1_pause = datetime(2026, 4, 1, 10, 20, tzinfo=timezone.utc)
+            pending_result_1 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=40.0,
+                outputs={"Codex": {"question": "Need clarification"}},
+                node_results=[],
+                pending_review={
+                    "kind": "codex",
+                    "summary": "Codex needs input",
+                    "question": "Need clarification",
+                    "task_prompt": "prompt",
+                    "thread_id": "thread-codex-1",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "codex-1",
+                    "paused_node_label": "Codex",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["codex-1"],
+                },
+            )
+
+            (
+                history_entry,
+                followup_1,
+            ) = await codex_followup_service.persist_pending_codex_followup_execution(
+                db=db,
+                workflow=workflow,
+                enriched_inputs={},
+                execution_result=pending_result_1,
+                trigger_source="manual",
+                credentials_owner_id=user.id,
+                trace_user_id=user.id,
+                public_base_url="http://test.local",
+            )
+            history_entry.started_at = t1_pause
+            followup_1.execution_snapshot["analytics_bucket_time"] = t1_pause.isoformat()
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="pending",
+                execution_time_ms=pending_result_1.execution_time_ms,
+                started_at=history_entry.started_at,
+            )
+            await db.commit()
+
+            followup_1.status = "answered"
+            followup_1.answer_text = "clarified"
+            await db.commit()
+
+            pending_result_2 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=75.0,
+                outputs={"Agent": {"draft": "Draft for approval"}},
+                node_results=[],
+                pending_review={
+                    "kind": "hitl",
+                    "summary": "Human review",
+                    "draft_text": "Draft for approval",
+                    "agent_state": {},
+                    "resume_mode": "inject_output",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "agent-1",
+                    "paused_node_label": "Agent",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["codex-1", "agent-1"],
+                },
+            )
+
+            with (
+                patch.object(
+                    codex_followup_service,
+                    "resume_workflow_execution",
+                    return_value=pending_result_2,
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await codex_followup_service.resume_codex_followup_in_background(followup_1.id)
+
+            h_stmt = select(HITLRequest).where(HITLRequest.workflow_id == workflow.id)
+            hitl_req_2 = (await db.execute(h_stmt)).scalar_one()
+            self.assertEqual(
+                hitl_req_2.execution_snapshot.get("analytics_bucket_time"),
+                t1_pause.isoformat(),
+            )
+
+            hitl_req_2.status = "resolved"
+            hitl_req_2.decision = "accepted"
+            await db.commit()
+
+            final_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                execution_time_ms=160.0,
+                outputs={"result": "ok"},
+                node_results=[],
+            )
+
+            with (
+                patch.object(hitl_service, "resume_workflow_execution", return_value=final_result),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(hitl_req_2.id)
+
+            stmt = select(WorkflowAnalyticsSnapshot).where(
+                WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+            )
+            async with async_session_maker() as verify_db:
+                snapshots_after = (await verify_db.execute(stmt)).scalars().all()
+            self.assertEqual(len(snapshots_after), 1)
+            final_snapshot = snapshots_after[0]
+            self.assertEqual(final_snapshot.bucket_start, normalize_bucket_start(t1_pause))
+            self.assertEqual(final_snapshot.total_executions, 1)
+            self.assertEqual(final_snapshot.success_count, 1)
+            self.assertEqual(final_snapshot.error_count, 0)
+
     async def test_db_timestamp_skew_across_hour_boundary_finalizes_in_original_bucket(
         self,
     ) -> None:
@@ -3732,6 +4077,711 @@ class SingleAnalyticsCountAfterResumeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(bucket_11.total_executions, 1)
                 self.assertEqual(bucket_11.success_count, 1)
                 self.assertEqual(bucket_11.error_count, 0)
+
+    async def _run_legacy_multi_pause_transition_test(
+        self, first_kind: str, second_kind: str, final_status: str
+    ) -> None:
+        """Verify legacy executions preserve unknown-bucket state across a second pause and completion."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name=f"Legacy Multi-Pause {first_kind.upper()} to {second_kind.upper()} WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t_earlier = datetime(2026, 4, 1, 10, 15, tzinfo=timezone.utc)
+            t_legacy_pause = datetime(2026, 4, 1, 10, 45, tzinfo=timezone.utc)
+
+            # Earlier bucket at 10:00:00 already has 1 execution and 1 success from a separate run
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=100.0,
+                started_at=t_earlier,
+                count_execution=True,
+            )
+            await db.commit()
+
+            # Legacy paused run: NO analytics_bucket_time in execution_snapshot
+            history_entry = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=50.0,
+                started_at=t_legacy_pause,
+                trigger_source="manual",
+            )
+            db.add(history_entry)
+            await db.flush()
+
+            if first_kind == "hitl":
+                req_1 = HITLRequest(
+                    workflow_id=workflow.id,
+                    execution_history_id=history_entry.id,
+                    public_token=f"token-leg-p1-{uuid.uuid4()}",
+                    workflow_name=workflow.name,
+                    agent_node_id="agent-1",
+                    agent_label="Agent 1",
+                    status="resolved",
+                    decision="accepted",
+                    created_at=t_legacy_pause,
+                    expires_at=t_legacy_pause + timedelta(hours=24),
+                    execution_snapshot={
+                        "credentials_owner_id": str(user.id),
+                        "trigger_source": "manual",
+                    },
+                )
+            else:
+                req_1 = CodexFollowupRequest(
+                    workflow_id=workflow.id,
+                    execution_history_id=history_entry.id,
+                    public_token=f"token-leg-p1-{uuid.uuid4()}",
+                    workflow_name=workflow.name,
+                    codex_node_id="codex-1",
+                    codex_label="Codex 1",
+                    status="answered",
+                    answer_text="first answer",
+                    created_at=t_legacy_pause,
+                    expires_at=t_legacy_pause + timedelta(hours=24),
+                    execution_snapshot={
+                        "credentials_owner_id": str(user.id),
+                        "trigger_source": "manual",
+                    },
+                )
+            db.add(req_1)
+            await db.commit()
+
+            # First resume: pauses again at second node
+            if second_kind == "hitl":
+                pending_result_2 = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="pending",
+                    execution_time_ms=70.0,
+                    outputs={"Agent 2": {"draft": "draft-2"}},
+                    node_results=[],
+                    pending_review={
+                        "kind": "hitl",
+                        "summary": "Second HITL",
+                        "draft_text": "draft-2",
+                        "resume_mode": "inject_output",
+                    },
+                    resume_snapshot={
+                        "workflow_id": str(workflow.id),
+                        "workflow_name": workflow.name,
+                        "paused_node_id": "agent-2",
+                        "paused_node_label": "Agent 2",
+                        "nodes": [],
+                        "edges": [],
+                        "completed_nodes": ["node-1", "agent-2"],
+                    },
+                )
+            else:
+                pending_result_2 = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="pending",
+                    execution_time_ms=70.0,
+                    outputs={"Codex 2": {"question": "q-2"}},
+                    node_results=[],
+                    pending_review={
+                        "kind": "codex",
+                        "summary": "Second Codex",
+                        "question": "q-2",
+                        "task_prompt": "prompt-2",
+                        "thread_id": "t-2",
+                    },
+                    resume_snapshot={
+                        "workflow_id": str(workflow.id),
+                        "workflow_name": workflow.name,
+                        "paused_node_id": "codex-2",
+                        "paused_node_label": "Codex 2",
+                        "nodes": [],
+                        "edges": [],
+                        "completed_nodes": ["node-1", "codex-2"],
+                    },
+                )
+
+            resume_first = (
+                hitl_service.resume_hitl_request_in_background
+                if first_kind == "hitl"
+                else codex_followup_service.resume_codex_followup_in_background
+            )
+            service_first = hitl_service if first_kind == "hitl" else codex_followup_service
+
+            with (
+                patch.object(
+                    service_first, "resume_workflow_execution", return_value=pending_result_2
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(service_first, "_resume_board_chain", AsyncMock()),
+            ):
+                await resume_first(req_1.id)
+
+            # Query the newly minted second request row
+            if second_kind == "hitl":
+                stmt2 = (
+                    select(HITLRequest)
+                    .where(HITLRequest.workflow_id == workflow.id)
+                    .order_by(HITLRequest.created_at.desc())
+                )
+                req_2 = (await db.execute(stmt2)).scalars().first()
+                self.assertIsNotNone(req_2)
+                self.assertNotEqual(req_2.id, req_1.id)
+            else:
+                stmt2 = (
+                    select(CodexFollowupRequest)
+                    .where(CodexFollowupRequest.workflow_id == workflow.id)
+                    .order_by(CodexFollowupRequest.created_at.desc())
+                )
+                req_2 = (await db.execute(stmt2)).scalars().first()
+                self.assertIsNotNone(req_2)
+                if first_kind == "codex":
+                    self.assertNotEqual(req_2.id, req_1.id)
+
+            # The second pause snapshot MUST preserve the unknown-bucket state!
+            self.assertIsNone(
+                req_2.execution_snapshot.get("analytics_bucket_time"),
+                f"Second pause for {first_kind}->{second_kind} must not infer analytics_bucket_time",
+            )
+            self.assertIsNone(
+                req_2.execution_snapshot.get("analytics_bucket_start"),
+                f"Second pause for {first_kind}->{second_kind} must not set analytics_bucket_start",
+            )
+
+            # Resolve the second pause
+            if second_kind == "hitl":
+                req_2.status = "resolved"
+                req_2.decision = "accepted"
+            else:
+                req_2.status = "answered"
+                req_2.answer_text = "second answer"
+            await db.commit()
+
+            # Final execution result: completes with success or error
+            final_result = ExecutionResult(
+                workflow_id=workflow.id,
+                status=final_status,
+                execution_time_ms=110.0,
+                outputs={"done": True} if final_status == "success" else {"error": "failed"},
+                node_results=[],
+            )
+
+            resume_second = (
+                hitl_service.resume_hitl_request_in_background
+                if second_kind == "hitl"
+                else codex_followup_service.resume_codex_followup_in_background
+            )
+            service_second = hitl_service if second_kind == "hitl" else codex_followup_service
+
+            with (
+                patch.object(
+                    service_second, "resume_workflow_execution", return_value=final_result
+                ),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(service_second, "_resume_board_chain", AsyncMock()),
+            ):
+                await resume_second(req_2.id)
+
+            async with async_session_maker() as verify_db:
+                stmt_verify = select(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+                )
+                snapshots = (await verify_db.execute(stmt_verify)).scalars().all()
+                self.assertEqual(len(snapshots), 1)
+
+                # CRITICAL INVARIANT: The earlier bucket must NEVER be corrupted!
+                # It must remain exactly 1 execution, 1 success, 0 error!
+                # (Never 1 execution and 2 successes, never 1 execution and 1 error)
+                self.assertEqual(
+                    snapshots[0].total_executions,
+                    1,
+                    f"total_executions corrupted for {first_kind}->{second_kind} ({final_status})",
+                )
+                self.assertEqual(
+                    snapshots[0].success_count,
+                    1,
+                    f"success_count corrupted for {first_kind}->{second_kind} ({final_status})",
+                )
+                self.assertEqual(
+                    snapshots[0].error_count,
+                    0,
+                    f"error_count corrupted for {first_kind}->{second_kind} ({final_status})",
+                )
+
+                # The history entry itself correctly reflects the final status
+                updated_entry = await verify_db.get(ExecutionHistory, history_entry.id)
+                self.assertIsNotNone(updated_entry)
+                self.assertEqual(updated_entry.status, final_status)
+
+    async def test_legacy_hitl_to_hitl_multi_pause_preserves_analytics_on_success(self) -> None:
+        """Legacy HITL -> HITL multi-pause preserves analytics on final success."""
+        await self._run_legacy_multi_pause_transition_test("hitl", "hitl", "success")
+
+    async def test_legacy_hitl_to_hitl_multi_pause_preserves_analytics_on_error(self) -> None:
+        """Legacy HITL -> HITL multi-pause preserves analytics on final error."""
+        await self._run_legacy_multi_pause_transition_test("hitl", "hitl", "error")
+
+    async def test_legacy_hitl_to_codex_multi_pause_preserves_analytics_on_success(self) -> None:
+        """Legacy HITL -> Codex multi-pause preserves analytics on final success."""
+        await self._run_legacy_multi_pause_transition_test("hitl", "codex", "success")
+
+    async def test_legacy_hitl_to_codex_multi_pause_preserves_analytics_on_error(self) -> None:
+        """Legacy HITL -> Codex multi-pause preserves analytics on final error."""
+        await self._run_legacy_multi_pause_transition_test("hitl", "codex", "error")
+
+    async def test_legacy_codex_to_codex_multi_pause_preserves_analytics_on_success(self) -> None:
+        """Legacy Codex -> Codex multi-pause preserves analytics on final success."""
+        await self._run_legacy_multi_pause_transition_test("codex", "codex", "success")
+
+    async def test_legacy_codex_to_codex_multi_pause_preserves_analytics_on_error(self) -> None:
+        """Legacy Codex -> Codex multi-pause preserves analytics on final error."""
+        await self._run_legacy_multi_pause_transition_test("codex", "codex", "error")
+
+    async def test_legacy_codex_to_hitl_multi_pause_preserves_analytics_on_success(self) -> None:
+        """Legacy Codex -> HITL multi-pause preserves analytics on final success."""
+        await self._run_legacy_multi_pause_transition_test("codex", "hitl", "success")
+
+    async def test_legacy_codex_to_hitl_multi_pause_preserves_analytics_on_error(self) -> None:
+        """Legacy Codex -> HITL multi-pause preserves analytics on final error."""
+        await self._run_legacy_multi_pause_transition_test("codex", "hitl", "error")
+
+    async def test_legacy_three_pause_chain_preserves_unknown_bucket_and_analytics(self) -> None:
+        """Legacy run across three consecutive pauses (HITL -> Codex -> HITL) preserves unknown bucket."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            ExecutionHistory,
+            HITLRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        async with async_session_maker() as db:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"test-{uuid.uuid4()}@example.com",
+                hashed_password="pw",
+                name="Test User",
+            )
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name="Legacy Three Pause WF",
+                nodes=[],
+                edges=[],
+            )
+            self.users_to_clean.append(user.id)
+            self.workflows_to_clean.append(workflow.id)
+            db.add(user)
+            db.add(workflow)
+            await db.commit()
+
+            t_earlier = datetime(2026, 4, 1, 10, 10, tzinfo=timezone.utc)
+            t_pause1 = datetime(2026, 4, 1, 10, 40, tzinfo=timezone.utc)
+
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=user.id,
+                workflow_name_snapshot=workflow.name,
+                status="success",
+                execution_time_ms=80.0,
+                started_at=t_earlier,
+                count_execution=True,
+            )
+            await db.commit()
+
+            # Pause 1: Legacy HITL Request (no bucket timestamp)
+            history_entry = ExecutionHistory(
+                workflow_id=workflow.id,
+                inputs={},
+                outputs={},
+                node_results=[],
+                status="pending",
+                execution_time_ms=30.0,
+                started_at=t_pause1,
+                trigger_source="manual",
+            )
+            db.add(history_entry)
+            await db.flush()
+
+            req_1 = HITLRequest(
+                workflow_id=workflow.id,
+                execution_history_id=history_entry.id,
+                public_token=f"token-p1-{uuid.uuid4()}",
+                workflow_name=workflow.name,
+                agent_node_id="agent-1",
+                agent_label="Agent 1",
+                status="resolved",
+                decision="accepted",
+                created_at=t_pause1,
+                expires_at=t_pause1 + timedelta(hours=24),
+                execution_snapshot={
+                    "credentials_owner_id": str(user.id),
+                    "trigger_source": "manual",
+                },
+            )
+            db.add(req_1)
+            await db.commit()
+
+            # Resume 1 -> Pause 2: Codex
+            p2 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=50.0,
+                outputs={"Codex": {"q": "need input"}},
+                node_results=[],
+                pending_review={
+                    "kind": "codex",
+                    "summary": "Codex needs input",
+                    "question": "need input",
+                    "task_prompt": "prompt",
+                    "thread_id": "th-1",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "codex-1",
+                    "paused_node_label": "Codex",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1", "codex-1"],
+                },
+            )
+            with (
+                patch.object(hitl_service, "resume_workflow_execution", return_value=p2),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(req_1.id)
+
+            req_2 = (
+                (
+                    await db.execute(
+                        select(CodexFollowupRequest)
+                        .where(CodexFollowupRequest.workflow_id == workflow.id)
+                        .order_by(CodexFollowupRequest.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            self.assertIsNotNone(req_2)
+            self.assertIsNone(req_2.execution_snapshot.get("analytics_bucket_time"))
+            self.assertIsNone(req_2.execution_snapshot.get("analytics_bucket_start"))
+
+            req_2.status = "answered"
+            req_2.answer_text = "got input"
+            await db.commit()
+
+            # Resume 2 -> Pause 3: HITL again
+            p3 = ExecutionResult(
+                workflow_id=workflow.id,
+                status="pending",
+                execution_time_ms=80.0,
+                outputs={"Agent 3": {"summary": "Third pause"}},
+                node_results=[],
+                pending_review={
+                    "kind": "hitl",
+                    "summary": "Third pause review",
+                    "draft_text": "Draft 3",
+                    "resume_mode": "inject_output",
+                },
+                resume_snapshot={
+                    "workflow_id": str(workflow.id),
+                    "workflow_name": workflow.name,
+                    "paused_node_id": "agent-3",
+                    "paused_node_label": "Agent 3",
+                    "nodes": [],
+                    "edges": [],
+                    "completed_nodes": ["agent-1", "codex-1", "agent-3"],
+                },
+            )
+            with (
+                patch.object(codex_followup_service, "resume_workflow_execution", return_value=p3),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await codex_followup_service.resume_codex_followup_in_background(req_2.id)
+
+            req_3 = (
+                (
+                    await db.execute(
+                        select(HITLRequest)
+                        .where(HITLRequest.workflow_id == workflow.id)
+                        .order_by(HITLRequest.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            self.assertIsNotNone(req_3)
+            self.assertNotEqual(req_3.id, req_1.id)
+            self.assertIsNone(req_3.execution_snapshot.get("analytics_bucket_time"))
+            self.assertIsNone(req_3.execution_snapshot.get("analytics_bucket_start"))
+
+            req_3.status = "resolved"
+            req_3.decision = "accepted"
+            await db.commit()
+
+            # Resume 3 -> final completion (success)
+            final_res = ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                execution_time_ms=120.0,
+                outputs={"done": True},
+                node_results=[],
+            )
+            with (
+                patch.object(hitl_service, "resume_workflow_execution", return_value=final_res),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.services.global_variables_service.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+                patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+                patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+            ):
+                await hitl_service.resume_hitl_request_in_background(req_3.id)
+
+            async with async_session_maker() as verify_db:
+                stmt_verify = select(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+                )
+                snapshots = (await verify_db.execute(stmt_verify)).scalars().all()
+                self.assertEqual(len(snapshots), 1)
+                self.assertEqual(snapshots[0].total_executions, 1)
+                self.assertEqual(snapshots[0].success_count, 1)
+                self.assertEqual(snapshots[0].error_count, 0)
+
+    async def test_uncounted_board_and_portal_multi_pause_counted_exactly_once(self) -> None:
+        """Uncounted board and portal runs across multiple pauses are counted exactly once on completion."""
+        from sqlalchemy import select
+
+        from app.db.models import (
+            CodexFollowupRequest,
+            User,
+            Workflow,
+            WorkflowAnalyticsSnapshot,
+        )
+        from app.db.session import async_session_maker
+        from app.services import codex_followup_service, hitl_service
+
+        for trigger in ("board", "portal"):
+            async with async_session_maker() as db:
+                user = User(
+                    id=uuid.uuid4(),
+                    email=f"test-{uuid.uuid4()}@example.com",
+                    hashed_password="pw",
+                    name="Test User",
+                )
+                workflow = Workflow(
+                    id=uuid.uuid4(),
+                    owner_id=user.id,
+                    name=f"Uncounted {trigger.capitalize()} Multi-Pause WF",
+                    nodes=[],
+                    edges=[],
+                )
+                self.users_to_clean.append(user.id)
+                self.workflows_to_clean.append(workflow.id)
+                db.add(user)
+                db.add(workflow)
+                await db.commit()
+
+                t_pause1 = datetime(2026, 4, 1, 10, 10, tzinfo=timezone.utc)
+
+                # Board/portal execution pauses at 10:10 (NOT counted in analytics during pause)
+                p1_res = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="pending",
+                    execution_time_ms=30.0,
+                    outputs={"Agent": {"draft": "hello"}},
+                    node_results=[],
+                    pending_review={
+                        "summary": "Review",
+                        "draft_text": "hello",
+                        "resume_mode": "inject_output",
+                    },
+                    resume_snapshot={
+                        "workflow_id": str(workflow.id),
+                        "workflow_name": workflow.name,
+                        "paused_node_id": "agent-1",
+                        "paused_node_label": "Agent",
+                        "nodes": [],
+                        "edges": [],
+                        "completed_nodes": ["agent-1"],
+                    },
+                )
+                history_entry, hitl_req_1 = await hitl_service.persist_pending_hitl_execution(
+                    db=db,
+                    workflow=workflow,
+                    enriched_inputs={},
+                    execution_result=p1_res,
+                    trigger_source=trigger,
+                    credentials_owner_id=user.id,
+                    trace_user_id=user.id,
+                    public_base_url="http://test.local",
+                )
+                history_entry.started_at = t_pause1
+                await db.commit()
+
+                # Verify NO analytics row was written at pause time for board/portal
+                stmt = select(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.workflow_id == workflow.id
+                )
+                snapshots = (await db.execute(stmt)).scalars().all()
+                self.assertEqual(len(snapshots), 0)
+
+                # Resume 1 at 11:30 -> pauses again at Codex node
+                hitl_req_1.status = "resolved"
+                hitl_req_1.decision = "accepted"
+                await db.commit()
+
+                p2_res = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="pending",
+                    execution_time_ms=60.0,
+                    outputs={"Codex": {"question": "q"}},
+                    node_results=[],
+                    pending_review={
+                        "kind": "codex",
+                        "summary": "Codex needs input",
+                        "question": "q",
+                        "task_prompt": "prompt",
+                        "thread_id": "th-1",
+                    },
+                    resume_snapshot={
+                        "workflow_id": str(workflow.id),
+                        "workflow_name": workflow.name,
+                        "paused_node_id": "codex-1",
+                        "paused_node_label": "Codex",
+                        "nodes": [],
+                        "edges": [],
+                        "completed_nodes": ["agent-1", "codex-1"],
+                    },
+                )
+                with (
+                    patch.object(hitl_service, "resume_workflow_execution", return_value=p2_res),
+                    patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                    patch(
+                        "app.services.global_variables_service.get_global_variables_context",
+                        AsyncMock(return_value={}),
+                    ),
+                    patch(
+                        "app.api.workflows._persist_global_variables_from_execution", AsyncMock()
+                    ),
+                    patch.object(hitl_service, "_resume_board_chain", AsyncMock()),
+                ):
+                    await hitl_service.resume_hitl_request_in_background(hitl_req_1.id)
+
+                # Still NO analytics row written after second pause
+                snapshots = (await db.execute(stmt)).scalars().all()
+                self.assertEqual(len(snapshots), 0)
+
+                followup = (
+                    await db.execute(
+                        select(CodexFollowupRequest).where(
+                            CodexFollowupRequest.workflow_id == workflow.id
+                        )
+                    )
+                ).scalar_one()
+
+                # Resume 2 at 13:00 -> completes!
+                followup.status = "answered"
+                followup.answer_text = "ans"
+                await db.commit()
+
+                is_success = trigger == "board"
+                final_status = "success" if is_success else "error"
+                final_res = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status=final_status,
+                    execution_time_ms=100.0,
+                    outputs={"done": True} if is_success else {"error": "failed"},
+                    node_results=[],
+                )
+                with (
+                    patch.object(
+                        codex_followup_service, "resume_workflow_execution", return_value=final_res
+                    ),
+                    patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                    patch(
+                        "app.services.global_variables_service.get_global_variables_context",
+                        AsyncMock(return_value={}),
+                    ),
+                    patch(
+                        "app.api.workflows._persist_global_variables_from_execution", AsyncMock()
+                    ),
+                    patch.object(codex_followup_service, "_resume_board_chain", AsyncMock()),
+                ):
+                    await codex_followup_service.resume_codex_followup_in_background(followup.id)
+
+                # Now on final completion: COUNTED EXACTLY ONCE!
+                async with async_session_maker() as verify_db:
+                    snapshots = (await verify_db.execute(stmt)).scalars().all()
+                    self.assertEqual(len(snapshots), 1)
+                    self.assertEqual(snapshots[0].total_executions, 1)
+                    if is_success:
+                        self.assertEqual(snapshots[0].success_count, 1)
+                        self.assertEqual(snapshots[0].error_count, 0)
+                    else:
+                        self.assertEqual(snapshots[0].success_count, 0)
+                        self.assertEqual(snapshots[0].error_count, 1)
+                    self.assertEqual(snapshots[0].bucket_start, normalize_bucket_start(t_pause1))
 
 
 class DownstreamGlobalPersistenceTimingTests(unittest.TestCase):

@@ -236,6 +236,9 @@ async def persist_pending_hitl_execution(
             execution_result.pending_review.get("approved_tool_call")
         )
 
+    has_known_bucket = bool(
+        snapshot.get("analytics_bucket_time") or snapshot.get("analytics_bucket_start")
+    )
     if history_entry is None:
         first_pause_at = datetime.now(timezone.utc)
         history_entry = ExecutionHistory(
@@ -250,17 +253,48 @@ async def persist_pending_hitl_execution(
             started_at=first_pause_at,
         )
         db.add(history_entry)
-    elif history_entry.started_at is None:
-        history_entry.started_at = datetime.now(timezone.utc)
-
-    bucket_time_str = (
-        snapshot.get("analytics_bucket_time")
-        or (history_entry.started_at.isoformat() if history_entry.started_at else None)
-        or datetime.now(timezone.utc).isoformat()
-    )
-    snapshot["analytics_bucket_time"] = bucket_time_str
-    if isinstance(execution_result.resume_snapshot, dict):
-        execution_result.resume_snapshot["analytics_bucket_time"] = bucket_time_str
+        bucket_time_raw = (
+            snapshot.get("analytics_bucket_time")
+            or snapshot.get("analytics_bucket_start")
+            or first_pause_at.isoformat()
+        )
+        bucket_time_str = (
+            bucket_time_raw
+            if isinstance(bucket_time_raw, str)
+            else (
+                bucket_time_raw.isoformat()
+                if hasattr(bucket_time_raw, "isoformat")
+                else str(bucket_time_raw)
+            )
+        )
+        snapshot["analytics_bucket_time"] = bucket_time_str
+        if isinstance(execution_result.resume_snapshot, dict):
+            execution_result.resume_snapshot["analytics_bucket_time"] = bucket_time_str
+    else:
+        if history_entry.started_at is None:
+            history_entry.started_at = datetime.now(timezone.utc)
+        if has_known_bucket:
+            bucket_time_raw = snapshot.get("analytics_bucket_time") or snapshot.get(
+                "analytics_bucket_start"
+            )
+            bucket_time_str = (
+                bucket_time_raw
+                if isinstance(bucket_time_raw, str)
+                else (
+                    bucket_time_raw.isoformat()
+                    if hasattr(bucket_time_raw, "isoformat")
+                    else str(bucket_time_raw)
+                )
+            )
+            snapshot["analytics_bucket_time"] = bucket_time_str
+            if isinstance(execution_result.resume_snapshot, dict):
+                execution_result.resume_snapshot["analytics_bucket_time"] = bucket_time_str
+        else:
+            snapshot.pop("analytics_bucket_time", None)
+            snapshot.pop("analytics_bucket_start", None)
+            if isinstance(execution_result.resume_snapshot, dict):
+                execution_result.resume_snapshot.pop("analytics_bucket_time", None)
+                execution_result.resume_snapshot.pop("analytics_bucket_start", None)
 
     history_entry.status = "pending"
     history_entry.inputs = enriched_inputs
@@ -327,6 +361,9 @@ async def persist_pending_hitl_execution(
         ):
             if key in snapshot:
                 merged_snapshot[key] = copy.deepcopy(snapshot[key])
+            elif key == "analytics_bucket_time":
+                merged_snapshot.pop(key, None)
+        merged_snapshot.pop("analytics_bucket_start", None)
         execution_result.resume_snapshot = merged_snapshot
         hitl_request.execution_snapshot = copy.deepcopy(merged_snapshot)
     execution_result.execution_time_ms += float(
@@ -427,12 +464,16 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
                             "analytics_bucket_time"
                         ]
                     elif (
-                        history_entry.started_at
+                        "analytics_bucket_start" in snapshot
+                        and "analytics_bucket_start" not in resumed_result.resume_snapshot
                         and "analytics_bucket_time" not in resumed_result.resume_snapshot
                     ):
-                        resumed_result.resume_snapshot["analytics_bucket_time"] = (
-                            history_entry.started_at.isoformat()
-                        )
+                        resumed_result.resume_snapshot["analytics_bucket_start"] = snapshot[
+                            "analytics_bucket_start"
+                        ]
+                    else:
+                        resumed_result.resume_snapshot.pop("analytics_bucket_time", None)
+                        resumed_result.resume_snapshot.pop("analytics_bucket_start", None)
 
                 from app.services.codex_followup_service import (
                     is_codex_pending_execution,
