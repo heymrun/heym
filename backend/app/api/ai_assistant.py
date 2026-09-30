@@ -138,7 +138,11 @@ from app.services.workflow_dsl_prompt import (
     build_assistant_prompt,
     is_dashboard_widget_workflow,
 )
-from app.services.workflow_executor import WorkflowCancelledError, execute_workflow
+from app.services.workflow_executor import (
+    WorkflowCancelledError,
+    _to_json_compatible,
+    execute_workflow,
+)
 from app.services.workflow_run_history_tool import get_workflow_run_history
 
 router = APIRouter()
@@ -2506,35 +2510,6 @@ async def run_execute_workflow_tool(
                 trigger_source=trigger_source,
             )
             db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=workflow.id,
-                owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-            )
-            execution_result.analytics_recorded = True
-            for sub_exec in execution_result.sub_workflow_executions:
-                sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
-                )
-                db.add(sub_history)
-                sub_exec.history_written = True
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                )
             if execution_result.allow_downstream_pending:
                 await db.commit()
                 _spawn_detached_task(
@@ -2550,6 +2525,35 @@ async def run_execute_workflow_tool(
                     )
                 )
             else:
+                await upsert_workflow_analytics_snapshot(
+                    db,
+                    workflow_id=workflow.id,
+                    owner_id=workflow.owner_id,
+                    workflow_name_snapshot=workflow.name,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                )
+                execution_result.analytics_recorded = True
+                for sub_exec in execution_result.sub_workflow_executions:
+                    sub_history = ExecutionHistory(
+                        workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
+                        inputs=_to_json_compatible(sub_exec.inputs),
+                        outputs=_to_json_compatible(sub_exec.outputs),
+                        node_results=_to_json_compatible(sub_exec.node_results),
+                        status=sub_exec.status,
+                        execution_time_ms=sub_exec.execution_time_ms,
+                        trigger_source=sub_exec.trigger_source,
+                    )
+                    db.add(sub_history)
+                    sub_exec.history_written = True
+                    await upsert_workflow_analytics_snapshot(
+                        db,
+                        workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
+                        owner_id=None,
+                        workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                        status=sub_exec.status,
+                        execution_time_ms=sub_exec.execution_time_ms,
+                    )
                 await _persist_global_variables_from_execution(
                     db,
                     user_id,
@@ -2664,7 +2668,12 @@ async def resolve_hitl_review_tool(
                         pass
 
         if codex_followup is not None or (
-            review_url and ("/codex/" in review_url or "/answer/" in review_url)
+            review_url
+            and (
+                "/codex/followup/" in review_url
+                or review_url.rstrip("/").endswith("/codex/followup")
+                or "/codex/" in review_url
+            )
         ):
             return json.dumps(
                 {

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.api.ai_assistant import (
     _extract_pending_hitl_review_payload,
     _extract_pending_review_from_candidate,
+    _sanitize_tool_result_for_llm,
     resolve_hitl_review_tool,
     run_execute_workflow_tool,
 )
@@ -21,7 +22,7 @@ from app.db.models import (
     Workflow,
     WorkflowAnalyticsSnapshot,
 )
-from app.db.session import async_session_maker
+from app.db.session import async_session_maker, engine
 from app.services.global_variables_service import get_global_variables_context
 from app.services.workflow_executor import ExecutionResult, SubWorkflowExecution
 
@@ -191,7 +192,7 @@ class RunExecuteWorkflowToolRobustnessTests(unittest.IsolatedAsyncioTestCase):
                 "Codex": {
                     "status": "needs_input",
                     "question": "Which branch?",
-                    "answerUrl": "http://localhost/answer/tok",
+                    "answerUrl": "http://localhost/codex/followup/tok",
                 }
             },
             node_results=[{"node_id": "c1", "node_type": "codex", "status": "pending"}],
@@ -238,7 +239,9 @@ class RunExecuteWorkflowToolRobustnessTests(unittest.IsolatedAsyncioTestCase):
         mock_hitl_only.assert_not_awaited()
         data = json.loads(result)
         self.assertIsNotNone(data.get("pending_review"))
-        self.assertEqual(data["pending_review"]["answer_url"], "http://localhost/answer/tok")
+        self.assertEqual(
+            data["pending_review"]["answer_url"], "http://localhost/codex/followup/tok"
+        )
         self.assertEqual(data["pending_review"]["question"], "Which branch?")
         self.assertEqual(data["pending_review"]["kind"], "codex")
         self.assertNotIn("review_url", data["pending_review"])
@@ -520,7 +523,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
             "status": "needs_input",
             "summary": "Codex needs input to continue.",
             "question": "Which GitHub repo should be used?",
-            "answerUrl": "http://localhost:3000/codex/answer/sample-token",
+            "answerUrl": "http://localhost:3000/codex/followup/sample-token",
             "requestId": "11111111-1111-1111-1111-111111111111",
             "expiresAt": "2026-10-01T00:00:00Z",
         }
@@ -529,7 +532,9 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extracted["kind"], "codex")
         self.assertEqual(extracted["type"], "codex")
         self.assertEqual(extracted["question"], "Which GitHub repo should be used?")
-        self.assertEqual(extracted["answer_url"], "http://localhost:3000/codex/answer/sample-token")
+        self.assertEqual(
+            extracted["answer_url"], "http://localhost:3000/codex/followup/sample-token"
+        )
         self.assertEqual(extracted["summary"], "Codex needs input to continue.")
         self.assertEqual(extracted["request_id"], "11111111-1111-1111-1111-111111111111")
         # Ensure no draft_text or review_url are synthesized
@@ -567,7 +572,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
                     "type": "codex",
                     "summary": "Codex needs input",
                     "question": "Which environment?",
-                    "answer_url": "http://localhost:3000/codex/answer/token-123",
+                    "answer_url": "http://localhost:3000/codex/followup/token-123",
                 },
             }
         )
@@ -581,7 +586,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
                     "CodexNode": {
                         "status": "needs_input",
                         "question": "Which environment?",
-                        "answerUrl": "http://localhost:3000/codex/answer/token-123",
+                        "answerUrl": "http://localhost:3000/codex/followup/token-123",
                     }
                 },
             }
@@ -642,7 +647,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Codex follow-up", res["error"])
         self.assertIn("answer link", res["error"])
 
-    async def test_resolve_hitl_review_tool_rejects_codex_answer_url(self) -> None:
+    async def test_resolve_hitl_review_tool_rejects_codex_followup_url(self) -> None:
         user_id = uuid.uuid4()
         db = AsyncMock()
         mock_db_res = MagicMock()
@@ -653,7 +658,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
                 user_id=user_id,
                 action="accept",
-                review_url="http://localhost:3000/codex/answer/codex-token-abc",
+                review_url="http://localhost:3000/codex/followup/codex-token-abc",
             )
         res = json.loads(res_str)
         self.assertEqual(res["status"], "error")
@@ -769,6 +774,7 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             await db.execute(delete(Workflow).where(Workflow.id.in_(self.cleanup_workflow_ids)))
             await db.execute(delete(User).where(User.id.in_(self.cleanup_user_ids)))
             await db.commit()
+        await engine.dispose()
 
     async def test_allow_downstream_visibility_and_exact_once_postgres(self) -> None:
         """PostgreSQL test: Session 1 executes workflow and commits.
@@ -893,6 +899,8 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 1,
                 "Parent workflow executions must be counted exactly once",
             )
+            self.assertEqual(parent_analytics.success_count, 1)
+            self.assertEqual(parent_analytics.error_count, 0)
 
             # 4. Analytics for sub-workflow must be recorded EXACTLY ONCE
             sub_analytics = (
@@ -907,3 +915,205 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 1,
                 "Sub-workflow executions must be counted exactly once",
             )
+            self.assertEqual(sub_analytics.success_count, 1)
+            self.assertEqual(sub_analytics.error_count, 0)
+
+    async def test_allow_downstream_error_status_and_analytics_postgres(self) -> None:
+        """Downstream error regression:
+        Foreground returns success and commits history row.
+        Downstream background work fails -> final history status is error,
+        total_executions is 1, error_count is 1, success_count is 0."""
+        downstream_error_node = {
+            "node_id": "downstream_fail_node",
+            "node_label": "HTTP Request Downstream",
+            "status": "error",
+            "error": "Downstream endpoint 500 Internal Server Error",
+            "execution_time_ms": 50.0,
+        }
+
+        join_called = False
+
+        def mock_join_with_error():
+            nonlocal join_called
+            join_called = True
+            execution_result.node_results.append(downstream_error_node)
+            execution_result.status = "error"
+            execution_result.execution_time_ms = 180.0
+
+        execution_result = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "fast_response"},
+            node_results=[
+                {"node_id": "n1", "status": "success", "output": {"initial": "fast_response"}}
+            ],
+            execution_time_ms=30.0,
+        )
+        execution_result._allow_downstream_pending = [MagicMock()]
+        execution_result.join_allow_downstream = mock_join_with_error
+
+        spawned_coros = []
+
+        # Session 1: run_execute_workflow_tool
+        async with async_session_maker() as session_1:
+            with (
+                patch(
+                    "app.api.ai_assistant._spawn_detached_task", side_effect=spawned_coros.append
+                ),
+                patch(
+                    "app.api.ai_assistant.execute_workflow",
+                    MagicMock(return_value=execution_result),
+                ),
+            ):
+                tool_res_str = await run_execute_workflow_tool(
+                    db=session_1,
+                    user_id=self.user_id,
+                    workflow_id_str=str(self.workflow_id),
+                    inputs={},
+                    public_base_url="http://localhost:3000",
+                )
+
+        tool_res = json.loads(tool_res_str)
+        self.assertEqual(tool_res["status"], "success")
+        history_id = uuid.UUID(tool_res["execution_history_id"])
+
+        # Session 2: history row exists and is committed in PostgreSQL
+        async with async_session_maker() as verify_session:
+            history_in_db = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(history_in_db.status, "success")
+
+        # Run the detached finalizer task
+        self.assertEqual(len(spawned_coros), 1)
+        await spawned_coros[0]
+        self.assertTrue(join_called)
+
+        # Session 3: verify downstream error state in PostgreSQL
+        async with async_session_maker() as verify_session:
+            history_final = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                history_final.status,
+                "error",
+                "Final history status must be updated to 'error' when downstream fails",
+            )
+            self.assertEqual(history_final.execution_time_ms, 180.0)
+
+            # Analytics snapshot must record total_executions=1, error_count=1, success_count=0
+            parent_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                parent_analytics.total_executions,
+                1,
+                "Total executions must be exactly 1 despite downstream failure",
+            )
+            self.assertEqual(
+                parent_analytics.error_count,
+                1,
+                "Error count must be incremented to 1",
+            )
+            self.assertEqual(
+                parent_analytics.success_count,
+                0,
+                "Success count must NOT be incremented for a failed downstream execution",
+            )
+
+
+class DashboardChatCodexVsHitlPipelineTests(unittest.TestCase):
+    """Trace Codex vs HITL pauses through the actual chat pipeline:
+    _sanitize_tool_result_for_llm, _extract_pending_hitl_review_payload, and LLM tool message content."""
+
+    def test_codex_pause_pipeline_propagation(self) -> None:
+        codex_tool_output = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(uuid.uuid4()),
+                "workflow_name": "Codex Workflow",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "codex",
+                    "type": "codex",
+                    "summary": "Codex needs input to choose database branch",
+                    "question": "Which database branch should be migrated?",
+                    "answer_url": "http://localhost:3000/codex/followup/codex-token-xyz",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+
+        # 1. Pipeline sanitization for LLM tool round
+        sanitized = _sanitize_tool_result_for_llm(codex_tool_output, "execute_workflow")
+        llm_context = json.loads(sanitized)
+        self.assertEqual(llm_context["status"], "pending")
+        self.assertIn("pending_review", llm_context)
+        self.assertEqual(llm_context["pending_review"]["kind"], "codex")
+        self.assertEqual(
+            llm_context["pending_review"]["question"],
+            "Which database branch should be migrated?",
+        )
+        self.assertEqual(
+            llm_context["pending_review"]["answer_url"],
+            "http://localhost:3000/codex/followup/codex-token-xyz",
+        )
+
+        # 2. UI SSE event extraction suppresses Codex from emitting HITL approval card
+        hitl_card_payload = _extract_pending_hitl_review_payload(codex_tool_output)
+        self.assertIsNone(
+            hitl_card_payload,
+            "Codex pauses must never produce a HITL approval card in chat stream",
+        )
+
+    def test_hitl_pause_pipeline_propagation(self) -> None:
+        hitl_tool_output = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(uuid.uuid4()),
+                "workflow_name": "HITL Workflow",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "hitl",
+                    "type": "hitl",
+                    "summary": "Review and approve sending customer invoice",
+                    "draft_text": "Invoice #1042 for $500",
+                    "review_url": "http://localhost:3000/hitl/review/hitl-token-abc",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+
+        # 1. Pipeline sanitization for LLM tool round
+        sanitized = _sanitize_tool_result_for_llm(hitl_tool_output, "execute_workflow")
+        llm_context = json.loads(sanitized)
+        self.assertEqual(llm_context["status"], "pending")
+        self.assertEqual(llm_context["pending_review"]["kind"], "hitl")
+
+        # 2. UI SSE event extraction emits HITL approval card
+        hitl_card_payload = _extract_pending_hitl_review_payload(hitl_tool_output)
+        self.assertIsNotNone(
+            hitl_card_payload,
+            "HITL pauses must produce a HITL approval card in chat stream",
+        )
+        self.assertEqual(hitl_card_payload["kind"], "hitl")
+        self.assertEqual(
+            hitl_card_payload["review_url"],
+            "http://localhost:3000/hitl/review/hitl-token-abc",
+        )
+        self.assertEqual(
+            hitl_card_payload["draft_text"],
+            "Invoice #1042 for $500",
+        )

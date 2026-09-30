@@ -481,6 +481,13 @@ async def _finalize_allow_downstream_history(
     """Persist output allowDownstream work after the API response has returned."""
     try:
         await asyncio.to_thread(execution_result.join_allow_downstream)
+        if any(
+            isinstance(node_result, dict)
+            and node_result.get("status") == "error"
+            and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
+            for node_result in (getattr(execution_result, "node_results", None) or [])
+        ):
+            execution_result.status = "error"
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
                 select(ExecutionHistory).where(ExecutionHistory.id == history_entry_id)
@@ -581,16 +588,6 @@ async def _finalize_allow_downstream_history(
                     execution_time_ms=execution_result.execution_time_ms,
                 )
                 execution_result.analytics_recorded = True
-            elif execution_result.status == "error":
-                await upsert_workflow_analytics_snapshot(
-                    bg_db,
-                    workflow_id=workflow_id,
-                    owner_id=owner_id,
-                    workflow_name_snapshot=workflow_name,
-                    status="error",
-                    execution_time_ms=execution_result.execution_time_ms,
-                    count_execution=False,
-                )
             await bg_db.commit()
     except Exception:
         logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
@@ -3301,15 +3298,16 @@ async def execute_workflow_endpoint(
             trigger_source=trigger_source,
         )
         db.add(history_entry)
-        await upsert_workflow_analytics_snapshot(
-            db,
-            workflow_id=workflow.id,
-            owner_id=workflow.owner_id,
-            workflow_name_snapshot=workflow.name,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-        )
-        execution_result.analytics_recorded = True
+        if not execution_result.allow_downstream_pending:
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                workflow_name_snapshot=workflow.name,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+            )
+            execution_result.analytics_recorded = True
         await db.flush()
         # The error workflow hook moved to dispatch_workflow, which sees offloaded
         # runs too and is shared with every other trigger.

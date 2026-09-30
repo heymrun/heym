@@ -1772,6 +1772,19 @@ class ExecutionResult:
                 existing_ids.add(result.node_id)
         if self._started_at:
             self.execution_time_ms = (time.time() - self._started_at) * 1000
+        if any(
+            (
+                getattr(r, "status", None) == "error"
+                and getattr(r, "metadata", {}).get("retry_stage") != "attempt_failed"
+            )
+            for r in self._allow_downstream_node_results
+        ) or any(
+            isinstance(item, dict)
+            and item.get("status") == "error"
+            and item.get("metadata", {}).get("retry_stage") != "attempt_failed"
+            for item in self.node_results
+        ):
+            self.status = "error"
 
 
 #: Terminal mappers: sinks whose output replaces the wrapped per-label response shape.
@@ -1940,6 +1953,7 @@ def _serialize_sub_workflow_executions(
             "node_results": _to_json_compatible(execution.node_results),
             "workflow_name": execution.workflow_name,
             "trigger_source": execution.trigger_source,
+            "history_written": getattr(execution, "history_written", False),
         }
         for execution in executions
     ]
@@ -1960,6 +1974,7 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
                 node_results=execution.get("node_results") or [],
                 workflow_name=execution.get("workflow_name", ""),
                 trigger_source=execution.get("trigger_source", "SUB_WORKFLOW"),
+                history_written=bool(execution.get("history_written", False)),
             )
         )
     return restored
