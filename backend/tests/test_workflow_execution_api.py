@@ -297,6 +297,14 @@ class RunExecuteWorkflowToolActorForwardingTests(unittest.IsolatedAsyncioTestCas
                 AsyncMock(return_value={}),
             ),
             patch(
+                "app.api.ai_assistant.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.api.ai_assistant._persist_global_variables_from_execution",
+                AsyncMock(),
+            ),
+            patch(
                 "app.api.ai_assistant.upsert_workflow_analytics_snapshot",
                 AsyncMock(),
             ),
@@ -344,6 +352,8 @@ class RunExecuteWorkflowToolTriggerSourceTests(unittest.IsolatedAsyncioTestCase)
                 AsyncMock(return_value={}),
             ),
             patch("app.api.ai_assistant.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.ai_assistant.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.ai_assistant._persist_global_variables_from_execution", AsyncMock()),
             patch("app.api.ai_assistant.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch(
                 "app.api.ai_assistant.execute_workflow",

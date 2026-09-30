@@ -26,6 +26,9 @@ from app.api.data_tables import create_data_table as create_data_table_route
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
 from app.api.workflows import (
+    _finalize_allow_downstream_history,
+    _persist_global_variables_from_execution,
+    _spawn_detached_task,
     collect_referenced_workflows,
     extract_input_fields_from_workflow,
     extract_output_node_from_workflow,
@@ -102,13 +105,13 @@ from app.services.generated_data_tables import (
     parse_data_table_choices,
     requires_data_table_payload,
 )
+from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import (
     build_hitl_resolved_output,
     build_public_base_url,
     claim_hitl_request_for_decision,
     ensure_hitl_request_is_actionable,
     get_hitl_request_by_token,
-    persist_pending_hitl_execution,
     refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
@@ -120,6 +123,7 @@ from app.services.model_router import (
     load_option_credential,
 )
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
+from app.services.pending_execution import persist_pending_execution
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
 from app.services.ssrf_guard import SsrfBlockedError
@@ -2437,6 +2441,7 @@ async def run_execute_workflow_tool(
 
     workflow_cache = await collect_referenced_workflows(db, workflow.nodes, actor_user_id=user_id)
     credentials_context = await get_credentials_context(db, user_id)
+    global_variables_context = await get_global_variables_context(db, user_id)
 
     enriched_inputs = {
         "headers": {},
@@ -2454,14 +2459,16 @@ async def run_execute_workflow_tool(
             workflow_cache=workflow_cache,
             test_run=False,
             credentials_context=credentials_context,
+            global_variables_context=global_variables_context,
             trace_user_id=user_id,
             actor_user_id=user_id,
             cancel_event=cancel_event,
             llm_session_id=llm_session_id,
         )
+
         history_entry_id: str | None = None
         if execution_result.status == "pending":
-            history_entry, _ = await persist_pending_hitl_execution(
+            history_entry, _ = await persist_pending_execution(
                 db=db,
                 workflow=workflow,
                 enriched_inputs=enriched_inputs,
@@ -2518,6 +2525,28 @@ async def run_execute_workflow_tool(
                     workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
                     status=sub_exec.status,
                     execution_time_ms=sub_exec.execution_time_ms,
+                )
+            if execution_result.allow_downstream_pending:
+                _spawn_detached_task(
+                    _finalize_allow_downstream_history(
+                        history_entry_id=history_entry.id,
+                        workflow_id=workflow.id,
+                        workflow_name=workflow.name,
+                        owner_id=workflow.owner_id,
+                        credentials_owner_id=user_id,
+                        workflow_nodes=copy.deepcopy(workflow.nodes),
+                        workflow_cache=copy.deepcopy(workflow_cache),
+                        execution_result=execution_result,
+                    )
+                )
+            else:
+                await _persist_global_variables_from_execution(
+                    db,
+                    user_id,
+                    workflow.nodes,
+                    workflow_cache,
+                    execution_result.node_results,
+                    execution_result.sub_workflow_executions,
                 )
             await db.flush()
             history_entry_id = str(history_entry.id)
@@ -2961,13 +2990,13 @@ def _extract_pending_review_from_candidate(candidate: Any) -> dict[str, str] | N
     if not isinstance(candidate, dict):
         return None
 
-    review_url = str(candidate.get("reviewUrl") or "").strip()
+    review_url = str(candidate.get("reviewUrl") or candidate.get("answerUrl") or "").strip()
     if not review_url:
         return None
 
     payload: dict[str, str] = {
         "summary": str(candidate.get("summary") or "").strip(),
-        "draft_text": str(candidate.get("draftText") or "").strip(),
+        "draft_text": str(candidate.get("draftText") or candidate.get("question") or "").strip(),
         "review_url": review_url,
     }
     request_id = str(candidate.get("requestId") or "").strip()
