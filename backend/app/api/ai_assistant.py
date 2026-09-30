@@ -43,6 +43,7 @@ from app.db.models import (
     BoardCardActivity,
     BoardCardRun,
     BoardColumn,
+    CodexFollowupRequest,
     Credential,
     CredentialType,
     ExecutionHistory,
@@ -68,6 +69,7 @@ from app.services.assistant_yolo import (
     stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
+from app.services.codex_followup_service import get_codex_followup_by_token
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import (
     CredentialPromptMode,
@@ -469,10 +471,12 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. For a specific task/card (what it is, its description, the comments/conversation on it, what happened, its output or error), use get_card_detail with the card_id from get_board_tasks. Answer from the results in the user's language; do not execute workflows for these questions.
 6c. When the user naturally asks to add or create a kanban task/card, use create_board_task; this is a board action, not a request to create a workflow, and no command prefix is needed. Pass the user's requested title and optional description. If the user clearly names a board, call list_boards first to resolve its exact board_id. If no board is specified, call create_board_task without board_id: it will create the task when there is exactly one board, or return requires_board_selection with the available boards when there are several. For requires_board_selection, emit one heym-clarify question of type single whose options are the returned board names, then stop and wait. After the user selects a board, call list_boards again to resolve the selected name to its board_id, then call create_board_task exactly once. If a named board is missing or ambiguous, use the same single-choice board selection. Never ask which column to use: create_board_task always places the task in the first column.
 6d. When the user asks what is running right now (e.g. "what is running?", "how many workflows are active?", "is anything still going?", "which node is it on?", "how long has it been running?"), use get_active_executions. It takes no arguments and returns count, running_count, pending_count, and one entry per in-progress run with workflow_name, running_for (human-readable elapsed time), current_nodes (the node or nodes executing right now), last_completed_node, and url. Answer with the count first, then one line per run: workflow name, how long it has been running, the current node label, and the url as a markdown link. If count is 0, say plainly that nothing is running right now. Entries with status "pending" are not executing; they are waiting for human review (pending_kind hitl or codex), so say that instead of reporting them as running. Do not use get_recent_executions for this question: that tool lists finished runs.
-7. When a workflow is waiting for human review and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation.
+7. When a workflow is waiting for human review (HITL review, with review_url or kind "hitl") and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation. Never call resolve_hitl_review for Codex follow-up pauses (with answer_url or kind "codex"): Codex questions cannot be resolved via resolve_hitl_review.
 8. When the user asks you to wait, monitor, or check again for a workflow that is still running or pending, use wait_for_execution_update instead of repeatedly polling yourself. Default to 5 seconds between checks and at most 5 checks unless the user explicitly asks otherwise.
-9. If execute_workflow or wait_for_execution_update returns a pending workflow with review details, explain that pending state in the same language as the user, include the review link as a markdown link, briefly summarize the blocked step, and show the three direct chat reply options: approve, edit: ..., and reject.
-10. Never say you cannot approve, edit, reject, or continue a pending workflow from chat when resolve_hitl_review can handle it. If a recent assistant message contains a review link, you can reuse that link to resolve the review on the next user turn.
+9. If execute_workflow or wait_for_execution_update returns a pending workflow:
+   - For HITL human review pauses (kind "hitl", with review_url): explain the pending review state in the user's language, include the review link as a markdown link, briefly summarize the blocked draft or step, and show the three direct chat reply options: approve, edit: ..., and reject.
+   - For Codex follow-up pauses (kind "codex", with answer_url): explain that Codex needs user input to continue, quote the question asked by Codex, direct the user to the answer link (answer_url) as a markdown link to provide the answer or continue, and do NOT show approve/edit/reject options.
+10. Never say you cannot approve, edit, reject, or continue a pending HITL workflow from chat when resolve_hitl_review can handle it. If a recent assistant message contains a review link, you can reuse that link to resolve the review on the next user turn. For Codex pauses, always direct the user to the Codex answer link instead.
 
 CRITICAL - Workflow-first behavior: You receive a list of available workflows at the start. When the user asks for ANY information (sports, weather, news, match schedules, birthdays, etc.), FIRST check if a workflow can answer. Match user intent to workflow names and descriptions (e.g. "when is the next match" / "Fenerbahce match" -> workflow named "Fenerbahce next match" or similar; "weather" -> weather workflow). If a workflow matches, call execute_workflow immediately with appropriate inputs (often empty {} for workflows with no required inputs). NEVER say "I don't have access" without first checking workflows—many questions can be answered by running a workflow.
 
@@ -482,7 +486,7 @@ Research-before-create behavior: Before calling create_workflow for a new automa
 
 Heym-only creation behavior: Do not recommend alternative platforms, external automation products, separate app/server setups, custom scripts outside Heym, or platform-external workarounds. When the user wants something built, configured, automated, or generated, stay inside Heym: use existing workflows, Heym DSL, and the AI Builder DSL generator via create_workflow or edit_workflow. If the request cannot be completed with available Heym capabilities, say that clearly and explain the closest Heym-native option.
 
-Respond in the same language the user uses. Be concise and helpful. When you run a workflow, summarize the result for the user. When a workflow is pending human review, your reply must include the review link and the direct chat options to approve, edit, or reject.
+Respond in the same language the user uses. Be concise and helpful. When you run a workflow, summarize the result for the user. When a workflow is pending human review (HITL), your reply must include the review link and the direct chat options to approve, edit, or reject. When a workflow is pending a Codex follow-up, your reply must include the Codex answer link and question, directing the user to answer via the link.
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
@@ -619,7 +623,7 @@ DASHBOARD_CHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "resolve_hitl_review",
-            "description": "Approve, edit, or refuse a pending Human-in-the-Loop review for a workflow run. Use this when the user says to approve, continue, edit, or reject a workflow that is waiting for human review.",
+            "description": "Approve, edit, or refuse a pending Human-in-the-Loop review for a workflow run. Use this when the user says to approve, continue, edit, or reject a workflow that is waiting for human review. Do NOT use for Codex follow-up questions (Codex questions must be answered via their answer link).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2488,8 +2492,11 @@ async def run_execute_workflow_tool(
                 execution_time_ms=execution_result.execution_time_ms,
                 started_at=getattr(history_entry, "started_at", None),
             )
+            execution_result.analytics_recorded = True
         else:
+            history_id = uuid.uuid4()
             history_entry = ExecutionHistory(
+                id=history_id,
                 workflow_id=workflow.id,
                 inputs=enriched_inputs,
                 outputs=execution_result.outputs,
@@ -2507,6 +2514,7 @@ async def run_execute_workflow_tool(
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
             )
+            execution_result.analytics_recorded = True
             for sub_exec in execution_result.sub_workflow_executions:
                 sub_history = ExecutionHistory(
                     workflow_id=uuid.UUID(sub_exec.workflow_id),
@@ -2518,6 +2526,7 @@ async def run_execute_workflow_tool(
                     trigger_source=sub_exec.trigger_source,
                 )
                 db.add(sub_history)
+                sub_exec.history_written = True
                 await upsert_workflow_analytics_snapshot(
                     db,
                     workflow_id=uuid.UUID(sub_exec.workflow_id),
@@ -2527,9 +2536,10 @@ async def run_execute_workflow_tool(
                     execution_time_ms=sub_exec.execution_time_ms,
                 )
             if execution_result.allow_downstream_pending:
+                await db.commit()
                 _spawn_detached_task(
                     _finalize_allow_downstream_history(
-                        history_entry_id=history_entry.id,
+                        history_entry_id=history_id,
                         workflow_id=workflow.id,
                         workflow_name=workflow.name,
                         owner_id=workflow.owner_id,
@@ -2548,8 +2558,8 @@ async def run_execute_workflow_tool(
                     execution_result.node_results,
                     execution_result.sub_workflow_executions,
                 )
-            await db.flush()
-            history_entry_id = str(history_entry.id)
+                await db.flush()
+            history_entry_id = str(history_id)
 
         def _nr_to_dict(r: Any) -> dict:
             if isinstance(r, dict):
@@ -2622,6 +2632,50 @@ async def resolve_hitl_review_tool(
         )
 
     if hitl_request is None:
+        codex_followup: CodexFollowupRequest | None = None
+        if request_id:
+            try:
+                request_uuid = uuid.UUID(request_id)
+                res = await db.execute(
+                    select(CodexFollowupRequest).where(CodexFollowupRequest.id == request_uuid)
+                )
+                codex_followup = res.scalar_one_or_none()
+            except ValueError:
+                res = await db.execute(
+                    select(CodexFollowupRequest).where(
+                        CodexFollowupRequest.public_token == request_id
+                    )
+                )
+                codex_followup = res.scalar_one_or_none()
+        elif review_url:
+            token = urlparse(review_url).path.rstrip("/").split("/")[-1].strip()
+            if token:
+                codex_followup = await get_codex_followup_by_token(db, token)
+                if codex_followup is None:
+                    try:
+                        token_uuid = uuid.UUID(token)
+                        res = await db.execute(
+                            select(CodexFollowupRequest).where(
+                                CodexFollowupRequest.id == token_uuid
+                            )
+                        )
+                        codex_followup = res.scalar_one_or_none()
+                    except ValueError:
+                        pass
+
+        if codex_followup is not None or (
+            review_url and ("/codex/" in review_url or "/answer/" in review_url)
+        ):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": (
+                        "This identifier belongs to a Codex follow-up question, not a human-in-the-loop review. "
+                        "Codex follow-ups cannot be resolved as an approval; please answer the question via the provided answer link."
+                    ),
+                }
+            )
+
         return json.dumps({"status": "error", "error": "Review request not found"})
 
     workflow = await get_workflow_for_user(db, hitl_request.workflow_id, user_id)
@@ -2990,17 +3044,46 @@ def _extract_pending_review_from_candidate(candidate: Any) -> dict[str, str] | N
     if not isinstance(candidate, dict):
         return None
 
-    review_url = str(candidate.get("reviewUrl") or candidate.get("answerUrl") or "").strip()
+    # Check if candidate represents a Codex pause
+    is_codex = (
+        candidate.get("kind") == "codex"
+        or candidate.get("type") == "codex"
+        or candidate.get("status") == "needs_input"
+        or bool(candidate.get("answerUrl") or candidate.get("answer_url"))
+    )
+
+    if is_codex:
+        answer_url = str(candidate.get("answerUrl") or candidate.get("answer_url") or "").strip()
+        if not answer_url:
+            return None
+        payload: dict[str, str] = {
+            "kind": "codex",
+            "type": "codex",
+            "summary": str(candidate.get("summary") or "").strip(),
+            "question": str(candidate.get("question") or "").strip(),
+            "answer_url": answer_url,
+        }
+        request_id = str(candidate.get("requestId") or candidate.get("request_id") or "").strip()
+        expires_at = str(candidate.get("expiresAt") or candidate.get("expires_at") or "").strip()
+        if request_id:
+            payload["request_id"] = request_id
+        if expires_at:
+            payload["expires_at"] = expires_at
+        return payload
+
+    review_url = str(candidate.get("reviewUrl") or candidate.get("review_url") or "").strip()
     if not review_url:
         return None
 
     payload: dict[str, str] = {
+        "kind": "hitl",
+        "type": "hitl",
         "summary": str(candidate.get("summary") or "").strip(),
-        "draft_text": str(candidate.get("draftText") or candidate.get("question") or "").strip(),
+        "draft_text": str(candidate.get("draftText") or candidate.get("draft_text") or "").strip(),
         "review_url": review_url,
     }
-    request_id = str(candidate.get("requestId") or "").strip()
-    expires_at = str(candidate.get("expiresAt") or "").strip()
+    request_id = str(candidate.get("requestId") or candidate.get("request_id") or "").strip()
+    expires_at = str(candidate.get("expiresAt") or candidate.get("expires_at") or "").strip()
 
     if request_id:
         payload["request_id"] = request_id
@@ -3078,11 +3161,24 @@ def _extract_pending_hitl_review_payload(result_json: str) -> dict[str, str] | N
 
     top_level_pending = data.get("pending_review")
     if isinstance(top_level_pending, dict):
-        review_url = str(top_level_pending.get("review_url") or "").strip()
+        if (
+            top_level_pending.get("kind") == "codex"
+            or top_level_pending.get("type") == "codex"
+            or bool(top_level_pending.get("answer_url") or top_level_pending.get("answerUrl"))
+        ):
+            return None
+
+        review_url = str(
+            top_level_pending.get("review_url") or top_level_pending.get("reviewUrl") or ""
+        ).strip()
         if review_url:
             return {
+                "kind": "hitl",
+                "type": "hitl",
                 "summary": str(top_level_pending.get("summary") or "").strip(),
-                "draft_text": str(top_level_pending.get("draft_text") or "").strip(),
+                "draft_text": str(
+                    top_level_pending.get("draft_text") or top_level_pending.get("draftText") or ""
+                ).strip(),
                 "review_url": review_url,
             }
 
@@ -3091,6 +3187,8 @@ def _extract_pending_hitl_review_payload(result_json: str) -> dict[str, str] | N
         for value in outputs.values():
             payload = _extract_pending_review_from_candidate(value)
             if payload:
+                if payload.get("kind") == "codex" or payload.get("type") == "codex":
+                    return None
                 return payload
 
     node_results = data.get("node_results") or []
@@ -3100,6 +3198,8 @@ def _extract_pending_hitl_review_payload(result_json: str) -> dict[str, str] | N
                 continue
             payload = _extract_pending_review_from_candidate(node_result.get("output"))
             if payload:
+                if payload.get("kind") == "codex" or payload.get("type") == "codex":
+                    return None
                 return payload
 
     return None

@@ -495,24 +495,73 @@ async def _finalize_allow_downstream_history(
                 flag_modified(history_entry, "node_results")
 
             for sub_exec in execution_result.sub_workflow_executions:
+                if getattr(sub_exec, "history_written", False):
+                    continue
+                if isinstance(sub_exec, dict) and sub_exec.get("history_written"):
+                    continue
+                sw_id = getattr(sub_exec, "workflow_id", None) or (
+                    sub_exec.get("workflow_id") if isinstance(sub_exec, dict) else None
+                )
+                if not sw_id:
+                    continue
+                inputs = (
+                    getattr(sub_exec, "inputs", {})
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("inputs", {})
+                )
+                outputs = (
+                    getattr(sub_exec, "outputs", {})
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("outputs", {})
+                )
+                node_results = (
+                    getattr(sub_exec, "node_results", [])
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("node_results", [])
+                )
+                st = (
+                    getattr(sub_exec, "status", "success")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("status", "success")
+                )
+                exec_ms = (
+                    getattr(sub_exec, "execution_time_ms", 0.0)
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("execution_time_ms", 0.0)
+                )
+                trig = (
+                    getattr(sub_exec, "trigger_source", "SUB_WORKFLOW")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("trigger_source", "SUB_WORKFLOW")
+                )
+                wf_name = (
+                    getattr(sub_exec, "workflow_name", "")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("workflow_name", "")
+                )
+
                 sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=_to_json_compatible(sub_exec.inputs),
-                    outputs=_to_json_compatible(sub_exec.outputs),
-                    node_results=_to_json_compatible(sub_exec.node_results),
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
+                    workflow_id=uuid.UUID(str(sw_id)),
+                    inputs=_to_json_compatible(inputs),
+                    outputs=_to_json_compatible(outputs),
+                    node_results=_to_json_compatible(node_results),
+                    status=st,
+                    execution_time_ms=exec_ms,
+                    trigger_source=trig,
                 )
                 bg_db.add(sub_history)
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    workflow_id=uuid.UUID(str(sw_id)),
                     owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
+                    workflow_name_snapshot=wf_name or "Sub-workflow",
+                    status=st,
+                    execution_time_ms=exec_ms,
                 )
+                if hasattr(sub_exec, "history_written"):
+                    sub_exec.history_written = True
+                elif isinstance(sub_exec, dict):
+                    sub_exec["history_written"] = True
 
             await _persist_global_variables_from_execution(
                 bg_db,
@@ -522,17 +571,29 @@ async def _finalize_allow_downstream_history(
                 _to_json_compatible(execution_result.node_results),
                 execution_result.sub_workflow_executions,
             )
-            await upsert_workflow_analytics_snapshot(
-                bg_db,
-                workflow_id=workflow_id,
-                owner_id=owner_id,
-                workflow_name_snapshot=workflow_name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-            )
+            if not getattr(execution_result, "analytics_recorded", False):
+                await upsert_workflow_analytics_snapshot(
+                    bg_db,
+                    workflow_id=workflow_id,
+                    owner_id=owner_id,
+                    workflow_name_snapshot=workflow_name,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                )
+                execution_result.analytics_recorded = True
+            elif execution_result.status == "error":
+                await upsert_workflow_analytics_snapshot(
+                    bg_db,
+                    workflow_id=workflow_id,
+                    owner_id=owner_id,
+                    workflow_name_snapshot=workflow_name,
+                    status="error",
+                    execution_time_ms=execution_result.execution_time_ms,
+                    count_execution=False,
+                )
             await bg_db.commit()
     except Exception:
-        pass
+        logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
 
 
 logger = logging.getLogger(__name__)
@@ -3248,6 +3309,7 @@ async def execute_workflow_endpoint(
             status=execution_result.status,
             execution_time_ms=execution_result.execution_time_ms,
         )
+        execution_result.analytics_recorded = True
         await db.flush()
         # The error workflow hook moved to dispatch_workflow, which sees offloaded
         # runs too and is shared with every other trigger.
@@ -3304,6 +3366,7 @@ async def execute_workflow_endpoint(
                 trigger_source=sub_exec.trigger_source,
             )
             db.add(sub_history)
+            sub_exec.history_written = True
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=uuid.UUID(sub_exec.workflow_id),

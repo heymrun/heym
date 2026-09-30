@@ -1722,6 +1722,7 @@ class SubWorkflowExecution:
     node_results: list = field(default_factory=list)
     workflow_name: str = ""
     trigger_source: str = "SUB_WORKFLOW"
+    history_written: bool = False
 
 
 @dataclass
@@ -1734,6 +1735,7 @@ class ExecutionResult:
     sub_workflow_executions: list[SubWorkflowExecution] = field(default_factory=list)
     pending_review: dict | None = None
     resume_snapshot: dict | None = None
+    analytics_recorded: bool = False
     # (future, done_event, wf_id, wf_name, inputs_snapshot) tuples for executeDoNotWait nodes.
     # Not serialized / not written to DB directly; drained by the API layer.
     _bg_pending: list = field(default_factory=list)
