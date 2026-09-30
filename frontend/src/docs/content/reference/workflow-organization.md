@@ -54,6 +54,8 @@ Changing any of these as a non-owner is rejected with `403`:
 
 Authentication is the reason the block is owner-only: `Anonymous` lets unauthenticated callers run the workflow, and a run with no signed-in caller resolves credentials and global variables as the **owner**, not the caller. The rest of the block is the published request contract and the owner's cost controls, so it moves with it.
 
+**On error, run workflow** (`error_workflow_id`) in the workflow-level **Properties** panel is owner-only for the same reason: the [error workflow](./features.md#error-workflow) runs with the failed run's credentials and global variables, which are the owner's for triggered and anonymous runs. Collaborators see the setting read-only, and adding, replacing, or clearing it as a non-owner is rejected with `403`.
+
 Editing the canvas, name, and description is unaffected.
 
 ### Execution tokens

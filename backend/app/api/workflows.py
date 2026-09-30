@@ -1471,6 +1471,9 @@ def _reject_stale_update(workflow: Workflow, base_updated_at: datetime | None) -
 # reaches this workflow and what it costs the owner. An anonymous run borrows the
 # owner's credential and global-variable context, so this whole block is the owner's
 # boundary to set rather than shared canvas state (GHSA-5939-m9jm-7gf5).
+# The error workflow runs with the failed run's context, which is the owner's for
+# anonymous and triggered runs, so a collaborator pointing it at a workflow they own
+# would run their own nodes as the owner (GHSA-c3f4-2mrj-jfqr).
 OWNER_ONLY_EXECUTION_FIELDS = (
     "auth_type",
     "auth_header_key",
@@ -1481,6 +1484,7 @@ OWNER_ONLY_EXECUTION_FIELDS = (
     "rate_limit_window_seconds",
     "sse_enabled",
     "sse_node_config",
+    "error_workflow_id",
 )
 
 
@@ -1499,6 +1503,9 @@ def _normalized_execution_value(field: str, value: Any) -> Any:
     # what it was given must not look like a change against the stored NULL.
     if field in ("auth_header_key", "sse_node_config"):
         return value or None
+    # Empty UUID (all-zeros) is how a client clears the error workflow.
+    if field == "error_workflow_id":
+        return None if value == uuid.UUID(int=0) else value
     return value
 
 
@@ -1507,7 +1514,7 @@ def _reject_non_owner_auth_change(
     workflow_data: WorkflowUpdate,
     user_id: uuid.UUID,
 ) -> None:
-    """Refuse a collaborator's change to the public execution configuration.
+    """Refuse a collaborator's change to the owner-only execution configuration.
 
     A shared collaborator reaches this workflow through ``get_workflow_for_user``, which
     accepts direct and team shares alike. Downgrading ``auth_type`` to ``anonymous`` would
@@ -1624,7 +1631,12 @@ async def update_workflow(
         workflow.sse_node_config = sanitized_sse_node_config
     if workflow_data.auto_recover_runs is not None:
         workflow.auto_recover_runs = workflow_data.auto_recover_runs
-    if workflow_data.error_workflow_id is not None:
+    # Echoing the stored value is a no-op, so it is not looked up again as the caller: a
+    # collaborator usually cannot open the owner's error workflow.
+    if workflow_data.error_workflow_id is not None and (
+        _normalized_execution_value("error_workflow_id", workflow_data.error_workflow_id)
+        != workflow.error_workflow_id
+    ):
         # Empty UUID (all-zeros) clears the setting; a workflow cannot target itself.
         if workflow_data.error_workflow_id == uuid.UUID(int=0):
             workflow.error_workflow_id = None
