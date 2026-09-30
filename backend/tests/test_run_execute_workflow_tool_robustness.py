@@ -1830,6 +1830,368 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 "No analytics snapshot must be created when parent history is missing",
             )
 
+    async def test_finalizer_second_run_afterward_skips_idempotently(
+        self,
+    ) -> None:
+        """When a first finalizer succeeds, a second finalizer running afterward with an independent
+        ExecutionResult must detect the database completion marker and exit without double-counting."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"run": "seq"},
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            status="success",
+            execution_time_ms=20.0,
+            started_at=datetime.now(timezone.utc),
+            executed_by_instance_name="WorkerNodeAlpha",
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        sub_id = str(uuid.uuid4())
+        sub_exec_1 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Sequential Sub WF",
+            status="success",
+            execution_time_ms=40.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"in": 1},
+            outputs={"out": 2},
+            node_results=[],
+            execution_id=sub_id,
+        )
+
+        def mock_join_1():
+            exec_res_1.outputs["downstream"] = "done"
+            exec_res_1.execution_time_ms = 110.0
+
+        exec_res_1 = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            execution_time_ms=20.0,
+            sub_workflow_executions=[sub_exec_1],
+        )
+        exec_res_1._allow_downstream_pending = [MagicMock()]
+        exec_res_1.join_allow_downstream = mock_join_1
+
+        # Run First Finalizer -> Succeeds
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res_1,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Sequential Parent WF",
+        )
+
+        # Verify first finalizer committed completion marker and did NOT corrupt executed_by_instance_name
+        async with async_session_maker() as verify_session_1:
+            p_hist = (
+                await verify_session_1.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                p_hist.executed_by_instance_name,
+                "WorkerNodeAlpha",
+                "executed_by_instance_name must remain untouched and uncorrupted",
+            )
+            has_marker = any(
+                isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+                for nr in (p_hist.node_results or [])
+            )
+            self.assertTrue(
+                has_marker, "Finalized node_results must contain _downstream_finalized marker"
+            )
+
+            parent_snap = (
+                await verify_session_1.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(parent_snap.total_executions, 1)
+
+            sub_snap = (
+                await verify_session_1.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(sub_snap.total_executions, 1)
+
+        # Run Second Finalizer afterward with an independent object graph
+        sub_exec_2 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Sequential Sub WF",
+            status="success",
+            execution_time_ms=40.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"in": 1},
+            outputs={"out": 2},
+            node_results=[],
+            execution_id=sub_id,
+        )
+
+        def mock_join_2():
+            exec_res_2.outputs["downstream"] = "done_2"
+            exec_res_2.execution_time_ms = 110.0
+
+        exec_res_2 = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            execution_time_ms=20.0,
+            sub_workflow_executions=[sub_exec_2],
+        )
+        exec_res_2._allow_downstream_pending = [MagicMock()]
+        exec_res_2.join_allow_downstream = mock_join_2
+        self.assertFalse(exec_res_2.analytics_recorded)
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res_2,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Sequential Parent WF",
+        )
+
+        # Verify second finalizer observed the completion marker and skipped without double-counting
+        async with async_session_maker() as verify_session_2:
+            p_hist_2 = (
+                await verify_session_2.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(p_hist_2.executed_by_instance_name, "WorkerNodeAlpha")
+
+            parent_snap_2 = (
+                await verify_session_2.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                parent_snap_2.total_executions,
+                1,
+                "Second sequential finalizer must not double-count parent analytics",
+            )
+
+            sub_snap_2 = (
+                await verify_session_2.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                sub_snap_2.total_executions,
+                1,
+                "Second sequential finalizer must not double-count sub-workflow analytics",
+            )
+
+            sub_histories_count = (
+                (
+                    await verify_session_2.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == self.sub_workflow_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(sub_histories_count), 1)
+
+    async def test_finalizer_rollback_before_completion_allows_retry_to_succeed(
+        self,
+    ) -> None:
+        """When a first finalizer encounters an error and rolls back before commit, it must not leave
+        durable or in-memory finalized markers, allowing a subsequent finalizer retry to succeed."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"run": "rollback_test"},
+            outputs={"initial": "raw"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            status="success",
+            execution_time_ms=15.0,
+            started_at=datetime.now(timezone.utc),
+            executed_by_instance_name="WorkerNodeBeta",
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        sub_id = str(uuid.uuid4())
+        sub_exec = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Rollback Sub WF",
+            status="success",
+            execution_time_ms=30.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"attempt": 1},
+            outputs={"result": 100},
+            node_results=[],
+            execution_id=sub_id,
+        )
+
+        def mock_join():
+            exec_res.outputs["downstream"] = "recovered"
+            exec_res.execution_time_ms = 85.0
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "raw"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            execution_time_ms=15.0,
+            sub_workflow_executions=[sub_exec],
+        )
+        exec_res._allow_downstream_pending = [MagicMock()]
+        exec_res.join_allow_downstream = mock_join
+
+        # Attempt 1: Inject failure right before commit inside _persist_global_variables_from_execution
+        with patch(
+            "app.api.workflows._persist_global_variables_from_execution",
+            side_effect=RuntimeError("Simulated DB failure before commit"),
+        ):
+            await _finalize_allow_downstream_history(
+                history_entry_id=history_id,
+                execution_result=exec_res,
+                credentials_owner_id=self.user_id,
+                workflow_nodes=[],
+                workflow_cache={},
+                workflow_id=self.workflow_id,
+                owner_id=self.user_id,
+                workflow_name="Rollback Parent WF",
+            )
+
+        # In-memory flags MUST remain False because commit was not reached
+        self.assertFalse(
+            exec_res.analytics_recorded, "analytics_recorded must remain False on rollback"
+        )
+        self.assertFalse(sub_exec.history_written, "history_written must remain False on rollback")
+
+        # Database state MUST have rolled back cleanly
+        async with async_session_maker() as check_session:
+            parent_in_db = (
+                await check_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            has_marker = any(
+                isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+                for nr in (parent_in_db.node_results or [])
+            )
+            self.assertFalse(
+                has_marker, "Database must NOT have _downstream_finalized marker after rollback"
+            )
+            self.assertEqual(parent_in_db.executed_by_instance_name, "WorkerNodeBeta")
+
+            sub_in_db = (
+                await check_session.execute(
+                    select(ExecutionHistory).where(
+                        ExecutionHistory.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(
+                sub_in_db, "Sub-workflow history must NOT be persisted after rollback"
+            )
+
+            snap_in_db = (
+                await check_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(snap_in_db, "Analytics snapshot must NOT be persisted after rollback")
+
+        # Attempt 2: Retry finalization without failure -> Must succeed completely
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Rollback Parent WF",
+        )
+
+        # In-memory flags are now marked True post-commit
+        self.assertTrue(
+            exec_res.analytics_recorded, "analytics_recorded must be True after successful retry"
+        )
+        self.assertTrue(
+            sub_exec.history_written, "history_written must be True after successful retry"
+        )
+
+        # Database state now reflects successful finalization
+        async with async_session_maker() as verify_session:
+            final_parent = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            has_marker_retry = any(
+                isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+                for nr in (final_parent.node_results or [])
+            )
+            self.assertTrue(has_marker_retry, "Retry must persist _downstream_finalized marker")
+            self.assertEqual(final_parent.executed_by_instance_name, "WorkerNodeBeta")
+            self.assertEqual(final_parent.outputs.get("downstream"), "recovered")
+            self.assertEqual(final_parent.execution_time_ms, 85.0)
+
+            final_sub = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(
+                        ExecutionHistory.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(final_sub.inputs, {"attempt": 1})
+            self.assertEqual(final_sub.outputs, {"result": 100})
+
+            final_parent_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(final_parent_snap.total_executions, 1)
+
+            final_sub_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(final_sub_snap.total_executions, 1)
+
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:

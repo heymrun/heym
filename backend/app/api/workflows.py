@@ -502,10 +502,7 @@ async def _finalize_allow_downstream_history(
                 )
                 return
 
-            is_already_finalized = bool(
-                history_entry.executed_by_instance_name
-                and ":downstream_finalized" in history_entry.executed_by_instance_name
-            ) or any(
+            is_already_finalized = any(
                 isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
                 for nr in (history_entry.node_results or [])
             )
@@ -517,18 +514,22 @@ async def _finalize_allow_downstream_history(
                 return
 
             node_results_json = _to_json_compatible(execution_result.node_results)
-            if isinstance(node_results_json, list):
+            marked = False
+            if isinstance(node_results_json, list) and node_results_json:
                 for nr in node_results_json:
                     if isinstance(nr, dict):
                         nr.setdefault("metadata", {})["_downstream_finalized"] = True
+                        marked = True
+            if not marked:
+                if isinstance(node_results_json, list):
+                    node_results_json.append({"metadata": {"_downstream_finalized": True}})
+                else:
+                    node_results_json = [{"metadata": {"_downstream_finalized": True}}]
 
             history_entry.outputs = _to_json_compatible(execution_result.outputs)
             history_entry.node_results = node_results_json
             history_entry.status = execution_result.status
             history_entry.execution_time_ms = execution_result.execution_time_ms
-            history_entry.executed_by_instance_name = (
-                f"{history_entry.executed_by_instance_name or 'instance'}:downstream_finalized"
-            )
             flag_modified(history_entry, "outputs")
             flag_modified(history_entry, "node_results")
 
@@ -550,16 +551,7 @@ async def _finalize_allow_downstream_history(
                 sub_history_id = uuid.uuid5(history_entry_id, f"sub:{inv_key}")
                 existing_sub = await bg_db.get(ExecutionHistory, sub_history_id)
                 if existing_sub is not None:
-                    if hasattr(sub_exec, "history_written"):
-                        sub_exec.history_written = True
-                    elif isinstance(sub_exec, dict):
-                        sub_exec["history_written"] = True
                     continue
-
-                if hasattr(sub_exec, "history_written"):
-                    sub_exec.history_written = True
-                elif isinstance(sub_exec, dict):
-                    sub_exec["history_written"] = True
 
                 inputs = (
                     getattr(sub_exec, "inputs", {})
@@ -632,10 +624,6 @@ async def _finalize_allow_downstream_history(
                 else False
             )
             if not analytics_already_recorded:
-                if hasattr(execution_result, "analytics_recorded"):
-                    execution_result.analytics_recorded = True
-                elif isinstance(execution_result, dict):
-                    execution_result["analytics_recorded"] = True
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
                     workflow_id=workflow_id,
@@ -650,6 +638,17 @@ async def _finalize_allow_downstream_history(
                     started_at=getattr(history_entry, "started_at", None),
                 )
             await bg_db.commit()
+
+            # Mark in-memory objects finalized ONLY after commit succeeds
+            if hasattr(execution_result, "analytics_recorded"):
+                execution_result.analytics_recorded = True
+            elif isinstance(execution_result, dict):
+                execution_result["analytics_recorded"] = True
+            for sub_exec in execution_result.sub_workflow_executions:
+                if hasattr(sub_exec, "history_written"):
+                    sub_exec.history_written = True
+                elif isinstance(sub_exec, dict):
+                    sub_exec["history_written"] = True
     except Exception:
         logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
 
