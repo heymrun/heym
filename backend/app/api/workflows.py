@@ -505,6 +505,9 @@ async def _finalize_allow_downstream_history(
             is_already_finalized = any(
                 isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
                 for nr in (history_entry.node_results or [])
+            ) or bool(
+                isinstance(history_entry.outputs, dict)
+                and history_entry.outputs.get("_downstream_finalized")
             )
             if is_already_finalized:
                 logger.info(
@@ -515,19 +518,24 @@ async def _finalize_allow_downstream_history(
 
             node_results_json = _to_json_compatible(execution_result.node_results)
             marked = False
-            if isinstance(node_results_json, list) and node_results_json:
+            if isinstance(node_results_json, list):
                 for nr in node_results_json:
                     if isinstance(nr, dict):
                         nr.setdefault("metadata", {})["_downstream_finalized"] = True
                         marked = True
-            if not marked:
-                if isinstance(node_results_json, list):
-                    node_results_json.append({"metadata": {"_downstream_finalized": True}})
-                else:
-                    node_results_json = [{"metadata": {"_downstream_finalized": True}}]
+                        break
 
-            history_entry.outputs = _to_json_compatible(execution_result.outputs)
-            history_entry.node_results = node_results_json
+            outputs_json = _to_json_compatible(execution_result.outputs)
+            if not marked:
+                if isinstance(outputs_json, dict):
+                    outputs_json["_downstream_finalized"] = True
+                else:
+                    outputs_json = {"_downstream_finalized": True}
+
+            history_entry.outputs = outputs_json
+            history_entry.node_results = (
+                node_results_json if isinstance(node_results_json, list) else []
+            )
             history_entry.status = execution_result.status
             history_entry.execution_time_ms = execution_result.execution_time_ms
             flag_modified(history_entry, "outputs")

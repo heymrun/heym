@@ -1676,7 +1676,13 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             status="success",
             outputs={"initial": "pending_downstream"},
             node_results=[
-                {"node_id": "n1", "status": "success", "output": {"initial": "pending_downstream"}}
+                {
+                    "node_id": "n1",
+                    "status": "success",
+                    "output": {"initial": "pending_downstream"},
+                    "metadata": {},
+                },
+                {"node_id": "n2", "status": "success", "output": {"step": 2}, "metadata": {}},
             ],
             execution_time_ms=20.0,
             sub_workflow_executions=[sub_exec_1],
@@ -1691,7 +1697,13 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             status="success",
             outputs={"initial": "pending_downstream"},
             node_results=[
-                {"node_id": "n1", "status": "success", "output": {"initial": "pending_downstream"}}
+                {
+                    "node_id": "n1",
+                    "status": "success",
+                    "output": {"initial": "pending_downstream"},
+                    "metadata": {},
+                },
+                {"node_id": "n2", "status": "success", "output": {"step": 2}, "metadata": {}},
             ],
             execution_time_ms=20.0,
             sub_workflow_executions=[sub_exec_2],
@@ -1730,6 +1742,27 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 raise res
 
         async with async_session_maker() as verify_session:
+            # Preserves original node count, marks only one node, no fake nodes
+            parent_history = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                len(parent_history.node_results), 2, "Must preserve node count without fake nodes"
+            )
+            marked_nodes = [
+                nr
+                for nr in parent_history.node_results
+                if isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+            ]
+            self.assertEqual(
+                len(marked_nodes), 1, "Exactly one node result must carry the finalized marker"
+            )
+            self.assertNotIn(
+                "_downstream_finalized", parent_history.outputs, "Outputs must not be polluted"
+            )
+
             # Exactly 1 sub-workflow row
             sub_histories = (
                 (
@@ -1911,6 +1944,18 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             )
             self.assertTrue(
                 has_marker, "Finalized node_results must contain _downstream_finalized marker"
+            )
+            self.assertEqual(len(p_hist.node_results), 1, "No fake node results must be added")
+            marked_nodes = [
+                nr
+                for nr in p_hist.node_results
+                if isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+            ]
+            self.assertEqual(
+                len(marked_nodes), 1, "Exactly one node result must carry the finalized marker"
+            )
+            self.assertNotIn(
+                "_downstream_finalized", p_hist.outputs, "Outputs must not be polluted"
             )
 
             parent_snap = (
@@ -2191,6 +2236,164 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 )
             ).scalar_one()
             self.assertEqual(final_sub_snap.total_executions, 1)
+
+    async def test_finalizer_zero_node_results_skips_fake_nodes_and_idempotently_finalizes(
+        self,
+    ) -> None:
+        """When node_results is empty, the finalizer must NOT synthesize fake node results,
+        must fall back to marking outputs, and must remain idempotent on subsequent runs."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"run": "zero_nodes"},
+            outputs={"initial": "res"},
+            node_results=[],
+            status="success",
+            execution_time_ms=10.0,
+            started_at=datetime.now(timezone.utc),
+            executed_by_instance_name="WorkerNodeZero",
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        sub_id = str(uuid.uuid4())
+        sub_exec = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Zero Node Sub WF",
+            status="success",
+            execution_time_ms=25.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"x": 1},
+            outputs={"y": 2},
+            node_results=[],
+            execution_id=sub_id,
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res", "downstream": "done"},
+            node_results=[],
+            execution_time_ms=35.0,
+            sub_workflow_executions=[sub_exec],
+        )
+        exec_res._allow_downstream_pending = [MagicMock()]
+        exec_res.join_allow_downstream = MagicMock()
+
+        # Run first finalizer
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Zero Node Parent WF",
+        )
+
+        async with async_session_maker() as verify_session:
+            p_hist = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                p_hist.node_results,
+                [],
+                "Must not append fake node results when node_results is empty",
+            )
+            self.assertTrue(
+                isinstance(p_hist.outputs, dict) and p_hist.outputs.get("_downstream_finalized"),
+                "Outputs must carry fallback marker when no node results exist",
+            )
+            self.assertEqual(p_hist.executed_by_instance_name, "WorkerNodeZero")
+
+            sub_histories = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == self.sub_workflow_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(sub_histories), 1)
+
+        # Run second finalizer with a fresh independent ExecutionResult (both flags false)
+        exec_res_2 = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res", "downstream": "done"},
+            node_results=[],
+            execution_time_ms=35.0,
+            sub_workflow_executions=[
+                SubWorkflowExecution(
+                    workflow_id=self.sub_workflow_id,
+                    workflow_name="Zero Node Sub WF",
+                    status="success",
+                    execution_time_ms=25.0,
+                    trigger_source="SUB_WORKFLOW",
+                    inputs={"x": 1},
+                    outputs={"y": 2},
+                    node_results=[],
+                    execution_id=sub_id,
+                )
+            ],
+        )
+        exec_res_2._allow_downstream_pending = [MagicMock()]
+        exec_res_2.join_allow_downstream = MagicMock()
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res_2,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Zero Node Parent WF",
+        )
+
+        async with async_session_maker() as verify_session_2:
+            p_hist_2 = (
+                await verify_session_2.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(p_hist_2.node_results, [])
+
+            sub_histories_2 = (
+                (
+                    await verify_session_2.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == self.sub_workflow_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                len(sub_histories_2),
+                1,
+                "Second finalizer must skip without creating duplicate sub-executions",
+            )
+
+            sub_snap = (
+                await verify_session_2.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(sub_snap.total_executions, 1, "Analytics must not be double counted")
 
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
