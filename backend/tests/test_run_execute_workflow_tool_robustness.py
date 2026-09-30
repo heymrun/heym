@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 import uuid
@@ -13,6 +14,7 @@ from app.api.ai_assistant import (
     _sanitize_tool_result_for_llm,
     resolve_hitl_review_tool,
     run_execute_workflow_tool,
+    stream_dashboard_chat,
 )
 from app.db.models import (
     CodexFollowupRequest,
@@ -719,6 +721,319 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         mock_resume.assert_called_once_with(hitl_req_id)
 
+    async def test_edge_case_1_valid_codex_followup_url(self) -> None:
+        """Case 1: Valid Codex followup URL returns explicit Codex rejection guidance with the public link."""
+        user_id = uuid.uuid4()
+        codex_req_id = uuid.uuid4()
+        codex_followup = CodexFollowupRequest(
+            id=codex_req_id,
+            workflow_id=uuid.uuid4(),
+            execution_history_id=uuid.uuid4(),
+            public_token="codex-token-123",
+            workflow_name="Codex WF",
+            codex_node_id="c1",
+            codex_label="Codex",
+            summary="Need info",
+            question="Which database branch?",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db = AsyncMock()
+        with (
+            patch("app.api.ai_assistant.get_hitl_request_by_token", AsyncMock(return_value=None)),
+            patch(
+                "app.api.ai_assistant.get_codex_followup_by_token",
+                AsyncMock(return_value=codex_followup),
+            ),
+        ):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                review_url="http://localhost:3000/codex/followup/codex-token-123",
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertIn("Codex follow-up", res["error"])
+        self.assertIn("answer link", res["error"])
+
+    async def test_edge_case_2_valid_codex_public_token_as_request_id(self) -> None:
+        """Case 2: Valid Codex followup public_token as request_id returns explicit Codex rejection guidance."""
+        user_id = uuid.uuid4()
+        codex_req_id = uuid.uuid4()
+        codex_followup = CodexFollowupRequest(
+            id=codex_req_id,
+            workflow_id=uuid.uuid4(),
+            execution_history_id=uuid.uuid4(),
+            public_token="codex-token-abc",
+            workflow_name="Codex WF",
+            codex_node_id="c1",
+            codex_label="Codex",
+            summary="Need info",
+            question="Select branch",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db = AsyncMock()
+        mock_codex_res = MagicMock()
+        mock_codex_res.scalar_one_or_none.return_value = codex_followup
+        db.execute = AsyncMock(return_value=mock_codex_res)
+
+        with patch("app.api.ai_assistant.get_hitl_request_by_token", AsyncMock(return_value=None)):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                request_id="codex-token-abc",
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertIn("Codex follow-up", res["error"])
+        self.assertIn("answer link", res["error"])
+
+    async def test_edge_case_3_valid_codex_uuid_as_request_id(self) -> None:
+        """Case 3: Valid Codex followup UUID as request_id returns explicit Codex rejection guidance."""
+        user_id = uuid.uuid4()
+        codex_req_id = uuid.uuid4()
+        codex_followup = CodexFollowupRequest(
+            id=codex_req_id,
+            workflow_id=uuid.uuid4(),
+            execution_history_id=uuid.uuid4(),
+            public_token="codex-token-xyz",
+            workflow_name="Codex WF",
+            codex_node_id="c1",
+            codex_label="Codex",
+            summary="Need info",
+            question="What port?",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db = AsyncMock()
+        mock_hitl_res = MagicMock()
+        mock_hitl_res.scalar_one_or_none.return_value = None
+        mock_codex_res = MagicMock()
+        mock_codex_res.scalar_one_or_none.return_value = codex_followup
+        db.execute = AsyncMock(side_effect=[mock_hitl_res, mock_codex_res])
+
+        res_str = await resolve_hitl_review_tool(
+            db=db,
+            user_id=user_id,
+            action="accept",
+            request_id=str(codex_req_id),
+        )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertIn("Codex follow-up", res["error"])
+        self.assertIn("answer link", res["error"])
+
+    async def test_edge_case_4_expired_codex_followup_request(self) -> None:
+        """Case 4: Expired Codex followup request still returns explicit Codex rejection guidance."""
+        user_id = uuid.uuid4()
+        codex_req_id = uuid.uuid4()
+        codex_followup = CodexFollowupRequest(
+            id=codex_req_id,
+            workflow_id=uuid.uuid4(),
+            execution_history_id=uuid.uuid4(),
+            public_token="codex-token-expired",
+            workflow_name="Codex WF",
+            codex_node_id="c1",
+            codex_label="Codex",
+            summary="Need info",
+            question="Expired question",
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        db = AsyncMock()
+        mock_hitl_res = MagicMock()
+        mock_hitl_res.scalar_one_or_none.return_value = None
+        mock_codex_res = MagicMock()
+        mock_codex_res.scalar_one_or_none.return_value = codex_followup
+        db.execute = AsyncMock(side_effect=[mock_hitl_res, mock_codex_res])
+
+        res_str = await resolve_hitl_review_tool(
+            db=db,
+            user_id=user_id,
+            action="accept",
+            request_id=str(codex_req_id),
+        )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertIn("Codex follow-up", res["error"])
+        self.assertIn("answer link", res["error"])
+
+    async def test_edge_case_5_malformed_url(self) -> None:
+        """Case 5: Malformed URL without token returns Invalid review_url without false Codex rejection."""
+        user_id = uuid.uuid4()
+        db = AsyncMock()
+        # Subcase 5a: URL without path token returns "Invalid review_url"
+        res_str = await resolve_hitl_review_tool(
+            db=db,
+            user_id=user_id,
+            action="accept",
+            review_url="http://localhost:3000/",
+        )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["error"], "Invalid review_url")
+        self.assertNotIn("Codex", res["error"])
+
+        # Subcase 5b: Empty review_url returns "request_id or review_url is required to resolve HITL review"
+        res_str = await resolve_hitl_review_tool(
+            db=db,
+            user_id=user_id,
+            action="accept",
+            review_url="",
+        )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(
+            res["error"], "request_id or review_url is required to resolve HITL review"
+        )
+        self.assertNotIn("Codex", res["error"])
+
+    async def test_edge_case_6_unrelated_url_containing_answer(self) -> None:
+        """Case 6: Unrelated URL containing 'answer' substring is NOT falsely rejected as Codex."""
+        user_id = uuid.uuid4()
+        db = AsyncMock()
+        mock_db_res = MagicMock()
+        mock_db_res.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=mock_db_res)
+        with (
+            patch("app.api.ai_assistant.get_hitl_request_by_token", AsyncMock(return_value=None)),
+            patch("app.api.ai_assistant.get_codex_followup_by_token", AsyncMock(return_value=None)),
+        ):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                review_url="http://localhost:3000/api/answer/123",
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["error"], "Review request not found")
+        self.assertNotIn("Codex", res["error"])
+
+    async def test_edge_case_7_unrelated_url_containing_codex_in_other_path(self) -> None:
+        """Case 7: Unrelated URL containing '/codex/' in different path context is NOT falsely rejected as Codex."""
+        user_id = uuid.uuid4()
+        db = AsyncMock()
+        mock_db_res = MagicMock()
+        mock_db_res.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=mock_db_res)
+        with (
+            patch("app.api.ai_assistant.get_hitl_request_by_token", AsyncMock(return_value=None)),
+            patch("app.api.ai_assistant.get_codex_followup_by_token", AsyncMock(return_value=None)),
+        ):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                review_url="https://example.com/codex/docs/overview",
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["error"], "Review request not found")
+        self.assertNotIn("Codex", res["error"])
+
+    async def test_edge_case_8_valid_hitl_request_id(self) -> None:
+        """Case 8: Valid HITL request ID (UUID) successfully resolves and resumes execution."""
+        user_id = uuid.uuid4()
+        hitl_req_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        hitl_req = HITLRequest(
+            id=hitl_req_id,
+            workflow_id=wf_id,
+            execution_history_id=uuid.uuid4(),
+            public_token="hitl-token-case8",
+            workflow_name="HITL WF",
+            agent_node_id="a1",
+            agent_label="Agent",
+            summary="Review request",
+            original_draft_text="Draft",
+            status="pending",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            execution_snapshot={"nodes": [], "edges": []},
+        )
+        workflow = SimpleNamespace(id=wf_id, owner_id=user_id)
+        db = AsyncMock()
+        mock_hitl_res = MagicMock()
+        mock_hitl_res.scalar_one_or_none.return_value = hitl_req
+        db.execute = AsyncMock(return_value=mock_hitl_res)
+        db.commit = AsyncMock()
+
+        with (
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch("app.api.ai_assistant.ensure_hitl_request_is_actionable", MagicMock()),
+            patch(
+                "app.api.ai_assistant.claim_hitl_request_for_decision", AsyncMock(return_value=True)
+            ),
+            patch(
+                "app.api.ai_assistant.build_hitl_resolved_output",
+                MagicMock(return_value={"approved": True}),
+            ),
+            patch(
+                "app.api.ai_assistant.resume_hitl_request_in_background", AsyncMock()
+            ) as mock_resume,
+        ):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                request_id=str(hitl_req_id),
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "resolved")
+        self.assertEqual(res["decision"], "accept")
+        mock_resume.assert_called_once_with(hitl_req_id)
+
+    async def test_edge_case_9_valid_hitl_review_url(self) -> None:
+        """Case 9: Valid HITL review_url successfully resolves and resumes execution."""
+        user_id = uuid.uuid4()
+        hitl_req_id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+        hitl_req = HITLRequest(
+            id=hitl_req_id,
+            workflow_id=wf_id,
+            execution_history_id=uuid.uuid4(),
+            public_token="hitl-token-case9",
+            workflow_name="HITL WF",
+            agent_node_id="a1",
+            agent_label="Agent",
+            summary="Review request",
+            original_draft_text="Draft",
+            status="pending",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            execution_snapshot={"nodes": [], "edges": []},
+        )
+        workflow = SimpleNamespace(id=wf_id, owner_id=user_id)
+        db = AsyncMock()
+        db.commit = AsyncMock()
+
+        with (
+            patch(
+                "app.api.ai_assistant.get_hitl_request_by_token",
+                AsyncMock(return_value=hitl_req),
+            ),
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=workflow)),
+            patch("app.api.ai_assistant.ensure_hitl_request_is_actionable", MagicMock()),
+            patch(
+                "app.api.ai_assistant.claim_hitl_request_for_decision", AsyncMock(return_value=True)
+            ),
+            patch(
+                "app.api.ai_assistant.build_hitl_resolved_output",
+                MagicMock(return_value={"approved": True}),
+            ),
+            patch(
+                "app.api.ai_assistant.resume_hitl_request_in_background", AsyncMock()
+            ) as mock_resume,
+        ):
+            res_str = await resolve_hitl_review_tool(
+                db=db,
+                user_id=user_id,
+                action="accept",
+                review_url="http://localhost:3000/hitl/review/hitl-token-case9",
+            )
+        res = json.loads(res_str)
+        self.assertEqual(res["status"], "resolved")
+        self.assertEqual(res["decision"], "accept")
+        mock_resume.assert_called_once_with(hitl_req_id)
+
 
 class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestCase):
     """Verify allowDownstream transaction visibility, exact-once sub-workflow history,
@@ -1029,8 +1344,158 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 "Success count must NOT be incremented for a failed downstream execution",
             )
 
+    async def test_concurrent_finalizer_invocations_postgres(self) -> None:
+        """Area 1: True concurrent exact-once safety regression test.
+        Runs two finalizer invocations concurrently (via asyncio.gather) against PostgreSQL
+        on the same ExecutionResult.
+        Verifies:
+        - exactly one sub-workflow ExecutionHistory row
+        - exactly one parent analytics execution count
+        - exactly one sub-workflow analytics execution count
+        - no duplicate analytics increments
+        - final parent history remains correct
+        """
+        from app.api.workflows import _finalize_allow_downstream_history
 
-class DashboardChatCodexVsHitlPipelineTests(unittest.TestCase):
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"input_key": "input_val"},
+            outputs={"initial": "fast_response"},
+            node_results=[{"node_id": "n1", "status": "success"}],
+            status="success",
+            execution_time_ms=25.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        sub_exec = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="AllowDownstream Sub WF",
+            status="success",
+            execution_time_ms=45.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"sub_in": 1},
+            outputs={"sub_out": 2},
+            node_results=[],
+        )
+        self.assertFalse(sub_exec.history_written)
+
+        def mock_join():
+            execution_result.outputs["downstream"] = "completed"
+            execution_result.execution_time_ms = 120.0
+
+        execution_result = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "fast_response"},
+            node_results=[
+                {"node_id": "n1", "status": "success", "output": {"initial": "fast_response"}}
+            ],
+            execution_time_ms=25.0,
+            sub_workflow_executions=[sub_exec],
+        )
+        execution_result._allow_downstream_pending = [MagicMock()]
+        execution_result.join_allow_downstream = mock_join
+        self.assertFalse(execution_result.analytics_recorded)
+
+        # Spawn TWO finalizer tasks running concurrently against PostgreSQL on the same ExecutionResult
+        finalizer_coro_1 = _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=execution_result,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="AllowDownstream Parent WF",
+        )
+        finalizer_coro_2 = _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=execution_result,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="AllowDownstream Parent WF",
+        )
+
+        results = await asyncio.gather(finalizer_coro_1, finalizer_coro_2, return_exceptions=True)
+        for res in results:
+            if isinstance(res, Exception):
+                raise res
+
+        # Verify exact-once safety in PostgreSQL:
+        async with async_session_maker() as verify_session:
+            # 1. Exactly ONE sub-workflow ExecutionHistory row
+            sub_histories = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == self.sub_workflow_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                len(sub_histories),
+                1,
+                "Concurrent finalizers must write sub-workflow history exactly once",
+            )
+            self.assertEqual(sub_histories[0].status, "success")
+            self.assertEqual(sub_histories[0].inputs, {"sub_in": 1})
+            self.assertEqual(sub_histories[0].outputs, {"sub_out": 2})
+
+            # 2. Exactly ONE parent analytics execution count
+            parent_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                parent_analytics.total_executions,
+                1,
+                "Concurrent finalizers must record parent analytics exactly once",
+            )
+            self.assertEqual(parent_analytics.success_count, 1)
+            self.assertEqual(parent_analytics.error_count, 0)
+
+            # 3. Exactly ONE sub-workflow analytics execution count
+            sub_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                sub_analytics.total_executions,
+                1,
+                "Concurrent finalizers must record sub-workflow analytics exactly once",
+            )
+            self.assertEqual(sub_analytics.success_count, 1)
+            self.assertEqual(sub_analytics.error_count, 0)
+
+            # 4. Final parent history outputs and timing must be correct
+            parent_history = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(parent_history.outputs.get("downstream"), "completed")
+            self.assertEqual(parent_history.execution_time_ms, 120.0)
+            self.assertEqual(parent_history.status, "success")
+
+
+class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:
     _sanitize_tool_result_for_llm, _extract_pending_hitl_review_payload, and LLM tool message content."""
 
@@ -1117,3 +1582,206 @@ class DashboardChatCodexVsHitlPipelineTests(unittest.TestCase):
             hitl_card_payload["draft_text"],
             "Invoice #1042 for $500",
         )
+
+    async def test_chat_loop_multi_turn_codex_steering(self) -> None:
+        """Area 3: Multi-turn mocked chat-loop test for Codex pause.
+        Round 1: LLM invokes execute_workflow tool.
+        Tool result: Codex pending with question and answer_url.
+        Round 2: LLM receives sanitized result with kind="codex", steers user to link,
+        no resolve_hitl_review call is made, and no HITL card is emitted in the SSE stream."""
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+
+        codex_tool_output = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(wf_id),
+                "workflow_name": "Codex Migration Workflow",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "codex",
+                    "type": "codex",
+                    "summary": "Codex requires user selection for branch",
+                    "question": "Which database branch should be migrated?",
+                    "answer_url": "http://localhost:3000/codex/followup/codex-token-xyz",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+
+        # Round 1: Model requests tool call to execute_workflow
+        tc = MagicMock()
+        tc.id = "tc_exec_codex"
+        tc.function.name = "execute_workflow"
+        tc.function.arguments = json.dumps({"workflow_id": str(wf_id)})
+        msg_round1 = MagicMock()
+        msg_round1.content = None
+        msg_round1.tool_calls = [tc]
+        resp_round1 = MagicMock()
+        resp_round1.choices = [MagicMock(message=msg_round1)]
+        resp_round1.usage = MagicMock(prompt_tokens=20, completion_tokens=5, total_tokens=25)
+
+        # Round 2: Model receives sanitized tool output and directs user to the answer link
+        msg_round2 = MagicMock()
+        msg_round2.content = (
+            "The workflow is paused waiting for your input. Please answer the Codex question at "
+            "http://localhost:3000/codex/followup/codex-token-xyz."
+        )
+        msg_round2.tool_calls = None
+        resp_round2 = MagicMock()
+        resp_round2.choices = [MagicMock(message=msg_round2)]
+        resp_round2.usage = MagicMock(prompt_tokens=40, completion_tokens=15, total_tokens=55)
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = [resp_round1, resp_round2]
+
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=None)),
+            patch(
+                "app.api.ai_assistant.run_execute_workflow_tool",
+                AsyncMock(return_value=codex_tool_output),
+            ),
+        ):
+            chunks = [
+                chunk
+                async for chunk in stream_dashboard_chat(
+                    client=fake_client,
+                    model="gpt-4o-mini",
+                    system_prompt="You are a helpful assistant.",
+                    messages=[{"role": "user", "content": "Execute migration workflow"}],
+                    db=AsyncMock(),
+                    user=user,
+                    provider="OpenAI",
+                    public_base_url="http://localhost:3000",
+                )
+            ]
+
+        joined_chunks = "".join(chunks)
+
+        # 1. Codex must NOT emit workflow_pending / HITL approval card in SSE stream
+        self.assertNotIn(
+            '"type": "workflow_pending"',
+            joined_chunks,
+            "Codex pause must not emit workflow_pending card in chat stream",
+        )
+
+        # 2. Verify Round 2 call to the LLM
+        self.assertEqual(fake_client.chat.completions.create.call_count, 2)
+        call_round2_kwargs = fake_client.chat.completions.create.call_args_list[1].kwargs
+        messages_sent_to_r2 = call_round2_kwargs["messages"]
+
+        tool_msgs = [m for m in messages_sent_to_r2 if m.get("role") == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        tool_payload = json.loads(tool_msgs[0]["content"])
+        self.assertEqual(tool_payload["status"], "pending")
+        self.assertIn("pending_review", tool_payload)
+        self.assertEqual(tool_payload["pending_review"]["kind"], "codex")
+        self.assertEqual(
+            tool_payload["pending_review"]["question"],
+            "Which database branch should be migrated?",
+        )
+        self.assertEqual(
+            tool_payload["pending_review"]["answer_url"],
+            "http://localhost:3000/codex/followup/codex-token-xyz",
+        )
+
+        # 3. Model directs user to the answer link
+        self.assertIn("http://localhost:3000/codex/followup/codex-token-xyz", joined_chunks)
+
+    async def test_chat_loop_multi_turn_hitl_approval_card(self) -> None:
+        """Area 3 Counterpart: Multi-turn mocked chat-loop test for HITL pause.
+        Round 1: LLM invokes execute_workflow tool.
+        Tool result: HITL pending review.
+        Stream emits workflow_pending SSE event with review_url and draft_text,
+        and Round 2 LLM receives sanitized HITL payload."""
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        wf_id = uuid.uuid4()
+
+        hitl_tool_output = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(wf_id),
+                "workflow_name": "HITL Approval Workflow",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "hitl",
+                    "type": "hitl",
+                    "summary": "Review invoice before sending",
+                    "draft_text": "Invoice #500 for $1,200",
+                    "review_url": "http://localhost:3000/hitl/review/hitl-token-abc",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+
+        tc = MagicMock()
+        tc.id = "tc_exec_hitl"
+        tc.function.name = "execute_workflow"
+        tc.function.arguments = json.dumps({"workflow_id": str(wf_id)})
+        msg_round1 = MagicMock()
+        msg_round1.content = None
+        msg_round1.tool_calls = [tc]
+        resp_round1 = MagicMock()
+        resp_round1.choices = [MagicMock(message=msg_round1)]
+        resp_round1.usage = MagicMock(prompt_tokens=20, completion_tokens=5, total_tokens=25)
+
+        msg_round2 = MagicMock()
+        msg_round2.content = "I have submitted the workflow for human approval."
+        msg_round2.tool_calls = None
+        resp_round2 = MagicMock()
+        resp_round2.choices = [MagicMock(message=msg_round2)]
+        resp_round2.usage = MagicMock(prompt_tokens=40, completion_tokens=15, total_tokens=55)
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = [resp_round1, resp_round2]
+
+        with (
+            patch("app.api.ai_assistant.record_run_history"),
+            patch("app.api.ai_assistant.get_workflow_for_user", AsyncMock(return_value=None)),
+            patch(
+                "app.api.ai_assistant.run_execute_workflow_tool",
+                AsyncMock(return_value=hitl_tool_output),
+            ),
+        ):
+            chunks = [
+                chunk
+                async for chunk in stream_dashboard_chat(
+                    client=fake_client,
+                    model="gpt-4o-mini",
+                    system_prompt="You are a helpful assistant.",
+                    messages=[{"role": "user", "content": "Execute invoice workflow"}],
+                    db=AsyncMock(),
+                    user=user,
+                    provider="OpenAI",
+                    public_base_url="http://localhost:3000",
+                )
+            ]
+
+        joined_chunks = "".join(chunks)
+
+        # 1. HITL MUST emit hitl pending review card in chat stream
+        self.assertIn(
+            '"type": "hitl"',
+            joined_chunks,
+            "HITL pause must emit hitl pending card in chat stream",
+        )
+        self.assertIn("http://localhost:3000/hitl/review/hitl-token-abc", joined_chunks)
+        self.assertIn("Invoice #500 for $1,200", joined_chunks)
+
+        # 2. Round 2 model receives sanitized HITL payload
+        self.assertEqual(fake_client.chat.completions.create.call_count, 2)
+        call_round2_kwargs = fake_client.chat.completions.create.call_args_list[1].kwargs
+        messages_sent_to_r2 = call_round2_kwargs["messages"]
+
+        tool_msgs = [m for m in messages_sent_to_r2 if m.get("role") == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        tool_payload = json.loads(tool_msgs[0]["content"])
+        self.assertEqual(tool_payload["status"], "pending")
+        self.assertEqual(tool_payload["pending_review"]["kind"], "hitl")

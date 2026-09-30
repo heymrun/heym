@@ -490,7 +490,9 @@ async def _finalize_allow_downstream_history(
             execution_result.status = "error"
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
-                select(ExecutionHistory).where(ExecutionHistory.id == history_entry_id)
+                select(ExecutionHistory)
+                .where(ExecutionHistory.id == history_entry_id)
+                .with_for_update()
             )
             history_entry = history_result.scalar_one_or_none()
             if history_entry is not None:
@@ -511,6 +513,21 @@ async def _finalize_allow_downstream_history(
                 )
                 if not sw_id:
                     continue
+
+                sub_history_id = uuid.uuid5(history_entry_id, str(sw_id))
+                existing_sub = await bg_db.get(ExecutionHistory, sub_history_id)
+                if existing_sub is not None:
+                    if hasattr(sub_exec, "history_written"):
+                        sub_exec.history_written = True
+                    elif isinstance(sub_exec, dict):
+                        sub_exec["history_written"] = True
+                    continue
+
+                if hasattr(sub_exec, "history_written"):
+                    sub_exec.history_written = True
+                elif isinstance(sub_exec, dict):
+                    sub_exec["history_written"] = True
+
                 inputs = (
                     getattr(sub_exec, "inputs", {})
                     if not isinstance(sub_exec, dict)
@@ -548,6 +565,7 @@ async def _finalize_allow_downstream_history(
                 )
 
                 sub_history = ExecutionHistory(
+                    id=sub_history_id,
                     workflow_id=uuid.UUID(str(sw_id)),
                     inputs=_to_json_compatible(inputs),
                     outputs=_to_json_compatible(outputs),
@@ -564,11 +582,8 @@ async def _finalize_allow_downstream_history(
                     workflow_name_snapshot=wf_name or "Sub-workflow",
                     status=st,
                     execution_time_ms=exec_ms,
+                    started_at=getattr(history_entry, "started_at", None),
                 )
-                if hasattr(sub_exec, "history_written"):
-                    sub_exec.history_written = True
-                elif isinstance(sub_exec, dict):
-                    sub_exec["history_written"] = True
 
             await _persist_global_variables_from_execution(
                 bg_db,
@@ -578,16 +593,29 @@ async def _finalize_allow_downstream_history(
                 _to_json_compatible(execution_result.node_results),
                 execution_result.sub_workflow_executions,
             )
-            if not getattr(execution_result, "analytics_recorded", False):
+            analytics_already_recorded = getattr(execution_result, "analytics_recorded", False) or (
+                execution_result.get("analytics_recorded", False)
+                if isinstance(execution_result, dict)
+                else False
+            )
+            if not analytics_already_recorded:
+                if hasattr(execution_result, "analytics_recorded"):
+                    execution_result.analytics_recorded = True
+                elif isinstance(execution_result, dict):
+                    execution_result["analytics_recorded"] = True
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
                     workflow_id=workflow_id,
                     owner_id=owner_id,
                     workflow_name_snapshot=workflow_name,
-                    status=execution_result.status,
-                    execution_time_ms=execution_result.execution_time_ms,
+                    status=getattr(execution_result, "status", "success")
+                    if not isinstance(execution_result, dict)
+                    else execution_result.get("status", "success"),
+                    execution_time_ms=getattr(execution_result, "execution_time_ms", 0.0)
+                    if not isinstance(execution_result, dict)
+                    else execution_result.get("execution_time_ms", 0.0),
+                    started_at=getattr(history_entry, "started_at", None),
                 )
-                execution_result.analytics_recorded = True
             await bg_db.commit()
     except Exception:
         logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)

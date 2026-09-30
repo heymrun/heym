@@ -2616,14 +2616,26 @@ async def resolve_hitl_review_tool(
     hitl_request: HITLRequest | None = None
 
     if request_id:
+        req_clean = request_id.strip()
+        request_uuid: uuid.UUID | None = None
         try:
-            request_uuid = uuid.UUID(request_id)
+            request_uuid = uuid.UUID(req_clean)
         except ValueError:
-            return json.dumps({"status": "error", "error": "Invalid request_id"})
-        result = await db.execute(select(HITLRequest).where(HITLRequest.id == request_uuid))
-        hitl_request = result.scalar_one_or_none()
+            pass
+
+        if request_uuid is not None:
+            result = await db.execute(select(HITLRequest).where(HITLRequest.id == request_uuid))
+            hitl_request = result.scalar_one_or_none()
+        else:
+            hitl_request = await get_hitl_request_by_token(db, req_clean)
     elif review_url:
-        token = urlparse(review_url).path.rstrip("/").split("/")[-1].strip()
+        token = ""
+        try:
+            parsed = urlparse(review_url)
+            path_parts = [p for p in parsed.path.rstrip("/").split("/") if p]
+            token = path_parts[-1] if path_parts else ""
+        except Exception:
+            token = ""
         if not token:
             return json.dumps({"status": "error", "error": "Invalid review_url"})
         hitl_request = await get_hitl_request_by_token(db, token)
@@ -2637,44 +2649,57 @@ async def resolve_hitl_review_tool(
 
     if hitl_request is None:
         codex_followup: CodexFollowupRequest | None = None
+        is_codex_url = False
+
         if request_id:
+            req_clean = request_id.strip()
+            request_uuid = None
             try:
-                request_uuid = uuid.UUID(request_id)
+                request_uuid = uuid.UUID(req_clean)
+            except ValueError:
+                pass
+
+            if request_uuid is not None:
                 res = await db.execute(
                     select(CodexFollowupRequest).where(CodexFollowupRequest.id == request_uuid)
                 )
                 codex_followup = res.scalar_one_or_none()
-            except ValueError:
+            else:
                 res = await db.execute(
                     select(CodexFollowupRequest).where(
-                        CodexFollowupRequest.public_token == request_id
+                        CodexFollowupRequest.public_token == req_clean
                     )
                 )
                 codex_followup = res.scalar_one_or_none()
         elif review_url:
-            token = urlparse(review_url).path.rstrip("/").split("/")[-1].strip()
-            if token:
-                codex_followup = await get_codex_followup_by_token(db, token)
-                if codex_followup is None:
-                    try:
-                        token_uuid = uuid.UUID(token)
-                        res = await db.execute(
-                            select(CodexFollowupRequest).where(
-                                CodexFollowupRequest.id == token_uuid
-                            )
-                        )
-                        codex_followup = res.scalar_one_or_none()
-                    except ValueError:
-                        pass
+            try:
+                parsed = urlparse(review_url)
+                norm_path = parsed.path.rstrip("/")
+                path_parts = [p for p in norm_path.split("/") if p]
+                # Canonical production route: /codex/followup/<token>
+                if len(path_parts) >= 2 and path_parts[-2] == "followup" and "codex" in path_parts:
+                    is_codex_url = True
+                elif "/codex/followup/" in norm_path or norm_path.endswith("/codex/followup"):
+                    is_codex_url = True
 
-        if codex_followup is not None or (
-            review_url
-            and (
-                "/codex/followup/" in review_url
-                or review_url.rstrip("/").endswith("/codex/followup")
-                or "/codex/" in review_url
-            )
-        ):
+                token = path_parts[-1] if path_parts else ""
+                if token and is_codex_url:
+                    codex_followup = await get_codex_followup_by_token(db, token)
+                    if codex_followup is None:
+                        try:
+                            token_uuid = uuid.UUID(token)
+                            res = await db.execute(
+                                select(CodexFollowupRequest).where(
+                                    CodexFollowupRequest.id == token_uuid
+                                )
+                            )
+                            codex_followup = res.scalar_one_or_none()
+                        except ValueError:
+                            pass
+            except Exception:
+                pass
+
+        if codex_followup is not None or is_codex_url:
             return json.dumps(
                 {
                     "status": "error",
