@@ -120,3 +120,7 @@ vulnerabilities in Heym:
   that kept working after the minting user's access to the workflow was removed,
   because validation never rechecked that user's current access
   (GHSA-pwr6-6377-3cgv).
+- [@manus-use](https://github.com/manus-use) (Jace, also known as zx) for
+  credential exfiltration via the error workflow setting, where a collaborator
+  could point a shared workflow's error workflow at a workflow of their own,
+  which then ran with the owner's credentials (GHSA-c3f4-2mrj-jfqr).
