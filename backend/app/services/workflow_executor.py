@@ -1723,6 +1723,7 @@ class SubWorkflowExecution:
     workflow_name: str = ""
     trigger_source: str = "SUB_WORKFLOW"
     history_written: bool = False
+    execution_id: str = ""
 
 
 @dataclass
@@ -1954,6 +1955,7 @@ def _serialize_sub_workflow_executions(
             "workflow_name": execution.workflow_name,
             "trigger_source": execution.trigger_source,
             "history_written": getattr(execution, "history_written", False),
+            "execution_id": getattr(execution, "execution_id", "") or "",
         }
         for execution in executions
     ]
@@ -1975,6 +1977,7 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
                 workflow_name=execution.get("workflow_name", ""),
                 trigger_source=execution.get("trigger_source", "SUB_WORKFLOW"),
                 history_written=bool(execution.get("history_written", False)),
+                execution_id=str(execution.get("execution_id", "") or ""),
             )
         )
     return restored
@@ -3103,6 +3106,7 @@ class WorkflowExecutor:
         wf_id: str,
         wf_name: str,
         inputs_snapshot: dict,
+        execution_id: str = "",
     ) -> None:
         """Append SubWorkflowExecution when a fire-and-forget sub-workflow finishes."""
         bg_trigger_source = "AI Agents" if parent._invoked_by_agent else "SUB_WORKFLOW"
@@ -3120,6 +3124,7 @@ class WorkflowExecutor:
                         node_results=[],
                         workflow_name=wf_name,
                         trigger_source=bg_trigger_source,
+                        execution_id=execution_id,
                     )
                 )
             return
@@ -3139,6 +3144,7 @@ class WorkflowExecutor:
                         node_results=pending_rows,
                         workflow_name=wf_name,
                         trigger_source=bg_trigger_source,
+                        execution_id=execution_id,
                     )
                 )
             return
@@ -3152,6 +3158,7 @@ class WorkflowExecutor:
             node_results=masked_rows,
             workflow_name=wf_name,
             trigger_source=bg_trigger_source,
+            execution_id=execution_id,
         )
         with parent.lock:
             parent.sub_workflow_executions.append(sub_exec)
@@ -4109,6 +4116,7 @@ class WorkflowExecutor:
                         node_results=masked_rows,
                         workflow_name=target_workflow.get("name", ""),
                         trigger_source="AI Agents",
+                        execution_id=str(_sub_execution_id),
                     )
                 )
                 self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)

@@ -1494,6 +1494,342 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             self.assertEqual(parent_history.execution_time_ms, 120.0)
             self.assertEqual(parent_history.status, "success")
 
+    async def test_repeated_sub_workflow_executions_separate_history_and_analytics(
+        self,
+    ) -> None:
+        """Legitimate repeated executions of the same child workflow (e.g. loops, multiple execute nodes,
+        branches) must each receive a distinct ExecutionHistory row and be counted in analytics."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"parent_input": "start"},
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success"}],
+            status="success",
+            execution_time_ms=30.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        # Invocation 1 of sub-workflow X
+        sub_exec_1 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Child Workflow",
+            status="success",
+            execution_time_ms=40.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"iteration": 1, "data": "item_1"},
+            outputs={"result": "processed_1"},
+            node_results=[],
+            execution_id=str(uuid.uuid4()),
+        )
+        # Invocation 2 of the SAME sub-workflow X
+        sub_exec_2 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Child Workflow",
+            status="success",
+            execution_time_ms=50.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"iteration": 2, "data": "item_2"},
+            outputs={"result": "processed_2"},
+            node_results=[],
+            execution_id=str(uuid.uuid4()),
+        )
+
+        def mock_join():
+            execution_result.outputs["downstream"] = "done"
+            execution_result.execution_time_ms = 150.0
+
+        execution_result = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success", "output": {"initial": "res"}}],
+            execution_time_ms=30.0,
+            sub_workflow_executions=[sub_exec_1, sub_exec_2],
+        )
+        execution_result._allow_downstream_pending = [MagicMock()]
+        execution_result.join_allow_downstream = mock_join
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=execution_result,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="AllowDownstream Repeated Parent",
+        )
+
+        async with async_session_maker() as verify_session:
+            # 1. Exactly TWO separate ExecutionHistory rows for the sub-workflow
+            sub_histories = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory)
+                        .where(ExecutionHistory.workflow_id == self.sub_workflow_id)
+                        .order_by(ExecutionHistory.execution_time_ms.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                len(sub_histories),
+                2,
+                "Both invocations of the same child workflow must have distinct ExecutionHistory rows",
+            )
+            self.assertNotEqual(sub_histories[0].id, sub_histories[1].id)
+            self.assertEqual(sub_histories[0].inputs, {"iteration": 1, "data": "item_1"})
+            self.assertEqual(sub_histories[0].outputs, {"result": "processed_1"})
+            self.assertEqual(sub_histories[1].inputs, {"iteration": 2, "data": "item_2"})
+            self.assertEqual(sub_histories[1].outputs, {"result": "processed_2"})
+
+            # 2. Child workflow analytics must reflect BOTH executions (total_executions == 2)
+            sub_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(
+                sub_analytics.total_executions,
+                2,
+                "Child workflow analytics must reflect total_executions == 2 for repeated invocations",
+            )
+            self.assertEqual(sub_analytics.success_count, 2)
+            self.assertEqual(sub_analytics.error_count, 0)
+
+            # 3. Parent history is updated
+            parent_history = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(parent_history.outputs.get("downstream"), "done")
+            self.assertEqual(parent_history.execution_time_ms, 150.0)
+
+    async def test_concurrent_finalizers_two_independent_execution_results(
+        self,
+    ) -> None:
+        """Two concurrent finalizers running with independent ExecutionResult object graphs
+        (non-shared in-memory state) against PostgreSQL must achieve exact-once persistence
+        via database-level serialization and state checks."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"k": "v"},
+            outputs={"initial": "pending_downstream"},
+            node_results=[{"node_id": "n1", "status": "success"}],
+            status="success",
+            execution_time_ms=20.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        sub_id = str(uuid.uuid4())
+        sub_exec_1 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Independent Object Sub WF",
+            status="success",
+            execution_time_ms=35.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"arg": 10},
+            outputs={"out": 20},
+            node_results=[],
+            execution_id=sub_id,
+        )
+        sub_exec_2 = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Independent Object Sub WF",
+            status="success",
+            execution_time_ms=35.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"arg": 10},
+            outputs={"out": 20},
+            node_results=[],
+            execution_id=sub_id,
+        )
+
+        def mock_join_1():
+            exec_res_1.outputs["downstream"] = "done_1"
+            exec_res_1.execution_time_ms = 100.0
+
+        def mock_join_2():
+            exec_res_2.outputs["downstream"] = "done_2"
+            exec_res_2.execution_time_ms = 100.0
+
+        exec_res_1 = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "pending_downstream"},
+            node_results=[
+                {"node_id": "n1", "status": "success", "output": {"initial": "pending_downstream"}}
+            ],
+            execution_time_ms=20.0,
+            sub_workflow_executions=[sub_exec_1],
+        )
+        exec_res_1._allow_downstream_pending = [MagicMock()]
+        exec_res_1.join_allow_downstream = mock_join_1
+        self.assertFalse(exec_res_1.analytics_recorded)
+
+        # Independent object graph 2 (different memory address, not sharing analytics_recorded)
+        exec_res_2 = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "pending_downstream"},
+            node_results=[
+                {"node_id": "n1", "status": "success", "output": {"initial": "pending_downstream"}}
+            ],
+            execution_time_ms=20.0,
+            sub_workflow_executions=[sub_exec_2],
+        )
+        exec_res_2._allow_downstream_pending = [MagicMock()]
+        exec_res_2.join_allow_downstream = mock_join_2
+        self.assertFalse(exec_res_2.analytics_recorded)
+
+        self.assertIsNot(exec_res_1, exec_res_2)
+        self.assertIsNot(sub_exec_1, sub_exec_2)
+
+        finalizer_coro_1 = _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res_1,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Independent Parent WF",
+        )
+        finalizer_coro_2 = _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res_2,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Independent Parent WF",
+        )
+
+        results = await asyncio.gather(finalizer_coro_1, finalizer_coro_2, return_exceptions=True)
+        for res in results:
+            if isinstance(res, Exception):
+                raise res
+
+        async with async_session_maker() as verify_session:
+            # Exactly 1 sub-workflow row
+            sub_histories = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == self.sub_workflow_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(sub_histories), 1)
+
+            # Exactly 1 parent analytics count
+            parent_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(parent_analytics.total_executions, 1)
+
+            # Exactly 1 sub-workflow analytics count
+            sub_analytics = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(sub_analytics.total_executions, 1)
+
+    async def test_finalize_missing_parent_history_aborts_without_persistence(
+        self,
+    ) -> None:
+        """When the parent ExecutionHistory row does not exist, _finalize_allow_downstream_history
+        must abort immediately without writing sub-workflow history, global variables, or analytics."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        missing_history_id = uuid.uuid4()
+        unregistered_sub_id = uuid.uuid4()
+
+        sub_exec = SubWorkflowExecution(
+            workflow_id=unregistered_sub_id,
+            workflow_name="Orphan Sub WF",
+            status="success",
+            execution_time_ms=30.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"data": 123},
+            outputs={"res": 456},
+            node_results=[],
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={},
+            execution_time_ms=10.0,
+            sub_workflow_executions=[sub_exec],
+        )
+
+        # Finalizer called for non-existent parent history ID
+        await _finalize_allow_downstream_history(
+            history_entry_id=missing_history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Missing Parent WF",
+        )
+
+        # Verify nothing was persisted
+        async with async_session_maker() as verify_session:
+            sub_row = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(
+                        ExecutionHistory.workflow_id == unregistered_sub_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(
+                sub_row, "No sub-workflow history must be written when parent history is missing"
+            )
+
+            analytics_row = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == unregistered_sub_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(
+                analytics_row,
+                "No analytics snapshot must be created when parent history is missing",
+            )
+
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:

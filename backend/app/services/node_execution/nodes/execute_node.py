@@ -163,7 +163,12 @@ def execute(ctx: NodeExecutionContext) -> object:
             def _on_execute_do_not_wait_done(f: Future) -> None:
                 try:
                     WorkflowExecutor._record_bg_sub_workflow_done(
-                        f, self, execute_workflow_id, wf_name, inputs_snap
+                        f,
+                        self,
+                        execute_workflow_id,
+                        wf_name,
+                        inputs_snap,
+                        execution_id=str(_sub_exec_id),
                     )
                 finally:
                     bg_error = f.exception()
@@ -233,6 +238,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 node_results=masked_rows,
                 workflow_name=target_workflow.get("name", ""),
                 trigger_source=("AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"),
+                execution_id=str(_sub_exec_id),
             )
             with self.lock:
                 self.sub_workflow_executions.append(sub_exec)

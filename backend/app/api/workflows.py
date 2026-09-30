@@ -495,15 +495,44 @@ async def _finalize_allow_downstream_history(
                 .with_for_update()
             )
             history_entry = history_result.scalar_one_or_none()
-            if history_entry is not None:
-                history_entry.outputs = _to_json_compatible(execution_result.outputs)
-                history_entry.node_results = _to_json_compatible(execution_result.node_results)
-                history_entry.status = execution_result.status
-                history_entry.execution_time_ms = execution_result.execution_time_ms
-                flag_modified(history_entry, "outputs")
-                flag_modified(history_entry, "node_results")
+            if history_entry is None:
+                logger.warning(
+                    "_finalize_allow_downstream_history: parent ExecutionHistory %s not found, skipping finalization",
+                    history_entry_id,
+                )
+                return
 
-            for sub_exec in execution_result.sub_workflow_executions:
+            is_already_finalized = bool(
+                history_entry.executed_by_instance_name
+                and ":downstream_finalized" in history_entry.executed_by_instance_name
+            ) or any(
+                isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+                for nr in (history_entry.node_results or [])
+            )
+            if is_already_finalized:
+                logger.info(
+                    "_finalize_allow_downstream_history: parent ExecutionHistory %s already finalized, skipping",
+                    history_entry_id,
+                )
+                return
+
+            node_results_json = _to_json_compatible(execution_result.node_results)
+            if isinstance(node_results_json, list):
+                for nr in node_results_json:
+                    if isinstance(nr, dict):
+                        nr.setdefault("metadata", {})["_downstream_finalized"] = True
+
+            history_entry.outputs = _to_json_compatible(execution_result.outputs)
+            history_entry.node_results = node_results_json
+            history_entry.status = execution_result.status
+            history_entry.execution_time_ms = execution_result.execution_time_ms
+            history_entry.executed_by_instance_name = (
+                f"{history_entry.executed_by_instance_name or 'instance'}:downstream_finalized"
+            )
+            flag_modified(history_entry, "outputs")
+            flag_modified(history_entry, "node_results")
+
+            for idx, sub_exec in enumerate(execution_result.sub_workflow_executions):
                 if getattr(sub_exec, "history_written", False):
                     continue
                 if isinstance(sub_exec, dict) and sub_exec.get("history_written"):
@@ -514,7 +543,11 @@ async def _finalize_allow_downstream_history(
                 if not sw_id:
                     continue
 
-                sub_history_id = uuid.uuid5(history_entry_id, str(sw_id))
+                sub_exec_id = getattr(sub_exec, "execution_id", None) or (
+                    sub_exec.get("execution_id") if isinstance(sub_exec, dict) else None
+                )
+                inv_key = str(sub_exec_id) if sub_exec_id else f"{sw_id}:{idx}"
+                sub_history_id = uuid.uuid5(history_entry_id, f"sub:{inv_key}")
                 existing_sub = await bg_db.get(ExecutionHistory, sub_history_id)
                 if existing_sub is not None:
                     if hasattr(sub_exec, "history_written"):
