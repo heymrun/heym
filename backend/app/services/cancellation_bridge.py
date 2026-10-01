@@ -30,6 +30,7 @@ def _attach_cancel_listener(
             listeners = []
             event._cancel_listeners = listeners  # type: ignore[attr-defined]
             orig_set = event.set
+            event._orig_set = orig_set  # type: ignore[attr-defined]
 
             def wrapped_set() -> None:
                 orig_set()
@@ -49,6 +50,13 @@ def _attach_cancel_listener(
             current_listeners = getattr(event, "_cancel_listeners", None)
             if current_listeners is not None and listener in current_listeners:
                 current_listeners.remove(listener)
+                if not current_listeners:
+                    orig = getattr(event, "_orig_set", None)
+                    if orig is not None:
+                        event.set = orig
+                        delattr(event, "_orig_set")
+                    if hasattr(event, "_cancel_listeners"):
+                        delattr(event, "_cancel_listeners")
 
     return detach
 
@@ -132,7 +140,7 @@ class CancellationBridge:
         self._thread = threading.Thread(
             target=target_fn,
             name=bridge_name,
-            daemon=True,
+            daemon=False,
         )
         self._thread.start()
 
@@ -153,7 +161,7 @@ class CancellationBridge:
 
         if self._thread is not None and self._thread.is_alive():
             if threading.current_thread() != self._thread:
-                self._thread.join()
+                self._thread.join(timeout=5.0)
 
     def __enter__(self) -> CancellationBridge:
         return self

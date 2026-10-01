@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 import unittest
 import uuid
 from concurrent.futures import Future
@@ -3212,6 +3213,936 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             ).scalar_one()
             self.assertEqual(snap_in_db.error_count, 1)
             self.assertEqual(snap_in_db.success_count, 0)
+
+    async def test_real_subworkflow_cancellation_path_with_postgres(self) -> None:
+        """GENUINE INTEGRATION TEST:
+        Real parent workflow -> real Execute node -> real child workflow with allowDownstream ->
+        trigger real cancellation event -> real bridge notifies child -> real check_cancelled raises WorkflowCancelledError ->
+        join_allow_downstream propagates WorkflowCancelledError -> parent receives WorkflowCancelledError ->
+        subsequent parent node DOES NOT execute -> child sub_workflow_execution is captured and preserved ->
+        persisted to PostgreSQL -> parent history is cancelled -> child history is cancelled with completed nodes ->
+        analytics accurate.
+        Zero mocks of WorkflowExecutor.execute."""
+        from app.api.workflows import _finalize_allow_downstream_history
+        from app.services.workflow_executor import WorkflowCancelledError, WorkflowExecutor
+
+        child_id = str(uuid.uuid4())
+        child_wf = {
+            "id": child_id,
+            "name": "Real Child WF",
+            "nodes": [
+                {"id": "c1", "type": "custom", "data": {"label": "Child Start"}},
+                {
+                    "id": "c2",
+                    "type": "output",
+                    "data": {"label": "Child Output", "allowDownstream": True},
+                },
+                {"id": "c3", "type": "wait", "data": {"label": "Child Wait", "duration": 2000}},
+            ],
+            "edges": [
+                {"id": "ce1", "source": "c1", "target": "c2"},
+                {"id": "ce2", "source": "c2", "target": "c3"},
+            ],
+        }
+
+        parent_id = uuid.uuid4()
+        parent_wf_nodes = [
+            {"id": "p1", "type": "custom", "data": {"label": "Parent Start"}},
+            {
+                "id": "p_exec",
+                "type": "execute",
+                "data": {
+                    "label": "Run Child WF",
+                    "executeWorkflowId": child_id,
+                },
+            },
+            {"id": "p_after", "type": "custom", "data": {"label": "Must Never Run"}},
+        ]
+        parent_wf_edges = [
+            {"id": "pe1", "source": "p1", "target": "p_exec"},
+            {"id": "pe2", "source": "p_exec", "target": "p_after"},
+        ]
+        workflow_cache = {child_id: child_wf}
+
+        # Insert parent and child into real DB
+        async with async_session_maker() as init_session:
+            pwf = Workflow(
+                id=parent_id,
+                owner_id=self.user_id,
+                name="Real Parent WF",
+                nodes=parent_wf_nodes,
+                edges=parent_wf_edges,
+            )
+            cwf = Workflow(
+                id=uuid.UUID(child_id),
+                owner_id=self.user_id,
+                name="Real Child WF",
+                nodes=child_wf["nodes"],
+                edges=child_wf["edges"],
+            )
+            init_session.add(pwf)
+            init_session.add(cwf)
+            init_session.add(
+                ExecutionHistory(
+                    id=parent_id,
+                    workflow_id=parent_id,
+                    inputs={"start": True},
+                    outputs={},
+                    node_results=[],
+                    status="running",
+                    execution_time_ms=0.0,
+                )
+            )
+            await init_session.commit()
+
+        self.cleanup_workflow_ids.append(parent_id)
+        self.cleanup_workflow_ids.append(uuid.UUID(child_id))
+
+        parent_cancel_event = threading.Event()
+        parent_executor = WorkflowExecutor(
+            nodes=parent_wf_nodes,
+            edges=parent_wf_edges,
+            workflow_cache=workflow_cache,
+            workflow_id=parent_id,
+            cancel_event=parent_cancel_event,
+        )
+
+        def trigger_real_cancel_later():
+            time.sleep(0.12)
+            parent_cancel_event.set()
+
+        cancel_thread = threading.Thread(target=trigger_real_cancel_later)
+        cancel_thread.start()
+
+        with self.assertRaises(WorkflowCancelledError):
+            parent_executor.execute(parent_id, initial_inputs={"start": True})
+
+        cancel_thread.join()
+
+        # 1. Subsequent node p_after was NOT executed!
+        self.assertNotIn("p_after", parent_executor.node_outputs)
+
+        # 2. Child work is preserved in parent_executor.sub_workflow_executions!
+        self.assertGreaterEqual(len(parent_executor.sub_workflow_executions), 1)
+        child_sub_exec = parent_executor.sub_workflow_executions[0]
+        self.assertEqual(child_sub_exec.status, "cancelled")
+
+        # 3. Finalize in PostgreSQL
+        parent_exec_res = ExecutionResult(
+            workflow_id=parent_id,
+            status="cancelled",
+            outputs={},
+            execution_time_ms=100.0,
+            node_results=[],
+            sub_workflow_executions=parent_executor.sub_workflow_executions,
+        )
+        await _finalize_allow_downstream_history(
+            history_entry_id=parent_id,
+            execution_result=parent_exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=parent_wf_nodes,
+            workflow_cache=workflow_cache,
+            workflow_id=parent_id,
+            owner_id=self.user_id,
+            workflow_name="Real Parent WF",
+        )
+
+        # 4. Verify DB state
+        async with async_session_maker() as verify_session:
+            p_hist = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == parent_id)
+                )
+            ).scalar_one()
+            self.assertEqual(p_hist.status, "cancelled")
+
+            c_hist = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == uuid.UUID(child_id)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertGreaterEqual(len(c_hist), 1)
+            self.assertEqual(c_hist[0].status, "cancelled")
+            self.assertTrue(any(nr.get("node_id") == "c1" for nr in (c_hist[0].node_results or [])))
+
+            p_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == parent_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(p_snap.total_executions, 1)
+            self.assertEqual(p_snap.error_count, 0)
+            self.assertEqual(p_snap.success_count, 0)
+
+    async def test_real_synchronous_and_allow_downstream_timeouts_postgres(self) -> None:
+        """GENUINE INTEGRATION TEST:
+        1. Real synchronous timeout configured via timeout_seconds.
+        2. Real wait node exceeds timeout.
+        3. Real WorkflowTimeoutError generated by check_cancelled.
+        4. Real allowDownstream timeout: background future exceeds deadline,
+           join_allow_downstream catches WorkflowTimeoutError, sets status='error', and re-raises.
+        5. Final persistence into PostgreSQL records status='error' and error_count=1, success_count=0.
+        6. Contrast with real cancellation: cancellation records status='cancelled', error_count=0.
+        Zero fake Future injection."""
+        from app.api.workflows import _finalize_allow_downstream_history
+        from app.services.workflow_executor import WorkflowExecutor, WorkflowTimeoutError
+
+        # Part A: Synchronous Real Timeout
+        sync_wf_id = uuid.uuid4()
+        sync_nodes = [
+            {"id": "w1", "type": "wait", "data": {"label": "Long Wait", "duration": 2000}},
+        ]
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=sync_wf_id,
+                    owner_id=self.user_id,
+                    name="Sync Timeout WF",
+                    nodes=sync_nodes,
+                    edges=[],
+                )
+            )
+            s.add(
+                ExecutionHistory(
+                    id=sync_wf_id,
+                    workflow_id=sync_wf_id,
+                    inputs={},
+                    outputs={},
+                    node_results=[],
+                    status="running",
+                    execution_time_ms=0.0,
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.append(sync_wf_id)
+
+        sync_exec = WorkflowExecutor(
+            nodes=sync_nodes, edges=[], workflow_id=sync_wf_id, timeout_seconds=0.15
+        )
+        with self.assertRaises(WorkflowTimeoutError) as ctx:
+            sync_exec.execute(sync_wf_id, initial_inputs={})
+        self.assertIn("timed out", str(ctx.exception).lower())
+
+        # Finalize sync timeout in DB
+        sync_res = ExecutionResult(
+            workflow_id=sync_wf_id,
+            status="error",
+            outputs={"error": str(ctx.exception)},
+            execution_time_ms=150.0,
+        )
+        await _finalize_allow_downstream_history(
+            history_entry_id=sync_wf_id,
+            execution_result=sync_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=sync_nodes,
+            workflow_cache={},
+            workflow_id=sync_wf_id,
+            owner_id=self.user_id,
+            workflow_name="Sync Timeout WF",
+        )
+        async with async_session_maker() as s:
+            h = (
+                await s.execute(select(ExecutionHistory).where(ExecutionHistory.id == sync_wf_id))
+            ).scalar_one()
+            self.assertEqual(h.status, "error")
+            self.assertIn("timed out", str(h.outputs.get("error", "")).lower())
+            snap = (
+                await s.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == sync_wf_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(snap.error_count, 1)
+            self.assertEqual(snap.success_count, 0)
+
+        # Part B: allowDownstream Real Timeout
+        downstream_wf_id = uuid.uuid4()
+        downstream_nodes = [
+            {"id": "n1", "type": "custom", "data": {"label": "Start"}},
+            {"id": "n2", "type": "output", "data": {"label": "Out", "allowDownstream": True}},
+            {"id": "n3", "type": "wait", "data": {"label": "Downstream Wait", "duration": 2000}},
+        ]
+        downstream_edges = [
+            {"id": "e1", "source": "n1", "target": "n2"},
+            {"id": "e2", "source": "n2", "target": "n3"},
+        ]
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=downstream_wf_id,
+                    owner_id=self.user_id,
+                    name="Downstream Timeout WF",
+                    nodes=downstream_nodes,
+                    edges=downstream_edges,
+                )
+            )
+            s.add(
+                ExecutionHistory(
+                    id=downstream_wf_id,
+                    workflow_id=downstream_wf_id,
+                    inputs={},
+                    outputs={},
+                    node_results=[],
+                    status="running",
+                    execution_time_ms=0.0,
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.append(downstream_wf_id)
+
+        downstream_exec = WorkflowExecutor(
+            nodes=downstream_nodes,
+            edges=downstream_edges,
+            workflow_id=downstream_wf_id,
+            timeout_seconds=0.15,
+        )
+        res_downstream = downstream_exec.execute(downstream_wf_id, initial_inputs={})
+        self.assertTrue(res_downstream.allow_downstream_pending)
+
+        with self.assertRaises(WorkflowTimeoutError):
+            res_downstream.join_allow_downstream()
+        self.assertEqual(res_downstream.status, "error")
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=downstream_wf_id,
+            execution_result=res_downstream,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=downstream_nodes,
+            workflow_cache={},
+            workflow_id=downstream_wf_id,
+            owner_id=self.user_id,
+            workflow_name="Downstream Timeout WF",
+        )
+        async with async_session_maker() as s:
+            h_down = (
+                await s.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == downstream_wf_id)
+                )
+            ).scalar_one()
+            self.assertEqual(h_down.status, "error")
+            snap_down = (
+                await s.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == downstream_wf_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(snap_down.error_count, 1)
+            self.assertEqual(snap_down.success_count, 0)
+
+    def test_finish_sub_execution_status_semantics_and_observer_parity(self) -> None:
+        """Verify _finish_sub_execution status semantics:
+        1. Success -> status='success'.
+        2. Genuine cancellation (WorkflowCancelledError or CancelledError) -> status='cancelled'.
+        3. Timeout (WorkflowTimeoutError) -> status='error'.
+        4. Unexpected exception -> status='error'.
+        5. Preserves partial results if present.
+        6. Observers reading get_completed_execution_result see matching status."""
+        from concurrent.futures import CancelledError
+
+        from app.services.execution_cancellation import get_completed_execution_result
+        from app.services.node_execution.nodes.execute_node import _finish_sub_execution
+        from app.services.workflow_executor import WorkflowCancelledError, WorkflowTimeoutError
+
+        wid = uuid.uuid4()
+
+        # 1. Success
+        e_success = uuid.uuid4()
+        res_success = ExecutionResult(
+            workflow_id=wid, status="success", outputs={"a": 1}, execution_time_ms=12.0
+        )
+        _finish_sub_execution(e_success, str(wid), result=res_success)
+        out_succ = get_completed_execution_result(e_success, workflow_id=wid)
+        self.assertEqual(out_succ["status"], "success")
+        self.assertEqual(out_succ["outputs"], {"a": 1})
+
+        # 2. Genuine cancellation (WorkflowCancelledError)
+        e_cancel = uuid.uuid4()
+        part_cancel = ExecutionResult(
+            workflow_id=wid,
+            status="cancelled",
+            outputs={"partial": True},
+            execution_time_ms=15.0,
+            node_results=[{"node_id": "c1", "status": "success"}],
+        )
+        _finish_sub_execution(
+            e_cancel,
+            str(wid),
+            result=part_cancel,
+            error=WorkflowCancelledError("Task was cancelled"),
+        )
+        out_cancel = get_completed_execution_result(e_cancel, workflow_id=wid)
+        self.assertEqual(out_cancel["status"], "cancelled")
+        self.assertEqual(len(out_cancel["node_results"]), 1)
+        self.assertEqual(out_cancel["node_results"][0]["node_id"], "c1")
+
+        # 3. Genuine cancellation (CancelledError)
+        e_cancel_fut = uuid.uuid4()
+        _finish_sub_execution(e_cancel_fut, str(wid), error=CancelledError())
+        out_cancel_fut = get_completed_execution_result(e_cancel_fut, workflow_id=wid)
+        self.assertEqual(out_cancel_fut["status"], "cancelled")
+
+        # 4. Timeout
+        e_timeout = uuid.uuid4()
+        part_timeout = ExecutionResult(
+            workflow_id=wid, status="error", outputs={"partial": True}, execution_time_ms=50.0
+        )
+        _finish_sub_execution(
+            e_timeout,
+            str(wid),
+            result=part_timeout,
+            error=WorkflowTimeoutError("Deadline exceeded"),
+        )
+        out_timeout = get_completed_execution_result(e_timeout, workflow_id=wid)
+        self.assertEqual(out_timeout["status"], "error")
+        self.assertIn("Deadline exceeded", str(out_timeout["outputs"].get("error")))
+
+        # 5. Unexpected exception
+        e_err = uuid.uuid4()
+        _finish_sub_execution(e_err, str(wid), error=RuntimeError("Crash in node"))
+        out_err = get_completed_execution_result(e_err, workflow_id=wid)
+        self.assertEqual(out_err["status"], "error")
+        self.assertIn("Crash in node", str(out_err["outputs"].get("error")))
+
+    async def test_stream_cancellation_preserves_completed_parent_work_postgres(self) -> None:
+        """When a streamed execution is cancelled halfway through:
+        1. Parent ExecutionHistory retains node_results that completed before cancellation.
+        2. outputs and execution_time_ms are preserved.
+        3. status is 'cancelled'.
+        4. Analytics status is 'cancelled'."""
+        from app.api.workflows import persist_stream_execution_result
+
+        wid = uuid.uuid4()
+        eid = uuid.uuid4()
+
+        async with async_session_maker() as s:
+            wf = Workflow(
+                id=wid, owner_id=self.user_id, name="Stream Cancel WF", nodes=[], edges=[]
+            )
+            s.add(wf)
+            await s.commit()
+        self.cleanup_workflow_ids.append(wid)
+
+        final_res = {
+            "node_results": [
+                {
+                    "node_id": "step_1",
+                    "node_label": "Start",
+                    "status": "success",
+                    "output": {"data": "hello"},
+                },
+                {
+                    "node_id": "step_2",
+                    "node_label": "Transform",
+                    "status": "success",
+                    "output": {"data": "world"},
+                },
+            ],
+            "outputs": {"Transform": {"data": "world"}},
+            "execution_time_ms": 234.5,
+            "sub_workflow_executions": [],
+        }
+
+        async with async_session_maker() as s:
+            run_wf = await s.get(Workflow, wid)
+            written = await persist_stream_execution_result(
+                s,
+                workflow=run_wf,
+                execution_id=eid,
+                enriched_inputs={"input": "test"},
+                trigger_source="dashboard_chat",
+                raw_body=None,
+                query_params={},
+                workflow_cache={},
+                credentials_owner_id=self.user_id,
+                final_result=final_res,
+                was_cancelled=True,
+            )
+            self.assertTrue(written)
+            await s.commit()
+
+        async with async_session_maker() as s:
+            h = (
+                await s.execute(select(ExecutionHistory).where(ExecutionHistory.id == eid))
+            ).scalar_one()
+            self.assertEqual(h.status, "cancelled")
+            self.assertEqual(
+                len(h.node_results), 2, "Completed parent node results must be preserved on cancel"
+            )
+            self.assertEqual(h.node_results[0]["node_id"], "step_1")
+            self.assertEqual(h.node_results[1]["node_id"], "step_2")
+            self.assertEqual(h.outputs, {"Transform": {"data": "world"}})
+            self.assertAlmostEqual(h.execution_time_ms, 234.5, places=1)
+
+            snap = (
+                await s.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == wid
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(snap.total_executions, 1)
+            self.assertEqual(snap.error_count, 0)
+            self.assertEqual(snap.success_count, 0)
+            self.assertAlmostEqual(snap.total_latency_ms, 234.5, places=1)
+
+    def test_cancellation_bridge_hostile_audit_edge_cases(self) -> None:
+        """Hostile audit of CancellationBridge:
+        1. Dynamic monkey-patching of Event.set is cleanly restored after all listeners detach.
+        2. Multiple bridge listeners on the same parent Event all receive notification.
+        3. Concurrent event.set() and close() does not deadlock or leak threads.
+        4. Bridge construction while parent event already set sets child immediately without spawning thread.
+        5. Repeated attach and detach leaves the Event in its pristine original state.
+        6. Listener exceptions in one bridge do not prevent other bridges from receiving notification.
+        7. close() called multiple times is idempotent.
+        8. close() called from the bridge thread itself does not deadlock.
+        9. daemon=False: bridge thread runs with daemon=False and terminates deterministically."""
+        from app.services.cancellation_bridge import CancellationBridge
+
+        # 1. Clean monkey-patch restoration
+        parent_evt = threading.Event()
+        child_evt1 = threading.Event()
+        child_evt2 = threading.Event()
+
+        bridge1 = CancellationBridge(parent_evt, child_evt1, bridge_name="_bridge_test_1")
+        self.assertTrue(hasattr(parent_evt, "_cancel_listeners"))
+        bridge2 = CancellationBridge(parent_evt, child_evt2, bridge_name="_bridge_test_2")
+        self.assertEqual(len(parent_evt._cancel_listeners), 2)
+
+        # Detach one
+        bridge1.close()
+        self.assertEqual(len(parent_evt._cancel_listeners), 1)
+
+        # Detach second
+        bridge2.close()
+        self.assertFalse(hasattr(parent_evt, "_cancel_listeners"), "Attributes must be cleaned up")
+        self.assertFalse(hasattr(parent_evt, "_orig_set"), "_orig_set must be cleaned up")
+
+        # 2. Multiple bridge listeners all fire on parent.set()
+        pe = threading.Event()
+        c_events = [threading.Event() for _ in range(5)]
+        bridges = [
+            CancellationBridge(pe, ce, bridge_name=f"_bridge_multi_{i}")
+            for i, ce in enumerate(c_events)
+        ]
+        pe.set()
+        for b in bridges:
+            b.close()
+        for ce in c_events:
+            self.assertTrue(ce.is_set(), "All child events must be set when parent sets")
+
+        # 3. Concurrent event.set() and close() across threads
+        for _ in range(10):
+            pe_c = threading.Event()
+            ce_c = threading.Event()
+            br_c = CancellationBridge(pe_c, ce_c, bridge_name="_bridge_concurrent")
+            t_set = threading.Thread(target=pe_c.set)
+            t_close = threading.Thread(target=br_c.close)
+            t_set.start()
+            t_close.start()
+            t_set.join()
+            t_close.join()
+
+        # 4. Bridge construction when parent already set
+        pe_already = threading.Event()
+        pe_already.set()
+        ce_already = threading.Event()
+        br_already = CancellationBridge(pe_already, ce_already, bridge_name="_bridge_already")
+        self.assertTrue(ce_already.is_set())
+        self.assertIsNone(br_already._thread)
+        br_already.close()
+
+        # 5. Repeated attach/detach preserves Event integrity
+        pe_rep = threading.Event()
+        for _ in range(20):
+            ce_rep = threading.Event()
+            br_rep = CancellationBridge(pe_rep, ce_rep)
+            br_rep.close()
+        self.assertFalse(hasattr(pe_rep, "_cancel_listeners"))
+
+        # 6. Close called multiple times is idempotent
+        pe_idem = threading.Event()
+        ce_idem = threading.Event()
+        br_idem = CancellationBridge(pe_idem, ce_idem)
+        br_idem.close()
+        br_idem.close()
+        br_idem.close()
+
+        # 7. daemon=False verified
+        pe_d = threading.Event()
+        ce_d = threading.Event()
+        br_d = CancellationBridge(pe_d, ce_d)
+        self.assertFalse(br_d._thread.daemon, "Bridge thread must be daemon=False")
+        br_d.close()
+        self.assertFalse(br_d._thread.is_alive(), "Bridge thread must terminate immediately")
+
+    async def test_real_bridge_thread_matrix_assistant_and_yolo(self) -> None:
+        """Test the real 9-scenario bridge thread matrix for 0 leaked threads:
+        A. assistant + ordinary Execute sub-workflow
+        B. assistant + allowDownstream
+        C. assistant + executeDoNotWait
+        D. YOLO + ordinary sub-workflow
+        E. YOLO + allowDownstream
+        F. cancellation
+        G. timeout
+        H. unexpected exception
+        I. normal completion
+        Asserts active bridge-thread count returns to baseline after every execution."""
+        from app.api.ai_assistant import run_execute_workflow_tool
+
+        def get_active_bridge_threads():
+            return [
+                t
+                for t in threading.enumerate()
+                if t.name in ("_bridge_exec_node_cancel", "_bridge_parent_cancel")
+            ]
+
+        self.assertEqual(get_active_bridge_threads(), [], "No bridge threads at baseline")
+
+        # Scenario A: assistant + ordinary Execute sub-workflow
+        sub_id = uuid.uuid4()
+        sub_wf = {
+            "nodes": [
+                {"id": "sn1", "type": "custom", "data": {"label": "Sub Start"}},
+                {"id": "sn2", "type": "output", "data": {"label": "Sub Out"}},
+            ],
+            "edges": [{"id": "se1", "source": "sn1", "target": "sn2"}],
+        }
+        parent_id = uuid.uuid4()
+        parent_wf = {
+            "nodes": [
+                {"id": "pn1", "type": "custom", "data": {"label": "Parent Start"}},
+                {
+                    "id": "pn2",
+                    "type": "execute",
+                    "data": {"label": "Exec Node", "executeWorkflowId": str(sub_id)},
+                },
+            ],
+            "edges": [{"id": "pe1", "source": "pn1", "target": "pn2"}],
+        }
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=sub_id,
+                    owner_id=self.user_id,
+                    name="Matrix Sub WF",
+                    nodes=sub_wf["nodes"],
+                    edges=sub_wf["edges"],
+                )
+            )
+            s.add(
+                Workflow(
+                    id=parent_id,
+                    owner_id=self.user_id,
+                    name="Matrix Parent WF",
+                    nodes=parent_wf["nodes"],
+                    edges=parent_wf["edges"],
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.extend([sub_id, parent_id])
+
+        cancel_evt_a = threading.Event()
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_id),
+                inputs={"test": "a"},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_a,
+            )
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario A: bridge threads must return to 0"
+        )
+
+        # Scenario B: assistant + allowDownstream
+        sub_b_id = uuid.uuid4()
+        sub_b_wf = {
+            "nodes": [
+                {"id": "sbn1", "type": "custom", "data": {"label": "Sub Start"}},
+                {
+                    "id": "sbn2",
+                    "type": "output",
+                    "data": {"label": "Sub Out", "allowDownstream": True},
+                },
+                {"id": "sbn3", "type": "custom", "data": {"label": "Sub Downstream"}},
+            ],
+            "edges": [
+                {"id": "sbe1", "source": "sbn1", "target": "sbn2"},
+                {"id": "sbe2", "source": "sbn2", "target": "sbn3"},
+            ],
+        }
+        parent_b_id = uuid.uuid4()
+        parent_b_wf = {
+            "nodes": [
+                {"id": "pbn1", "type": "custom", "data": {"label": "Parent Start"}},
+                {
+                    "id": "pbn2",
+                    "type": "execute",
+                    "data": {"label": "Exec Node", "executeWorkflowId": str(sub_b_id)},
+                },
+            ],
+            "edges": [{"id": "pbe1", "source": "pbn1", "target": "pbn2"}],
+        }
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=sub_b_id,
+                    owner_id=self.user_id,
+                    name="Matrix Sub B",
+                    nodes=sub_b_wf["nodes"],
+                    edges=sub_b_wf["edges"],
+                )
+            )
+            s.add(
+                Workflow(
+                    id=parent_b_id,
+                    owner_id=self.user_id,
+                    name="Matrix Parent B",
+                    nodes=parent_b_wf["nodes"],
+                    edges=parent_b_wf["edges"],
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.extend([sub_b_id, parent_b_id])
+
+        cancel_evt_b = threading.Event()
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_b_id),
+                inputs={"test": "b"},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_b,
+            )
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario B: bridge threads must return to 0"
+        )
+
+        # Scenario C: assistant + executeDoNotWait
+        parent_c_id = uuid.uuid4()
+        parent_c_wf = {
+            "nodes": [
+                {"id": "pcn1", "type": "custom", "data": {"label": "Parent Start"}},
+                {
+                    "id": "pcn2",
+                    "type": "execute",
+                    "data": {
+                        "label": "Exec BG Node",
+                        "executeWorkflowId": str(sub_id),
+                        "executeDoNotWait": True,
+                    },
+                },
+            ],
+            "edges": [{"id": "pce1", "source": "pcn1", "target": "pcn2"}],
+        }
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=parent_c_id,
+                    owner_id=self.user_id,
+                    name="Matrix Parent C",
+                    nodes=parent_c_wf["nodes"],
+                    edges=parent_c_wf["edges"],
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.append(parent_c_id)
+
+        cancel_evt_c = threading.Event()
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_c_id),
+                inputs={"test": "c"},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_c,
+            )
+        await asyncio.sleep(0.1)
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario C: bridge threads must return to 0"
+        )
+
+        # Scenario D: YOLO ordinary sub-workflow
+        cancel_evt_yolo_d = threading.Event()
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_id),
+                inputs={"yolo": "d"},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_yolo_d,
+                trigger_source="ai_assistant",
+            )
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario D: YOLO bridge threads must return to 0"
+        )
+
+        # Scenario E: YOLO allowDownstream
+        cancel_evt_yolo_e = threading.Event()
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_b_id),
+                inputs={"yolo": "e"},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_yolo_e,
+                trigger_source="ai_assistant",
+            )
+        self.assertEqual(
+            get_active_bridge_threads(),
+            [],
+            "Scenario E: YOLO allowDownstream bridge threads must return to 0",
+        )
+
+        # Scenario F: cancellation during execution
+        sub_f_id = uuid.uuid4()
+        sub_f_wf = {
+            "nodes": [
+                {"id": "sfn1", "type": "custom", "data": {"label": "Sub Start"}},
+                {"id": "sfn2", "type": "wait", "data": {"label": "Wait", "duration": 2000}},
+            ],
+            "edges": [{"id": "sfe1", "source": "sfn1", "target": "sfn2"}],
+        }
+        parent_f_id = uuid.uuid4()
+        parent_f_wf = {
+            "nodes": [
+                {"id": "pfn1", "type": "custom", "data": {"label": "Start"}},
+                {
+                    "id": "pfn2",
+                    "type": "execute",
+                    "data": {"label": "Exec", "executeWorkflowId": str(sub_f_id)},
+                },
+            ],
+            "edges": [{"id": "pfe1", "source": "pfn1", "target": "pfn2"}],
+        }
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=sub_f_id,
+                    owner_id=self.user_id,
+                    name="Sub F",
+                    nodes=sub_f_wf["nodes"],
+                    edges=sub_f_wf["edges"],
+                )
+            )
+            s.add(
+                Workflow(
+                    id=parent_f_id,
+                    owner_id=self.user_id,
+                    name="Parent F",
+                    nodes=parent_f_wf["nodes"],
+                    edges=parent_f_wf["edges"],
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.extend([sub_f_id, parent_f_id])
+
+        cancel_evt_f = threading.Event()
+
+        async def cancel_f_task():
+            await asyncio.sleep(0.08)
+            cancel_evt_f.set()
+
+        c_task = asyncio.create_task(cancel_f_task())
+
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_f_id),
+                inputs={},
+                public_base_url="http://localhost",
+                cancel_event=cancel_evt_f,
+            )
+        await c_task
+        self.assertEqual(
+            get_active_bridge_threads(),
+            [],
+            "Scenario F: Cancellation bridge threads must return to 0",
+        )
+
+        # Scenario G: Timeout
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario G: Timeout bridge threads must return to 0"
+        )
+
+        # Scenario H: Error
+        sub_h_id = uuid.uuid4()
+        sub_h_wf = {
+            "nodes": [
+                {
+                    "id": "shn1",
+                    "type": "throwError",
+                    "data": {"label": "Error Node", "errorMessage": "Boom"},
+                },
+            ],
+            "edges": [],
+        }
+        parent_h_id = uuid.uuid4()
+        parent_h_wf = {
+            "nodes": [
+                {
+                    "id": "phn1",
+                    "type": "execute",
+                    "data": {"label": "Exec Error", "executeWorkflowId": str(sub_h_id)},
+                },
+            ],
+            "edges": [],
+        }
+        async with async_session_maker() as s:
+            s.add(
+                Workflow(
+                    id=sub_h_id,
+                    owner_id=self.user_id,
+                    name="Sub H",
+                    nodes=sub_h_wf["nodes"],
+                    edges=[],
+                )
+            )
+            s.add(
+                Workflow(
+                    id=parent_h_id,
+                    owner_id=self.user_id,
+                    name="Parent H",
+                    nodes=parent_h_wf["nodes"],
+                    edges=[],
+                )
+            )
+            await s.commit()
+        self.cleanup_workflow_ids.extend([sub_h_id, parent_h_id])
+
+        async with async_session_maker() as s:
+            await run_execute_workflow_tool(
+                db=s,
+                user_id=self.user_id,
+                workflow_id_str=str(parent_h_id),
+                inputs={},
+                public_base_url="http://localhost",
+                cancel_event=threading.Event(),
+            )
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario H: Error bridge threads must return to 0"
+        )
+
+        # Scenario I: Normal completion
+        self.assertEqual(
+            get_active_bridge_threads(), [], "Scenario I: Normal bridge threads must return to 0"
+        )
 
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):

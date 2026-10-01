@@ -2052,6 +2052,8 @@ class WorkflowExecutor:
         self.lock = Lock()
         self.workflow_cache = workflow_cache or {}
         self.sub_workflow_executions: list[SubWorkflowExecution] = []
+        self.completed_node_results: list[dict] = []
+        self.execution_start_time: float | None = None
         self.test_mode = test_mode
         self.credentials_context = credentials_context or {}
         self.global_variables_context = global_variables_context or {}
@@ -3275,6 +3277,8 @@ class WorkflowExecutor:
                 self.credentials_context,
             )
         record_execution_node_completed(self.execution_id, node_id, live_result)
+        with self.lock:
+            self.completed_node_results.append(live_result)
         return result
 
     def _handle_success_branch_routing(self, node_id: str) -> None:
@@ -7684,6 +7688,7 @@ class WorkflowExecutor:
 
     def _execute_inner(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         start_time = time.time()
+        self.execution_start_time = start_time
         self._arm_deadline()
         self.check_cancelled()
         node_results: list[NodeResult] = []

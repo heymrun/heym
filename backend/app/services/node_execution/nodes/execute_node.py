@@ -1,7 +1,6 @@
-from __future__ import annotations
-
+import asyncio
 import uuid
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from importlib import import_module
 from threading import Event
 
@@ -22,24 +21,39 @@ def _finish_sub_execution(
     Without this the handle simply vanishes and the observer stream has nothing to find:
     the sub-workflow's history row is written under a different id by the parent's run.
     """
-    if error is not None or result is None:
-        payload: dict = {
-            "type": "execution_complete",
-            "workflow_id": workflow_id,
-            "status": "error",
-            "outputs": {"error": str(error) if error is not None else "Sub-workflow did not run"},
-            "execution_time_ms": 0,
-            "node_results": [],
-        }
+    _workflow_executor = import_module("app.services.workflow_executor")
+    workflow_timeout_error = _workflow_executor.WorkflowTimeoutError
+    workflow_cancelled_error = _workflow_executor.WorkflowCancelledError
+
+    node_results = getattr(result, "node_results", []) if result is not None else []
+    raw_outputs = getattr(result, "outputs", {}) if result is not None else {}
+    outputs = dict(raw_outputs) if isinstance(raw_outputs, dict) else {}
+    execution_time_ms = getattr(result, "execution_time_ms", 0.0) if result is not None else 0.0
+
+    if isinstance(error, workflow_timeout_error):
+        status = "error"
+        outputs["error"] = str(error)
+    elif isinstance(error, (workflow_cancelled_error, CancelledError, asyncio.CancelledError)):
+        status = "cancelled"
+        if "error" not in outputs:
+            outputs["error"] = str(error) or "Workflow execution cancelled"
+    elif error is not None:
+        status = "error"
+        outputs["error"] = str(error)
+    elif result is not None:
+        status = getattr(result, "status", "success")
     else:
-        payload = {
-            "type": "execution_complete",
-            "workflow_id": workflow_id,
-            "status": result.status,
-            "outputs": result.outputs,
-            "execution_time_ms": result.execution_time_ms,
-            "node_results": result.node_results,
-        }
+        status = "error"
+        outputs["error"] = "Sub-workflow did not run"
+
+    payload: dict = {
+        "type": "execution_complete",
+        "workflow_id": workflow_id,
+        "status": status,
+        "outputs": outputs,
+        "execution_time_ms": execution_time_ms,
+        "node_results": node_results,
+    }
     try:
         complete_execution(
             execution_id,
