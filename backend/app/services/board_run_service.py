@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Iterable
+from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -45,7 +46,12 @@ from app.services.execution_cancellation import (
 )
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
-from app.services.workflow_executor import _to_json_compatible, execute_workflow
+from app.services.workflow_executor import (
+    WorkflowCancelledError,
+    WorkflowTimeoutError,
+    _to_json_compatible,
+    execute_workflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -514,7 +520,27 @@ async def _run_chain(
                 finally:
                     clear_execution(execution_id)
                 if result.allow_downstream_pending:
-                    result.join_allow_downstream()
+                    try:
+                        result.join_allow_downstream()
+                    except WorkflowTimeoutError as exc:
+                        logger.warning(
+                            "Board run %s allowDownstream timed out: %s", execution_id, exc
+                        )
+                        result.status = "error"
+                        if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                            result.outputs.setdefault(
+                                "error", str(exc) or "Workflow execution timed out"
+                            )
+                    except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
+                        logger.info("Board run %s allowDownstream cancelled", execution_id)
+                        result.status = "cancelled"
+                    except Exception as exc:
+                        logger.exception(
+                            "Board run %s allowDownstream failed unexpectedly", execution_id
+                        )
+                        result.status = "error"
+                        if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                            result.outputs.setdefault("error", str(exc))
 
                 if result.status == "pending":
                     # A Codex question and a HITL review are different pauses with different

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import secrets
 import uuid
+from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -20,10 +22,14 @@ from app.db.session import async_session_maker
 from app.services.hitl_service import build_default_public_base_url
 from app.services.workflow_executor import (
     ExecutionResult,
+    WorkflowCancelledError,
+    WorkflowTimeoutError,
     _to_json_compatible,
     execute_hitl_notification_branch,
     resume_workflow_execution,
 )
+
+logger = logging.getLogger(__name__)
 
 CODEX_FOLLOWUP_TTL_HOURS = 168
 
@@ -424,14 +430,38 @@ async def resume_codex_followup_in_background(request_id: uuid.UUID) -> None:
                 return
 
             if getattr(resumed_result, "allow_downstream_pending", False):
-                await asyncio.to_thread(resumed_result.join_allow_downstream)
-                if any(
-                    isinstance(node_result, dict)
-                    and node_result.get("status") == "error"
-                    and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
-                    for node_result in (getattr(resumed_result, "node_results", None) or [])
-                ):
+                try:
+                    await asyncio.to_thread(resumed_result.join_allow_downstream)
+                    if any(
+                        isinstance(node_result, dict)
+                        and node_result.get("status") == "error"
+                        and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
+                        for node_result in (getattr(resumed_result, "node_results", None) or [])
+                    ):
+                        resumed_result.status = "error"
+                except WorkflowTimeoutError as exc:
+                    logger.warning(
+                        "Codex resumed run %s allowDownstream timed out: %s", history_entry.id, exc
+                    )
                     resumed_result.status = "error"
+                    if hasattr(resumed_result, "outputs") and isinstance(
+                        resumed_result.outputs, dict
+                    ):
+                        resumed_result.outputs.setdefault(
+                            "error", str(exc) or "Workflow execution timed out"
+                        )
+                except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
+                    logger.info("Codex resumed run %s allowDownstream cancelled", history_entry.id)
+                    resumed_result.status = "cancelled"
+                except Exception as exc:
+                    logger.exception(
+                        "Codex resumed run %s allowDownstream failed unexpectedly", history_entry.id
+                    )
+                    resumed_result.status = "error"
+                    if hasattr(resumed_result, "outputs") and isinstance(
+                        resumed_result.outputs, dict
+                    ):
+                        resumed_result.outputs.setdefault("error", str(exc))
 
             history_entry.status = resumed_result.status
             history_entry.outputs = _to_json_compatible(resumed_result.outputs)

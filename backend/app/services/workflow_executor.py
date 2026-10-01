@@ -37,6 +37,7 @@ from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
 from app.services import expression_syntax
 from app.services.agent_tool_policy import is_blocked_as_tool
+from app.services.cancellation_bridge import CancellationBridge
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
@@ -1759,15 +1760,26 @@ class ExecutionResult:
         self._allow_downstream_pending.clear()
         cancelled = False
         unhandled_error = False
+        downstream_exception: BaseException | None = None
         for fut in pending:
             try:
                 fut.result()
-            except WorkflowCancelledError:
+            except WorkflowTimeoutError as exc:
+                if downstream_exception is None:
+                    downstream_exception = exc
+            except (WorkflowCancelledError, CancelledError, asyncio.CancelledError) as exc:
                 cancelled = True
-            except (CancelledError, asyncio.CancelledError):
-                cancelled = True
-            except Exception:
+                if downstream_exception is None:
+                    downstream_exception = (
+                        exc
+                        if isinstance(exc, WorkflowCancelledError)
+                        else WorkflowCancelledError("Workflow execution cancelled")
+                    )
+            except Exception as exc:
                 unhandled_error = True
+                logger.exception("Unexpected exception in allowDownstream background execution")
+                if downstream_exception is None:
+                    downstream_exception = exc
 
         existing_ids = {item.get("node_id") for item in self.node_results if isinstance(item, dict)}
         for result in self._allow_downstream_node_results:
@@ -1791,10 +1803,15 @@ class ExecutionResult:
             )
             for r in self._allow_downstream_node_results
         )
-        if cancelled:
+        if isinstance(downstream_exception, WorkflowTimeoutError):
+            self.status = "error"
+        elif cancelled:
             self.status = "cancelled"
         elif unhandled_error or has_downstream_node_error:
             self.status = "error"
+
+        if downstream_exception is not None:
+            raise downstream_exception
 
 
 #: Terminal mappers: sinks whose output replaces the wrapped per-label response shape.
@@ -3138,7 +3155,21 @@ class WorkflowExecutor:
                 )
             return
         if sub_res.allow_downstream_pending:
-            sub_res.join_allow_downstream()
+            try:
+                sub_res.join_allow_downstream()
+            except WorkflowTimeoutError as exc:
+                sub_res.status = "error"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
+            except (WorkflowCancelledError, CancelledError, asyncio.CancelledError) as exc:
+                sub_res.status = "cancelled"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc) or "Workflow execution cancelled")
+            except Exception as exc:
+                logger.exception("Unexpected exception in background sub-workflow allowDownstream")
+                sub_res.status = "error"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc))
         credentials_context = getattr(parent, "credentials_context", None) or {}
         if sub_res.status == "pending":
             _, pending_rows = mask_sub_workflow_result(sub_res, credentials_context)
@@ -4066,15 +4097,11 @@ class WorkflowExecutor:
             event=sub_cancel_event,
             recoverable=False,
         )
-        # Propagate parent cancellation into the sub's cancel event.
-        if self.cancel_event is not None:
-            _parent_event = self.cancel_event
-
-            def _bridge_parent_cancel() -> None:
-                _parent_event.wait()
-                sub_cancel_event.set()
-
-            Thread(target=_bridge_parent_cancel, daemon=True).start()
+        bridge = CancellationBridge(
+            self.cancel_event,
+            sub_cancel_event,
+            bridge_name="_bridge_parent_cancel",
+        )
         sub_executor = WorkflowExecutor(
             nodes=target_workflow["nodes"],
             edges=target_workflow["edges"],
@@ -4098,11 +4125,14 @@ class WorkflowExecutor:
             "body": inputs,
         }
         start_ms = time.time() * 1000
+        sub_result: ExecutionResult | None = None
         try:
             sub_result = sub_executor.execute(
                 workflow_id=uuid.UUID(workflow_id_str),
                 initial_inputs=enriched_inputs,
             )
+            if sub_result.allow_downstream_pending:
+                sub_result.join_allow_downstream()
             if sub_result.status == "pending":
                 return {
                     "status": "error",
@@ -4148,6 +4178,25 @@ class WorkflowExecutor:
             # Preserve lifecycle status at the source so the agent loop can abort
             # on explicit cancelled/timeout without inferring from error text.
             elapsed_ms = round((time.time() * 1000) - start_ms)
+            if sub_result is not None:
+                masked_outputs, masked_rows = mask_sub_workflow_result(
+                    sub_result, self.credentials_context
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(
+                        SubWorkflowExecution(
+                            workflow_id=workflow_id_str,
+                            inputs=inputs,
+                            outputs={"error": str(exc)},
+                            status="error",
+                            execution_time_ms=sub_result.execution_time_ms,
+                            node_results=masked_rows,
+                            workflow_name=target_workflow.get("name", ""),
+                            trigger_source="AI Agents",
+                            execution_id=str(_sub_execution_id),
+                        )
+                    )
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
             return {
                 "status": "timeout",
                 "outputs": {},
@@ -4156,6 +4205,25 @@ class WorkflowExecutor:
             }
         except WorkflowCancelledError as exc:
             elapsed_ms = round((time.time() * 1000) - start_ms)
+            if sub_result is not None:
+                masked_outputs, masked_rows = mask_sub_workflow_result(
+                    sub_result, self.credentials_context
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(
+                        SubWorkflowExecution(
+                            workflow_id=workflow_id_str,
+                            inputs=inputs,
+                            outputs={"error": str(exc)},
+                            status="cancelled",
+                            execution_time_ms=sub_result.execution_time_ms,
+                            node_results=masked_rows,
+                            workflow_name=target_workflow.get("name", ""),
+                            trigger_source="AI Agents",
+                            execution_id=str(_sub_execution_id),
+                        )
+                    )
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
             return {
                 "status": "cancelled",
                 "outputs": {},
@@ -4164,6 +4232,25 @@ class WorkflowExecutor:
             }
         except Exception as exc:
             elapsed_ms = round((time.time() * 1000) - start_ms)
+            if sub_result is not None:
+                masked_outputs, masked_rows = mask_sub_workflow_result(
+                    sub_result, self.credentials_context
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(
+                        SubWorkflowExecution(
+                            workflow_id=workflow_id_str,
+                            inputs=inputs,
+                            outputs={"error": str(exc)},
+                            status="error",
+                            execution_time_ms=sub_result.execution_time_ms,
+                            node_results=masked_rows,
+                            workflow_name=target_workflow.get("name", ""),
+                            trigger_source="AI Agents",
+                            execution_id=str(_sub_execution_id),
+                        )
+                    )
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
             return {
                 "status": "error",
                 "outputs": {},
@@ -4171,6 +4258,7 @@ class WorkflowExecutor:
                 "error": str(exc),
             }
         finally:
+            bridge.close()
             _clear_sub_execution(_sub_execution_id)
 
     @staticmethod

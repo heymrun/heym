@@ -380,6 +380,32 @@ async def persist_stream_execution_result(
             status="cancelled",
             execution_time_ms=0.0,
         )
+        sub_workflow_executions = (
+            final_result.get("sub_workflow_executions", [])
+            if isinstance(final_result, dict)
+            else []
+        )
+        for sub_exec in sub_workflow_executions:
+            sub_id = uuid.UUID(str(sub_exec["workflow_id"]))
+            db.add(
+                ExecutionHistory(
+                    workflow_id=sub_id,
+                    inputs=sub_exec["inputs"],
+                    outputs=sub_exec["outputs"],
+                    node_results=sub_exec.get("node_results", []),
+                    status=sub_exec["status"],
+                    execution_time_ms=sub_exec["execution_time_ms"],
+                    trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
+                )
+            )
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=sub_id,
+                owner_id=None,
+                workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
+                status=sub_exec["status"],
+                execution_time_ms=float(sub_exec["execution_time_ms"]),
+            )
         return True
 
     if not final_result or final_result.get("status") == "pending":
@@ -483,21 +509,54 @@ async def _finalize_allow_downstream_history(
         try:
             await asyncio.to_thread(execution_result.join_allow_downstream)
         except Exception as exc:
-            logger.warning(
-                "join_allow_downstream failed for execution %s: %s", history_entry_id, exc
+            from app.services.workflow_executor import (
+                WorkflowCancelledError,
+                WorkflowTimeoutError,
             )
-            from app.services.workflow_executor import WorkflowCancelledError
 
-            if isinstance(exc, (WorkflowCancelledError, asyncio.CancelledError)):
-                if hasattr(execution_result, "status"):
-                    execution_result.status = "cancelled"
-                elif isinstance(execution_result, dict):
-                    execution_result["status"] = "cancelled"
-            elif getattr(execution_result, "status", None) != "cancelled":
+            if isinstance(exc, WorkflowTimeoutError):
+                logger.warning(
+                    "join_allow_downstream timed out for execution %s: %s",
+                    history_entry_id,
+                    exc,
+                )
                 if hasattr(execution_result, "status"):
                     execution_result.status = "error"
                 elif isinstance(execution_result, dict):
                     execution_result["status"] = "error"
+                if hasattr(execution_result, "outputs") and isinstance(
+                    execution_result.outputs, dict
+                ):
+                    execution_result.outputs.setdefault(
+                        "error", str(exc) or "Workflow execution timed out"
+                    )
+                elif isinstance(execution_result, dict):
+                    outs = execution_result.setdefault("outputs", {})
+                    if isinstance(outs, dict):
+                        outs.setdefault("error", str(exc) or "Workflow execution timed out")
+            elif isinstance(exc, (WorkflowCancelledError, asyncio.CancelledError)):
+                logger.info("join_allow_downstream cancelled for execution %s", history_entry_id)
+                if hasattr(execution_result, "status"):
+                    execution_result.status = "cancelled"
+                elif isinstance(execution_result, dict):
+                    execution_result["status"] = "cancelled"
+            else:
+                logger.exception(
+                    "join_allow_downstream failed unexpectedly for execution %s", history_entry_id
+                )
+                if getattr(execution_result, "status", None) != "cancelled":
+                    if hasattr(execution_result, "status"):
+                        execution_result.status = "error"
+                    elif isinstance(execution_result, dict):
+                        execution_result["status"] = "error"
+                if hasattr(execution_result, "outputs") and isinstance(
+                    execution_result.outputs, dict
+                ):
+                    execution_result.outputs.setdefault("error", str(exc))
+                elif isinstance(execution_result, dict):
+                    outs = execution_result.setdefault("outputs", {})
+                    if isinstance(outs, dict):
+                        outs.setdefault("error", str(exc))
 
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
@@ -3265,6 +3324,33 @@ async def execute_workflow_endpoint(
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
         )
+    except WorkflowTimeoutError as exc:
+        if not test_run:
+            history_entry = ExecutionHistory(
+                id=execution_id,
+                workflow_id=workflow.id,
+                inputs=enriched_inputs,
+                outputs={"error": str(exc)},
+                node_results=[],
+                status="error",
+                execution_time_ms=0,
+                trigger_source=trigger_source,
+            )
+            db.add(history_entry)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                workflow_name_snapshot=workflow.name,
+                status="error",
+                execution_time_ms=0.0,
+                started_at=datetime.now(timezone.utc),
+            )
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=str(exc) or "Workflow execution timed out",
+        )
     except WorkflowCancelledError:
         if not test_run:
             history_entry = ExecutionHistory(
@@ -4075,6 +4161,13 @@ async def execute_workflow_stream(
             return
         except WorkflowCancelledError:
             was_cancelled = True
+            wf_exec = executor_holder.get("executor")
+            if wf_exec is not None:
+                extra = _serialize_sub_workflow_executions(wf_exec.sub_workflow_executions)
+                if extra:
+                    if final_result is None:
+                        final_result = {}
+                    final_result["sub_workflow_executions"] = extra
             return
         finally:
             release_run()

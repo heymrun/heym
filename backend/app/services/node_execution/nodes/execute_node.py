@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from concurrent.futures import Future
 from importlib import import_module
-from threading import Event, Thread
+from threading import Event
 
+from app.services.cancellation_bridge import CancellationBridge
 from app.services.execution_cancellation import clear_execution, complete_execution
 from app.services.node_execution.base import NodeExecutionContext
 
@@ -52,6 +53,7 @@ def _finish_sub_execution(
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the execute node."""
     _workflow_executor = import_module("app.services.workflow_executor")
+    ExecutionResult = _workflow_executor.ExecutionResult  # noqa: N806
     SubWorkflowExecution = _workflow_executor.SubWorkflowExecution  # noqa: N806
     WorkflowExecutor = _workflow_executor.WorkflowExecutor  # noqa: N806
     SUB_WORKFLOW_HITL_UNSUPPORTED = _workflow_executor.SUB_WORKFLOW_HITL_UNSUPPORTED  # noqa: N806
@@ -115,14 +117,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         )
         _sub_exec_id = uuid.uuid4()
         _exec_node_cancel_event = Event()
-        if self.cancel_event is not None:
-            _exec_node_parent = self.cancel_event
-
-            def _bridge_exec_node_cancel() -> None:
-                _exec_node_parent.wait()
-                _exec_node_cancel_event.set()
-
-            Thread(target=_bridge_exec_node_cancel, daemon=True).start()
+        bridge = CancellationBridge(
+            self.cancel_event,
+            _exec_node_cancel_event,
+            bridge_name="_bridge_exec_node_cancel",
+        )
         sub_executor = WorkflowExecutor(
             nodes=target_workflow["nodes"],
             edges=target_workflow["edges"],
@@ -179,6 +178,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                         error=bg_error,
                     )
                     bg_callback_done.set()
+                    bridge.close()
 
             bg_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
                 sub_executor.execute,
@@ -205,6 +205,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 recoverable=False,
             )
             sub_error: BaseException | None = None
+            sub_result: ExecutionResult | None = None
             try:
                 sub_result = sub_executor.execute(
                     workflow_id=uuid.UUID(execute_workflow_id),
@@ -216,33 +217,33 @@ def execute(ctx: NodeExecutionContext) -> object:
                 sub_error = exc
                 raise
             finally:
-                # `sub_result` is only read when nothing was raised, so it is always bound.
+                bridge.close()
                 _finish_sub_execution(
                     _sub_exec_id,
                     execute_workflow_id,
-                    result=None if sub_error else sub_result,
+                    result=sub_result,
                     error=sub_error,
                 )
+                if sub_result is not None:
+                    masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
+                        sub_result, self.credentials_context
+                    )
+                    sub_exec = SubWorkflowExecution(
+                        workflow_id=execute_workflow_id,
+                        inputs=execute_inputs,
+                        outputs=masked_outputs,
+                        status=sub_result.status,
+                        execution_time_ms=sub_result.execution_time_ms,
+                        node_results=masked_rows,
+                        workflow_name=target_workflow.get("name", ""),
+                        trigger_source=("AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"),
+                        execution_id=str(_sub_exec_id),
+                    )
+                    with self.lock:
+                        self.sub_workflow_executions.append(sub_exec)
+                        self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
             if sub_result.status == "pending":
                 raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
-
-            masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
-                sub_result, self.credentials_context
-            )
-            sub_exec = SubWorkflowExecution(
-                workflow_id=execute_workflow_id,
-                inputs=execute_inputs,
-                outputs=masked_outputs,
-                status=sub_result.status,
-                execution_time_ms=sub_result.execution_time_ms,
-                node_results=masked_rows,
-                workflow_name=target_workflow.get("name", ""),
-                trigger_source=("AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"),
-                execution_id=str(_sub_exec_id),
-            )
-            with self.lock:
-                self.sub_workflow_executions.append(sub_exec)
-                self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
 
             output = {
                 "workflow_id": execute_workflow_id,

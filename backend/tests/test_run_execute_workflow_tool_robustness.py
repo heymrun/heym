@@ -33,6 +33,7 @@ from app.services.workflow_executor import (
     NodeResult,
     SubWorkflowExecution,
     WorkflowCancelledError,
+    WorkflowTimeoutError,
 )
 
 
@@ -2710,6 +2711,507 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             ).scalar_one()
             self.assertEqual(sub_snap.total_executions, 1)
             self.assertEqual(sub_snap.success_count, 1)
+
+    async def test_cancellation_bridge_threads_exit_and_no_leak_across_repeated_turns(
+        self,
+    ) -> None:
+        """25 repeated normal turns must not leak _bridge_exec_node_cancel or _bridge_parent_cancel
+        threads. Active bridge thread count must return to baseline after every completed turn,
+        including:
+        - normal completion with allowDownstream
+        - normal completion without allowDownstream
+        - actual cancellation
+        - actual timeout
+        - unexpected exception
+        """
+        from app.services.cancellation_bridge import CancellationBridge
+        from app.services.workflow_executor import WorkflowExecutor
+
+        def get_bridge_threads():
+            return [
+                t
+                for t in threading.enumerate()
+                if t.name in ("_bridge_exec_node_cancel", "_bridge_parent_cancel")
+            ]
+
+        # Baseline check
+        self.assertEqual(get_bridge_threads(), [], "No bridge threads should exist at baseline")
+
+        # 1. Repeated turns of CancellationBridge directly
+        for turn in range(25):
+            parent_event = threading.Event()
+            child_event = threading.Event()
+            bridge = CancellationBridge(
+                parent_event, child_event, bridge_name="_bridge_parent_cancel"
+            )
+            self.assertEqual(
+                len(get_bridge_threads()), 1, f"Bridge thread must be running in turn {turn}"
+            )
+            bridge.close()
+            self.assertEqual(
+                get_bridge_threads(),
+                [],
+                f"Bridge thread must terminate immediately after close in turn {turn}",
+            )
+
+        # 2. Repeated turns of Execute node bridge
+        for turn in range(25):
+            parent_event = threading.Event()
+            child_event = threading.Event()
+            bridge = CancellationBridge(
+                parent_event, child_event, bridge_name="_bridge_exec_node_cancel"
+            )
+            self.assertEqual(len(get_bridge_threads()), 1)
+            bridge.close()
+            self.assertEqual(get_bridge_threads(), [])
+
+        # 3. Real cancellation: setting parent_event causes bridge thread to set child and exit
+        parent_event = threading.Event()
+        child_event = threading.Event()
+        bridge = CancellationBridge(
+            parent_event, child_event, bridge_name="_bridge_exec_node_cancel"
+        )
+        parent_event.set()
+        bridge.close()
+        self.assertTrue(child_event.is_set(), "Child event must be set when parent cancels")
+        self.assertEqual(get_bridge_threads(), [], "Bridge thread must be terminated")
+
+        # 4. Parent already cancelled before bridge created
+        parent_event = threading.Event()
+        parent_event.set()
+        child_event = threading.Event()
+        bridge = CancellationBridge(parent_event, child_event, bridge_name="_bridge_parent_cancel")
+        self.assertTrue(
+            child_event.is_set(), "Child event must be set immediately if parent already set"
+        )
+        self.assertEqual(
+            get_bridge_threads(), [], "No bridge thread should be spawned if parent already set"
+        )
+        bridge.close()
+
+        # 5. Full sub-workflow invocation via run_sub_workflow across 25 turns
+        target_wf = {
+            "nodes": [
+                {"id": "n1", "type": "custom", "data": {"label": "Start"}},
+                {"id": "n2", "type": "output", "data": {"label": "End"}},
+            ],
+            "edges": [{"id": "e1", "source": "n1", "target": "n2"}],
+            "name": "Sub Workflow In Turn",
+        }
+        wf_id_str = str(self.sub_workflow_id)
+        cache = {wf_id_str: target_wf}
+
+        parent_exec = WorkflowExecutor(
+            nodes=[{"id": "pn1", "type": "input"}],
+            edges=[],
+            workflow_cache=cache,
+            workflow_id=self.workflow_id,
+            cancel_event=threading.Event(),
+        )
+
+        for turn in range(25):
+            res = parent_exec._execute_sub_workflow_tool(
+                tool_def={"_sub_workflow_ids": [wf_id_str]},
+                _name="call_sub_workflow",
+                args={"workflow_id": wf_id_str, "inputs": {"x": turn}},
+                _timeout_seconds=30.0,
+            )
+            self.assertNotIn(
+                "error", res, f"Sub-workflow execution must not error in turn {turn}: {res}"
+            )
+            self.assertEqual(
+                get_bridge_threads(),
+                [],
+                f"All bridge threads must exit after sub-workflow turn {turn}",
+            )
+
+    async def test_subworkflow_cancellation_cancels_parent_and_aborts_subsequent_nodes(
+        self,
+    ) -> None:
+        """When an awaited sub-workflow is cancelled (with or without allowDownstream):
+        1. Cancellation must propagate to the parent executor (does NOT swallow or treat as success).
+        2. Subsequent parent nodes must NOT be executed.
+        3. Completed child work must be captured in parent.sub_workflow_executions and persisted to DB.
+        4. Parent status must be 'cancelled' in ExecutionHistory and analytics."""
+        from app.api.workflows import _finalize_allow_downstream_history
+        from app.services.workflow_executor import WorkflowCancelledError, WorkflowExecutor
+
+        # Construct child workflow with allowDownstream
+        child_id = str(uuid.uuid4())
+        child_wf = {
+            "id": child_id,
+            "name": "AllowDownstream Child",
+            "nodes": [
+                {"id": "c1", "type": "custom", "data": {"label": "Child Start"}},
+                {
+                    "id": "c2",
+                    "type": "output",
+                    "data": {"label": "Child Output", "allowDownstream": True},
+                },
+                {"id": "c3", "type": "custom", "data": {"label": "Child Downstream"}},
+            ],
+            "edges": [
+                {"id": "ce1", "source": "c1", "target": "c2"},
+                {"id": "ce2", "source": "c2", "target": "c3"},
+            ],
+        }
+
+        # Construct parent workflow: p1 -> p_exec (Execute Node) -> p3 (Subsequent Node)
+        parent_id = uuid.uuid4()
+        parent_wf_nodes = [
+            {"id": "p1", "type": "custom", "data": {"label": "Parent Start"}},
+            {
+                "id": "p_exec",
+                "type": "execute",
+                "data": {
+                    "label": "Run Child WF",
+                    "executeWorkflowId": child_id,
+                },
+            },
+            {"id": "p3", "type": "custom", "data": {"label": "Subsequent Parent Node"}},
+        ]
+        parent_wf_edges = [
+            {"id": "pe1", "source": "p1", "target": "p_exec"},
+            {"id": "pe2", "source": "p_exec", "target": "p3"},
+        ]
+        workflow_cache = {child_id: child_wf}
+
+        parent_cancel_event = threading.Event()
+        parent_executor = WorkflowExecutor(
+            nodes=parent_wf_nodes,
+            edges=parent_wf_edges,
+            workflow_cache=workflow_cache,
+            workflow_id=parent_id,
+            cancel_event=parent_cancel_event,
+        )
+
+        downstream_fut: Future = Future()
+        downstream_fut.set_exception(WorkflowCancelledError("Downstream was cancelled"))
+
+        child_exec_result = ExecutionResult(
+            workflow_id=uuid.UUID(child_id),
+            status="success",
+            outputs={"child_out": "initial_val"},
+            node_results=[{"node_id": "c1", "status": "success", "output": {"c1": "done"}}],
+            execution_time_ms=20.0,
+            _allow_downstream_pending=[downstream_fut],
+            _allow_downstream_node_results=[
+                NodeResult(
+                    node_id="c3",
+                    node_label="Child Downstream",
+                    node_type="custom",
+                    status="cancelled",
+                    output={},
+                    execution_time_ms=5.0,
+                )
+            ],
+        )
+
+        orig_execute = WorkflowExecutor.execute
+
+        def custom_execute(exec_self, workflow_id, initial_inputs=None):
+            if str(workflow_id) == child_id:
+                return child_exec_result
+            return orig_execute(exec_self, workflow_id, initial_inputs)
+
+        with patch.object(WorkflowExecutor, "execute", side_effect=custom_execute, autospec=True):
+            with self.assertRaises(WorkflowCancelledError):
+                parent_executor.execute(parent_id, initial_inputs={"start": True})
+
+        # 1. Subsequent node p3 was NOT executed!
+        self.assertNotIn(
+            "p3",
+            parent_executor.node_outputs,
+            "Subsequent parent node p3 must NOT be executed after child cancel",
+        )
+
+        # 2. Child work is preserved in parent_executor.sub_workflow_executions!
+        self.assertGreaterEqual(
+            len(parent_executor.sub_workflow_executions),
+            1,
+            "Child sub_workflow_execution must be captured",
+        )
+        child_sub_exec = parent_executor.sub_workflow_executions[0]
+        self.assertEqual(child_sub_exec.status, "cancelled")
+        child_node_ids = [
+            nr.get("node_id") for nr in child_sub_exec.node_results if isinstance(nr, dict)
+        ]
+        self.assertIn("c1", child_node_ids)
+        self.assertIn("c3", child_node_ids)
+
+        # 3. Persist and verify in DB
+        async with async_session_maker() as init_session:
+            pwf = Workflow(
+                id=parent_id,
+                owner_id=self.user_id,
+                name="Parent WF Cancel Test",
+                nodes=[],
+                edges=[],
+            )
+            cwf = Workflow(
+                id=uuid.UUID(child_id),
+                owner_id=self.user_id,
+                name="Child WF Cancel Test",
+                nodes=[],
+                edges=[],
+            )
+            init_session.add(pwf)
+            init_session.add(cwf)
+            init_session.add(
+                ExecutionHistory(
+                    id=parent_id,
+                    workflow_id=parent_id,
+                    inputs={"start": True},
+                    outputs={},
+                    node_results=[],
+                    status="running",
+                    execution_time_ms=0.0,
+                )
+            )
+            await init_session.commit()
+
+        self.cleanup_workflow_ids.append(parent_id)
+        self.cleanup_workflow_ids.append(uuid.UUID(child_id))
+        parent_exec_res = ExecutionResult(
+            workflow_id=parent_id,
+            status="cancelled",
+            outputs={},
+            execution_time_ms=50.0,
+            node_results=[],
+            sub_workflow_executions=parent_executor.sub_workflow_executions,
+        )
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=parent_id,
+            execution_result=parent_exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache=workflow_cache,
+            workflow_id=parent_id,
+            owner_id=self.user_id,
+            workflow_name="Parent WF Cancel Test",
+        )
+
+        async with async_session_maker() as verify_session:
+            p_hist = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == parent_id)
+                )
+            ).scalar_one()
+            self.assertEqual(p_hist.status, "cancelled", "Parent history must be cancelled")
+
+            # Verify child history entry was written
+            sub_hist = (
+                (
+                    await verify_session.execute(
+                        select(ExecutionHistory).where(
+                            ExecutionHistory.workflow_id == uuid.UUID(child_id)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertGreaterEqual(
+                len(sub_hist), 1, "Child history must be persisted even though cancelled"
+            )
+            self.assertEqual(sub_hist[0].status, "cancelled")
+
+    async def test_downstream_timeout_recorded_as_error_not_cancelled(self) -> None:
+        """WorkflowTimeoutError inherits from WorkflowCancelledError.
+        1. join_allow_downstream must classify timeout as 'error' (NOT 'cancelled').
+        2. join_allow_downstream re-raises WorkflowTimeoutError.
+        3. _finalize_allow_downstream_history persists status='error'.
+        4. WorkflowAnalyticsSnapshot records error_count += 1, success_count == 0."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"test": "timeout"},
+            outputs={"partial": "before_timeout"},
+            node_results=[{"node_id": "step_1", "status": "success"}],
+            status="running",
+            execution_time_ms=10.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        timeout_fut: Future = Future()
+        timeout_fut.set_exception(WorkflowTimeoutError("Workflow timed out after 30 seconds"))
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"partial": "before_timeout"},
+            node_results=[{"node_id": "step_1", "status": "success"}],
+            execution_time_ms=10.0,
+            _allow_downstream_pending=[timeout_fut],
+            _allow_downstream_node_results=[
+                NodeResult(
+                    node_id="downstream_step",
+                    node_label="Downstream Processing",
+                    node_type="custom",
+                    status="error",
+                    output={},
+                    execution_time_ms=30000.0,
+                    error="Workflow timed out after 30 seconds",
+                )
+            ],
+        )
+
+        # 1. Direct join_allow_downstream check
+        with self.assertRaises(WorkflowTimeoutError):
+            exec_res.join_allow_downstream()
+
+        self.assertEqual(
+            exec_res.status,
+            "error",
+            "ExecutionResult status must be 'error' on timeout, NOT 'cancelled'",
+        )
+
+        # 2. Finalizer persistence check
+        timeout_fut_2: Future = Future()
+        timeout_fut_2.set_exception(WorkflowTimeoutError("Workflow timed out after 30 seconds"))
+        exec_res._allow_downstream_pending = [timeout_fut_2]
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Timeout Test WF",
+        )
+
+        self.assertEqual(exec_res.status, "error")
+
+        async with async_session_maker() as verify_session:
+            hist_in_db = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                hist_in_db.status, "error", "ExecutionHistory status must be 'error' on timeout"
+            )
+
+            snap_in_db = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(snap_in_db.total_executions, 1)
+            self.assertEqual(
+                snap_in_db.error_count, 1, "Analytics error_count must be 1 on timeout"
+            )
+            self.assertEqual(
+                snap_in_db.success_count, 0, "Analytics success_count must be 0 on timeout"
+            )
+
+    async def test_unexpected_exception_in_allow_downstream_preserves_traceback_and_sets_error(
+        self,
+    ) -> None:
+        """Unexpected exceptions in allowDownstream:
+        1. Are logged with full traceback (logger.exception).
+        2. Are NOT misclassified as cancelled or success.
+        3. Set status='error'.
+        4. Re-raise out of join_allow_downstream.
+        5. Detached finalizer logs with traceback and persists status='error'."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"data": "test_unexpected"},
+            outputs={"initial": "ok"},
+            node_results=[{"node_id": "initial_step", "status": "success"}],
+            status="running",
+            execution_time_ms=10.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        error_fut: Future = Future()
+        error_fut.set_exception(
+            RuntimeError("Unexpected database socket explosion during allowDownstream")
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "ok"},
+            node_results=[{"node_id": "initial_step", "status": "success"}],
+            execution_time_ms=10.0,
+            _allow_downstream_pending=[error_fut],
+            _allow_downstream_node_results=[],
+        )
+
+        # 1. Verify join_allow_downstream logs exception with traceback and re-raises
+        with self.assertLogs("app.services.workflow_executor", level="ERROR") as cm:
+            with self.assertRaises(RuntimeError):
+                exec_res.join_allow_downstream()
+
+        self.assertIn(
+            "Unexpected exception in allowDownstream background execution", "\n".join(cm.output)
+        )
+        self.assertIn("Unexpected database socket explosion", "\n".join(cm.output))
+        self.assertEqual(
+            exec_res.status,
+            "error",
+            "ExecutionResult status must be 'error' on unexpected exception",
+        )
+
+        # 2. Verify _finalize_allow_downstream_history logs exception with traceback and persists 'error'
+        error_fut_2: Future = Future()
+        error_fut_2.set_exception(
+            RuntimeError("Unexpected database socket explosion during allowDownstream")
+        )
+        exec_res._allow_downstream_pending = [error_fut_2]
+
+        with self.assertLogs("app.api.workflows", level="ERROR") as cm_finalizer:
+            await _finalize_allow_downstream_history(
+                history_entry_id=history_id,
+                execution_result=exec_res,
+                credentials_owner_id=self.user_id,
+                workflow_nodes=[],
+                workflow_cache={},
+                workflow_id=self.workflow_id,
+                owner_id=self.user_id,
+                workflow_name="Unexpected Error WF",
+            )
+
+        self.assertIn("join_allow_downstream failed unexpectedly", "\n".join(cm_finalizer.output))
+        self.assertEqual(exec_res.status, "error")
+
+        async with async_session_maker() as verify_session:
+            hist_in_db = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(hist_in_db.status, "error", "ExecutionHistory status must be 'error'")
+            self.assertIn("socket explosion", str(hist_in_db.outputs.get("error", "")))
+
+            snap_in_db = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(snap_in_db.error_count, 1)
+            self.assertEqual(snap_in_db.success_count, 0)
 
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
