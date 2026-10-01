@@ -19,7 +19,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from functools import lru_cache
@@ -1757,8 +1757,18 @@ class ExecutionResult:
         """Wait for output allowDownstream background work to populate final results."""
         pending = list(self._allow_downstream_pending)
         self._allow_downstream_pending.clear()
+        cancelled = False
+        unhandled_error = False
         for fut in pending:
-            fut.result()
+            try:
+                fut.result()
+            except WorkflowCancelledError:
+                cancelled = True
+            except (CancelledError, asyncio.CancelledError):
+                cancelled = True
+            except Exception:
+                unhandled_error = True
+
         existing_ids = {item.get("node_id") for item in self.node_results if isinstance(item, dict)}
         for result in self._allow_downstream_node_results:
             if result.node_id not in existing_ids:
@@ -1773,18 +1783,17 @@ class ExecutionResult:
                 existing_ids.add(result.node_id)
         if self._started_at:
             self.execution_time_ms = (time.time() - self._started_at) * 1000
-        if any(
+
+        has_downstream_node_error = any(
             (
                 getattr(r, "status", None) == "error"
                 and getattr(r, "metadata", {}).get("retry_stage") != "attempt_failed"
             )
             for r in self._allow_downstream_node_results
-        ) or any(
-            isinstance(item, dict)
-            and item.get("status") == "error"
-            and item.get("metadata", {}).get("retry_stage") != "attempt_failed"
-            for item in self.node_results
-        ):
+        )
+        if cancelled:
+            self.status = "cancelled"
+        elif unhandled_error or has_downstream_node_error:
             self.status = "error"
 
 

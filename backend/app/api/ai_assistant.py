@@ -3092,7 +3092,6 @@ def _extract_pending_review_from_candidate(candidate: Any) -> dict[str, str] | N
             return None
         payload: dict[str, str] = {
             "kind": "codex",
-            "type": "codex",
             "summary": str(candidate.get("summary") or "").strip(),
             "question": str(candidate.get("question") or "").strip(),
             "answer_url": answer_url,
@@ -3111,7 +3110,6 @@ def _extract_pending_review_from_candidate(candidate: Any) -> dict[str, str] | N
 
     payload: dict[str, str] = {
         "kind": "hitl",
-        "type": "hitl",
         "summary": str(candidate.get("summary") or "").strip(),
         "draft_text": str(candidate.get("draftText") or candidate.get("draft_text") or "").strip(),
         "review_url": review_url,
@@ -3208,7 +3206,6 @@ def _extract_pending_hitl_review_payload(result_json: str) -> dict[str, str] | N
         if review_url:
             return {
                 "kind": "hitl",
-                "type": "hitl",
                 "summary": str(top_level_pending.get("summary") or "").strip(),
                 "draft_text": str(
                     top_level_pending.get("draft_text") or top_level_pending.get("draftText") or ""
@@ -4070,8 +4067,9 @@ async def stream_dashboard_chat(
                             "data: "
                             + json.dumps(
                                 {
-                                    "type": "workflow_pending",
                                     **pending_review,
+                                    "type": "workflow_pending",
+                                    "kind": pending_review.get("kind") or "hitl",
                                 }
                             )
                             + "\n\n"
@@ -4228,8 +4226,9 @@ async def stream_dashboard_chat(
                             "data: "
                             + json.dumps(
                                 {
-                                    "type": "workflow_pending",
                                     **pending_review,
+                                    "type": "workflow_pending",
+                                    "kind": pending_review.get("kind") or "hitl",
                                 }
                             )
                             + "\n\n"
@@ -4398,8 +4397,9 @@ async def stream_dashboard_chat(
                             "data: "
                             + json.dumps(
                                 {
-                                    "type": "workflow_pending",
                                     **pending_review,
+                                    "type": "workflow_pending",
+                                    "kind": pending_review.get("kind") or "hitl",
                                 }
                             )
                             + "\n\n"
@@ -5845,6 +5845,7 @@ async def dashboard_chat_stream(
                 await queue.put(None)
 
         producer = asyncio.create_task(produce_chunks())
+        completed_normally = False
         try:
             while True:
                 try:
@@ -5858,6 +5859,7 @@ async def dashboard_chat_stream(
                     continue
 
                 if item is None:
+                    completed_normally = True
                     break
                 if isinstance(item, Exception):
                     raise item
@@ -5865,7 +5867,8 @@ async def dashboard_chat_stream(
                     break
                 yield item
         finally:
-            cancel_event.set()
+            if not completed_normally:
+                cancel_event.set()
             producer.cancel()
             watcher.cancel()
             with contextlib.suppress(asyncio.CancelledError):

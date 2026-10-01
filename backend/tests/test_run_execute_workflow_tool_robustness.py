@@ -1,7 +1,9 @@
 import asyncio
 import json
+import threading
 import unittest
 import uuid
+from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,7 +28,12 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker, engine
 from app.services.global_variables_service import get_global_variables_context
-from app.services.workflow_executor import ExecutionResult, SubWorkflowExecution
+from app.services.workflow_executor import (
+    ExecutionResult,
+    NodeResult,
+    SubWorkflowExecution,
+    WorkflowCancelledError,
+)
 
 
 class _AllResult:
@@ -532,7 +539,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         extracted = _extract_pending_review_from_candidate(candidate)
         self.assertIsNotNone(extracted)
         self.assertEqual(extracted["kind"], "codex")
-        self.assertEqual(extracted["type"], "codex")
+        self.assertNotIn("type", extracted)
         self.assertEqual(extracted["question"], "Which GitHub repo should be used?")
         self.assertEqual(
             extracted["answer_url"], "http://localhost:3000/codex/followup/sample-token"
@@ -555,7 +562,7 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         extracted = _extract_pending_review_from_candidate(candidate)
         self.assertIsNotNone(extracted)
         self.assertEqual(extracted["kind"], "hitl")
-        self.assertEqual(extracted["type"], "hitl")
+        self.assertNotIn("type", extracted)
         self.assertEqual(extracted["summary"], "Please review generated email")
         self.assertEqual(extracted["draft_text"], "Subject: Welcome aboard!\n\nHello Team,")
         self.assertEqual(
@@ -611,6 +618,8 @@ class CodexVsHITLDifferentiationTests(unittest.IsolatedAsyncioTestCase):
         )
         payload = _extract_pending_hitl_review_payload(hitl_tool_result)
         self.assertIsNotNone(payload)
+        self.assertEqual(payload["kind"], "hitl")
+        self.assertNotIn("type", payload)
         self.assertEqual(payload["review_url"], "http://localhost:3000/hitl/review/token-hitl")
         self.assertEqual(payload["draft_text"], "Deploy to prod?")
 
@@ -2395,6 +2404,313 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             ).scalar_one()
             self.assertEqual(sub_snap.total_executions, 1, "Analytics must not be double counted")
 
+    async def test_recovered_sub_agent_error_preserves_parent_success(self) -> None:
+        """When an earlier sub-agent or tool fails but the parent agent recovers and produces
+        successful output, downstream finalization must NOT mark the parent as 'error' due to
+        historical pre-output node results. The parent must retain 'success' in both ExecutionResult
+        and ExecutionHistory, and analytics must record a success."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        failed_sub_agent_node = {
+            "node_id": "agent_tool_node_1",
+            "node_label": "Research Subagent",
+            "node_type": "agent",
+            "status": "error",
+            "error": "Temporary API timeout, retried and recovered",
+            "metadata": {},
+        }
+        recovered_node = {
+            "node_id": "agent_tool_node_2",
+            "node_label": "Research Subagent Retry",
+            "node_type": "agent",
+            "status": "success",
+            "output": {"summary": "Found data"},
+            "metadata": {},
+        }
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"prompt": "Do research"},
+            outputs={"result": "Recovered research summary"},
+            node_results=[failed_sub_agent_node, recovered_node],
+            status="success",
+            execution_time_ms=50.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        downstream_fut: Future = Future()
+        downstream_fut.set_result(None)
+
+        downstream_node = NodeResult(
+            node_id="downstream_log_1",
+            node_label="Audit Logger",
+            node_type="custom",
+            status="success",
+            output={"logged": True},
+            execution_time_ms=12.0,
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"result": "Recovered research summary"},
+            node_results=[dict(failed_sub_agent_node), dict(recovered_node)],
+            execution_time_ms=50.0,
+            _allow_downstream_pending=[downstream_fut],
+            _allow_downstream_node_results=[downstream_node],
+        )
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Recovered Parent WF",
+        )
+
+        # 1. In-memory status remains success
+        self.assertEqual(
+            exec_res.status,
+            "success",
+            "Parent status must remain success despite historical recovered node errors",
+        )
+
+        # 2. Database verification
+        async with async_session_maker() as verify_session:
+            p_hist = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                p_hist.status,
+                "success",
+                "Persisted parent ExecutionHistory status must remain 'success'",
+            )
+            node_ids = [
+                nr.get("node_id") for nr in (p_hist.node_results or []) if isinstance(nr, dict)
+            ]
+            self.assertIn("downstream_log_1", node_ids)
+
+            p_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(p_snap.total_executions, 1)
+            self.assertEqual(p_snap.success_count, 1)
+            self.assertEqual(p_snap.error_count, 0)
+
+    async def test_genuine_downstream_failure_produces_error_status_and_analytics(
+        self,
+    ) -> None:
+        """When downstream work genuinely fails (e.g. downstream node produces status='error'),
+        join_allow_downstream and finalizer must update the parent status to 'error' and record
+        an error in the workflow analytics snapshot."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"start": 1},
+            outputs={"initial": "ok"},
+            node_results=[{"node_id": "initial_node", "status": "success"}],
+            status="success",
+            execution_time_ms=25.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        downstream_fut: Future = Future()
+        downstream_fut.set_result(None)
+
+        downstream_error_node = NodeResult(
+            node_id="downstream_webhook_1",
+            node_label="Webhook Notification",
+            node_type="webhook",
+            status="error",
+            error="Connection refused: endpoint unreachable",
+            output={},
+            execution_time_ms=45.0,
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "ok"},
+            node_results=[{"node_id": "initial_node", "status": "success"}],
+            execution_time_ms=25.0,
+            _allow_downstream_pending=[downstream_fut],
+            _allow_downstream_node_results=[downstream_error_node],
+        )
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Downstream Failure WF",
+        )
+
+        self.assertEqual(exec_res.status, "error")
+
+        async with async_session_maker() as verify_session:
+            p_hist = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(p_hist.status, "error")
+
+            p_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(p_snap.total_executions, 1)
+            self.assertEqual(p_snap.error_count, 1)
+            self.assertEqual(p_snap.success_count, 0)
+
+    async def test_real_downstream_cancellation_persists_history_and_completed_subworkflows(
+        self,
+    ) -> None:
+        """When downstream work is cancelled via WorkflowCancelledError:
+        1. Real join_allow_downstream (NOT mocked) handles cancellation gracefully and sets status='cancelled'.
+        2. _finalize_allow_downstream_history does NOT abort or swallow the persistence pass.
+        3. Parent ExecutionHistory is updated to status='cancelled' in PostgreSQL.
+        4. Already-completed SubWorkflowExecution rows are fully persisted into ExecutionHistory.
+        5. Analytics snapshots are recorded for both parent and completed sub-workflows."""
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        initial_history = ExecutionHistory(
+            id=history_id,
+            workflow_id=self.workflow_id,
+            inputs={"data": "parent_start"},
+            outputs={"initial": "pre_cancellation"},
+            node_results=[{"node_id": "parent_step_1", "status": "success"}],
+            status="running",
+            execution_time_ms=30.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        async with async_session_maker() as init_session:
+            init_session.add(initial_history)
+            await init_session.commit()
+
+        cancelled_fut: Future = Future()
+        cancelled_fut.set_exception(
+            WorkflowCancelledError("Downstream step cancelled by user disconnect")
+        )
+
+        sub_exec_id = str(uuid.uuid4())
+        sub_exec = SubWorkflowExecution(
+            workflow_id=self.sub_workflow_id,
+            workflow_name="Completed Child WF",
+            status="success",
+            execution_time_ms=65.0,
+            trigger_source="SUB_WORKFLOW",
+            inputs={"x": 42},
+            outputs={"y": 84},
+            node_results=[{"node_id": "child_step_1", "status": "success"}],
+            execution_id=sub_exec_id,
+        )
+
+        downstream_node = NodeResult(
+            node_id="downstream_step_1",
+            node_label="Partial Downstream",
+            node_type="custom",
+            status="success",
+            output={"partial": True},
+            execution_time_ms=15.0,
+        )
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "pre_cancellation"},
+            node_results=[{"node_id": "parent_step_1", "status": "success"}],
+            execution_time_ms=30.0,
+            sub_workflow_executions=[sub_exec],
+            _allow_downstream_pending=[cancelled_fut],
+            _allow_downstream_node_results=[downstream_node],
+        )
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Cancelled Parent WF",
+        )
+
+        self.assertEqual(
+            exec_res.status,
+            "cancelled",
+            "ExecutionResult status must be 'cancelled' after real cancellation",
+        )
+
+        async with async_session_maker() as verify_session:
+            parent_in_db = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+            self.assertEqual(
+                parent_in_db.status,
+                "cancelled",
+                "Parent ExecutionHistory in DB must be updated to 'cancelled'",
+            )
+
+            node_ids = [
+                nr.get("node_id")
+                for nr in (parent_in_db.node_results or [])
+                if isinstance(nr, dict)
+            ]
+            self.assertIn("downstream_step_1", node_ids)
+
+            expected_sub_history_id = uuid.uuid5(history_id, f"sub:{sub_exec_id}")
+            sub_in_db = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == expected_sub_history_id)
+                )
+            ).scalar_one_or_none()
+            self.assertIsNotNone(
+                sub_in_db,
+                "Already-completed sub-workflow must be persisted even when downstream is cancelled",
+            )
+            self.assertEqual(sub_in_db.status, "success")
+            self.assertEqual(sub_in_db.outputs, {"y": 84})
+
+            sub_snap = (
+                await verify_session.execute(
+                    select(WorkflowAnalyticsSnapshot).where(
+                        WorkflowAnalyticsSnapshot.workflow_id == self.sub_workflow_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(sub_snap.total_executions, 1)
+            self.assertEqual(sub_snap.success_count, 1)
+
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:
@@ -2667,11 +2983,22 @@ class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         joined_chunks = "".join(chunks)
 
-        # 1. HITL MUST emit hitl pending review card in chat stream
+        # 1. HITL MUST emit workflow_pending event with kind: hitl in chat stream
         self.assertIn(
+            '"type": "workflow_pending"',
+            joined_chunks,
+            "HITL pause must emit workflow_pending event in chat stream",
+        )
+        self.assertIn(
+            '"kind": "hitl"',
+            joined_chunks,
+            "HITL pause event must carry kind: hitl",
+        )
+        # Event type must NOT be overwritten with type: hitl
+        self.assertNotIn(
             '"type": "hitl"',
             joined_chunks,
-            "HITL pause must emit hitl pending card in chat stream",
+            "SSE event type must remain workflow_pending, not overwritten with hitl",
         )
         self.assertIn("http://localhost:3000/hitl/review/hitl-token-abc", joined_chunks)
         self.assertIn("Invoice #500 for $1,200", joined_chunks)
@@ -2686,3 +3013,154 @@ class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
         tool_payload = json.loads(tool_msgs[0]["content"])
         self.assertEqual(tool_payload["status"], "pending")
         self.assertEqual(tool_payload["pending_review"]["kind"], "hitl")
+
+    def test_workflow_pending_sse_event_structure_and_codex_differentiation(self) -> None:
+        """Verify the exact SSE event structure:
+        - HITL pauses yield SSE events with type='workflow_pending' and kind='hitl'.
+        - type='hitl' must NEVER be present as the SSE event type.
+        - Codex pauses yield kind='codex' internally for candidate extraction, but do NOT produce
+          a workflow_pending SSE event card in chat stream."""
+        hitl_raw_payload = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(uuid.uuid4()),
+                "workflow_name": "Deploy Service",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "hitl",
+                    "type": "hitl",
+                    "summary": "Approve production deployment",
+                    "draft_text": "Confirm deploy to prod cluster",
+                    "review_url": "http://localhost:3000/hitl/review/sample-token",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+
+        extracted_hitl = _extract_pending_hitl_review_payload(hitl_raw_payload)
+        self.assertIsNotNone(extracted_hitl)
+        self.assertEqual(extracted_hitl["kind"], "hitl")
+        self.assertNotIn("type", extracted_hitl)
+
+        # Simulate the exact SSE event serialization in ai_assistant.py
+        sse_event = {
+            **extracted_hitl,
+            "type": "workflow_pending",
+            "kind": extracted_hitl.get("kind") or "hitl",
+        }
+        self.assertEqual(sse_event["type"], "workflow_pending")
+        self.assertEqual(sse_event["kind"], "hitl")
+        self.assertNotEqual(sse_event["type"], "hitl")
+
+        # Verify Codex differentiation
+        codex_raw_payload = json.dumps(
+            {
+                "status": "pending",
+                "workflow_id": str(uuid.uuid4()),
+                "workflow_name": "Codex Service",
+                "execution_history_id": str(uuid.uuid4()),
+                "outputs": {},
+                "node_results": [],
+                "pending_review": {
+                    "kind": "codex",
+                    "type": "codex",
+                    "summary": "Choose parameter",
+                    "question": "Which cluster?",
+                    "answer_url": "http://localhost:3000/codex/followup/sample-token",
+                    "request_id": str(uuid.uuid4()),
+                },
+            }
+        )
+        extracted_codex = _extract_pending_hitl_review_payload(codex_raw_payload)
+        self.assertIsNone(
+            extracted_codex,
+            "Codex pause must not extract as HITL review payload or emit workflow_pending card",
+        )
+
+    async def test_normal_chat_completion_does_not_cancel_downstream_work(self) -> None:
+        """Normal chat stream completion must NOT set cancel_event.
+        cancel_event must only be set when the stream disconnects or aborts prematurely."""
+        from app.services.assistant_yolo import stream_until_disconnect
+
+        async def fake_not_disconnected() -> bool:
+            return False
+
+        # Scenario 1: Normal clean completion
+        cancel_event_normal = threading.Event()
+
+        async def clean_producer():
+            yield "data: chunk 1\n\n"
+            yield "data: chunk 2\n\n"
+
+        chunks_normal = []
+        async for chunk in stream_until_disconnect(
+            clean_producer(),
+            is_disconnected=fake_not_disconnected,
+            cancel_event=cancel_event_normal,
+            heartbeat_seconds=1.0,
+        ):
+            chunks_normal.append(chunk)
+
+        self.assertEqual(len(chunks_normal), 2)
+        self.assertFalse(
+            cancel_event_normal.is_set(),
+            "cancel_event must NOT be set when chat stream completes normally",
+        )
+
+        # Scenario 2: Premature client disconnect / generator exit (Starlette calls aclose on disconnect)
+        cancel_event_aborted = threading.Event()
+
+        async def infinite_producer():
+            while True:
+                yield "data: chunk\n\n"
+                await asyncio.sleep(0.01)
+
+        chunks_aborted = []
+        gen = stream_until_disconnect(
+            infinite_producer(),
+            is_disconnected=fake_not_disconnected,
+            cancel_event=cancel_event_aborted,
+            heartbeat_seconds=1.0,
+        )
+        try:
+            async for chunk in gen:
+                chunks_aborted.append(chunk)
+                break
+        finally:
+            await gen.aclose()
+
+        self.assertTrue(
+            cancel_event_aborted.is_set(),
+            "cancel_event MUST be set when client disconnects prematurely (aclose invoked)",
+        )
+
+        # Scenario 3: Disconnect detected by watcher
+        cancel_event_watcher = threading.Event()
+        disconnected_flag = False
+
+        async def disconnect_checker() -> bool:
+            return disconnected_flag
+
+        gen_watcher = stream_until_disconnect(
+            infinite_producer(),
+            is_disconnected=disconnect_checker,
+            cancel_event=cancel_event_watcher,
+            heartbeat_seconds=1.0,
+            poll_seconds=0.01,
+        )
+        chunks_watcher = []
+        try:
+            async for chunk in gen_watcher:
+                chunks_watcher.append(chunk)
+                disconnected_flag = True
+                await asyncio.sleep(0.05)  # Allow watcher to poll and set cancel_event
+                break
+        finally:
+            await gen_watcher.aclose()
+
+        self.assertTrue(
+            cancel_event_watcher.is_set(),
+            "cancel_event MUST be set when watcher detects client disconnect",
+        )

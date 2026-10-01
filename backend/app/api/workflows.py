@@ -480,14 +480,25 @@ async def _finalize_allow_downstream_history(
 ) -> None:
     """Persist output allowDownstream work after the API response has returned."""
     try:
-        await asyncio.to_thread(execution_result.join_allow_downstream)
-        if any(
-            isinstance(node_result, dict)
-            and node_result.get("status") == "error"
-            and node_result.get("metadata", {}).get("retry_stage") != "attempt_failed"
-            for node_result in (getattr(execution_result, "node_results", None) or [])
-        ):
-            execution_result.status = "error"
+        try:
+            await asyncio.to_thread(execution_result.join_allow_downstream)
+        except Exception as exc:
+            logger.warning(
+                "join_allow_downstream failed for execution %s: %s", history_entry_id, exc
+            )
+            from app.services.workflow_executor import WorkflowCancelledError
+
+            if isinstance(exc, (WorkflowCancelledError, asyncio.CancelledError)):
+                if hasattr(execution_result, "status"):
+                    execution_result.status = "cancelled"
+                elif isinstance(execution_result, dict):
+                    execution_result["status"] = "cancelled"
+            elif getattr(execution_result, "status", None) != "cancelled":
+                if hasattr(execution_result, "status"):
+                    execution_result.status = "error"
+                elif isinstance(execution_result, dict):
+                    execution_result["status"] = "error"
+
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
                 select(ExecutionHistory)
