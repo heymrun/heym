@@ -6,7 +6,9 @@ not with the dispatched work: the API layer still drains that work afterwards so
 history is recorded, and that drain used to hold both open.
 """
 
+import asyncio
 import json
+import threading
 import time
 import unittest
 import uuid
@@ -20,8 +22,10 @@ from app.services.execution_cancellation import (
 
 TARGET_WF_ID = "22222222-2222-2222-2222-222222222222"
 
-# 1500 ms is long enough that a stream held open by the drain is unmistakable, and short
-# enough to keep the test quick.
+# The dispatched sub-workflow blocks on a gate the test controls instead of sleeping for a
+# fixed time. A wall-clock threshold on the parent's stream is flaky on slow CI runners; a
+# gate makes "the stream was held open by the dispatch" fail deterministically, because the
+# gate is only released after the stream has been asserted to be over.
 _TARGET_WORKFLOW = {
     "nodes": [
         {
@@ -29,7 +33,7 @@ _TARGET_WORKFLOW = {
             "type": "textInput",
             "data": {"label": "input", "inputFields": [{"key": "text"}]},
         },
-        {"id": "t2", "type": "wait", "data": {"label": "wait", "duration": 1500}},
+        {"id": "t2", "type": "wait", "data": {"label": "wait", "duration": 0}},
         {"id": "t3", "type": "output", "data": {"label": "output"}},
     ],
     "edges": [
@@ -67,9 +71,27 @@ class _ScalarResult:
         return self._value
 
 
+# Upper bound for waiting on the stream. It is never the pass condition: it only turns a
+# stream that is genuinely held open into a failure instead of a hung test run.
+_STREAM_DEADLINE_SECONDS = 20.0
+
+
 class DoNotWaitStreamReleaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_ends_before_the_dispatched_sub_workflow_does(self) -> None:
         from app.api.workflows import execute_workflow_stream
+        from app.services.node_execution import registry
+
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+
+        def blocked_wait_handler(ctx: object) -> object:
+            """Stand-in for the wait node that only returns once the test opens the gate."""
+            gate.wait(timeout=60)
+            return {"value": "released"}
+
+        handler_patch = patch.dict(registry._HANDLER_CACHE, {"wait": blocked_wait_handler})
+        handler_patch.start()
+        self.addCleanup(handler_patch.stop)
 
         wf_id = uuid.uuid4()
         workflow = SimpleNamespace(
@@ -121,9 +143,13 @@ class DoNotWaitStreamReleaseTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-            started_at = time.monotonic()
-            frames = [chunk async for chunk in response.body_iterator]
-            stream_seconds = time.monotonic() - started_at
+            async def read_stream() -> list[str | bytes]:
+                return [chunk async for chunk in response.body_iterator]
+
+            try:
+                frames = await asyncio.wait_for(read_stream(), timeout=_STREAM_DEADLINE_SECONDS)
+            except asyncio.TimeoutError:
+                self.fail("the parent's stream was held open by the dispatched sub-workflow")
 
         payload = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in frames)
         self.assertIn("execution_complete", payload)
@@ -133,12 +159,9 @@ class DoNotWaitStreamReleaseTests(unittest.IsolatedAsyncioTestCase):
         )
         execution_id = json.loads(started[len("data: ") :])["execution_id"]
 
-        # The parent's own nodes are instant; only the dispatched sub-workflow is slow.
-        self.assertLess(
-            stream_seconds,
-            1.0,
-            "the parent's stream was held open by the dispatched sub-workflow",
-        )
+        # The gate is still closed, so the stream ending proves it did not wait for the
+        # dispatched sub-workflow.
+        self.assertFalse(gate.is_set())
 
         parent_still_active = [
             handle for handle in list_active_executions() if handle.workflow_id == wf_id
@@ -178,16 +201,18 @@ class DoNotWaitStreamReleaseTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # Let the dispatch finish before the test ends, so it does not run on into the
-        # next test (or into interpreter shutdown, where the shared pool is closed).
-        deadline = time.time() + 10
-        while time.time() < deadline:
+        # next test (or into interpreter shutdown, where the shared pool is closed). Yield to
+        # the loop while polling: the drain's bookkeeping is scheduled on it.
+        gate.set()
+        deadline = time.monotonic() + _STREAM_DEADLINE_SECONDS
+        while time.monotonic() < deadline:
             if not [
                 handle
                 for handle in list_active_executions()
                 if str(handle.workflow_id) == TARGET_WF_ID
             ]:
                 break
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
 
 
 if __name__ == "__main__":
