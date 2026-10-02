@@ -546,6 +546,7 @@ function handleNodeClick(event: { node: { id: string } }): void {
 function handleNodeContextMenu(event: { event: MouseEvent | TouchEvent; node: { id: string } }): void {
   event.event.preventDefault();
   event.event.stopPropagation();
+  if (workflowStore.isReadOnly) return;
 
   const vueFlowSelectedNodes = getSelectedNodes.value;
   const vueFlowSelectedIds = new Set(vueFlowSelectedNodes.map((n) => n.id));
@@ -825,11 +826,16 @@ function handleNodeDoubleClick(event: {
 }
 
 function handleEdgeDoubleClick(event: { edge: { id: string } }): void {
+  if (workflowStore.isReadOnly) return;
   workflowStore.removeEdge(event.edge.id);
 }
 
 function handleDrop(event: DragEvent): void {
   event.preventDefault();
+  if (workflowStore.isReadOnly) {
+    isDraggingFile.value = false;
+    return;
+  }
   isDraggingFile.value = false;
   lastDropTime = Date.now();
   const files = event.dataTransfer?.files;
@@ -1546,6 +1552,9 @@ function handleKeyDown(event: KeyboardEvent): void {
     return;
   }
 
+  // Everything below changes the workflow (delete, toggle, pin, paste, search-to-add).
+  if (workflowStore.isReadOnly) return;
+
   if (event.key === "Delete" || event.key === "Backspace") {
     const selectedEdges = getSelectedEdges.value;
     const hasSelectedNodes = workflowStore.selectedNodeIds.size > 0;
@@ -1897,7 +1906,9 @@ watch(
       :multi-selection-key-code="['Meta', 'Control']"
       :delete-key-code="null"
       :selection-mode="SelectionMode.Partial"
-      :edges-updatable="true"
+      :edges-updatable="!workflowStore.isReadOnly"
+      :nodes-draggable="!workflowStore.isReadOnly"
+      :nodes-connectable="!workflowStore.isReadOnly"
       fit-view-on-init
       @node-click="handleNodeClick"
       @node-double-click="handleNodeDoubleClick"

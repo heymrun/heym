@@ -121,6 +121,11 @@ class CollaboratorAuthDowngradeTests(unittest.TestCase):
 
 
 class UpdateWorkflowEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     """The guard is only worth anything if ``update_workflow`` actually runs it."""
 
     def _shared_workflow(self, workflow_id: uuid.UUID) -> SimpleNamespace:
@@ -211,6 +216,11 @@ class UpdateWorkflowEndpointTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SharedCollaboratorRegressionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     """Both share kinds reach ``update_workflow``; neither may move the boundary.
 
     There is no DB-backed test harness in this repo, so the two share paths are proven at

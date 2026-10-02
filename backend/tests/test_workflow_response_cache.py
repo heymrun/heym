@@ -126,6 +126,11 @@ class WorkflowResponseCacheClearTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClearWorkflowResponseCacheEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_clear_response_cache_requires_workflow_access(self) -> None:
         workflow_id = uuid.uuid4()
         current_user = SimpleNamespace(id=uuid.uuid4())

@@ -58,6 +58,9 @@ class ErrorWorkflowOwnershipTests(unittest.IsolatedAsyncioTestCase):
     """Drives ``update_workflow`` itself, so a guard that is never called cannot pass."""
 
     def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.owner_id = uuid.uuid4()
         self.collaborator_id = uuid.uuid4()
         self.db = AsyncMock()

@@ -7,6 +7,7 @@ vi.mock("@/services/api", () => ({
   lastWrittenWorkflowRevision: vi.fn(() => null),
   workflowApi: {
     get: vi.fn(),
+    update: vi.fn(),
     executeStream: vi.fn(),
     getWorkflowHistoryEntry: vi.fn(),
     streamActiveExecution: vi.fn(),
@@ -369,5 +370,44 @@ describe("workflow execution state", () => {
     expect(store.executionHistoryTotal).toBe(1);
     expect(store.executionHistoryList.length).toBe(1);
     expect(store.executionHistoryDetails.size).toBe(1);
+  });
+});
+
+describe("read-only workflow access", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it("is not read-only for the owner or a write share", async () => {
+    const store = useWorkflowStore();
+
+    vi.mocked(workflowApi.get).mockResolvedValue(makeWorkflow("owned"));
+    await store.loadWorkflow("owned");
+    expect(store.isReadOnly).toBe(false);
+
+    vi.mocked(workflowApi.get).mockResolvedValue({ ...makeWorkflow("shared"), permission: "write" });
+    await store.loadWorkflow("shared");
+    expect(store.isReadOnly).toBe(false);
+  });
+
+  it("is read-only for a read share", async () => {
+    vi.mocked(workflowApi.get).mockResolvedValue({ ...makeWorkflow("shared"), permission: "read" });
+    const store = useWorkflowStore();
+    await store.loadWorkflow("shared");
+
+    expect(store.isReadOnly).toBe(true);
+  });
+
+  it("never sends a save for a read share", async () => {
+    vi.mocked(workflowApi.get).mockResolvedValue({ ...makeWorkflow("shared"), permission: "read" });
+    const store = useWorkflowStore();
+    await store.loadWorkflow("shared");
+    store.hasUnsavedChanges = true;
+
+    const saved = await store.saveWorkflow();
+
+    expect(saved).toBe(false);
+    expect(workflowApi.update).not.toHaveBeenCalled();
   });
 });

@@ -23,6 +23,8 @@ export interface Workflow {
   edges: WorkflowEdge[];
   auth_type: WorkflowAuthType;
   auth_header_key: string | null;
+  /** What the signed-in user may do. Absent on older payloads; treat as "write". */
+  permission?: WorkflowSharePermission;
   /** Owner-only. Null for direct and team collaborators even when a secret is set. */
   auth_header_value: string | null;
   auth_header_value_set: boolean;
@@ -1055,11 +1057,23 @@ export interface NodeData {
   url?: string;
 }
 
+/** "read" lets a collaborator view and run a workflow; "write" also lets them edit it. */
+export type WorkflowSharePermission = "read" | "write";
+
 export interface WorkflowShare {
   id: string;
   user_id: string;
   email: string;
   name: string;
+  permission: WorkflowSharePermission;
+  shared_at: string;
+}
+
+export interface WorkflowTeamShare {
+  id: string;
+  team_id: string;
+  team_name: string;
+  permission: WorkflowSharePermission;
   shared_at: string;
 }
 

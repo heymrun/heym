@@ -55,8 +55,6 @@ from app.models.schemas import (
     InputFieldSchema,
     OutputNodeSchema,
     RevertVersionRequest,
-    TeamShareRequest,
-    TeamShareResponse,
     WorkflowCreate,
     WorkflowExecuteResponse,
     WorkflowListResponse,
@@ -64,6 +62,8 @@ from app.models.schemas import (
     WorkflowResponse,
     WorkflowShareRequest,
     WorkflowShareResponse,
+    WorkflowTeamShareRequest,
+    WorkflowTeamShareResponse,
     WorkflowUpdate,
     WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
@@ -117,7 +117,10 @@ from app.services.hitl_service import (
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.workflow_access import (
+    PERMISSION_WRITE,
+    get_workflow_permission,
     revoke_execution_tokens_without_access,
+    user_can_write_workflow,
     user_has_workflow_access,
     workflow_access_clause,
 )
@@ -550,6 +553,19 @@ async def get_workflow_for_user(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def require_workflow_write(db: AsyncSession, workflow: Workflow, user_id: uuid.UUID) -> None:
+    """Raise 403 unless ``user_id`` may edit ``workflow``.
+
+    A read share lets a collaborator open and run the workflow; every route that changes
+    it (canvas, settings, notes, agent memory) must call this after loading the workflow.
+    """
+    if not await user_can_write_workflow(db, workflow, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You have read-only access to this workflow",
+        )
 
 
 def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSchema]:
@@ -1424,6 +1440,12 @@ async def get_workflow(
         )
 
     response = _build_workflow_response(workflow, current_user.id)
+    # Fail closed: an access path the permission lookup cannot see is treated as read-only.
+    response.permission = (
+        "write"
+        if await get_workflow_permission(db, workflow, current_user.id) == PERMISSION_WRITE
+        else "read"
+    )
     if workflow.owner_id != current_user.id:
         share_result = await db.execute(
             select(WorkflowShare).where(
@@ -1551,6 +1573,7 @@ async def update_workflow(
             detail="Workflow not found",
         )
 
+    await require_workflow_write(db, workflow, current_user.id)
     _reject_stale_update(workflow, workflow_data.base_updated_at)
     _reject_non_owner_auth_change(workflow, workflow_data, current_user.id)
 
@@ -1769,6 +1792,7 @@ async def clear_workflow_response_cache(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found",
         )
+    await require_workflow_write(db, workflow, current_user.id)
 
     await response_cache.clear_workflow(db, workflow_id)
 
@@ -2235,6 +2259,7 @@ async def list_workflow_shares(
                 name=user.name,
                 mcp_enabled=share.mcp_enabled,
                 folder_id=share.folder_id,
+                permission=share.permission,
                 shared_at=share.created_at,
             )
         )
@@ -2282,7 +2307,9 @@ async def create_workflow_share(
     )
     share = share_result.scalar_one_or_none()
     if share is None:
-        share = WorkflowShare(workflow_id=workflow.id, user_id=target_user.id)
+        share = WorkflowShare(
+            workflow_id=workflow.id, user_id=target_user.id, permission=share_data.permission
+        )
         db.add(share)
         await db.flush()
         await db.refresh(share)
@@ -2294,12 +2321,14 @@ async def create_workflow_share(
             target_name=workflow.name,
             grantee_id=target_user.id,
             grantee_email=target_user.email,
+            permission=share.permission,
         )
     elif not share.is_explicit_share:
         # A row already exists only because this user filed the workflow into a personal
         # folder while reaching it through a team share. An explicit invite now turns that
         # into a real grant, same as if no row had existed.
         share.is_explicit_share = True
+        share.permission = share_data.permission
         await db.flush()
         await db.refresh(share)
         audit(
@@ -2310,6 +2339,23 @@ async def create_workflow_share(
             target_name=workflow.name,
             grantee_id=target_user.id,
             grantee_email=target_user.email,
+            permission=share.permission,
+        )
+    elif share.permission != share_data.permission:
+        previous_permission = share.permission
+        share.permission = share_data.permission
+        await db.flush()
+        await db.refresh(share)
+        audit(
+            action="workflow.share_update",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            grantee_id=target_user.id,
+            grantee_email=target_user.email,
+            permission=share.permission,
+            previous_permission=previous_permission,
         )
 
     return WorkflowShareResponse(
@@ -2317,6 +2363,7 @@ async def create_workflow_share(
         user_id=target_user.id,
         email=target_user.email,
         name=target_user.name,
+        permission=share.permission,
         shared_at=share.created_at,
     )
 
@@ -2366,12 +2413,12 @@ async def remove_workflow_share(
     await db.commit()
 
 
-@router.get("/{workflow_id}/team-shares", response_model=list[TeamShareResponse])
+@router.get("/{workflow_id}/team-shares", response_model=list[WorkflowTeamShareResponse])
 async def list_workflow_team_shares(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[TeamShareResponse]:
+) -> list[WorkflowTeamShareResponse]:
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(
@@ -2390,23 +2437,24 @@ async def list_workflow_team_shares(
         .order_by(Team.name.asc())
     )
     return [
-        TeamShareResponse(
+        WorkflowTeamShareResponse(
             id=share.id,
             team_id=team.id,
             team_name=team.name,
+            permission=share.permission,
             shared_at=share.created_at,
         )
         for share, team in result.all()
     ]
 
 
-@router.post("/{workflow_id}/team-shares", response_model=TeamShareResponse)
+@router.post("/{workflow_id}/team-shares", response_model=WorkflowTeamShareResponse)
 async def create_workflow_team_share(
     workflow_id: uuid.UUID,
-    payload: TeamShareRequest,
+    payload: WorkflowTeamShareRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> TeamShareResponse:
+) -> WorkflowTeamShareResponse:
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(
@@ -2437,13 +2485,33 @@ async def create_workflow_team_share(
     )
     share = existing.scalar_one_or_none()
     if share:
-        return TeamShareResponse(
+        if share.permission != payload.permission:
+            previous_permission = share.permission
+            share.permission = payload.permission
+            await db.flush()
+            await db.refresh(share)
+            await db.commit()
+            audit(
+                action="workflow.team_share_update",
+                actor=current_user,
+                target_type="workflow",
+                target_id=workflow_id,
+                target_name=workflow.name,
+                team_id=team.id,
+                team_name=team.name,
+                permission=share.permission,
+                previous_permission=previous_permission,
+            )
+        return WorkflowTeamShareResponse(
             id=share.id,
             team_id=team.id,
             team_name=team.name,
+            permission=share.permission,
             shared_at=share.created_at,
         )
-    share = WorkflowTeamShare(workflow_id=workflow_id, team_id=payload.team_id)
+    share = WorkflowTeamShare(
+        workflow_id=workflow_id, team_id=payload.team_id, permission=payload.permission
+    )
     db.add(share)
     await db.flush()
     await db.refresh(share)
@@ -2456,11 +2524,13 @@ async def create_workflow_team_share(
         target_name=workflow.name,
         team_id=team.id,
         team_name=team.name,
+        permission=share.permission,
     )
-    return TeamShareResponse(
+    return WorkflowTeamShareResponse(
         id=share.id,
         team_id=team.id,
         team_name=team.name,
+        permission=share.permission,
         shared_at=share.created_at,
     )
 
@@ -4233,6 +4303,7 @@ async def save_workflow_analysis_note(
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, workflow, current_user.id)
 
     result = await db.execute(
         select(WorkflowAnalysisNote)

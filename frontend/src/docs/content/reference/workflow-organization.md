@@ -30,7 +30,16 @@ The tree response includes `children` and `workflows` per folder. Shared workflo
 
 ## Sharing Workflows
 
-Open **Share** in the workflow editor to invite users by email or share with a [team](./teams.md).
+Open **Share** in the workflow editor to invite users by email or share with a [team](./teams.md). Every invitation and every team share carries a permission:
+
+| Permission | What the collaborator can do |
+|------------|------------------------------|
+| **Read** | Open the workflow, inspect it, view execution history, and run it. The editor opens in read-only mode: Save is disabled and the canvas cannot be changed. |
+| **Write** | Everything Read allows, plus edit the canvas, settings, analysis document, and agent memory. |
+
+The permission is shown next to every entry in the Share dialog and can be changed at any time from that dropdown, without removing and re-adding the share. When a user reaches a workflow through several paths (a direct share and one or more teams), the **highest** permission wins. Shares that existed before permissions were introduced are **Write**, and API clients that omit `permission` also get **Write**.
+
+Owner-only actions never depend on the permission: deleting a workflow, reverting or clearing versions, clearing history, managing shares, and the [owner-only settings](#owner-only-settings) below stay with the owner even for **Write** collaborators. A **Read** collaborator who sends an edit through the API (`PUT /api/workflows/{id}`, the analysis note, agent memory, cache clearing) or through the AI Assistant receives `403` with `You have read-only access to this workflow`.
 
 Sharing a workflow grants access to the canvas, execution history, and analysis document. It does **not** automatically share:
 

@@ -577,6 +577,11 @@ class WorkflowShare(Base):
     # through a team share, not because the owner shared the workflow with them directly.
     # Access checks must never treat such a row as a grant; it is cosmetic, folder-id bookkeeping.
     is_explicit_share: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # "read" lets the collaborator view and run the workflow; "write" also lets them edit it.
+    # Shares created before permissions existed are "write".
+    permission: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="write", server_default="write"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="shares")
@@ -600,6 +605,9 @@ class WorkflowTeamShare(Base):
         ForeignKey("teams.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    permission: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="write", server_default="write"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

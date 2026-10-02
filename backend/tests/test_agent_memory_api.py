@@ -46,6 +46,11 @@ class GetMemoryGraphTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AddMemoryEdgeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_missing_entity_400(self) -> None:
         wf_id = uuid.uuid4()
         user = MagicMock()
@@ -76,6 +81,11 @@ class AddMemoryEdgeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class UpdateMemoryNodeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch("app.api.workflows.user_can_write_workflow", AsyncMock(return_value=True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_refreshes_row_after_flush_before_response(self) -> None:
         """Expired ORM state after flush must be refreshed for async session (updated_at, etc.)."""
         wf_id = uuid.uuid4()

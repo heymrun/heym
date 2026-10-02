@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.api.workflows import get_workflow_for_user
+from app.api.workflows import get_workflow_for_user, require_workflow_write
 from app.db.models import AgentMemoryEdge, AgentMemoryNode, User
 from app.models.agent_memory_schemas import (
     EdgeCreateRequest,
@@ -104,6 +104,7 @@ async def add_memory_node(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     row = AgentMemoryNode(
         id=uuid.uuid4(),
@@ -134,6 +135,7 @@ async def update_memory_node(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     res = await db.execute(
         select(AgentMemoryNode).where(
@@ -168,6 +170,7 @@ async def delete_memory_node(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     res = await db.execute(
         select(AgentMemoryNode).where(
@@ -198,6 +201,7 @@ async def add_memory_edge(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     src_nm = body.source_entity_name.strip()
     tgt_nm = body.target_entity_name.strip()
@@ -267,6 +271,7 @@ async def update_memory_edge(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     res = await db.execute(
         select(AgentMemoryEdge).where(
@@ -312,6 +317,7 @@ async def delete_memory_edge(
     wf = await get_workflow_for_user(db, workflow_id, current_user.id)
     if wf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, wf, current_user.id)
 
     res = await db.execute(
         select(AgentMemoryEdge).where(

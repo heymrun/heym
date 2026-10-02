@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["128_workflow_share_explicit_flag"])
+        self.assertEqual(self.script.get_heads(), ["129_workflow_share_permission"])
+
+    def test_workflow_share_permission_follows_explicit_flag(self) -> None:
+        revision = self.script.get_revision("129_workflow_share_permission")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "128_workflow_share_explicit_flag")
 
     def test_workflow_share_explicit_flag_follows_dashboard_shares(self) -> None:
         revision = self.script.get_revision("128_workflow_share_explicit_flag")

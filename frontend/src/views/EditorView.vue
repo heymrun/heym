@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useMediaQuery } from "@vueuse/core";
 import { useRoute, useRouter } from "vue-router";
-import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Globe, GitBranch, History, LayoutTemplate, Moon, Pencil, RefreshCw, Save, Search, Share2, Sparkles, Sun, TerminalSquare, Trash2, Users, X, XCircle } from "lucide-vue-next";
+import { AlertTriangle, ChevronLeft, ChevronRight, Compass, Copy, Download, Globe, GitBranch, History, LayoutTemplate, Lock, Moon, Pencil, RefreshCw, Save, Search, Share2, Sparkles, Sun, TerminalSquare, Trash2, X, XCircle } from "lucide-vue-next";
 import axios from "axios";
 
 import type {
@@ -11,11 +11,10 @@ import type {
   WebhookBodyMode,
   WorkflowAuthType,
   WorkflowListItem,
-  WorkflowShare,
 } from "@/types/workflow";
-import type { Team, TeamShare } from "@/types/team";
 
 import WorkflowCanvas from "@/components/Canvas/WorkflowCanvas.vue";
+import WorkflowShareDialog from "@/components/Dialogs/WorkflowShareDialog.vue";
 import MobileWorkflowTree from "@/components/Canvas/MobileWorkflowTree.vue";
 import ContextualShowcase from "@/features/showcase/components/ContextualShowcase.vue";
 import ShareTemplateModal from "@/features/templates/components/ShareTemplateModal.vue";
@@ -41,7 +40,6 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import Tooltip from "@/components/ui/Tooltip.vue";
-import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
@@ -51,7 +49,7 @@ import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { useExecutionTokens } from "@/composables/useExecutionTokens";
 import { useToast } from "@/composables/useToast";
-import { templatesApi, teamsApi, workflowApi } from "@/services/api";
+import { templatesApi, workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { useShowcaseStore } from "@/stores/showcase";
 import { useThemeStore } from "@/stores/theme";
@@ -125,15 +123,6 @@ const cacheTtlMinutes = ref(0);
 const cacheEvicting = ref(false);
 const rateLimitRequests = ref(0);
 const rateLimitWindowSeconds = ref(60);
-const shareEmail = ref("");
-const shareError = ref("");
-const shareLoading = ref(false);
-const shareSubmitting = ref(false);
-const shareRemoving = ref<string | null>(null);
-const workflowShares = ref<WorkflowShare[]>([]);
-const workflowTeamShares = ref<TeamShare[]>([]);
-const shareTeamId = ref("");
-const teams = ref<Team[]>([]);
 const validationErrors = ref<ValidationError[]>([]);
 const showValidationDialog = ref(false);
 const portalDialogRef = ref<InstanceType<typeof WebPortalSettingsDialog> | null>(null);
@@ -158,6 +147,7 @@ const isStandardWorkflow = computed(
 );
 const hasUnsavedChanges = computed(() => workflowStore.hasUnsavedChanges);
 const isSaving = computed(() => workflowStore.isSaving);
+const isReadOnly = computed(() => workflowStore.isReadOnly);
 const isEditing = computed(() => isTitleEditing.value || isDescriptionEditing.value);
 
 const isTitleEditing = ref(false);
@@ -188,6 +178,7 @@ function returnToWorkflowList(): void {
 let skipNextDescriptionCommit = false;
 
 function startTitleEdit(): void {
+  if (isReadOnly.value) return;
   if (isDescriptionEditing.value) {
     const trimmed = editingDescriptionValue.value.trim();
     const newValue = trimmed || null;
@@ -222,6 +213,7 @@ function cancelTitleEdit(): void {
 }
 
 function startDescriptionEdit(): void {
+  if (isReadOnly.value) return;
   if (workflowStore.hasUnsavedChanges && !isTitleEditing.value) return;
   if (isTitleEditing.value) {
     const trimmed = editingTitleValue.value.trim();
@@ -629,7 +621,7 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
   // Save: Cmd/Ctrl + S
   if (isMeta && event.key === "s") {
     event.preventDefault();
-    if (hasUnsavedChanges.value && !isSaving.value) {
+    if (hasUnsavedChanges.value && !isSaving.value && !isReadOnly.value) {
       handleSave();
     }
   }
@@ -640,7 +632,7 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
       return;
     }
     event.preventDefault();
-    workflowStore.undo();
+    if (!isReadOnly.value) workflowStore.undo();
   }
 
   // Redo: Cmd/Ctrl + Shift + Z or Cmd/Ctrl + Y
@@ -649,7 +641,7 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
       return;
     }
     event.preventDefault();
-    workflowStore.redo();
+    if (!isReadOnly.value) workflowStore.redo();
   }
 }
 
@@ -943,14 +935,10 @@ watch(webhookBodyMode, async (value) => {
   }
 });
 
-watch(shareOpen, async (open) => {
-  if (!open) return;
-  if (!isStandardWorkflow.value) {
+watch(shareOpen, (open) => {
+  if (open && !isStandardWorkflow.value) {
     shareOpen.value = false;
-    return;
   }
-  shareError.value = "";
-  await loadShares();
 });
 
 watch(curlOpen, async (open) => {
@@ -1246,115 +1234,6 @@ function isTokenExpired(isoString: string): boolean {
   return new Date(isoString) < new Date();
 }
 
-async function loadShares(): Promise<void> {
-  shareLoading.value = true;
-  shareError.value = "";
-  try {
-    const [userShares, teamShares, teamList] = await Promise.all([
-      workflowApi.listShares(workflowId.value),
-      workflowApi.listTeamShares(workflowId.value),
-      teamsApi.list(),
-    ]);
-    workflowShares.value = userShares;
-    workflowTeamShares.value = teamShares;
-    teams.value = teamList;
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      shareError.value = error.response?.data?.detail || "Failed to load shares";
-    } else {
-      shareError.value = "Failed to load shares";
-    }
-  } finally {
-    shareLoading.value = false;
-  }
-}
-
-async function addShare(): Promise<void> {
-  const email = shareEmail.value.trim();
-  if (!email) return;
-  shareSubmitting.value = true;
-  shareError.value = "";
-  try {
-    const share = await workflowApi.addShare(workflowId.value, email);
-    const existingIndex = workflowShares.value.findIndex((entry) => entry.user_id === share.user_id);
-    if (existingIndex >= 0) {
-      workflowShares.value.splice(existingIndex, 1, share);
-    } else {
-      workflowShares.value.push(share);
-    }
-    workflowShares.value.sort((a, b) => a.email.localeCompare(b.email));
-    shareEmail.value = "";
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      shareError.value = error.response?.data?.detail || "Failed to share workflow";
-    } else {
-      shareError.value = "Failed to share workflow";
-    }
-  } finally {
-    shareSubmitting.value = false;
-  }
-}
-
-async function removeShare(userId: string): Promise<void> {
-  shareRemoving.value = userId;
-  shareError.value = "";
-  try {
-    await workflowApi.removeShare(workflowId.value, userId);
-    workflowShares.value = workflowShares.value.filter((share) => share.user_id !== userId);
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      shareError.value = error.response?.data?.detail || "Failed to remove share";
-    } else {
-      shareError.value = "Failed to remove share";
-    }
-  } finally {
-    shareRemoving.value = null;
-  }
-}
-
-const workflowTeamOptions = computed(() => {
-  const shared = new Set(workflowTeamShares.value.map((s) => s.team_id));
-  return [
-    { value: "", label: "Select a team" },
-    ...teams.value
-      .filter((t) => !shared.has(t.id))
-      .map((t) => ({ value: t.id, label: t.name })),
-  ];
-});
-
-async function addWorkflowTeamShare(): Promise<void> {
-  if (!shareTeamId.value) return;
-  shareSubmitting.value = true;
-  shareError.value = "";
-  try {
-    const share = await workflowApi.addTeamShare(workflowId.value, shareTeamId.value);
-    workflowTeamShares.value = [...workflowTeamShares.value, share];
-    shareTeamId.value = "";
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      shareError.value = error.response?.data?.detail || "Failed to share with team";
-    } else {
-      shareError.value = "Failed to share with team";
-    }
-  } finally {
-    shareSubmitting.value = false;
-  }
-}
-
-async function removeWorkflowTeamShare(teamId: string): Promise<void> {
-  shareError.value = "";
-  try {
-    await workflowApi.removeTeamShare(workflowId.value, teamId);
-    workflowTeamShares.value = workflowTeamShares.value.filter((s) => s.team_id !== teamId);
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error)) {
-      shareError.value = error.response?.data?.detail || "Failed to remove team share";
-    } else {
-      shareError.value = "Failed to remove team share";
-    }
-  }
-}
-
 function closeValidationDialog(): void {
   showValidationDialog.value = false;
   validationErrors.value = [];
@@ -1467,6 +1346,15 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             @mousedown.prevent="startTitleEdit"
           >
             {{ workflowName }}
+            <span
+              v-if="isReadOnly"
+              data-testid="workflow-read-only-badge"
+              class="ml-2 inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 align-middle text-[10px] font-medium leading-none text-amber-500"
+              title="Read-only access: you can view and run this workflow, but not edit it."
+            >
+              <Lock class="h-2.5 w-2.5" />
+              Read-only
+            </span>
           </h1>
           <input
             v-if="isDescriptionEditing"
@@ -1750,7 +1638,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           variant="gradient"
           size="sm"
           data-testid="save-workflow-button"
-          :disabled="!hasUnsavedChanges"
+          :disabled="!hasUnsavedChanges || isReadOnly"
           :loading="isSaving"
           class="hidden sm:inline-flex"
           aria-label="Save"
@@ -1762,7 +1650,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
         <Button
           variant="gradient"
           size="icon"
-          :disabled="!hasUnsavedChanges"
+          :disabled="!hasUnsavedChanges || isReadOnly"
           :loading="isSaving"
           class="sm:hidden h-11 w-11 min-h-[44px] min-w-[44px]"
           aria-label="Save"
@@ -1787,149 +1675,11 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
 
     <WebPortalSettingsDialog ref="portalDialogRef" />
 
-    <Dialog
+    <WorkflowShareDialog
       :open="shareOpen"
-      title="Share workflow"
+      :workflow-id="workflowId"
       @close="shareOpen = false"
-    >
-      <div class="space-y-6">
-        <p class="text-sm text-muted-foreground">
-          Sharing this workflow lets collaborators view, edit, and run it. Credentials and
-          sub-workflows used by this workflow are not shared automatically. Share each credential
-          and sub-workflow with the same users or teams so recipients can run the workflow.
-        </p>
-        <div class="space-y-3">
-          <div class="space-y-2">
-            <Label>Invite by email</Label>
-            <div class="flex gap-2">
-              <Input
-                v-model="shareEmail"
-                placeholder="name@example.com"
-                type="email"
-              />
-              <Button
-                :loading="shareSubmitting"
-                @click="addShare"
-              >
-                Add
-              </Button>
-            </div>
-          </div>
-          <div class="space-y-2">
-            <Label>Share with team</Label>
-            <div class="flex gap-2">
-              <Select
-                v-model="shareTeamId"
-                :options="workflowTeamOptions"
-                class="flex-1"
-              />
-              <Button
-                :loading="shareSubmitting"
-                :disabled="!shareTeamId"
-                @click="addWorkflowTeamShare"
-              >
-                <Users class="w-4 h-4" />
-                Add
-              </Button>
-            </div>
-          </div>
-          <p
-            v-if="shareError"
-            class="text-xs text-destructive"
-          >
-            {{ shareError }}
-          </p>
-        </div>
-        <div class="space-y-2">
-          <Label>Shared with users</Label>
-          <div
-            v-if="shareLoading"
-            class="text-sm text-muted-foreground"
-          >
-            Loading...
-          </div>
-          <div
-            v-else-if="workflowShares.length === 0"
-            class="text-sm text-muted-foreground"
-          >
-            No users
-          </div>
-          <div
-            v-else
-            class="space-y-2"
-          >
-            <div
-              v-for="share in workflowShares"
-              :key="share.user_id"
-              class="flex items-center justify-between rounded-md border px-3 py-2"
-            >
-              <div class="flex min-w-0 items-center gap-2.5">
-                <UserAvatar
-                  :user-id="share.user_id"
-                  :name="share.name"
-                  :email="share.email"
-                  class="h-8 w-8 bg-primary/10 text-xs font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
-                />
-                <div class="min-w-0">
-                  <div class="truncate text-sm font-medium">
-                    {{ share.name }}
-                  </div>
-                  <div class="truncate text-xs text-muted-foreground">
-                    {{ share.email }}
-                  </div>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-destructive"
-                :loading="shareRemoving === share.user_id"
-                @click="removeShare(share.user_id)"
-              >
-                Remove
-              </Button>
-            </div>
-          </div>
-        </div>
-        <div class="space-y-2">
-          <Label>Shared with teams</Label>
-          <div
-            v-if="shareLoading"
-            class="text-sm text-muted-foreground"
-          >
-            Loading...
-          </div>
-          <div
-            v-else-if="workflowTeamShares.length === 0"
-            class="text-sm text-muted-foreground"
-          >
-            No teams
-          </div>
-          <div
-            v-else
-            class="space-y-2"
-          >
-            <div
-              v-for="share in workflowTeamShares"
-              :key="share.id"
-              class="flex items-center justify-between rounded-md border px-3 py-2"
-            >
-              <div class="text-sm font-medium">
-                {{ share.team_name }}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-destructive"
-                @click="removeWorkflowTeamShare(share.team_id)"
-              >
-                Remove
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Dialog>
+    />
 
     <Dialog
       :open="curlOpen"
@@ -2439,7 +2189,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
     >
       <NodePanel
         v-if="!isMobile"
-        v-show="leftPanelOpen && !analysisPanelOpen"
+        v-show="leftPanelOpen && !analysisPanelOpen && !isReadOnly"
       />
       <AnalysisPanel
         v-if="!isMobile && analysisPanelOpen"

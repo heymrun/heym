@@ -124,7 +124,7 @@ from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
 from app.services.ssrf_guard import SsrfBlockedError
 from app.services.timezone_utils import get_configured_timezone
-from app.services.workflow_access import explicit_workflow_share_ids
+from app.services.workflow_access import explicit_workflow_share_ids, user_can_write_workflow
 from app.services.workflow_dsl_prompt import (
     CLARIFY_PROTOCOL_PROMPT,
     DASHBOARD_WIDGET_PROMPT_HINT,
@@ -2245,6 +2245,10 @@ async def edit_and_run_generated_workflow_tool(
         workflow = await get_workflow_for_user(db, workflow_uuid, user.id)
         if workflow is None:
             return json.dumps({"status": "error", "error": "Workflow not found or no access"})
+        if not await user_can_write_workflow(db, workflow, user.id):
+            return json.dumps(
+                {"status": "error", "error": "You have read-only access to this workflow"}
+            )
 
         node_templates = await template_service.list_node_templates(db, user, None)
         node_template_payload = [

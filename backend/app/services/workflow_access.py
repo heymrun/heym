@@ -96,6 +96,64 @@ async def user_has_workflow_access(db: AsyncSession, workflow: Workflow, user_id
     return result.scalar_one_or_none() is not None
 
 
+PERMISSION_READ = "read"
+PERMISSION_WRITE = "write"
+
+
+async def get_workflow_permission(
+    db: AsyncSession, workflow: Workflow, user_id: UUID
+) -> str | None:
+    """Return the highest permission ``user_id`` holds on ``workflow``.
+
+    The owner and anyone with write access to a dashboard that hosts the workflow as a widget
+    get ``"write"``. Otherwise the highest permission across the user's direct share and every
+    team share wins, so a write grant through one path is never weakened by a read grant
+    through another. ``None`` means the user has no access at all.
+    """
+    if workflow.owner_id == user_id:
+        return PERMISSION_WRITE
+
+    permissions: list[str] = []
+
+    direct_result = await db.execute(
+        select(WorkflowShare.permission).where(
+            WorkflowShare.workflow_id == workflow.id,
+            WorkflowShare.user_id == user_id,
+            WorkflowShare.is_explicit_share.is_(True),
+        )
+    )
+    permissions.extend(direct_result.scalars().all())
+
+    team_result = await db.execute(
+        select(WorkflowTeamShare.permission).where(
+            WorkflowTeamShare.workflow_id == workflow.id,
+            WorkflowTeamShare.team_id.in_(
+                select(TeamMember.team_id).where(TeamMember.user_id == user_id)
+            ),
+        )
+    )
+    permissions.extend(team_result.scalars().all())
+
+    if getattr(workflow, "kind", None) == "dashboard_widget":
+        widget_result = await db.execute(
+            select(Workflow.id).where(
+                Workflow.id == workflow.id,
+                Workflow.id.in_(writable_shared_widget_workflow_ids(user_id)),
+            )
+        )
+        if widget_result.scalar_one_or_none() is not None:
+            permissions.append(PERMISSION_WRITE)
+
+    if not permissions:
+        return None
+    return PERMISSION_WRITE if PERMISSION_WRITE in permissions else PERMISSION_READ
+
+
+async def user_can_write_workflow(db: AsyncSession, workflow: Workflow, user_id: UUID) -> bool:
+    """Return whether ``user_id`` may edit ``workflow`` (owner or a write share)."""
+    return await get_workflow_permission(db, workflow, user_id) == PERMISSION_WRITE
+
+
 async def revoke_execution_tokens_without_access(db: AsyncSession, workflow: Workflow) -> None:
     """Revoke execution tokens whose minter can no longer access ``workflow``.
 

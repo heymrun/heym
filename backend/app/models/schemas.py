@@ -248,8 +248,13 @@ class WorkflowUpdate(BaseModel):
     base_updated_at: datetime | None = None
 
 
+WorkflowSharePermission = Literal["read", "write"]
+
+
 class WorkflowShareRequest(BaseModel):
     email: EmailStr
+    # Omitting it keeps the behavior from before permissions existed: a share can edit.
+    permission: WorkflowSharePermission = "write"
 
 
 class WorkflowShareResponse(BaseModel):
@@ -259,7 +264,16 @@ class WorkflowShareResponse(BaseModel):
     name: str
     mcp_enabled: bool = False
     folder_id: uuid.UUID | None = None
+    permission: WorkflowSharePermission = "write"
     shared_at: datetime
+
+
+class WorkflowTeamShareRequest(TeamShareRequest):
+    permission: WorkflowSharePermission = "write"
+
+
+class WorkflowTeamShareResponse(TeamShareResponse):
+    permission: WorkflowSharePermission = "write"
 
 
 class WorkflowResponse(BaseModel):
@@ -290,6 +304,8 @@ class WorkflowResponse(BaseModel):
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
     owner_name: str | None = None
+    # What the requesting user may do: the owner and write shares edit, read shares view and run.
+    permission: WorkflowSharePermission = "write"
     # Same audience as the portal settings endpoint: anyone who can read the workflow.
     portal_enabled: bool = False
     portal_slug: str | None = None

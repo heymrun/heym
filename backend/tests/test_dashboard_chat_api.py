@@ -644,6 +644,11 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
 
 class DashboardChatWorkflowBuilderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        patcher = patch(
+            "app.api.ai_assistant.user_can_write_workflow", AsyncMock(return_value=True)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
 
     def test_extract_generated_workflow_config_from_json_block(self) -> None:
@@ -1505,6 +1510,11 @@ def _owner_and_llm_credential() -> tuple[MagicMock, MagicMock]:
 
 class DashboardChatCredentialChoiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        patcher = patch(
+            "app.api.ai_assistant.user_can_write_workflow", AsyncMock(return_value=True)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
         self.github_work = CatalogCredential(uuid.uuid4(), "github-work", CredentialType.github)
         self.credential_catalog.return_value = [self.github_work]
@@ -1733,6 +1743,11 @@ _DATA_TABLE_BUILDER_CONTENT = """
 
 class DashboardChatDataTableChoiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        patcher = patch(
+            "app.api.ai_assistant.user_can_write_workflow", AsyncMock(return_value=True)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
         self.leads = CatalogDataTable(
             uuid.uuid4(),

@@ -88,6 +88,8 @@ import type {
   WorkflowVersion,
   WorkflowVersionDiff,
   WorkflowShare,
+  WorkflowSharePermission,
+  WorkflowTeamShare,
   DecisionQuestionsSuggestion,
 } from "@/types/workflow";
 import type {
@@ -1121,25 +1123,34 @@ export const workflowApi = {
     const response = await api.get<WorkflowShare[]>(`/workflows/${id}/shares`);
     return response.data;
   },
-  addShare: async (id: string, email: string): Promise<WorkflowShare> => {
+  addShare: async (
+    id: string,
+    email: string,
+    permission: WorkflowSharePermission = "read",
+  ): Promise<WorkflowShare> => {
     const response = await api.post<WorkflowShare>(`/workflows/${id}/shares`, {
       email,
+      permission,
     });
     return response.data;
   },
   removeShare: async (id: string, userId: string): Promise<void> => {
     await api.delete(`/workflows/${id}/shares/${userId}`);
   },
-  listTeamShares: async (id: string): Promise<TeamShare[]> => {
-    const response = await api.get<TeamShare[]>(
+  listTeamShares: async (id: string): Promise<WorkflowTeamShare[]> => {
+    const response = await api.get<WorkflowTeamShare[]>(
       `/workflows/${id}/team-shares`,
     );
     return response.data;
   },
-  addTeamShare: async (id: string, teamId: string): Promise<TeamShare> => {
-    const response = await api.post<TeamShare>(
+  addTeamShare: async (
+    id: string,
+    teamId: string,
+    permission: WorkflowSharePermission = "read",
+  ): Promise<WorkflowTeamShare> => {
+    const response = await api.post<WorkflowTeamShare>(
       `/workflows/${id}/team-shares`,
-      { team_id: teamId },
+      { team_id: teamId, permission },
     );
     return response.data;
   },

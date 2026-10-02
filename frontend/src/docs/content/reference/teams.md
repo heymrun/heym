@@ -52,7 +52,7 @@ Drive file team shares are read-only for team members; the file owner keeps mana
 
 Team shares per resource:
 
-- `GET/POST/DELETE /api/workflows/{id}/team-shares`
+- `GET/POST/DELETE /api/workflows/{id}/team-shares` – the POST body accepts `permission` (`read` or `write`, default `write`); posting an existing team again updates its permission
 - `GET/POST/DELETE /api/credentials/{id}/team-shares`
 - `GET/POST/DELETE /api/global-variables/{id}/team-shares`
 - `GET/POST/DELETE /api/vector-stores/{id}/team-shares`

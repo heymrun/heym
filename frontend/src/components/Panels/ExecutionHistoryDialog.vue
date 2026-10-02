@@ -700,7 +700,6 @@ function bringToCanvas(): void {
     :open="open"
     title="Execution History"
     size="4xl"
-    content-class="!h-[min(90vh,calc(100dvh-2rem))] sm:!h-[min(85vh,calc(100dvh-3rem))]"
     :close-on-escape="!searchActive || !searchQuery"
     @close="emit('close')"
     @escape="handleDialogEscape"

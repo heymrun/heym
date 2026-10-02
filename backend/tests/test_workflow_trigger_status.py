@@ -183,6 +183,13 @@ class WorkflowListResponseTriggerStatusTests(unittest.TestCase):
 
 
 class WorkflowDetailOwnerNameTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patcher = patch(
+            "app.api.workflows.get_workflow_permission", AsyncMock(return_value="write")
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_owner_sees_own_name(self) -> None:
         current_user = User(id=uuid.uuid4(), email="a@b.c", hashed_password="hashed", name="Anna")
         workflow = make_detail_workflow(current_user.id)

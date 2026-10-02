@@ -106,7 +106,7 @@ Drag and drop a JSON workflow file onto the workflow area to create a new workfl
 
 ## Sharing
 
-Open a workflow in the editor and click **Share** to invite users by email or share with a [team](./teams-tab.md). Shared collaborators can view, edit, and run the workflow. Credentials and sub-workflows are not shared automatically; share those separately with the same users or teams. See [Workflow Organization](../reference/workflow-organization.md#sharing-workflows) and [Credentials Sharing](../reference/credentials-sharing.md).
+Open a workflow in the editor and click **Share** to invite users by email or share with a [team](./teams-tab.md). Choose **Read** (view and run) or **Write** (also edit) for each user or team, and change it later from the dropdown next to the entry. Credentials and sub-workflows are not shared automatically; share those separately with the same users or teams. See [Workflow Organization](../reference/workflow-organization.md#sharing-workflows) and [Credentials Sharing](../reference/credentials-sharing.md).
 
 ## Editing and Deleting
 

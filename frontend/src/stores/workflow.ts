@@ -73,6 +73,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const serverClockOffsetMs = ref(0);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
+  /**
+   * A read share lets the user open and run a workflow but not change it. The backend rejects
+   * the save with 403; this flag keeps the editor from offering edits it cannot persist.
+   */
+  const isReadOnly = computed(() => currentWorkflow.value?.permission === "read");
   const workflowLoadedAt = ref<string | null>(null);
   const staleSaveDialogOpen = ref(false);
   const staleSaveServerUpdatedAt = ref<string | null>(null);
@@ -686,7 +691,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   /** Returns false when a concurrent edit blocked the save and the dialog was opened. */
   async function saveWorkflow(): Promise<boolean> {
     const wf = currentWorkflow.value;
-    if (!wf) return false;
+    if (!wf || isReadOnly.value) return false;
     return _executeSave(knownWorkflowRevision(wf.id));
   }
 
@@ -1433,7 +1438,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     // newer version, so the user is asked to confirm the overwrite. Without them there is nothing
     // to overwrite, but the execution request carries only inputs — the backend runs the *stored*
     // workflow — so the run would silently execute a definition this tab is not showing.
-    if (hasUnsavedChanges.value) {
+    if (hasUnsavedChanges.value && !isReadOnly.value) {
       if (!(await saveWorkflow())) {
         pendingStaleSaveRun.value = { body };
         return;
@@ -3590,6 +3595,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     serverClockOffsetMs,
     isSaving,
     hasUnsavedChanges,
+    isReadOnly,
     runningNodeIds,
     pendingNodeDeletion,
     clipboardNode,
