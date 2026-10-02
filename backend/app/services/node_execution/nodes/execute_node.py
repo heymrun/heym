@@ -136,135 +136,169 @@ def execute(ctx: NodeExecutionContext) -> object:
             _exec_node_cancel_event,
             bridge_name="_bridge_exec_node_cancel",
         )
-        sub_executor = WorkflowExecutor(
-            nodes=target_workflow["nodes"],
-            edges=target_workflow["edges"],
-            workflow_cache=self.workflow_cache,
-            test_mode=False,
-            credentials_context=self.credentials_context,
-            global_variables_context=merged_global,
-            workflow_id=uuid.UUID(execute_workflow_id),
-            trace_user_id=self.trace_user_id,
-            actor_user_id=self.actor_user_id,
-            sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
-            cancel_event=_exec_node_cancel_event,
-            invoked_by_agent=self._invoked_by_agent,
-            execution_id=str(_sub_exec_id),
-            llm_session_id=self.llm_session_id,
-            node_pool=(_BACKGROUND_NODE_EXECUTOR if execute_do_not_wait else self._node_pool),
-        )
-        enriched_execute_inputs = {
-            "headers": {},
-            "query": {},
-            "body": execute_inputs,
-        }
-
-        if execute_do_not_wait:
-            wf_name = target_workflow.get("name", "")
-            inputs_snap = dict(execute_inputs)
-            bg_callback_done = Event()
-            # Registered before submit so the dispatched run shows as running from its
-            # first moment; without it the sub-workflow stays invisible until it ends.
-            _register_sub_execution(
+        bridge_transferred = False
+        try:
+            sub_executor = WorkflowExecutor(
+                nodes=target_workflow["nodes"],
+                edges=target_workflow["edges"],
+                workflow_cache=self.workflow_cache,
+                test_mode=False,
+                credentials_context=self.credentials_context,
+                global_variables_context=merged_global,
                 workflow_id=uuid.UUID(execute_workflow_id),
-                execution_id=_sub_exec_id,
-                event=_exec_node_cancel_event,
-                inputs=enriched_execute_inputs,
-                recoverable=False,
+                trace_user_id=self.trace_user_id,
+                actor_user_id=self.actor_user_id,
+                sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
+                cancel_event=_exec_node_cancel_event,
+                invoked_by_agent=self._invoked_by_agent,
+                execution_id=str(_sub_exec_id),
+                llm_session_id=self.llm_session_id,
+                node_pool=(_BACKGROUND_NODE_EXECUTOR if execute_do_not_wait else self._node_pool),
             )
+            enriched_execute_inputs = {
+                "headers": {},
+                "query": {},
+                "body": execute_inputs,
+            }
 
-            def _on_execute_do_not_wait_done(f: Future) -> None:
+            if execute_do_not_wait:
+                wf_name = target_workflow.get("name", "")
+                inputs_snap = dict(execute_inputs)
+                bg_callback_done = Event()
+                # Registered before submit so the dispatched run shows as running from its
+                # first moment; without it the sub-workflow stays invisible until it ends.
+                _register_sub_execution(
+                    workflow_id=uuid.UUID(execute_workflow_id),
+                    execution_id=_sub_exec_id,
+                    event=_exec_node_cancel_event,
+                    inputs=enriched_execute_inputs,
+                    recoverable=False,
+                )
+
+                def _on_execute_do_not_wait_done(f: Future) -> None:
+                    try:
+                        WorkflowExecutor._record_bg_sub_workflow_done(
+                            f,
+                            self,
+                            execute_workflow_id,
+                            wf_name,
+                            inputs_snap,
+                            execution_id=str(_sub_exec_id),
+                        )
+                    finally:
+                        bg_error = f.exception()
+                        bg_result = None if bg_error else f.result()
+                        if (
+                            bg_result is not None
+                            and getattr(bg_result, "status", None) == "pending"
+                            and bg_error is None
+                        ):
+                            bg_error = ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
+                        _finish_sub_execution(
+                            _sub_exec_id,
+                            execute_workflow_id,
+                            result=bg_result,
+                            error=bg_error,
+                        )
+                        bg_callback_done.set()
+                        bridge.close()
+
                 try:
-                    WorkflowExecutor._record_bg_sub_workflow_done(
-                        f,
-                        self,
-                        execute_workflow_id,
-                        wf_name,
-                        inputs_snap,
-                        execution_id=str(_sub_exec_id),
+                    bg_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
+                        sub_executor.execute,
+                        workflow_id=uuid.UUID(execute_workflow_id),
+                        initial_inputs=enriched_execute_inputs,
                     )
+                    bg_future.add_done_callback(_on_execute_do_not_wait_done)
+                    bridge_transferred = True
+                except Exception:
+                    clear_execution(_sub_exec_id)
+                    raise
+
+                with self._bg_futures_lock:
+                    self._bg_futures.append(
+                        (
+                            bg_future,
+                            bg_callback_done,
+                            execute_workflow_id,
+                            wf_name,
+                            inputs_snap,
+                        )
+                    )
+                output = {"status": "dispatched", "workflow_id": execute_workflow_id}
+            else:
+                _register_sub_execution(
+                    workflow_id=uuid.UUID(execute_workflow_id),
+                    execution_id=_sub_exec_id,
+                    event=_exec_node_cancel_event,
+                    recoverable=False,
+                )
+                sub_error: BaseException | None = None
+                sub_result: ExecutionResult | None = None
+                try:
+                    sub_result = sub_executor.execute(
+                        workflow_id=uuid.UUID(execute_workflow_id),
+                        initial_inputs=enriched_execute_inputs,
+                    )
+                    if sub_result.allow_downstream_pending:
+                        sub_result.join_allow_downstream()
+                except BaseException as exc:
+                    sub_error = exc
+                    raise
                 finally:
-                    bg_error = f.exception()
+                    is_unsupported_pending = (
+                        sub_result is not None and getattr(sub_result, "status", None) == "pending"
+                    )
+                    sub_status = (
+                        "error"
+                        if is_unsupported_pending
+                        else (getattr(sub_result, "status", "error") if sub_result else "error")
+                    )
+                    if is_unsupported_pending and sub_error is None:
+                        sub_error = ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
                     _finish_sub_execution(
                         _sub_exec_id,
                         execute_workflow_id,
-                        result=None if bg_error else f.result(),
-                        error=bg_error,
+                        result=sub_result,
+                        error=sub_error,
                     )
-                    bg_callback_done.set()
-                    bridge.close()
+                    if sub_result is not None:
+                        masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
+                            sub_result, self.credentials_context
+                        )
+                        if is_unsupported_pending:
+                            masked_outputs = dict(masked_outputs)
+                            masked_outputs["error"] = SUB_WORKFLOW_HITL_UNSUPPORTED
+                        sub_exec = SubWorkflowExecution(
+                            workflow_id=execute_workflow_id,
+                            inputs=execute_inputs,
+                            outputs=masked_outputs,
+                            status=sub_status,
+                            execution_time_ms=sub_result.execution_time_ms,
+                            node_results=masked_rows,
+                            workflow_name=target_workflow.get("name", ""),
+                            trigger_source=(
+                                "AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"
+                            ),
+                            execution_id=str(_sub_exec_id),
+                        )
+                        with self.lock:
+                            self.sub_workflow_executions.append(sub_exec)
+                            self.sub_workflow_executions.extend(
+                                sub_executor.sub_workflow_executions
+                            )
+                if is_unsupported_pending:
+                    raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
 
-            bg_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
-                sub_executor.execute,
-                workflow_id=uuid.UUID(execute_workflow_id),
-                initial_inputs=enriched_execute_inputs,
-            )
-            bg_future.add_done_callback(_on_execute_do_not_wait_done)
-            with self._bg_futures_lock:
-                self._bg_futures.append(
-                    (
-                        bg_future,
-                        bg_callback_done,
-                        execute_workflow_id,
-                        wf_name,
-                        inputs_snap,
-                    )
-                )
-            output = {"status": "dispatched", "workflow_id": execute_workflow_id}
-        else:
-            _register_sub_execution(
-                workflow_id=uuid.UUID(execute_workflow_id),
-                execution_id=_sub_exec_id,
-                event=_exec_node_cancel_event,
-                recoverable=False,
-            )
-            sub_error: BaseException | None = None
-            sub_result: ExecutionResult | None = None
-            try:
-                sub_result = sub_executor.execute(
-                    workflow_id=uuid.UUID(execute_workflow_id),
-                    initial_inputs=enriched_execute_inputs,
-                )
-                if sub_result.allow_downstream_pending:
-                    sub_result.join_allow_downstream()
-            except BaseException as exc:
-                sub_error = exc
-                raise
-            finally:
+                output = {
+                    "workflow_id": execute_workflow_id,
+                    "status": sub_result.status,
+                    "outputs": sub_result.outputs,
+                    "execution_time_ms": sub_result.execution_time_ms,
+                }
+        finally:
+            if not bridge_transferred:
                 bridge.close()
-                _finish_sub_execution(
-                    _sub_exec_id,
-                    execute_workflow_id,
-                    result=sub_result,
-                    error=sub_error,
-                )
-                if sub_result is not None:
-                    masked_outputs, masked_rows = _workflow_executor.mask_sub_workflow_result(
-                        sub_result, self.credentials_context
-                    )
-                    sub_exec = SubWorkflowExecution(
-                        workflow_id=execute_workflow_id,
-                        inputs=execute_inputs,
-                        outputs=masked_outputs,
-                        status=sub_result.status,
-                        execution_time_ms=sub_result.execution_time_ms,
-                        node_results=masked_rows,
-                        workflow_name=target_workflow.get("name", ""),
-                        trigger_source=("AI Agents" if self._invoked_by_agent else "SUB_WORKFLOW"),
-                        execution_id=str(_sub_exec_id),
-                    )
-                    with self.lock:
-                        self.sub_workflow_executions.append(sub_exec)
-                        self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
-            if sub_result.status == "pending":
-                raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
-
-            output = {
-                "workflow_id": execute_workflow_id,
-                "status": sub_result.status,
-                "outputs": sub_result.outputs,
-                "execution_time_ms": sub_result.execution_time_ms,
-            }
     else:
         output = execute_inputs
     return output

@@ -4106,164 +4106,175 @@ class WorkflowExecutor:
             sub_cancel_event,
             bridge_name="_bridge_parent_cancel",
         )
-        sub_executor = WorkflowExecutor(
-            nodes=target_workflow["nodes"],
-            edges=target_workflow["edges"],
-            workflow_cache=self.workflow_cache,
-            test_mode=False,
-            credentials_context=self.credentials_context,
-            global_variables_context=merged_global,
-            workflow_id=uuid.UUID(workflow_id_str),
-            trace_user_id=self.trace_user_id,
-            actor_user_id=self.actor_user_id,
-            sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
-            cancel_event=sub_cancel_event,
-            invoked_by_agent=True,
-            execution_id=str(_sub_execution_id),
-            llm_session_id=self.llm_session_id,
-            node_pool=self._node_pool,
-        )
-        enriched_inputs = {
-            "headers": {},
-            "query": {},
-            "body": inputs,
-        }
-        start_ms = time.time() * 1000
-        sub_result: ExecutionResult | None = None
+        downstream_submitted = False
         try:
-            sub_result = sub_executor.execute(
+            sub_executor = WorkflowExecutor(
+                nodes=target_workflow["nodes"],
+                edges=target_workflow["edges"],
+                workflow_cache=self.workflow_cache,
+                test_mode=False,
+                credentials_context=self.credentials_context,
+                global_variables_context=merged_global,
                 workflow_id=uuid.UUID(workflow_id_str),
-                initial_inputs=enriched_inputs,
+                trace_user_id=self.trace_user_id,
+                actor_user_id=self.actor_user_id,
+                sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
+                cancel_event=sub_cancel_event,
+                invoked_by_agent=True,
+                execution_id=str(_sub_execution_id),
+                llm_session_id=self.llm_session_id,
+                node_pool=self._node_pool,
             )
-            if sub_result.allow_downstream_pending:
-                sub_result.join_allow_downstream()
-            if sub_result.status == "pending":
+            enriched_inputs = {
+                "headers": {},
+                "query": {},
+                "body": inputs,
+            }
+            start_ms = time.time() * 1000
+            sub_result: ExecutionResult | None = None
+
+            def _record_sub_failure(status: str, exc: BaseException) -> None:
+                if sub_result is None:
+                    return
+                _, masked_rows = mask_sub_workflow_result(sub_result, self.credentials_context)
+                sub_exec = SubWorkflowExecution(
+                    workflow_id=workflow_id_str,
+                    inputs=inputs,
+                    outputs={"error": str(exc)},
+                    status=status,
+                    execution_time_ms=sub_result.execution_time_ms,
+                    node_results=masked_rows,
+                    workflow_name=target_workflow.get("name", ""),
+                    trigger_source="AI Agents",
+                    execution_id=str(_sub_execution_id),
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(sub_exec)
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
+
+            def _sub_tool_error(status: str, exc: BaseException, default_msg: str = "") -> dict:
+                elapsed_ms = round((time.time() * 1000) - start_ms)
+                _record_sub_failure("cancelled" if status == "cancelled" else "error", exc)
                 return {
-                    "status": "error",
+                    "status": status,
                     "outputs": {},
-                    "execution_time_ms": round((time.time() * 1000) - start_ms),
-                    "error": "HITL is not supported inside sub-workflow tools.",
+                    "execution_time_ms": elapsed_ms,
+                    "error": str(exc) or default_msg,
                 }
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            masked_outputs, masked_rows = mask_sub_workflow_result(
-                sub_result, self.credentials_context
-            )
-            with self.lock:
-                self.sub_workflow_executions.append(
-                    SubWorkflowExecution(
-                        workflow_id=workflow_id_str,
-                        inputs=inputs,
-                        outputs=masked_outputs,
-                        status=sub_result.status,
-                        execution_time_ms=sub_result.execution_time_ms,
-                        node_results=masked_rows,
-                        workflow_name=target_workflow.get("name", ""),
-                        trigger_source="AI Agents",
-                        execution_id=str(_sub_execution_id),
-                    )
+
+            try:
+                sub_result = sub_executor.execute(
+                    workflow_id=uuid.UUID(workflow_id_str),
+                    initial_inputs=enriched_inputs,
                 )
-                self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
-            out = {
-                "status": sub_result.status,
-                "outputs": sub_result.outputs,
-                "execution_time_ms": elapsed_ms,
-            }
-            if sub_result.status == "error":
-                err = sub_result.outputs.get("error") if sub_result.outputs else None
-                if err:
-                    out["error"] = err
-                elif sub_result.node_results:
-                    for nr in sub_result.node_results:
-                        if isinstance(nr, dict) and nr.get("error"):
-                            out["error"] = nr["error"]
-                            break
-            return out
-        except WorkflowTimeoutError as exc:
-            # Preserve lifecycle status at the source so the agent loop can abort
-            # on explicit cancelled/timeout without inferring from error text.
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            if sub_result is not None:
+                if sub_result.status == "pending":
+                    return {
+                        "status": "error",
+                        "outputs": {},
+                        "execution_time_ms": round((time.time() * 1000) - start_ms),
+                        "error": "HITL is not supported inside sub-workflow tools.",
+                    }
+                elapsed_ms = round((time.time() * 1000) - start_ms)
                 masked_outputs, masked_rows = mask_sub_workflow_result(
                     sub_result, self.credentials_context
                 )
-                with self.lock:
-                    self.sub_workflow_executions.append(
-                        SubWorkflowExecution(
-                            workflow_id=workflow_id_str,
-                            inputs=inputs,
-                            outputs={"error": str(exc)},
-                            status="error",
-                            execution_time_ms=sub_result.execution_time_ms,
-                            node_results=masked_rows,
-                            workflow_name=target_workflow.get("name", ""),
-                            trigger_source="AI Agents",
-                            execution_id=str(_sub_execution_id),
-                        )
-                    )
-                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
-            return {
-                "status": "timeout",
-                "outputs": {},
-                "execution_time_ms": elapsed_ms,
-                "error": str(exc) or "Workflow execution timed out",
-            }
-        except WorkflowCancelledError as exc:
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            if sub_result is not None:
-                masked_outputs, masked_rows = mask_sub_workflow_result(
-                    sub_result, self.credentials_context
+                sub_exec = SubWorkflowExecution(
+                    workflow_id=workflow_id_str,
+                    inputs=inputs,
+                    outputs=masked_outputs,
+                    status=sub_result.status,
+                    execution_time_ms=sub_result.execution_time_ms,
+                    node_results=masked_rows,
+                    workflow_name=target_workflow.get("name", ""),
+                    trigger_source="AI Agents",
+                    execution_id=str(_sub_execution_id),
                 )
                 with self.lock:
-                    self.sub_workflow_executions.append(
-                        SubWorkflowExecution(
-                            workflow_id=workflow_id_str,
-                            inputs=inputs,
-                            outputs={"error": str(exc)},
-                            status="cancelled",
-                            execution_time_ms=sub_result.execution_time_ms,
-                            node_results=masked_rows,
-                            workflow_name=target_workflow.get("name", ""),
-                            trigger_source="AI Agents",
-                            execution_id=str(_sub_execution_id),
-                        )
-                    )
+                    self.sub_workflow_executions.append(sub_exec)
                     self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
-            return {
-                "status": "cancelled",
-                "outputs": {},
-                "execution_time_ms": elapsed_ms,
-                "error": str(exc) or "Workflow execution cancelled",
-            }
-        except Exception as exc:
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            if sub_result is not None:
-                masked_outputs, masked_rows = mask_sub_workflow_result(
-                    sub_result, self.credentials_context
-                )
-                with self.lock:
-                    self.sub_workflow_executions.append(
-                        SubWorkflowExecution(
-                            workflow_id=workflow_id_str,
-                            inputs=inputs,
-                            outputs={"error": str(exc)},
-                            status="error",
-                            execution_time_ms=sub_result.execution_time_ms,
-                            node_results=masked_rows,
-                            workflow_name=target_workflow.get("name", ""),
-                            trigger_source="AI Agents",
-                            execution_id=str(_sub_execution_id),
-                        )
+
+                if sub_result.allow_downstream_pending:
+                    bg_callback_done = Event()
+
+                    def _on_sub_downstream_done() -> None:
+                        try:
+                            sub_result.join_allow_downstream()
+                            if sub_result.status != "success":
+                                sub_exec.status = sub_result.status
+                        except WorkflowTimeoutError as exc:
+                            sub_exec.status = "error"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault(
+                                    "error", str(exc) or "Workflow execution timed out"
+                                )
+                        except (
+                            WorkflowCancelledError,
+                            CancelledError,
+                            asyncio.CancelledError,
+                        ) as exc:
+                            sub_exec.status = "cancelled"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault(
+                                    "error", str(exc) or "Workflow execution cancelled"
+                                )
+                        except Exception as exc:
+                            logger.exception(
+                                "Unexpected exception in allowDownstream sub-workflow background execution"
+                            )
+                            sub_exec.status = "error"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault("error", str(exc))
+                        finally:
+                            if sub_result is not None:
+                                _, updated_masked_rows = mask_sub_workflow_result(
+                                    sub_result, self.credentials_context
+                                )
+                                sub_exec.node_results = updated_masked_rows
+                                sub_exec.execution_time_ms = sub_result.execution_time_ms
+                            bg_callback_done.set()
+                            bridge.close()
+                            _clear_sub_execution(_sub_execution_id)
+
+                    bg_downstream_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
+                        _on_sub_downstream_done
                     )
-                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
-            return {
-                "status": "error",
-                "outputs": {},
-                "execution_time_ms": elapsed_ms,
-                "error": str(exc),
-            }
+                    with self._bg_futures_lock:
+                        self._bg_futures.append(
+                            (
+                                bg_downstream_future,
+                                bg_callback_done,
+                                workflow_id_str,
+                                target_workflow.get("name", ""),
+                                dict(inputs),
+                            )
+                        )
+                    downstream_submitted = True
+
+                out = {
+                    "status": sub_result.status,
+                    "outputs": sub_result.outputs,
+                    "execution_time_ms": elapsed_ms,
+                }
+                if sub_result.status == "error":
+                    err = sub_result.outputs.get("error") if sub_result.outputs else None
+                    if err:
+                        out["error"] = err
+                    elif sub_result.node_results:
+                        for nr in sub_result.node_results:
+                            if isinstance(nr, dict) and nr.get("error"):
+                                out["error"] = nr["error"]
+                                break
+                return out
+            except WorkflowTimeoutError as exc:
+                return _sub_tool_error("timeout", exc, "Workflow execution timed out")
+            except WorkflowCancelledError as exc:
+                return _sub_tool_error("cancelled", exc, "Workflow execution cancelled")
+            except Exception as exc:
+                return _sub_tool_error("error", exc)
         finally:
-            bridge.close()
-            _clear_sub_execution(_sub_execution_id)
+            if not downstream_submitted:
+                bridge.close()
+                _clear_sub_execution(_sub_execution_id)
 
     @staticmethod
     def _normalize_hitl_policy_token(value: str) -> str:

@@ -125,9 +125,11 @@ from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
     WorkflowTimeoutError,
+    _mask_node_result_row,
     _serialize_sub_workflow_executions,
     _to_json_compatible,
     execute_workflow_streaming,
+    mask_sensitive_output,
 )
 from app.services.workflow_last_trigger import (
     fetch_last_trigger_source,
@@ -367,6 +369,23 @@ async def persist_stream_execution_result(
         parent_exec_time = (
             final_result.get("execution_time_ms", 0.0) if isinstance(final_result, dict) else 0.0
         )
+        if credentials_owner_id:
+            try:
+                credentials_ctx = await get_credentials_context(db, credentials_owner_id)
+                if credentials_ctx:
+                    parent_outputs = mask_sensitive_output(parent_outputs, credentials_ctx)
+                    if isinstance(parent_node_results, list):
+                        masked_parent_node_results = []
+                        for row in parent_node_results:
+                            if isinstance(row, dict):
+                                rc = copy.deepcopy(row)
+                                _mask_node_result_row(rc, credentials_ctx)
+                                masked_parent_node_results.append(rc)
+                            else:
+                                masked_parent_node_results.append(row)
+                        parent_node_results = masked_parent_node_results
+            except Exception:
+                pass
         db.add(
             ExecutionHistory(
                 id=execution_id,
@@ -4171,20 +4190,47 @@ async def execute_workflow_stream(
         except WorkflowCancelledError:
             was_cancelled = True
             wf_exec = executor_holder.get("executor")
+            node_results = []
+            node_outputs = {}
+            sub_workflow_executions = []
+            execution_time_ms = 0.0
             if wf_exec is not None:
-                if final_result is None:
-                    final_result = {}
+                if getattr(wf_exec, "completed_node_results", None):
+                    node_results = list(wf_exec.completed_node_results)
+                if getattr(wf_exec, "node_outputs", None):
+                    node_outputs = dict(wf_exec.node_outputs)
+                if getattr(wf_exec, "execution_start_time", None):
+                    execution_time_ms = (time.time() - wf_exec.execution_start_time) * 1000
                 extra = _serialize_sub_workflow_executions(wf_exec.sub_workflow_executions)
                 if extra:
-                    final_result["sub_workflow_executions"] = extra
-                if getattr(wf_exec, "completed_node_results", None):
-                    final_result["node_results"] = list(wf_exec.completed_node_results)
-                if getattr(wf_exec, "node_outputs", None):
-                    final_result["outputs"] = dict(wf_exec.node_outputs)
-                if getattr(wf_exec, "execution_start_time", None):
-                    final_result["execution_time_ms"] = (
-                        time.time() - wf_exec.execution_start_time
-                    ) * 1000
+                    sub_workflow_executions = extra
+
+            masked_outputs = (
+                mask_sensitive_output(node_outputs, credentials_context)
+                if credentials_context
+                else _to_json_compatible(node_outputs)
+            )
+            masked_node_results = []
+            for row in node_results:
+                if isinstance(row, dict):
+                    row_copy = copy.deepcopy(row)
+                    if credentials_context:
+                        _mask_node_result_row(row_copy, credentials_context)
+                    masked_node_results.append(row_copy)
+                else:
+                    masked_node_results.append(row)
+
+            cancelled_event = {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "cancelled",
+                "outputs": masked_outputs,
+                "execution_time_ms": execution_time_ms,
+                "node_results": masked_node_results,
+                "sub_workflow_executions": sub_workflow_executions,
+            }
+            final_result = cancelled_event
+            event_queue.put(cancelled_event)
             return
         finally:
             release_run()

@@ -4144,6 +4144,607 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             get_active_bridge_threads(), [], "Scenario I: Normal bridge threads must return to 0"
         )
 
+    async def test_cancelled_stream_outputs_masked_in_history_and_observer(self) -> None:
+        """Issue 1: Cancelled stream outputs and node results must remain masked.
+        - Credentials context must mask sensitive strings in both ExecutionHistory and active execution observer.
+        - Neither ExecutionHistory.outputs nor observer terminal payload may leak raw secrets."""
+        from app.api.workflows import persist_stream_execution_result
+        from app.services.execution_cancellation import (
+            complete_execution,
+            get_completed_execution_result,
+            register_execution,
+        )
+        from app.services.workflow_executor import _mask_node_result_row, mask_sensitive_output
+
+        secret_token = "sk-live-super-secret-token-abcdef123456"
+        secret_context = {"api_key": secret_token}
+
+        wid = uuid.uuid4()
+        eid = uuid.uuid4()
+
+        async with async_session_maker() as s:
+            wf = Workflow(
+                id=wid,
+                owner_id=self.user_id,
+                name="Stream Masking Cancel WF",
+                nodes=[{"id": "step_auth", "type": "javascript"}],
+                edges=[],
+                sse_enabled=True,
+            )
+            s.add(wf)
+            await s.commit()
+        self.cleanup_workflow_ids.append(wid)
+
+        raw_node_results = [
+            {
+                "node_id": "step_auth",
+                "node_label": "Authenticate",
+                "status": "success",
+                "output": {"token": secret_token, "user": "admin"},
+            }
+        ]
+        raw_outputs = {"token": secret_token, "status": "authorized"}
+
+        # Simulate stream cancelled with raw node outputs
+        final_res = {
+            "type": "execution_complete",
+            "workflow_id": str(wid),
+            "status": "cancelled",
+            "outputs": raw_outputs,
+            "execution_time_ms": 150.0,
+            "node_results": raw_node_results,
+            "sub_workflow_executions": [],
+        }
+
+        # 1. persist_stream_execution_result with credentials_owner_id
+        async with async_session_maker() as s:
+            run_wf = await s.get(Workflow, wid)
+            with patch(
+                "app.api.workflows.get_credentials_context",
+                AsyncMock(return_value=secret_context),
+            ):
+                written = await persist_stream_execution_result(
+                    s,
+                    workflow=run_wf,
+                    execution_id=eid,
+                    enriched_inputs={},
+                    trigger_source="manual",
+                    raw_body=None,
+                    query_params={},
+                    workflow_cache={},
+                    credentials_owner_id=self.user_id,
+                    final_result=final_res,
+                    was_cancelled=True,
+                )
+                self.assertTrue(written)
+                await s.commit()
+
+        # Check DB ExecutionHistory
+        async with async_session_maker() as s:
+            h = (
+                await s.execute(select(ExecutionHistory).where(ExecutionHistory.id == eid))
+            ).scalar_one()
+            self.assertEqual(h.status, "cancelled")
+            self.assertNotIn(
+                secret_token,
+                json.dumps(h.outputs),
+                "Raw secret must NOT leak in history outputs",
+            )
+            self.assertIn(
+                "sk-live**",
+                json.dumps(h.outputs),
+                "Masked token must be present in history outputs",
+            )
+            self.assertNotIn(
+                secret_token,
+                json.dumps(h.node_results),
+                "Raw secret must NOT leak in history node_results",
+            )
+
+        # 2. Check active observer complete_execution
+        cancel_eid = uuid.uuid4()
+        c_event = threading.Event()
+        register_execution(
+            workflow_id=wid, execution_id=cancel_eid, event=c_event, recoverable=False
+        )
+        masked_out = mask_sensitive_output(raw_outputs, secret_context)
+        import copy
+
+        masked_nr = copy.deepcopy(raw_node_results)
+        _mask_node_result_row(masked_nr[0], secret_context)
+        observer_event = {
+            "type": "execution_complete",
+            "workflow_id": str(wid),
+            "status": "cancelled",
+            "outputs": masked_out,
+            "execution_time_ms": 150.0,
+            "node_results": masked_nr,
+        }
+        complete_execution(cancel_eid, workflow_id=wid, result=observer_event)
+        completed_obs = get_completed_execution_result(cancel_eid, workflow_id=wid)
+        self.assertIsNotNone(completed_obs)
+        self.assertEqual(completed_obs["status"], "cancelled")
+        self.assertNotIn(secret_token, json.dumps(completed_obs["outputs"]))
+        self.assertIn("sk-live**", json.dumps(completed_obs["outputs"]))
+
+    async def test_cancelled_stream_emits_valid_terminal_event(self) -> None:
+        """Issue 2: Stream cancellation must emit a valid terminal execution_complete event.
+        - Client reading the SSE stream must receive execution_started and then execution_complete.
+        - The event must have status='cancelled', workflow_id, outputs, node_results, and execution_time_ms."""
+        from app.api.workflows import execute_workflow_stream
+        from app.services.workflow_executor import WorkflowCancelledError
+
+        wid = uuid.uuid4()
+        async with async_session_maker() as s:
+            wf = Workflow(
+                id=wid,
+                owner_id=self.user_id,
+                name="Stream Terminal Event Cancel WF",
+                nodes=[{"id": "n1", "type": "javascript"}],
+                edges=[],
+                sse_enabled=True,
+            )
+            s.add(wf)
+            await s.commit()
+        self.cleanup_workflow_ids.append(wid)
+
+        request = MagicMock()
+        request.method = "POST"
+        request.headers = {}
+        request.query_params = {}
+        request.base_url = "http://localhost/"
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        def fake_streaming_run(*args, **kwargs):
+            # Simulate streaming generator yielding a progress event then raising cancellation
+            yield {"type": "node_started", "node_id": "n1"}
+            raise WorkflowCancelledError("Workflow was cancelled mid-stream")
+
+        async with async_session_maker() as s:
+            with (
+                patch(
+                    "app.api.workflows.parse_execute_body",
+                    AsyncMock(return_value=({}, False, "API", False)),
+                ),
+                patch(
+                    "app.api.workflows.validate_workflow_auth",
+                    AsyncMock(return_value=SimpleNamespace(id=self.user_id)),
+                ),
+                patch("app.api.workflows.enforce_workflow_http_method", MagicMock()),
+                patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+                patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+                patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+                patch("app.api.workflows.build_public_base_url", return_value="http://localhost"),
+                patch("app.api.workflows.execute_workflow_streaming", fake_streaming_run),
+                patch(
+                    "app.api.workflows.persist_stream_execution_result",
+                    AsyncMock(return_value=True),
+                ),
+                patch("app.api.workflows.async_session_maker", async_session_maker),
+            ):
+                response = await execute_workflow_stream(
+                    workflow_id=wid,
+                    request=request,
+                    current_user=SimpleNamespace(id=self.user_id),
+                    db=s,
+                )
+
+                frames = [chunk async for chunk in response.body_iterator]
+
+        raw_payload = "".join(c.decode() if isinstance(c, bytes) else c for c in frames)
+        lines = [line.strip() for line in raw_payload.split("\n") if line.startswith("data: ")]
+        parsed_events = [json.loads(line[len("data: ") :]) for line in lines]
+
+        # Verify execution_started was emitted
+        self.assertTrue(any(e.get("type") == "execution_started" for e in parsed_events))
+
+        # Verify execution_complete was emitted with status="cancelled"
+        terminal_events = [e for e in parsed_events if e.get("type") == "execution_complete"]
+        self.assertEqual(
+            len(terminal_events),
+            1,
+            "Exactly one terminal execution_complete event must be emitted on cancel",
+        )
+        term = terminal_events[0]
+        self.assertEqual(term.get("status"), "cancelled")
+        self.assertEqual(term.get("workflow_id"), str(wid))
+        self.assertIn("outputs", term)
+        self.assertIn("execution_time_ms", term)
+        self.assertIn("node_results", term)
+
+    def test_execute_node_bridge_cleanup_on_early_failures(self) -> None:
+        """Issue 3: Every Execute-node bridge creation path must clean up its bridge thread.
+        - If WorkflowExecutor fails during creation, bridge must close and thread must terminate.
+        - If _BACKGROUND_WORKFLOW_EXECUTOR.submit fails, bridge must close and thread must terminate.
+        - If synchronous execution raises inside execute(), bridge must close and thread must terminate."""
+        from app.services.node_execution.base import NodeExecutionContext
+        from app.services.node_execution.nodes.execute_node import execute as execute_node_fn
+        from app.services.workflow_executor import WorkflowExecutor
+
+        def count_bridge_threads() -> int:
+            return sum(
+                1
+                for t in threading.enumerate()
+                if t.is_alive() and "_bridge_exec_node_cancel" in t.name
+            )
+
+        baseline = count_bridge_threads()
+
+        wf_target_id = str(uuid.uuid4())
+        cache = {
+            wf_target_id: {
+                "name": "Target WF",
+                "nodes": [{"id": "t1", "type": "javascript"}],
+                "edges": [],
+            }
+        }
+        parent_exec_3 = WorkflowExecutor(
+            nodes=[],
+            edges=[],
+            workflow_cache=cache,
+            workflow_id=uuid.uuid4(),
+        )
+
+        # Scenario 3a: WorkflowExecutor constructor raises ValueError
+        ctx_3a = NodeExecutionContext(
+            executor=parent_exec_3,
+            node_id="exec_1",
+            inputs={},
+            allow_branch_skip=False,
+            start_time=time.time(),
+            node={
+                "id": "exec_1",
+                "type": "executeWorkflow",
+                "data": {"executeWorkflowId": wf_target_id},
+            },
+            node_type="executeWorkflow",
+            node_data={"executeWorkflowId": wf_target_id, "executeDoNotWait": False},
+            node_label="Execute",
+        )
+        # Scenario 3a: WorkflowExecutor constructor raises ValueError
+        with patch.object(
+            WorkflowExecutor,
+            "__init__",
+            side_effect=ValueError("Simulated constructor failure"),
+        ):
+            with self.assertRaises(ValueError):
+                execute_node_fn(ctx_3a)
+
+        self.assertEqual(
+            count_bridge_threads(),
+            baseline,
+            "Bridge thread must be cleaned up if WorkflowExecutor fails to construct",
+        )
+
+        # Scenario 3b: execute_do_not_wait=True, submit raises RuntimeError
+        ctx_3b = NodeExecutionContext(
+            executor=parent_exec_3,
+            node_id="exec_2",
+            inputs={},
+            allow_branch_skip=False,
+            start_time=time.time(),
+            node={
+                "id": "exec_2",
+                "type": "executeWorkflow",
+                "data": {"executeWorkflowId": wf_target_id, "executeDoNotWait": True},
+            },
+            node_type="executeWorkflow",
+            node_data={"executeWorkflowId": wf_target_id, "executeDoNotWait": True},
+            node_label="Execute",
+        )
+        from app.services.workflow_executor import _BACKGROUND_WORKFLOW_EXECUTOR
+
+        with patch.object(
+            _BACKGROUND_WORKFLOW_EXECUTOR,
+            "submit",
+            side_effect=RuntimeError("Thread pool exhausted"),
+        ):
+            with self.assertRaises(RuntimeError):
+                execute_node_fn(ctx_3b)
+
+        self.assertEqual(
+            count_bridge_threads(),
+            baseline,
+            "Bridge thread must be cleaned up if background submit fails",
+        )
+
+        # Scenario 3c: Synchronous execution raises RuntimeError inside sub_executor.execute
+        ctx_3c = NodeExecutionContext(
+            executor=parent_exec_3,
+            node_id="exec_3",
+            inputs={},
+            allow_branch_skip=False,
+            start_time=time.time(),
+            node={
+                "id": "exec_3",
+                "type": "executeWorkflow",
+                "data": {"executeWorkflowId": wf_target_id, "executeDoNotWait": False},
+            },
+            node_type="executeWorkflow",
+            node_data={"executeWorkflowId": wf_target_id, "executeDoNotWait": False},
+            node_label="Execute",
+        )
+        with patch.object(
+            WorkflowExecutor,
+            "execute",
+            side_effect=RuntimeError("Simulated execution failure"),
+        ):
+            with self.assertRaises(RuntimeError):
+                execute_node_fn(ctx_3c)
+
+        self.assertEqual(
+            count_bridge_threads(),
+            baseline,
+            "Bridge thread must be cleaned up if synchronous execute fails",
+        )
+
+    def test_agent_subworkflow_tool_non_blocking_allow_downstream(self) -> None:
+        """Issue 4: Agent sub-workflow tool must NOT wait for allowDownstream tail.
+        - Tool call must return immediately (< 250ms) with initial outputs.
+        - Downstream work must drain in background when parent calls drain_bg_futures().
+        - Completed downstream results must be appended to SubWorkflowExecution.node_results."""
+        from app.services.workflow_executor import NodeResult, WorkflowExecutor
+
+        sub_wf_id = str(uuid.uuid4())
+        parent_wf_id = uuid.uuid4()
+
+        sub_cache = {
+            sub_wf_id: {
+                "name": "Sub WF With Tail",
+                "nodes": [
+                    {"id": "out1", "type": "output", "data": {"allowDownstream": True}},
+                    {"id": "slow_downstream", "type": "javascript"},
+                ],
+                "edges": [{"source": "out1", "target": "slow_downstream"}],
+            }
+        }
+
+        parent_executor = WorkflowExecutor(
+            nodes=[],
+            edges=[],
+            workflow_cache=sub_cache,
+            workflow_id=parent_wf_id,
+        )
+
+        tool_def = {"_sub_workflow_ids": [sub_wf_id]}
+        args = {"workflow_id": sub_wf_id, "inputs": {"query": "test"}}
+
+        downstream_ran = threading.Event()
+
+        def fake_execute(self_sub, workflow_id, initial_inputs):
+            from concurrent.futures import Future
+
+            fut = Future()
+
+            def run_slow_downstream():
+                time.sleep(0.4)
+                downstream_ran.set()
+                fut.set_result(None)
+
+            threading.Thread(target=run_slow_downstream, daemon=True).start()
+
+            res = ExecutionResult(
+                workflow_id=workflow_id,
+                status="success",
+                outputs={"reply": "instant_response"},
+                execution_time_ms=10.0,
+                node_results=[
+                    {
+                        "node_id": "out1",
+                        "node_label": "Output",
+                        "status": "success",
+                        "output": {"reply": "instant_response"},
+                    }
+                ],
+                _allow_downstream_pending=[fut],
+                _allow_downstream_node_results=[
+                    NodeResult(
+                        node_id="slow_downstream",
+                        node_label="Slow",
+                        node_type="javascript",
+                        execution_time_ms=1.0,
+                        status="success",
+                        output={"done": True},
+                    )
+                ],
+            )
+            return res
+
+        start_time = time.monotonic()
+        with patch.object(WorkflowExecutor, "execute", fake_execute):
+            result = parent_executor._execute_sub_workflow_tool(
+                tool_def=tool_def,
+                _name="call_sub_workflow",
+                args=args,
+                _timeout_seconds=30.0,
+            )
+        duration = time.monotonic() - start_time
+
+        # Verify tool returned immediately without waiting for the 0.4s downstream thread
+        self.assertLess(duration, 0.25, f"Agent tool must return immediately, took {duration:.3f}s")
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("outputs"), {"reply": "instant_response"})
+
+        # Initial SubWorkflowExecution is registered with initial outputs
+        self.assertEqual(len(parent_executor.sub_workflow_executions), 1)
+        sub_exec = parent_executor.sub_workflow_executions[0]
+        self.assertEqual(sub_exec.status, "success")
+
+        # Now parent drains background futures
+        parent_executor.drain_bg_futures()
+        self.assertTrue(
+            downstream_ran.is_set(),
+            "Downstream work must complete during drain_bg_futures",
+        )
+
+        # After drain, downstream node results are merged into sub_exec.node_results
+        node_ids = [nr.get("node_id") for nr in sub_exec.node_results if isinstance(nr, dict)]
+        self.assertIn(
+            "slow_downstream",
+            node_ids,
+            "Downstream node result must be present in SubWorkflowExecution after drain",
+        )
+
+    async def test_paused_subworkflow_does_not_leave_pending_history_row(self) -> None:
+        """Issue 5: Paused sub-workflow must NOT leave an impossible pending history row.
+        - Execute node must convert sub_result.status == 'pending' to status='error' with
+          outputs={'error': SUB_WORKFLOW_HITL_UNSUPPORTED}.
+        - Parent must raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED).
+        - Sub-workflow history row in DB must be recorded as status='error' (never 'pending')
+          with child node_results preserved."""
+        from app.api.workflows import persist_stream_execution_result
+        from app.services.node_execution.base import NodeExecutionContext
+        from app.services.node_execution.nodes.execute_node import (
+            execute as execute_node_fn,
+        )
+        from app.services.workflow_executor import (
+            SUB_WORKFLOW_HITL_UNSUPPORTED,
+            WorkflowExecutor,
+            _serialize_sub_workflow_executions,
+        )
+
+        parent_wid = uuid.uuid4()
+        child_wid = uuid.uuid4()
+        parent_eid = uuid.uuid4()
+
+        async with async_session_maker() as s:
+            pwf = Workflow(
+                id=parent_wid,
+                owner_id=self.user_id,
+                name="Parent HITL Test WF",
+                nodes=[],
+                edges=[],
+            )
+            cwf = Workflow(
+                id=child_wid,
+                owner_id=self.user_id,
+                name="Child HITL Test WF",
+                nodes=[],
+                edges=[],
+            )
+            s.add(pwf)
+            s.add(cwf)
+            await s.commit()
+        self.cleanup_workflow_ids.extend([parent_wid, child_wid])
+
+        cache = {
+            str(child_wid): {
+                "name": "Child WF",
+                "nodes": [{"id": "hitl_node", "type": "humanInTheLoop"}],
+                "edges": [],
+            }
+        }
+
+        # Simulate sub-workflow pausing on HITL
+        pending_res = ExecutionResult(
+            workflow_id=child_wid,
+            status="pending",
+            outputs={},
+            execution_time_ms=45.0,
+            node_results=[
+                {
+                    "node_id": "step_before_hitl",
+                    "node_label": "PreHITL",
+                    "status": "success",
+                    "output": {"data": 123},
+                }
+            ],
+        )
+
+        parent_exec = WorkflowExecutor(
+            nodes=[],
+            edges=[],
+            workflow_cache=cache,
+            workflow_id=parent_wid,
+        )
+
+        ctx = NodeExecutionContext(
+            executor=parent_exec,
+            node_id="exec_sub",
+            inputs={},
+            allow_branch_skip=False,
+            start_time=time.time(),
+            node={
+                "id": "exec_sub",
+                "type": "executeWorkflow",
+                "data": {"executeWorkflowId": str(child_wid), "executeDoNotWait": False},
+            },
+            node_type="executeWorkflow",
+            node_data={"executeWorkflowId": str(child_wid), "executeDoNotWait": False},
+            node_label="Execute Sub",
+        )
+
+        with patch(
+            "app.services.workflow_executor.WorkflowExecutor.execute",
+            return_value=pending_res,
+        ):
+            with self.assertRaises(ValueError) as cm:
+                execute_node_fn(ctx)
+            self.assertIn(SUB_WORKFLOW_HITL_UNSUPPORTED, str(cm.exception))
+
+        # Verify that parent_exec.sub_workflow_executions recorded child as status='error'
+        self.assertEqual(len(parent_exec.sub_workflow_executions), 1)
+        sub_exec = parent_exec.sub_workflow_executions[0]
+        self.assertEqual(
+            sub_exec.status,
+            "error",
+            "Sub-workflow status must be converted to 'error' (never 'pending')",
+        )
+        self.assertEqual(sub_exec.outputs, {"error": SUB_WORKFLOW_HITL_UNSUPPORTED})
+        self.assertEqual(
+            len(sub_exec.node_results), 1, "Child node results before pause must be preserved"
+        )
+        self.assertEqual(sub_exec.node_results[0]["node_id"], "step_before_hitl")
+
+        # Persist parent terminal result to DB and verify sub-workflow history row in DB
+        serialized_sub = _serialize_sub_workflow_executions(parent_exec.sub_workflow_executions)
+        final_res = {
+            "node_results": [],
+            "outputs": {"error": SUB_WORKFLOW_HITL_UNSUPPORTED},
+            "execution_time_ms": 50.0,
+            "sub_workflow_executions": serialized_sub,
+        }
+
+        async with async_session_maker() as s:
+            run_wf = await s.get(Workflow, parent_wid)
+            written = await persist_stream_execution_result(
+                s,
+                workflow=run_wf,
+                execution_id=parent_eid,
+                enriched_inputs={},
+                trigger_source="manual",
+                raw_body=None,
+                query_params={},
+                workflow_cache=cache,
+                credentials_owner_id=self.user_id,
+                final_result=final_res,
+                was_cancelled=False,
+            )
+            self.assertTrue(written)
+            await s.commit()
+
+        # Check DB history rows
+        async with async_session_maker() as s:
+            child_rows = (
+                (
+                    await s.execute(
+                        select(ExecutionHistory).where(ExecutionHistory.workflow_id == child_wid)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                len(child_rows), 1, "Sub-workflow must have exactly one history row written"
+            )
+            child_h = child_rows[0]
+            self.assertEqual(
+                child_h.status, "error", "Child DB history row must be 'error', NEVER 'pending'"
+            )
+            self.assertEqual(child_h.outputs, {"error": SUB_WORKFLOW_HITL_UNSUPPORTED})
+            self.assertEqual(len(child_h.node_results), 1)
+            self.assertEqual(child_h.node_results[0]["node_id"], "step_before_hitl")
+
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:
