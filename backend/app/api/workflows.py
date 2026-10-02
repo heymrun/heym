@@ -126,6 +126,7 @@ from app.services.workflow_executor import (
     WorkflowCancelledError,
     WorkflowTimeoutError,
     _mask_node_result_row,
+    _mask_sub_execution_dict,
     _serialize_sub_workflow_executions,
     _to_json_compatible,
     execute_workflow_streaming,
@@ -369,6 +370,7 @@ async def persist_stream_execution_result(
         parent_exec_time = (
             final_result.get("execution_time_ms", 0.0) if isinstance(final_result, dict) else 0.0
         )
+        credentials_ctx: dict[str, str] | None = None
         if credentials_owner_id:
             try:
                 credentials_ctx = await get_credentials_context(db, credentials_owner_id)
@@ -412,6 +414,8 @@ async def persist_stream_execution_result(
             else []
         )
         for sub_exec in sub_workflow_executions:
+            if credentials_ctx:
+                sub_exec = _mask_sub_execution_dict(sub_exec, credentials_ctx)
             sub_id = uuid.UUID(str(sub_exec["workflow_id"]))
             db.add(
                 ExecutionHistory(
@@ -4201,7 +4205,10 @@ async def execute_workflow_stream(
                     node_outputs = dict(wf_exec.node_outputs)
                 if getattr(wf_exec, "execution_start_time", None):
                     execution_time_ms = (time.time() - wf_exec.execution_start_time) * 1000
-                extra = _serialize_sub_workflow_executions(wf_exec.sub_workflow_executions)
+                extra = _serialize_sub_workflow_executions(
+                    wf_exec.sub_workflow_executions,
+                    credentials_context=credentials_context,
+                )
                 if extra:
                     sub_workflow_executions = extra
 

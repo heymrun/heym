@@ -4745,6 +4745,433 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             self.assertEqual(len(child_h.node_results), 1)
             self.assertEqual(child_h.node_results[0]["node_id"], "step_before_hitl")
 
+    async def test_cancelled_stream_masks_subworkflow_inputs_in_sse_observer_and_db_postgres(
+        self,
+    ) -> None:
+        """Issue 1: Mask sub-workflow records in cancelled stream payloads.
+        - Inputs, outputs, and node_results must be masked before publishing or persisting on cancel.
+        - Raw secrets must NOT appear in:
+          a) client SSE terminal event
+          b) active observer terminal payload
+          c) child ExecutionHistory.inputs / outputs / node_results in PostgreSQL
+        - Live execution objects must not be mutated.
+        - Normal execution masking is not broken."""
+        from app.api.workflows import execute_workflow_stream
+        from app.services.execution_cancellation import get_completed_execution_result
+        from app.services.workflow_executor import (
+            SubWorkflowExecution,
+            WorkflowCancelledError,
+        )
+
+        secret_token = "sk-live-super-secret-key-123456789"
+        secret_context = {"api_key": secret_token}
+
+        parent_wid = uuid.uuid4()
+        child_wid = uuid.uuid4()
+        execution_id = uuid.uuid4()
+
+        async with async_session_maker() as s:
+            pwf = Workflow(
+                id=parent_wid,
+                owner_id=self.user_id,
+                name="Parent Cancel Mask Stream WF",
+                nodes=[{"id": "p1", "type": "javascript"}],
+                edges=[],
+                sse_enabled=True,
+            )
+            cwf = Workflow(
+                id=child_wid,
+                owner_id=self.user_id,
+                name="Child Cancel Mask Stream WF",
+                nodes=[{"id": "c1", "type": "javascript"}],
+                edges=[],
+            )
+            s.add(pwf)
+            s.add(cwf)
+            await s.commit()
+
+        self.cleanup_workflow_ids.extend([parent_wid, child_wid])
+
+        child_inputs = {"api_key": secret_token, "prompt": f"run with {secret_token}"}
+        child_outputs = {"result": f"received {secret_token}", "status": "done"}
+        child_node_results = [
+            {
+                "node_id": "c1",
+                "node_label": "ChildStep",
+                "node_type": "javascript",
+                "status": "success",
+                "output": {"token": secret_token},
+                "error": f"failed with {secret_token}",
+                "execution_time_ms": 12.0,
+            }
+        ]
+        sub_exec = SubWorkflowExecution(
+            workflow_id=str(child_wid),
+            inputs=dict(child_inputs),
+            outputs=dict(child_outputs),
+            status="success",
+            execution_time_ms=50.0,
+            node_results=list(child_node_results),
+            workflow_name="Child Cancel Mask Stream WF",
+            trigger_source="AI Agents",
+            execution_id=str(uuid.uuid4()),
+        )
+
+        mock_executor = MagicMock()
+        mock_executor.completed_node_results = [
+            {
+                "node_id": "p1",
+                "node_label": "ParentStep",
+                "node_type": "javascript",
+                "status": "success",
+                "output": {"token": secret_token},
+                "error": None,
+                "execution_time_ms": 10.0,
+            }
+        ]
+        mock_executor.node_outputs = {"ParentStep": {"token": secret_token}}
+        mock_executor.execution_start_time = time.time()
+        mock_executor.sub_workflow_executions = [sub_exec]
+
+        def fake_streaming_run(*args, **kwargs):
+            holder = kwargs.get("executor_holder")
+            if holder is not None:
+                holder["executor"] = mock_executor
+            yield {"type": "node_started", "node_id": "p1"}
+            raise WorkflowCancelledError("Workflow was cancelled by user")
+
+        request = MagicMock()
+        request.method = "POST"
+        request.headers = {}
+        request.query_params = {}
+        request.base_url = "http://localhost/"
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        async with async_session_maker() as s:
+            with (
+                patch(
+                    "app.api.workflows.parse_execute_body",
+                    AsyncMock(return_value=({}, False, "API", False)),
+                ),
+                patch(
+                    "app.api.workflows.validate_workflow_auth",
+                    AsyncMock(return_value=SimpleNamespace(id=self.user_id)),
+                ),
+                patch("app.api.workflows.enforce_workflow_http_method", MagicMock()),
+                patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+                patch(
+                    "app.api.workflows.get_credentials_context",
+                    AsyncMock(return_value=secret_context),
+                ),
+                patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+                patch("app.api.workflows.build_public_base_url", return_value="http://localhost"),
+                patch("app.api.workflows.execute_workflow_streaming", fake_streaming_run),
+                patch("app.api.workflows.async_session_maker", async_session_maker),
+            ):
+                response = await execute_workflow_stream(
+                    workflow_id=parent_wid,
+                    request=request,
+                    current_user=SimpleNamespace(id=self.user_id),
+                    db=s,
+                )
+                frames = [chunk async for chunk in response.body_iterator]
+
+        raw_payload = "".join(c.decode() if isinstance(c, bytes) else c for c in frames)
+        lines = [line.strip() for line in raw_payload.split("\n") if line.startswith("data: ")]
+        parsed_events = [json.loads(line[len("data: ") :]) for line in lines]
+
+        # Extract execution_id from execution_started event
+        execution_id = None
+        for e in parsed_events:
+            if e.get("type") == "execution_started":
+                execution_id = uuid.UUID(e["execution_id"])
+                break
+        self.assertIsNotNone(execution_id, "execution_started must emit execution_id")
+
+        # a) Client SSE terminal event validation
+        terminal_events = [e for e in parsed_events if e.get("type") == "execution_complete"]
+        self.assertEqual(len(terminal_events), 1)
+        term = terminal_events[0]
+        self.assertEqual(term.get("status"), "cancelled")
+        self.assertEqual(len(term.get("sub_workflow_executions", [])), 1)
+        term_sub = term["sub_workflow_executions"][0]
+
+        # Sub-workflow inputs, outputs, node_results must be masked in client SSE
+        term_inputs_str = json.dumps(term_sub.get("inputs"))
+        self.assertNotIn(
+            secret_token,
+            term_inputs_str,
+            "Client SSE must NOT contain raw secret in sub-workflow inputs",
+        )
+        self.assertIn(
+            "sk-live**",
+            term_inputs_str,
+            "Client SSE must contain masked secret in sub-workflow inputs",
+        )
+
+        term_outputs_str = json.dumps(term_sub.get("outputs"))
+        self.assertNotIn(
+            secret_token,
+            term_outputs_str,
+            "Client SSE must NOT contain raw secret in sub-workflow outputs",
+        )
+        self.assertIn(
+            "sk-live**",
+            term_outputs_str,
+            "Client SSE must contain masked secret in sub-workflow outputs",
+        )
+
+        term_nr_str = json.dumps(term_sub.get("node_results"))
+        self.assertNotIn(
+            secret_token,
+            term_nr_str,
+            "Client SSE must NOT contain raw secret in sub-workflow node_results",
+        )
+        self.assertIn(
+            "sk-live**",
+            term_nr_str,
+            "Client SSE must contain masked secret in sub-workflow node_results",
+        )
+
+        # b) Active observer SSE response validation
+        completed_obs = get_completed_execution_result(execution_id, workflow_id=parent_wid)
+        self.assertIsNotNone(
+            completed_obs, "Active observer should receive completed execution payload"
+        )
+        self.assertEqual(completed_obs.get("status"), "cancelled")
+        self.assertEqual(len(completed_obs.get("sub_workflow_executions", [])), 1)
+        obs_sub = completed_obs["sub_workflow_executions"][0]
+
+        obs_inputs_str = json.dumps(obs_sub.get("inputs"))
+        self.assertNotIn(
+            secret_token,
+            obs_inputs_str,
+            "Observer must NOT contain raw secret in sub-workflow inputs",
+        )
+        self.assertIn(
+            "sk-live**",
+            obs_inputs_str,
+            "Observer must contain masked secret in sub-workflow inputs",
+        )
+
+        obs_outputs_str = json.dumps(obs_sub.get("outputs"))
+        self.assertNotIn(
+            secret_token,
+            obs_outputs_str,
+            "Observer must NOT contain raw secret in sub-workflow outputs",
+        )
+        self.assertIn(
+            "sk-live**",
+            obs_outputs_str,
+            "Observer must contain masked secret in sub-workflow outputs",
+        )
+
+        obs_nr_str = json.dumps(obs_sub.get("node_results"))
+        self.assertNotIn(
+            secret_token,
+            obs_nr_str,
+            "Observer must NOT contain raw secret in sub-workflow node_results",
+        )
+        self.assertIn(
+            "sk-live**",
+            obs_nr_str,
+            "Observer must contain masked secret in sub-workflow node_results",
+        )
+
+        # c) Child ExecutionHistory in PostgreSQL validation
+        child_h = None
+        for _ in range(50):
+            async with async_session_maker() as s:
+                child_rows = (
+                    (
+                        await s.execute(
+                            select(ExecutionHistory).where(
+                                ExecutionHistory.workflow_id == child_wid
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if child_rows:
+                    child_h = child_rows[0]
+                    break
+            await asyncio.sleep(0.05)
+
+        self.assertIsNotNone(child_h, "Child ExecutionHistory row must be persisted in PostgreSQL")
+        db_inputs_str = json.dumps(child_h.inputs)
+        self.assertNotIn(
+            secret_token,
+            db_inputs_str,
+            "Child ExecutionHistory.inputs in DB must NOT leak raw secret",
+        )
+        self.assertIn(
+            "sk-live**",
+            db_inputs_str,
+            "Child ExecutionHistory.inputs in DB must contain masked secret",
+        )
+
+        db_outputs_str = json.dumps(child_h.outputs)
+        self.assertNotIn(
+            secret_token,
+            db_outputs_str,
+            "Child ExecutionHistory.outputs in DB must NOT leak raw secret",
+        )
+        self.assertIn(
+            "sk-live**",
+            db_outputs_str,
+            "Child ExecutionHistory.outputs in DB must contain masked secret",
+        )
+
+        db_nr_str = json.dumps(child_h.node_results)
+        self.assertNotIn(
+            secret_token,
+            db_nr_str,
+            "Child ExecutionHistory.node_results in DB must NOT leak raw secret",
+        )
+        self.assertIn(
+            "sk-live**",
+            db_nr_str,
+            "Child ExecutionHistory.node_results in DB must contain masked secret",
+        )
+
+        # Live execution object must NOT have been mutated
+        self.assertEqual(
+            sub_exec.inputs["api_key"],
+            secret_token,
+            "Live SubWorkflowExecution object must not be mutated",
+        )
+        self.assertEqual(
+            sub_exec.outputs["result"],
+            f"received {secret_token}",
+            "Live SubWorkflowExecution object must not be mutated",
+        )
+
+    def test_concurrent_agent_allow_downstream_subworkflows_no_pool_deadlock(self) -> None:
+        """Issue 2: 16+ simultaneous agent calls with allowDownstream and executeDoNotWait do not deadlock.
+        - Waiters run off the shared pool via _submit_allow_downstream_work.
+        - Shared _BACKGROUND_WORKFLOW_EXECUTOR is not saturated by join_allow_downstream() waiters.
+        - Downstream executeDoNotWait tasks submitted to _BACKGROUND_WORKFLOW_EXECUTOR run without starvation.
+        - parent.drain_bg_futures() drains all background completions cleanly."""
+        from app.services.workflow_executor import (
+            _BACKGROUND_WORKFLOW_EXECUTOR,
+            ExecutionResult,
+            NodeResult,
+            WorkflowExecutor,
+        )
+
+        num_concurrent = 16
+        parent_wf_id = uuid.uuid4()
+        sub_wf_ids = [str(uuid.uuid4()) for _ in range(num_concurrent)]
+        sub_cache = {
+            sid: {
+                "name": f"Concurrent Sub WF {i}",
+                "nodes": [
+                    {"id": "out", "type": "output", "data": {"allowDownstream": True}},
+                    {"id": "downstream_bg", "type": "javascript"},
+                ],
+                "edges": [{"source": "out", "target": "downstream_bg"}],
+            }
+            for i, sid in enumerate(sub_wf_ids)
+        }
+
+        parent_executor = WorkflowExecutor(
+            nodes=[],
+            edges=[],
+            workflow_cache=sub_cache,
+            workflow_id=parent_wf_id,
+        )
+        parent_executor._invoked_by_agent = True
+
+        downstream_events = [threading.Event() for _ in range(num_concurrent)]
+
+        def fake_execute(self_sub, workflow_id, initial_inputs):
+            idx = sub_wf_ids.index(str(workflow_id))
+            evt = downstream_events[idx]
+
+            def downstream_job():
+                time.sleep(0.05)
+                evt.set()
+                return {"done": True, "index": idx}
+
+            bg_fut = _BACKGROUND_WORKFLOW_EXECUTOR.submit(downstream_job)
+
+            return ExecutionResult(
+                workflow_id=workflow_id,
+                status="success",
+                outputs={"reply": f"response_{idx}"},
+                execution_time_ms=5.0,
+                node_results=[
+                    {
+                        "node_id": "out",
+                        "node_label": "Output",
+                        "status": "success",
+                        "output": {"reply": f"response_{idx}"},
+                    }
+                ],
+                _allow_downstream_pending=[bg_fut],
+                _allow_downstream_node_results=[
+                    NodeResult(
+                        node_id="downstream_bg",
+                        node_label="Downstream BG",
+                        node_type="javascript",
+                        execution_time_ms=1.0,
+                        status="success",
+                        output={"done": True, "index": idx},
+                    )
+                ],
+            )
+
+        results = []
+        errors = []
+
+        def run_agent_call(i: int) -> None:
+            try:
+                sid = sub_wf_ids[i]
+                res = parent_executor._execute_sub_workflow_tool(
+                    tool_def={"_sub_workflow_ids": [sid]},
+                    _name=f"call_sub_{i}",
+                    args={"workflow_id": sid, "inputs": {"index": i}},
+                    _timeout_seconds=5.0,
+                )
+                results.append(res)
+            except Exception as e:
+                errors.append(e)
+
+        with patch.object(WorkflowExecutor, "execute", fake_execute):
+            threads = [
+                threading.Thread(target=run_agent_call, args=(i,)) for i in range(num_concurrent)
+            ]
+            start_t = time.monotonic()
+            for t in threads:
+                t.start()
+
+            # Verify that while all 16 waiters are running, _BACKGROUND_WORKFLOW_EXECUTOR
+            # is NOT blocked/saturated: a canary job submitted to the pool executes immediately.
+            canary_fut = _BACKGROUND_WORKFLOW_EXECUTOR.submit(lambda: "canary_success")
+            self.assertEqual(
+                canary_fut.result(timeout=2.0),
+                "canary_success",
+                "_BACKGROUND_WORKFLOW_EXECUTOR must not be deadlocked by allowDownstream waiters",
+            )
+
+            for t in threads:
+                t.join(timeout=3.0)
+                self.assertFalse(t.is_alive(), f"Agent tool call thread hung! Thread: {t.name}")
+
+            self.assertEqual(len(errors), 0, f"Encountered errors: {errors}")
+            self.assertEqual(len(results), num_concurrent)
+
+            # Drain parent background futures
+            parent_executor.drain_bg_futures()
+
+            for i, evt in enumerate(downstream_events):
+                self.assertTrue(evt.is_set(), f"Downstream event {i} was not set!")
+
+            self.assertEqual(len(parent_executor.sub_workflow_executions), num_concurrent)
+            total_time = time.monotonic() - start_t
+            self.assertLess(total_time, 5.0, f"Execution took too long: {total_time:.2f}s")
+
 
 class DashboardChatCodexVsHitlPipelineTests(unittest.IsolatedAsyncioTestCase):
     """Trace Codex vs HITL pauses through the actual chat pipeline:

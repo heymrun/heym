@@ -1947,66 +1947,63 @@ def _max_node_result_sequence(results: list[NodeResult]) -> int:
 
 
 def _restore_node_results(results: list[dict] | None) -> list[NodeResult]:
-    restored: list[NodeResult] = []
-    for result in results or []:
-        if not isinstance(result, dict):
-            continue
-        meta = result.get("metadata")
-        restored.append(
-            NodeResult(
-                node_id=result.get("node_id", ""),
-                node_label=result.get("node_label", ""),
-                node_type=result.get("node_type", "unknown"),
-                status=result.get("status", "success"),
-                output=result.get("output") or {},
-                execution_time_ms=float(result.get("execution_time_ms", 0)),
-                error=result.get("error"),
-                metadata=dict(meta) if isinstance(meta, dict) else {},
-            )
+    return [
+        NodeResult(
+            node_id=r.get("node_id", ""),
+            node_label=r.get("node_label", ""),
+            node_type=r.get("node_type", "unknown"),
+            status=r.get("status", "success"),
+            output=r.get("output") or {},
+            execution_time_ms=float(r.get("execution_time_ms", 0)),
+            error=r.get("error"),
+            metadata=dict(r.get("metadata")) if isinstance(r.get("metadata"), dict) else {},
         )
-    return restored
+        for r in (results or [])
+        if isinstance(r, dict)
+    ]
 
 
 def _serialize_sub_workflow_executions(
     executions: list[SubWorkflowExecution],
+    credentials_context: dict[str, str] | None = None,
 ) -> list[dict]:
-    return [
+    serialized = [
         {
-            "workflow_id": execution.workflow_id,
-            "inputs": _to_json_compatible(execution.inputs),
-            "outputs": _to_json_compatible(execution.outputs),
-            "status": execution.status,
-            "execution_time_ms": execution.execution_time_ms,
-            "node_results": _to_json_compatible(execution.node_results),
-            "workflow_name": execution.workflow_name,
-            "trigger_source": execution.trigger_source,
-            "history_written": getattr(execution, "history_written", False),
-            "execution_id": getattr(execution, "execution_id", "") or "",
+            "workflow_id": ex.workflow_id,
+            "inputs": _to_json_compatible(ex.inputs),
+            "outputs": _to_json_compatible(ex.outputs),
+            "status": ex.status,
+            "execution_time_ms": ex.execution_time_ms,
+            "node_results": _to_json_compatible(ex.node_results),
+            "workflow_name": ex.workflow_name,
+            "trigger_source": ex.trigger_source,
+            "history_written": getattr(ex, "history_written", False),
+            "execution_id": getattr(ex, "execution_id", "") or "",
         }
-        for execution in executions
+        for ex in executions
     ]
+    if credentials_context:
+        return [_mask_sub_execution_dict(item, credentials_context) for item in serialized]
+    return serialized
 
 
 def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubWorkflowExecution]:
-    restored: list[SubWorkflowExecution] = []
-    for execution in executions or []:
-        if not isinstance(execution, dict):
-            continue
-        restored.append(
-            SubWorkflowExecution(
-                workflow_id=execution.get("workflow_id", ""),
-                inputs=execution.get("inputs") or {},
-                outputs=execution.get("outputs") or {},
-                status=execution.get("status", "success"),
-                execution_time_ms=float(execution.get("execution_time_ms", 0)),
-                node_results=execution.get("node_results") or [],
-                workflow_name=execution.get("workflow_name", ""),
-                trigger_source=execution.get("trigger_source", "SUB_WORKFLOW"),
-                history_written=bool(execution.get("history_written", False)),
-                execution_id=str(execution.get("execution_id", "") or ""),
-            )
+    return [
+        SubWorkflowExecution(
+            workflow_id=ex.get("workflow_id", ""),
+            inputs=ex.get("inputs") or {},
+            outputs=ex.get("outputs") or {},
+            status=ex.get("status", "success"),
+            execution_time_ms=float(ex.get("execution_time_ms", 0)),
+            node_results=ex.get("node_results") or [],
+            workflow_name=ex.get("workflow_name", ""),
+            trigger_source=ex.get("trigger_source", "SUB_WORKFLOW"),
+            history_written=bool(ex.get("history_written", False)),
+            execution_id=str(ex.get("execution_id", "") or ""),
         )
-    return restored
+        for ex in (executions or [])
+        if isinstance(ex, dict)
+    ]
 
 
 class WorkflowExecutor:
@@ -4235,9 +4232,7 @@ class WorkflowExecutor:
                             bridge.close()
                             _clear_sub_execution(_sub_execution_id)
 
-                    bg_downstream_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
-                        _on_sub_downstream_done
-                    )
+                    bg_downstream_future = _submit_allow_downstream_work(_on_sub_downstream_done)
                     with self._bg_futures_lock:
                         self._bg_futures.append(
                             (
@@ -8227,20 +8222,29 @@ def mask_sub_workflow_result(
     return mask_sensitive_output(outputs, credentials_context), masked_rows
 
 
+def _mask_sub_execution_dict(row: dict, credentials_context: dict[str, str] | None) -> dict:
+    if not credentials_context or not isinstance(row, dict):
+        return row
+    sc = copy.deepcopy(row)
+    if "inputs" in sc:
+        sc["inputs"] = mask_sensitive_output(sc["inputs"], credentials_context)
+    if "outputs" in sc:
+        sc["outputs"] = mask_sensitive_output(sc["outputs"], credentials_context)
+    if isinstance(sc.get("node_results"), list):
+        for nr in sc["node_results"]:
+            if isinstance(nr, dict):
+                _mask_node_result_row(nr, credentials_context)
+    return sc
+
+
 def mask_credentials_context(credentials_context: dict[str, str] | None) -> dict[str, str]:
     """Return a preview-safe credentials context with secret values masked."""
     if not credentials_context:
         return {}
-
-    masked_context: dict[str, str] = {}
-    for name, value in credentials_context.items():
-        if not value:
-            masked_context[name] = value
-        elif len(value) > 7:
-            masked_context[name] = value[:7] + "**"
-        else:
-            masked_context[name] = "**"
-    return masked_context
+    return {
+        name: value if not value else (value[:7] + "**" if len(value) > 7 else "**")
+        for name, value in credentials_context.items()
+    }
 
 
 def execute_workflow(
