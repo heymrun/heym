@@ -1,5 +1,6 @@
 """Read / write permissions on direct and team workflow shares."""
 
+import json
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api import agent_memory as agent_memory_api
+from app.api import ai_assistant as ai_assistant_api
 from app.api import workflows as workflows_api
 from app.db.models import User, Workflow, WorkflowShare, WorkflowTeamShare
 from app.models.schemas import (
@@ -186,6 +188,45 @@ class AgentMemoryMutationsRequireWriteTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
         db.add.assert_not_called()
+
+
+class AssistantEditRequiresWriteTest(unittest.IsolatedAsyncioTestCase):
+    """``heym_chat`` over MCP and the Chat tab both reach ``edit_workflow`` through this tool."""
+
+    async def test_read_only_collaborator_cannot_edit_through_the_assistant(self) -> None:
+        workflow = _workflow(uuid.uuid4())
+        collaborator = SimpleNamespace(id=uuid.uuid4())
+        client = MagicMock()
+        db = AsyncMock()
+
+        with (
+            patch.object(
+                ai_assistant_api, "get_workflow_for_user", AsyncMock(return_value=workflow)
+            ),
+            patch.object(
+                ai_assistant_api, "user_can_write_workflow", AsyncMock(return_value=False)
+            ),
+        ):
+            raw = await ai_assistant_api.edit_and_run_generated_workflow_tool(
+                db=db,
+                user=collaborator,
+                client=client,
+                model="m",
+                selected_credential=MagicMock(),
+                selected_model="m",
+                workflow_id=str(workflow.id),
+                instructions="add a step",
+                inputs={},
+                available_workflows=[],
+                public_base_url="http://localhost",
+            )
+
+        result = json.loads(raw)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("read-only", result["error"])
+        client.chat.completions.create.assert_not_called()
+        db.flush.assert_not_awaited()
+        self.assertEqual(workflow.nodes, [])
 
 
 def _user(email: str = "member@example.com") -> User:
