@@ -1892,7 +1892,10 @@ function startResize(event: MouseEvent | TouchEvent, messageId: string, directio
 }
 
 .markdown-content :deep(table) {
-  width: 100%;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-collapse: collapse;
   margin-top: 0.75em;
   margin-bottom: 0.75em;

@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
-import { AlertTriangle, Brain, Loader2, Pin, RefreshCw, Sparkles } from "lucide-vue-next";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Brain,
+  Loader2,
+  Pin,
+  RefreshCw,
+  Sparkles,
+} from "lucide-vue-next";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
@@ -371,6 +379,20 @@ const hasThrowErrorWarning = computed(() => {
       v-else
       class="node-accent absolute top-0 left-0 right-0 h-[3px] bg-muted-foreground/40"
     />
+
+    <div
+      v-if="isError"
+      class="node-error-badge absolute top-1.5 right-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-destructive text-destructive-foreground pointer-events-none"
+      data-testid="node-error-badge"
+      role="img"
+      aria-label="This node failed in the last run"
+      title="This node failed in the last run"
+    >
+      <AlertCircle
+        class="relative w-3.5 h-3.5"
+        stroke-width="2.5"
+      />
+    </div>
 
     <Handle
       v-if="hasInput"
@@ -932,8 +954,28 @@ const hasThrowErrorWarning = computed(() => {
   }
 }
 
+.node-error-badge {
+  animation: node-error-pulse 1.8s ease-out infinite;
+}
+
+@keyframes node-error-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 hsl(var(--destructive) / 0.7);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+  80%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 7px hsl(var(--destructive) / 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .runbook-node-enter {
+  .runbook-node-enter,
+  .node-error-badge {
     animation: none;
   }
 }

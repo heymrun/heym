@@ -1001,8 +1001,8 @@ onUnmounted(() => {
 
           <div
             :class="[
-              'group/message relative rounded-2xl px-4 py-2.5 pr-[4.25rem] text-sm leading-relaxed break-words',
-              msg.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[72%]',
+              'group/message relative min-w-0 rounded-2xl px-4 py-2.5 pr-[4.25rem] text-sm leading-relaxed break-words',
+              msg.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[88%] sm:max-w-[72%]',
               msg.role === 'user'
                 ? 'bg-primary text-primary-foreground rounded-tr-sm'
                 : 'bg-muted text-foreground rounded-tl-sm'
@@ -1160,8 +1160,8 @@ onUnmounted(() => {
           </div>
           <div
             :class="[
-              'rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed bg-muted text-foreground break-words',
-              streamState.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[72%]',
+              'min-w-0 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed bg-muted text-foreground break-words',
+              streamState.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[88%] sm:max-w-[72%]',
             ]"
           >
             <div
@@ -1568,6 +1568,34 @@ onUnmounted(() => {
 .chat-markdown :deep(ol) {
   margin: 0.45em 0;
   padding-left: 1.25rem;
+}
+
+.chat-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown :deep(table) {
+  border-collapse: collapse;
+  display: block;
+  margin: 0.65em 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-markdown :deep(th),
+.chat-markdown :deep(td) {
+  border: 1px solid hsl(var(--border) / 0.5);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown :deep(th) {
+  background: hsl(var(--background) / 0.4);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chat-markdown :deep(blockquote) {
