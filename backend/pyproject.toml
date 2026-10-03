@@ -1,7 +1,7 @@
 [project]
 name = "heym-backend"
 version = "0.0.123"
-description = "AI Workflow Automation Platform Backend"
+description = "Heym backend: infrastructure for running and governing AI agents in production"
 license = { text = "MIT with Commons Clause condition" }
 requires-python = ">=3.11"
 dependencies = [

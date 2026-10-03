@@ -8,7 +8,7 @@ Heym is free to use and self-host under its source-available license. For organi
 
 | Service | Description |
 |---------|-------------|
-| **Workflow Automation Support** | Architecture reviews, workflow design guidance, and hands-on help building production automations |
+| **Production Agent Support** | Architecture reviews, agent and workflow design guidance, and hands-on help taking agents to production |
 | **Tool Training** | Onboarding sessions and training for your team covering the workflow editor, AI nodes, agents, and integrations |
 | **Heym Q&A** | Direct access to the Heym engineering team for platform questions, best practices, and troubleshooting |
 | **Kubernetes Deployment** | Assistance with multi-worker-node setups, sidecar containers, scaling strategies, and cluster configuration |
@@ -16,9 +16,9 @@ Heym is free to use and self-host under its source-available license. For organi
 | **Priority Support & SLA** | Guaranteed response times and priority issue resolution |
 | **Custom Development** | Feature development and modifications tailored to your organization's requirements |
 
-## Automation Support
+## Production Agent Support
 
-The Heym team helps you design, build, and optimize workflow automations for your business processes. This includes reviewing your automation requirements, recommending node configurations, and ensuring your workflows follow best practices for reliability and performance.
+The Heym team helps you design, build, and harden agents and workflows for your business processes. This includes reviewing your requirements, recommending node configurations, and making sure your workflows follow best practices for reliability, observability, and governance.
 
 Support covers all node types including [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md), and [Cron](../nodes/cron-node.md) triggers — as well as advanced patterns like [multi-agent orchestration](./agent-architecture.md), [Human-in-the-Loop](./human-in-the-loop.md) checkpoints, and [parallel execution](./parallel-execution.md) across branches.
 
@@ -49,13 +49,13 @@ The standard [Running & Deployment](../getting-started/running-and-deployment.md
 
 ## Solution Consulting
 
-Every organization has unique automation needs. The Heym team provides consulting to help you:
+Every organization runs agents against different systems and constraints. The Heym team provides consulting to help you:
 
 - Evaluate whether Heym fits your specific use case
-- Design end-to-end automation architectures
+- Design end-to-end agent and workflow architectures
 - Plan integrations with your existing infrastructure and third-party services
 - Debug complex workflows and resolve production issues
-- Migrate from other automation platforms (n8n, Zapier, Make.com)
+- Migrate existing workflows from tools such as n8n, Zapier, or Make.com
 
 ## Contact
 

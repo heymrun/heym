@@ -70,7 +70,7 @@ When you build a benchmark matrix for agent workflows, include HITL scenarios as
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Built-in evals as an AI-native feature
+- [Why Heym](../getting-started/why-heym.md) – Evals as the test stage of the agent lifecycle
 - [Agent Node](../nodes/agent-node.md) – Workflows being evaluated
 - [Credentials Tab](./credentials-tab.md) – Credentials for eval runs
 - [Traces Tab](./traces-tab.md) – Detailed trace inspection

@@ -59,7 +59,7 @@ When you open a trace:
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Built-in LLM observability vs other platforms
+- [Why Heym](../getting-started/why-heym.md) – LLM observability across the agent lifecycle
 - [Agent Node](../nodes/agent-node.md) – Agent node with tool calling
 - [Node Types](../reference/node-types.md) – LLM and Agent nodes
 - [Credentials Tab](./credentials-tab.md) – Credentials used in traces

@@ -401,7 +401,7 @@ Compression is automatic and always active for Agent nodes. It does **not** appl
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – AI-native features vs n8n, Zapier, Make.com
+- [Why Heym](../getting-started/why-heym.md) – How agents run and stay governed in production
 - [Agent Persistent Memory](../reference/agent-persistent-memory.md) – Knowledge graph per agent node, optional sharing, API, editor
 - [Agent Architecture](../reference/agent-architecture.md) – Sub-agents, orchestrator, skills, MCP, tool calling
 - [Human-in-the-Loop](../reference/human-in-the-loop.md) – Public review pages, pending executions, approve/edit/refuse flow

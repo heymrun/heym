@@ -172,7 +172,7 @@ Agent tool calls also emit richer observability:
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Multi-agent orchestration and AI-native features
+- [Why Heym](../getting-started/why-heym.md) – Multi-agent orchestration across the agent lifecycle
 - [Agent Node](../nodes/agent-node.md) – Configuration and parameters
 - [Agent Persistent Memory](./agent-persistent-memory.md) – Knowledge graph per agent node and peer sharing
 - [Human-in-the-Loop](./human-in-the-loop.md) – Review links, pending payloads, and resume behavior

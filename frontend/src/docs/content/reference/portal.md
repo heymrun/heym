@@ -65,7 +65,7 @@ Input fields come from [Input](../nodes/input-node.md) nodes. The API extracts s
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Portal as an AI-native feature
+- [Why Heym](../getting-started/why-heym.md) – Portal as a chat surface for agents in production
 - [Workflows Tab](../tabs/workflows-tab.md) – Create workflows and enable portal
 - [Human-in-the-Loop](./human-in-the-loop.md) – Public review pages for pending agent outputs
 - [Triggers](./triggers.md) – Portal as an entry point

@@ -218,7 +218,7 @@ When reranking is enabled:
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Built-in RAG vs external service stitching
+- [Why Heym](../getting-started/why-heym.md) – Built-in RAG as part of the agent runtime
 - [Node Types](../reference/node-types.md) – Overview of all node types
 - [Vectorstores Tab](../tabs/vectorstores-tab.md) – Create and manage vector stores
 - [Third-Party Integrations](../reference/integrations.md#qdrant) – Qdrant and Postgres (pgvector) credential setup

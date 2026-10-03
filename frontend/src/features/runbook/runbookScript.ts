@@ -5,7 +5,7 @@ import { INPUT_HANDLE } from "@/lib/canvasConnectionRules";
 const OUTPUT_HANDLE = "output";
 
 /** Sample input the demo types into the Input node. */
-export const RUNBOOK_INPUT_TEXT = "Heym is an ai native automation platform";
+export const RUNBOOK_INPUT_TEXT = "Heym runs and governs AI agents in production";
 
 /** consoleLog message expression — logs the input upper-cased. DSL supports .upper(). */
 export const RUNBOOK_LOG_EXPRESSION = "$input.text.upper()";
@@ -85,7 +85,7 @@ export function buildRunbookStickyNode(): WorkflowNode {
       label: "stickyNote",
       stickyTitle: "Heym Runbook",
       stickyColor: "sky",
-      note: "Heym is an AI-native automation platform.\n\nWatch it build a tiny workflow — Input → Wait → Console Log — then run it automatically.",
+      note: "Heym runs and governs AI agents in production.\n\nWatch it build a tiny workflow — Input → Wait → Console Log — then run it automatically.",
     },
   };
 }

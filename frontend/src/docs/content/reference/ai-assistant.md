@@ -150,7 +150,7 @@ The assistant sees table names, descriptions and columns, never rows. It never c
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – Natural language workflow building vs other platforms
+- [Why Heym](../getting-started/why-heym.md) – Natural-language building as the first stage of the agent lifecycle
 - [Quick Start](../getting-started/quick-start.md) – Build your first workflow
 - [Settings](./user-settings.md) – User Rules injected into AI Assistant system prompt
 - [Chat with Heym](./chat-with-heym.md) – Page-aware assistant inside the documentation area

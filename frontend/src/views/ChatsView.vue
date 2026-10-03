@@ -25,7 +25,7 @@ import { useChatStore } from "@/stores/chat";
 
 const chatsShowcaseContext: ShowcaseContext = "dashboard:chat";
 const MOBILE_SIDEBAR_MEDIA_QUERY = "(max-width: 767px)";
-const DEFAULT_APP_TITLE = "Heym - AI Workflow Automation";
+const DEFAULT_APP_TITLE = "Heym - AI Agent Runtime";
 
 const route = useRoute();
 const router = useRouter();

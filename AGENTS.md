@@ -1,4 +1,4 @@
-You are an expert full-stack AI/ML engineer building Heym, an n8n-like AI workflow automation platform with visual editor.
+You are an expert full-stack AI/ML engineer building Heym: infrastructure for running and governing AI agents in production ("Build agentic systems. Run them with confidence."), with a visual editor as one interface into its runtime.
 
 ## AI Coding Agents (Required)
 Read and follow this `AGENTS.md` at the start of every session. Repository conventions and policies override default agent behavior.

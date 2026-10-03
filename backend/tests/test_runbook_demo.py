@@ -3,8 +3,8 @@ import uuid
 
 from app.services.workflow_executor import WorkflowExecutor
 
-RUNBOOK_INPUT_TEXT = "Heym is an ai native automation platform"
-RUNBOOK_EXPECTED_LOG = "HEYM IS AN AI NATIVE AUTOMATION PLATFORM"
+RUNBOOK_INPUT_TEXT = "Heym runs and governs AI agents in production"
+RUNBOOK_EXPECTED_LOG = "HEYM RUNS AND GOVERNS AI AGENTS IN PRODUCTION"
 
 
 def _make_runbook_workflow() -> tuple[list[dict], list[dict], dict]:

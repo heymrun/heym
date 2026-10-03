@@ -299,7 +299,7 @@ class HeymIdentityMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="Heym API",
-    description="AI Workflow Automation Platform",
+    description="Infrastructure for running and governing AI agents in production",
     version=settings.resolved_version,
     lifespan=lifespan,
 )

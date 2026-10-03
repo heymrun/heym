@@ -310,7 +310,7 @@ Enable **Guardrails** in the node properties to block unsafe user messages befor
 ## Related
 
 - [Agent Node](./agent-node.md) – LLM with tool calling
-- [Why Heym](../getting-started/why-heym.md) – AI-native features vs n8n, Zapier, Make.com
+- [Why Heym](../getting-started/why-heym.md) – Where LLM steps fit in the agent lifecycle
 - [Guardrails](../reference/guardrails.md) – Block unsafe content categories
 - [Node Types](../reference/node-types.md) – Overview of all node types
 - [Expression DSL](../reference/expression-dsl.md) – Referencing data in prompts

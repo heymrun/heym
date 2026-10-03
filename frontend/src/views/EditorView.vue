@@ -1112,7 +1112,7 @@ async function commitNodeMessage(nodeId: string): Promise<void> {
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
   workflowStore.clearWorkflow();
-  document.title = "Heym - AI Workflow Automation";
+  document.title = "Heym - AI Agent Runtime";
 });
 
 async function handleSave(): Promise<void> {

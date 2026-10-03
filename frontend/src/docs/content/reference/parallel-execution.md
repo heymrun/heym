@@ -49,7 +49,7 @@ Streaming uses the same parallel model but emits events as nodes complete. The e
 
 ## Related
 
-- [Why Heym](../getting-started/why-heym.md) – DAG-based parallel execution vs sequential tools
+- [Why Heym](../getting-started/why-heym.md) – Parallel DAG execution in the Heym runtime
 - [Workflow Structure](./workflow-structure.md) – Nodes, edges, and execution flow
 - [Core Concepts](../getting-started/core-concepts.md) – Execution flow overview
 - [Node Types](./node-types.md) – [Merge](../nodes/merge-node.md) node and other types
