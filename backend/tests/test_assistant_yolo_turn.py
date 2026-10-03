@@ -297,7 +297,10 @@ class StreamUntilDisconnectTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         self.assertEqual(chunks, ["data: one\n\n", "data: two\n\n"])
-        self.assertTrue(cancel_event.is_set())
+        self.assertFalse(
+            cancel_event.is_set(),
+            "cancel_event must NOT be set when source completes normally",
+        )
 
     async def test_sends_keepalives_while_the_source_is_quiet(self) -> None:
         release = asyncio.Event()

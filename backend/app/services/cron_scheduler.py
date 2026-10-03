@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from concurrent.futures import CancelledError
 from datetime import datetime, timezone
 
 from croniter import croniter
@@ -26,7 +27,11 @@ from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.timezone_utils import get_configured_timezone
-from app.services.workflow_executor import _to_json_compatible
+from app.services.workflow_executor import (
+    WorkflowCancelledError,
+    WorkflowTimeoutError,
+    _to_json_compatible,
+)
 
 logger = logging.getLogger("cron_scheduler")
 
@@ -238,7 +243,25 @@ class CronScheduler:
                 log_offloaded_run(logger, workflow_id=workflow.id, trigger="cron", result=result)
                 return
             if result.allow_downstream_pending:
-                result.join_allow_downstream()
+                try:
+                    result.join_allow_downstream()
+                except WorkflowTimeoutError as exc:
+                    logger.warning("Cron run %s allowDownstream timed out: %s", execution_id, exc)
+                    result.status = "error"
+                    if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                        result.outputs.setdefault(
+                            "error", str(exc) or "Workflow execution timed out"
+                        )
+                except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
+                    logger.info("Cron run %s allowDownstream cancelled", execution_id)
+                    result.status = "cancelled"
+                except Exception as exc:
+                    logger.exception(
+                        "Cron run %s allowDownstream failed unexpectedly", execution_id
+                    )
+                    result.status = "error"
+                    if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                        result.outputs.setdefault("error", str(exc))
 
             if result.status == "pending":
                 history_entry, _ = await persist_pending_hitl_execution(

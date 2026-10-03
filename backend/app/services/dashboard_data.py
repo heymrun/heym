@@ -2,6 +2,7 @@ import asyncio
 import copy
 import logging
 import uuid
+from concurrent.futures import CancelledError
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,7 +16,11 @@ from app.models.dashboard_schemas import WidgetDataResponse
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.highlight.highlight_builder import build_highlight_payload
-from app.services.workflow_executor import _to_json_compatible
+from app.services.workflow_executor import (
+    WorkflowCancelledError,
+    WorkflowTimeoutError,
+    _to_json_compatible,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +217,21 @@ async def _finalize_widget_allow_downstream(
     result: Any,
 ) -> None:
     try:
-        await asyncio.to_thread(result.join_allow_downstream)
+        try:
+            await asyncio.to_thread(result.join_allow_downstream)
+        except WorkflowTimeoutError as exc:
+            logger.warning("Dashboard widget run allowDownstream timed out: %s", exc)
+            result.status = "error"
+            if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                result.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
+        except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
+            logger.info("Dashboard widget run allowDownstream cancelled")
+            result.status = "cancelled"
+        except Exception as exc:
+            logger.exception("Dashboard widget run allowDownstream failed unexpectedly")
+            result.status = "error"
+            if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                result.outputs.setdefault("error", str(exc))
         async with async_session_maker() as bg_db:
             if history_entry_id is not None:
                 history_result = await bg_db.execute(

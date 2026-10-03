@@ -56,6 +56,7 @@ from app.services.secret_tokens import hash_secret
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
+    WorkflowTimeoutError,
     execute_workflow,
     execute_workflow_streaming,
 )
@@ -521,6 +522,19 @@ async def portal_execute_stream(
                 event_queue.put(event)
                 if event.get("type") == "execution_complete":
                     final_result = event
+        except WorkflowTimeoutError as exc:
+            timeout_event = {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "error",
+                "outputs": {"error": str(exc)},
+                "execution_time_ms": 0,
+                "node_results": [],
+                "sub_workflow_executions": [],
+            }
+            final_result = timeout_event
+            event_queue.put(timeout_event)
+            return
         except WorkflowCancelledError:
             was_cancelled = True
             return

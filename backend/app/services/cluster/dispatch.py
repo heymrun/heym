@@ -42,7 +42,11 @@ from app.services.execution_cancellation import (
     register_execution,
     relinquish_execution,
 )
-from app.services.workflow_executor import WorkflowCancelledError, execute_workflow
+from app.services.workflow_executor import (
+    WorkflowCancelledError,
+    WorkflowTimeoutError,
+    execute_workflow,
+)
 
 logger = logging.getLogger("cluster")
 
@@ -469,6 +473,15 @@ class RunQueueWorker:
                 row.execution_id,
             )
             result.status = "error"
+        except WorkflowTimeoutError as exc:
+            logger.warning(
+                "Allow-downstream run timed out: %s (%s)",
+                row.execution_id,
+                exc,
+            )
+            result.status = "error"
+            if hasattr(result, "outputs") and isinstance(result.outputs, dict):
+                result.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
         except WorkflowCancelledError:
             logger.info("Allow-downstream run was cancelled: %s", row.execution_id)
             result.status = "cancelled"
@@ -730,6 +743,53 @@ class RunQueueWorker:
                         await db.commit()
             await run_queue.complete(
                 row.execution_id, result=summarize(result, row.execution_id), error=None
+            )
+        except WorkflowTimeoutError as exc:
+            logger.warning("Claimed run timed out: %s", row.execution_id)
+            async with async_session_maker() as db:
+                wf_res = await db.execute(
+                    select(Workflow.owner_id, Workflow.name).where(Workflow.id == row.workflow_id)
+                )
+                wf_row = wf_res.first()
+                await db.execute(
+                    pg_insert(ExecutionHistory)
+                    .values(
+                        id=row.execution_id,
+                        workflow_id=row.workflow_id,
+                        inputs=row.inputs,
+                        outputs={"error": str(exc) or "Execution timed out"},
+                        node_results=[],
+                        status="error",
+                        execution_time_ms=0.0,
+                        trigger_source=row.trigger_source,
+                        **attribution_fields(),
+                    )
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                if wf_row is not None:
+                    owner_id, workflow_name = wf_row
+                    await upsert_workflow_analytics_snapshot(
+                        db,
+                        workflow_id=row.workflow_id,
+                        owner_id=owner_id,
+                        workflow_name_snapshot=workflow_name,
+                        status="error",
+                        execution_time_ms=0.0,
+                    )
+                await db.commit()
+            await run_queue.complete(
+                row.execution_id,
+                result={
+                    "execution_id": str(row.execution_id),
+                    "workflow_id": str(row.workflow_id),
+                    "status": "error",
+                    "outputs": {"error": str(exc) or "Execution timed out"},
+                    "execution_time_ms": 0.0,
+                    "history_written": True,
+                    "error": str(exc) or "Execution timed out",
+                    "instance": identity.instance_name(),
+                },
+                error=str(exc) or "Execution timed out",
             )
         except WorkflowCancelledError:
             logger.info("Claimed run was cancelled: %s", row.execution_id)

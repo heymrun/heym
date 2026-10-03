@@ -129,9 +129,12 @@ from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
     WorkflowTimeoutError,
+    _mask_node_result_row,
+    _mask_sub_execution_dict,
     _serialize_sub_workflow_executions,
     _to_json_compatible,
     execute_workflow_streaming,
+    mask_sensitive_output,
 )
 from app.services.workflow_last_trigger import (
     fetch_last_trigger_source,
@@ -364,15 +367,40 @@ async def persist_stream_execution_result(
     reach the client, so they are skipped here.
     """
     if was_cancelled:
+        parent_node_results = (
+            final_result.get("node_results", []) if isinstance(final_result, dict) else []
+        )
+        parent_outputs = final_result.get("outputs", {}) if isinstance(final_result, dict) else {}
+        parent_exec_time = (
+            final_result.get("execution_time_ms", 0.0) if isinstance(final_result, dict) else 0.0
+        )
+        credentials_ctx: dict[str, str] | None = None
+        if credentials_owner_id:
+            try:
+                credentials_ctx = await get_credentials_context(db, credentials_owner_id)
+                if credentials_ctx:
+                    parent_outputs = mask_sensitive_output(parent_outputs, credentials_ctx)
+                    if isinstance(parent_node_results, list):
+                        masked_parent_node_results = []
+                        for row in parent_node_results:
+                            if isinstance(row, dict):
+                                rc = copy.deepcopy(row)
+                                _mask_node_result_row(rc, credentials_ctx)
+                                masked_parent_node_results.append(rc)
+                            else:
+                                masked_parent_node_results.append(row)
+                        parent_node_results = masked_parent_node_results
+            except Exception:
+                pass
         db.add(
             ExecutionHistory(
                 id=execution_id,
                 workflow_id=workflow.id,
                 inputs=enriched_inputs,
-                outputs={},
-                node_results=[],
+                outputs=parent_outputs,
+                node_results=parent_node_results,
                 status="cancelled",
-                execution_time_ms=0,
+                execution_time_ms=float(parent_exec_time),
                 trigger_source=trigger_source,
             )
         )
@@ -382,8 +410,36 @@ async def persist_stream_execution_result(
             owner_id=workflow.owner_id,
             workflow_name_snapshot=workflow.name,
             status="cancelled",
-            execution_time_ms=0.0,
+            execution_time_ms=float(parent_exec_time),
         )
+        sub_workflow_executions = (
+            final_result.get("sub_workflow_executions", [])
+            if isinstance(final_result, dict)
+            else []
+        )
+        for sub_exec in sub_workflow_executions:
+            if credentials_ctx:
+                sub_exec = _mask_sub_execution_dict(sub_exec, credentials_ctx)
+            sub_id = uuid.UUID(str(sub_exec["workflow_id"]))
+            db.add(
+                ExecutionHistory(
+                    workflow_id=sub_id,
+                    inputs=sub_exec["inputs"],
+                    outputs=sub_exec["outputs"],
+                    node_results=sub_exec.get("node_results", []),
+                    status=sub_exec["status"],
+                    execution_time_ms=sub_exec["execution_time_ms"],
+                    trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
+                )
+            )
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=sub_id,
+                owner_id=None,
+                workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
+                status=sub_exec["status"],
+                execution_time_ms=float(sub_exec["execution_time_ms"]),
+            )
         return True
 
     if not final_result or final_result.get("status") == "pending":
@@ -484,38 +540,188 @@ async def _finalize_allow_downstream_history(
 ) -> None:
     """Persist output allowDownstream work after the API response has returned."""
     try:
-        await asyncio.to_thread(execution_result.join_allow_downstream)
+        try:
+            await asyncio.to_thread(execution_result.join_allow_downstream)
+        except Exception as exc:
+            from concurrent.futures import CancelledError
+
+            from app.services.workflow_executor import (
+                WorkflowCancelledError,
+                WorkflowTimeoutError,
+            )
+
+            if isinstance(exc, WorkflowTimeoutError):
+                logger.warning(
+                    "join_allow_downstream timed out for execution %s: %s",
+                    history_entry_id,
+                    exc,
+                )
+                if hasattr(execution_result, "status"):
+                    execution_result.status = "error"
+                elif isinstance(execution_result, dict):
+                    execution_result["status"] = "error"
+                if hasattr(execution_result, "outputs") and isinstance(
+                    execution_result.outputs, dict
+                ):
+                    execution_result.outputs.setdefault(
+                        "error", str(exc) or "Workflow execution timed out"
+                    )
+                elif isinstance(execution_result, dict):
+                    outs = execution_result.setdefault("outputs", {})
+                    if isinstance(outs, dict):
+                        outs.setdefault("error", str(exc) or "Workflow execution timed out")
+            elif isinstance(exc, (WorkflowCancelledError, CancelledError, asyncio.CancelledError)):
+                logger.info("join_allow_downstream cancelled for execution %s", history_entry_id)
+                if hasattr(execution_result, "status"):
+                    execution_result.status = "cancelled"
+                elif isinstance(execution_result, dict):
+                    execution_result["status"] = "cancelled"
+            else:
+                logger.exception(
+                    "join_allow_downstream failed unexpectedly for execution %s", history_entry_id
+                )
+                if getattr(execution_result, "status", None) != "cancelled":
+                    if hasattr(execution_result, "status"):
+                        execution_result.status = "error"
+                    elif isinstance(execution_result, dict):
+                        execution_result["status"] = "error"
+                if hasattr(execution_result, "outputs") and isinstance(
+                    execution_result.outputs, dict
+                ):
+                    execution_result.outputs.setdefault("error", str(exc))
+                elif isinstance(execution_result, dict):
+                    outs = execution_result.setdefault("outputs", {})
+                    if isinstance(outs, dict):
+                        outs.setdefault("error", str(exc))
+
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
-                select(ExecutionHistory).where(ExecutionHistory.id == history_entry_id)
+                select(ExecutionHistory)
+                .where(ExecutionHistory.id == history_entry_id)
+                .with_for_update()
             )
             history_entry = history_result.scalar_one_or_none()
-            if history_entry is not None:
-                history_entry.outputs = _to_json_compatible(execution_result.outputs)
-                history_entry.node_results = _to_json_compatible(execution_result.node_results)
-                history_entry.status = execution_result.status
-                history_entry.execution_time_ms = execution_result.execution_time_ms
-                flag_modified(history_entry, "outputs")
-                flag_modified(history_entry, "node_results")
+            if history_entry is None:
+                logger.warning(
+                    "_finalize_allow_downstream_history: parent ExecutionHistory %s not found, skipping finalization",
+                    history_entry_id,
+                )
+                return
 
-            for sub_exec in execution_result.sub_workflow_executions:
+            is_already_finalized = any(
+                isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
+                for nr in (history_entry.node_results or [])
+            ) or bool(
+                isinstance(history_entry.outputs, dict)
+                and history_entry.outputs.get("_downstream_finalized")
+            )
+            if is_already_finalized:
+                logger.info(
+                    "_finalize_allow_downstream_history: parent ExecutionHistory %s already finalized, skipping",
+                    history_entry_id,
+                )
+                return
+
+            node_results_json = _to_json_compatible(execution_result.node_results)
+            marked = False
+            if isinstance(node_results_json, list):
+                for nr in node_results_json:
+                    if isinstance(nr, dict):
+                        nr.setdefault("metadata", {})["_downstream_finalized"] = True
+                        marked = True
+                        break
+
+            outputs_json = _to_json_compatible(execution_result.outputs)
+            if not marked:
+                if isinstance(outputs_json, dict):
+                    outputs_json["_downstream_finalized"] = True
+                else:
+                    outputs_json = {"_downstream_finalized": True}
+
+            history_entry.outputs = outputs_json
+            history_entry.node_results = (
+                node_results_json if isinstance(node_results_json, list) else []
+            )
+            history_entry.status = execution_result.status
+            history_entry.execution_time_ms = execution_result.execution_time_ms
+            flag_modified(history_entry, "outputs")
+            flag_modified(history_entry, "node_results")
+
+            for idx, sub_exec in enumerate(execution_result.sub_workflow_executions):
+                if getattr(sub_exec, "history_written", False):
+                    continue
+                if isinstance(sub_exec, dict) and sub_exec.get("history_written"):
+                    continue
+                sw_id = getattr(sub_exec, "workflow_id", None) or (
+                    sub_exec.get("workflow_id") if isinstance(sub_exec, dict) else None
+                )
+                if not sw_id:
+                    continue
+
+                sub_exec_id = getattr(sub_exec, "execution_id", None) or (
+                    sub_exec.get("execution_id") if isinstance(sub_exec, dict) else None
+                )
+                inv_key = str(sub_exec_id) if sub_exec_id else f"{sw_id}:{idx}"
+                sub_history_id = uuid.uuid5(history_entry_id, f"sub:{inv_key}")
+                existing_sub = await bg_db.get(ExecutionHistory, sub_history_id)
+                if existing_sub is not None:
+                    continue
+
+                inputs = (
+                    getattr(sub_exec, "inputs", {})
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("inputs", {})
+                )
+                outputs = (
+                    getattr(sub_exec, "outputs", {})
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("outputs", {})
+                )
+                node_results = (
+                    getattr(sub_exec, "node_results", [])
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("node_results", [])
+                )
+                st = (
+                    getattr(sub_exec, "status", "success")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("status", "success")
+                )
+                exec_ms = (
+                    getattr(sub_exec, "execution_time_ms", 0.0)
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("execution_time_ms", 0.0)
+                )
+                trig = (
+                    getattr(sub_exec, "trigger_source", "SUB_WORKFLOW")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("trigger_source", "SUB_WORKFLOW")
+                )
+                wf_name = (
+                    getattr(sub_exec, "workflow_name", "")
+                    if not isinstance(sub_exec, dict)
+                    else sub_exec.get("workflow_name", "")
+                )
+
                 sub_history = ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=_to_json_compatible(sub_exec.inputs),
-                    outputs=_to_json_compatible(sub_exec.outputs),
-                    node_results=_to_json_compatible(sub_exec.node_results),
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
-                    trigger_source=sub_exec.trigger_source,
+                    id=sub_history_id,
+                    workflow_id=uuid.UUID(str(sw_id)),
+                    inputs=_to_json_compatible(inputs),
+                    outputs=_to_json_compatible(outputs),
+                    node_results=_to_json_compatible(node_results),
+                    status=st,
+                    execution_time_ms=exec_ms,
+                    trigger_source=trig,
                 )
                 bg_db.add(sub_history)
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    workflow_id=uuid.UUID(str(sw_id)),
                     owner_id=None,
-                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
-                    status=sub_exec.status,
-                    execution_time_ms=sub_exec.execution_time_ms,
+                    workflow_name_snapshot=wf_name or "Sub-workflow",
+                    status=st,
+                    execution_time_ms=exec_ms,
+                    started_at=getattr(history_entry, "started_at", None),
                 )
 
             await _persist_global_variables_from_execution(
@@ -526,17 +732,39 @@ async def _finalize_allow_downstream_history(
                 _to_json_compatible(execution_result.node_results),
                 execution_result.sub_workflow_executions,
             )
-            await upsert_workflow_analytics_snapshot(
-                bg_db,
-                workflow_id=workflow_id,
-                owner_id=owner_id,
-                workflow_name_snapshot=workflow_name,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
+            analytics_already_recorded = getattr(execution_result, "analytics_recorded", False) or (
+                execution_result.get("analytics_recorded", False)
+                if isinstance(execution_result, dict)
+                else False
             )
+            if not analytics_already_recorded:
+                await upsert_workflow_analytics_snapshot(
+                    bg_db,
+                    workflow_id=workflow_id,
+                    owner_id=owner_id,
+                    workflow_name_snapshot=workflow_name,
+                    status=getattr(execution_result, "status", "success")
+                    if not isinstance(execution_result, dict)
+                    else execution_result.get("status", "success"),
+                    execution_time_ms=getattr(execution_result, "execution_time_ms", 0.0)
+                    if not isinstance(execution_result, dict)
+                    else execution_result.get("execution_time_ms", 0.0),
+                    started_at=getattr(history_entry, "started_at", None),
+                )
             await bg_db.commit()
+
+            # Mark in-memory objects finalized ONLY after commit succeeds
+            if hasattr(execution_result, "analytics_recorded"):
+                execution_result.analytics_recorded = True
+            elif isinstance(execution_result, dict):
+                execution_result["analytics_recorded"] = True
+            for sub_exec in execution_result.sub_workflow_executions:
+                if hasattr(sub_exec, "history_written"):
+                    sub_exec.history_written = True
+                elif isinstance(sub_exec, dict):
+                    sub_exec["history_written"] = True
     except Exception:
-        pass
+        logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
 
 
 logger = logging.getLogger(__name__)
@@ -3201,6 +3429,33 @@ async def execute_workflow_endpoint(
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
         )
+    except WorkflowTimeoutError as exc:
+        if not test_run:
+            history_entry = ExecutionHistory(
+                id=execution_id,
+                workflow_id=workflow.id,
+                inputs=enriched_inputs,
+                outputs={"error": str(exc)},
+                node_results=[],
+                status="error",
+                execution_time_ms=0,
+                trigger_source=trigger_source,
+            )
+            db.add(history_entry)
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                workflow_name_snapshot=workflow.name,
+                status="error",
+                execution_time_ms=0.0,
+                started_at=datetime.now(timezone.utc),
+            )
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=str(exc) or "Workflow execution timed out",
+        )
     except WorkflowCancelledError:
         if not test_run:
             history_entry = ExecutionHistory(
@@ -3313,14 +3568,16 @@ async def execute_workflow_endpoint(
             trigger_source=trigger_source,
         )
         db.add(history_entry)
-        await upsert_workflow_analytics_snapshot(
-            db,
-            workflow_id=workflow.id,
-            owner_id=workflow.owner_id,
-            workflow_name_snapshot=workflow.name,
-            status=execution_result.status,
-            execution_time_ms=execution_result.execution_time_ms,
-        )
+        if not execution_result.allow_downstream_pending:
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=workflow.id,
+                owner_id=workflow.owner_id,
+                workflow_name_snapshot=workflow.name,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+            )
+            execution_result.analytics_recorded = True
         await db.flush()
         # The error workflow hook moved to dispatch_workflow, which sees offloaded
         # runs too and is shared with every other trigger.
@@ -3377,6 +3634,7 @@ async def execute_workflow_endpoint(
                 trigger_source=sub_exec.trigger_source,
             )
             db.add(sub_history)
+            sub_exec.history_written = True
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=uuid.UUID(sub_exec.workflow_id),
@@ -4038,6 +4296,51 @@ async def execute_workflow_stream(
             return
         except WorkflowCancelledError:
             was_cancelled = True
+            wf_exec = executor_holder.get("executor")
+            node_results = []
+            node_outputs = {}
+            sub_workflow_executions = []
+            execution_time_ms = 0.0
+            if wf_exec is not None:
+                if getattr(wf_exec, "completed_node_results", None):
+                    node_results = list(wf_exec.completed_node_results)
+                if getattr(wf_exec, "node_outputs", None):
+                    node_outputs = dict(wf_exec.node_outputs)
+                if getattr(wf_exec, "execution_start_time", None):
+                    execution_time_ms = (time.time() - wf_exec.execution_start_time) * 1000
+                extra = _serialize_sub_workflow_executions(
+                    wf_exec.sub_workflow_executions,
+                    credentials_context=credentials_context,
+                )
+                if extra:
+                    sub_workflow_executions = extra
+
+            masked_outputs = (
+                mask_sensitive_output(node_outputs, credentials_context)
+                if credentials_context
+                else _to_json_compatible(node_outputs)
+            )
+            masked_node_results = []
+            for row in node_results:
+                if isinstance(row, dict):
+                    row_copy = copy.deepcopy(row)
+                    if credentials_context:
+                        _mask_node_result_row(row_copy, credentials_context)
+                    masked_node_results.append(row_copy)
+                else:
+                    masked_node_results.append(row)
+
+            cancelled_event = {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "cancelled",
+                "outputs": masked_outputs,
+                "execution_time_ms": execution_time_ms,
+                "node_results": masked_node_results,
+                "sub_workflow_executions": sub_workflow_executions,
+            }
+            final_result = cancelled_event
+            event_queue.put(cancelled_event)
             return
         finally:
             release_run()

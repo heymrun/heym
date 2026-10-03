@@ -127,6 +127,7 @@ class TriggerCallSiteCoverageTests(unittest.TestCase):
         "app/api/discord.py",
         "app/api/mcp.py",
         "app/api/mcp_servers.py",
+        "app/api/ai_assistant.py",
         "app/services/imap_trigger_service.py",
         "app/services/rabbitmq_consumer.py",
         "app/services/websocket_trigger_service.py",

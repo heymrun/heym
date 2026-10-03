@@ -384,6 +384,7 @@ async def stream_until_disconnect(
 
     watcher = asyncio.create_task(watch_disconnect())
     producer = asyncio.create_task(produce())
+    completed_normally = False
     try:
         while True:
             try:
@@ -394,12 +395,14 @@ async def stream_until_disconnect(
                 yield ": ping\n\n"
                 continue
             if item is None:
+                completed_normally = True
                 break
             if isinstance(item, Exception):
                 raise item
             yield item
     finally:
-        cancel_event.set()
+        if not completed_normally:
+            cancel_event.set()
         producer.cancel()
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
