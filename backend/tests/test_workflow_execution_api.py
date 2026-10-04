@@ -21,7 +21,7 @@ from app.api.workflows import (
     get_credentials_context,
     parse_execute_body,
 )
-from app.db.models import Credential, CredentialType, DataTable, DataTableRow
+from app.db.models import Credential, CredentialType, DataTable, DataTableRow, ExecutionHistory
 from app.models.schemas import PortalExecuteRequest
 from app.services.workflow_executor import (
     ExecutionResult,
@@ -2109,9 +2109,7 @@ class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase)
             status="success",
             outputs={"ack": True},
             execution_time_ms=1.0,
-            node_results=[
-                {"node_id": "n1", "status": "success", "output": {"ack": True}}
-            ],
+            node_results=[{"node_id": "n1", "status": "success", "output": {"ack": True}}],
             sub_workflow_executions=[],
         )
         execution_result._allow_downstream_pending = [MagicMock()]
@@ -2155,7 +2153,8 @@ class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase)
                 db=db,
             )
 
-        self.assertEqual(response.status, "success")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), {"ack": True})
         history_entry = next(
             row.args[0]
             for row in db.add.call_args_list

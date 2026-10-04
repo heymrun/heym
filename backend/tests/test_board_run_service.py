@@ -363,9 +363,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         execution_result = SimpleNamespace(
             status="success",
             outputs={"text": "early"},
-            node_results=[
-                {"node_id": "output", "status": "success", "output": {"text": "early"}}
-            ],
+            node_results=[{"node_id": "output", "status": "success", "output": {"text": "early"}}],
             execution_time_ms=1.0,
             sub_workflow_executions=[],
             allow_downstream_pending=True,

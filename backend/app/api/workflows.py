@@ -545,9 +545,7 @@ async def _finalize_allow_downstream_history(
                 exc,
             )
             execution_result.status = "error"
-            execution_result.outputs.setdefault(
-                "error", str(exc) or "Workflow execution timed out"
-            )
+            execution_result.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
         except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
             logger.info("join_allow_downstream cancelled for execution %s", history_entry_id)
             execution_result.status = "cancelled"

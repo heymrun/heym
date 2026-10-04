@@ -4756,7 +4756,9 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
 
                 for thread in threads:
                     thread.join(timeout=3.0)
-                    self.assertFalse(thread.is_alive(), f"Agent tool call thread hung: {thread.name}")
+                    self.assertFalse(
+                        thread.is_alive(), f"Agent tool call thread hung: {thread.name}"
+                    )
 
                 self.assertEqual(errors, [])
                 self.assertEqual(len(results), num_concurrent)

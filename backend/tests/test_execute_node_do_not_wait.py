@@ -387,9 +387,7 @@ class ExecuteNodeDoNotWaitTests(unittest.TestCase):
             status="success",
             outputs={"ack": True},
             execution_time_ms=2.0,
-            node_results=[
-                {"node_id": "out", "status": "success", "output": {"ack": True}}
-            ],
+            node_results=[{"node_id": "out", "status": "success", "output": {"ack": True}}],
         )
         child_result._allow_downstream_pending = [unittest.mock.MagicMock()]
 
@@ -408,9 +406,7 @@ class ExecuteNodeDoNotWaitTests(unittest.TestCase):
         child_result.join_allow_downstream = join_allow_downstream
 
         with (
-            unittest.mock.patch.object(
-                WorkflowExecutor, "execute", return_value=child_result
-            ),
+            unittest.mock.patch.object(WorkflowExecutor, "execute", return_value=child_result),
             unittest.mock.patch(
                 "app.services.node_execution.nodes.execute_node.complete_execution"
             ),

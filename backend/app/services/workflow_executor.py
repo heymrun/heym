@@ -1966,6 +1966,7 @@ def _restore_node_results(results: list[dict] | None) -> list[NodeResult]:
         )
     return restored
 
+
 def _serialize_sub_workflow_executions(
     executions: list[SubWorkflowExecution],
     credentials_context: dict[str, str] | None = None,
@@ -2010,6 +2011,7 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
             )
         )
     return restored
+
 
 class WorkflowExecutor:
     def __init__(

@@ -219,12 +219,25 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
         analytics = AsyncMock()
 
         with (
-            patch("app.services.cron_scheduler.collect_referenced_workflows", AsyncMock(return_value={})),
-            patch("app.services.cron_scheduler.get_credentials_context", AsyncMock(return_value={})),
-            patch("app.services.cron_scheduler.get_global_variables_context", AsyncMock(return_value={})),
-            patch("app.services.cron_scheduler.dispatch_workflow", AsyncMock(return_value=execution_result)),
+            patch(
+                "app.services.cron_scheduler.collect_referenced_workflows",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.cron_scheduler.get_credentials_context", AsyncMock(return_value={})
+            ),
+            patch(
+                "app.services.cron_scheduler.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.cron_scheduler.dispatch_workflow",
+                AsyncMock(return_value=execution_result),
+            ),
             patch("app.services.cron_scheduler.upsert_workflow_analytics_snapshot", analytics),
-            patch("app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()),
+            patch(
+                "app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()
+            ),
         ):
             await scheduler._execute_workflow(db, workflow)
 

@@ -54,9 +54,7 @@ class CancelledStreamMaskingAdvisoryTests(unittest.IsolatedAsyncioTestCase):
                         WorkflowAnalyticsSnapshot.workflow_id.in_(self.cleanup_workflow_ids)
                     )
                 )
-                await db.execute(
-                    delete(Workflow).where(Workflow.id.in_(self.cleanup_workflow_ids))
-                )
+                await db.execute(delete(Workflow).where(Workflow.id.in_(self.cleanup_workflow_ids)))
             await db.execute(delete(User).where(User.id == self.user_id))
             await db.commit()
         await engine.dispose()
@@ -71,7 +69,6 @@ class CancelledStreamMaskingAdvisoryTests(unittest.IsolatedAsyncioTestCase):
             get_completed_execution_result,
             register_execution,
         )
-        from app.services.workflow_executor import _mask_node_result_row, mask_sensitive_output
 
         secret_token = "sk-live-super-secret-token-abcdef123456"
         secret_context = {"api_key": secret_token}
@@ -184,7 +181,6 @@ class CancelledStreamMaskingAdvisoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(secret_token, json.dumps(completed_obs["outputs"]))
         self.assertIn("sk-live**", json.dumps(completed_obs["outputs"]))
 
-
     async def test_cancelled_stream_masks_subworkflow_inputs_in_sse_observer_and_db_postgres(
         self,
     ) -> None:
@@ -198,10 +194,6 @@ class CancelledStreamMaskingAdvisoryTests(unittest.IsolatedAsyncioTestCase):
         - Normal execution masking is not broken."""
         from app.api.workflows import execute_workflow_stream
         from app.services.execution_cancellation import get_completed_execution_result
-        from app.services.workflow_executor import (
-            SubWorkflowExecution,
-            WorkflowCancelledError,
-        )
 
         secret_token = "sk-live-super-secret-key-123456789"
         secret_context = {"api_key": secret_token}
@@ -486,4 +478,3 @@ class CancelledStreamMaskingAdvisoryTests(unittest.IsolatedAsyncioTestCase):
             f"received {secret_token}",
             "Live SubWorkflowExecution object must not be mutated",
         )
-
