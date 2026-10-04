@@ -1966,6 +1966,30 @@ def _restore_node_results(results: list[dict] | None) -> list[NodeResult]:
         )
     return restored
 
+def _serialize_sub_workflow_executions(
+    executions: list[SubWorkflowExecution],
+    credentials_context: dict[str, str] | None = None,
+) -> list[dict]:
+    serialized = [
+        {
+            "workflow_id": ex.workflow_id,
+            "inputs": _to_json_compatible(ex.inputs),
+            "outputs": _to_json_compatible(ex.outputs),
+            "status": ex.status,
+            "execution_time_ms": ex.execution_time_ms,
+            "node_results": _to_json_compatible(ex.node_results),
+            "workflow_name": ex.workflow_name,
+            "trigger_source": ex.trigger_source,
+            "history_written": getattr(ex, "history_written", False),
+            "execution_id": getattr(ex, "execution_id", "") or "",
+        }
+        for ex in executions
+    ]
+    if credentials_context:
+        return [_mask_sub_execution_dict(item, credentials_context) for item in serialized]
+    return serialized
+
+
 def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubWorkflowExecution]:
     restored: list[SubWorkflowExecution] = []
     for execution in executions or []:
