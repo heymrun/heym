@@ -31,7 +31,7 @@ When an Output node is connected to an [Agent Node](./agent-node.md) as a canvas
 
 ## Async Post-Processing
 
-When `allowDownstream: true`, the response is returned immediately. Nodes connected after the output run in the background (e.g. Slack notifications, logging).
+When `allowDownstream: true`, the response is returned immediately. Nodes connected after the output run in the background (e.g. Slack notifications, logging). Because the downstream tail may finish later, a downstream failure can change the recorded run status to `error` after the early response has already been returned; the final history and analytics reflect that later outcome.
 
 ## Example
 

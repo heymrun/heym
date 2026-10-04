@@ -180,6 +180,61 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(parent.node_results[1]["output"], {"items": ["done"]})
 
+    async def test_downstream_failure_persists_error_history_and_analytics(self) -> None:
+        scheduler = CronScheduler()
+        owner_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            name="Cron downstream failure",
+            nodes=[],
+            edges=[],
+        )
+
+        execution_result = SimpleNamespace(
+            status="success",
+            outputs={"ack": True},
+            node_results=[{"node_id": "output", "status": "success", "output": {"ack": True}}],
+            execution_time_ms=1.0,
+            sub_workflow_executions=[],
+            allow_downstream_pending=True,
+        )
+
+        def join_allow_downstream() -> None:
+            execution_result.status = "error"
+            execution_result.outputs = {"error": "Downstream cron failure"}
+            execution_result.node_results.append(
+                {
+                    "node_id": "downstream",
+                    "status": "error",
+                    "error": "Downstream cron failure",
+                }
+            )
+            execution_result.execution_time_ms = 40.0
+
+        execution_result.join_allow_downstream = join_allow_downstream
+        added_rows: list[object] = []
+        db = SimpleNamespace(add=added_rows.append, commit=AsyncMock())
+        analytics = AsyncMock()
+
+        with (
+            patch("app.services.cron_scheduler.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.services.cron_scheduler.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.services.cron_scheduler.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.services.cron_scheduler.dispatch_workflow", AsyncMock(return_value=execution_result)),
+            patch("app.services.cron_scheduler.upsert_workflow_analytics_snapshot", analytics),
+            patch("app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()),
+        ):
+            await scheduler._execute_workflow(db, workflow)
+
+        history = next(row for row in added_rows if isinstance(row, ExecutionHistory))
+        self.assertEqual(history.status, "error")
+        self.assertEqual(history.outputs, {"error": "Downstream cron failure"})
+        self.assertEqual(history.execution_time_ms, 40.0)
+        analytics.assert_awaited_once()
+        self.assertEqual(analytics.await_args.kwargs["status"], "error")
+
     async def test_execute_workflow_persists_pending_hitl_with_review_url_context(self) -> None:
         scheduler = CronScheduler()
         owner_id = uuid.uuid4()

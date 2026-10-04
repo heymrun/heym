@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from collections.abc import Coroutine, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -538,57 +538,27 @@ async def _finalize_allow_downstream_history(
     try:
         try:
             await asyncio.to_thread(execution_result.join_allow_downstream)
-        except Exception as exc:
-            from concurrent.futures import CancelledError
-
-            from app.services.workflow_executor import (
-                WorkflowCancelledError,
-                WorkflowTimeoutError,
+        except WorkflowTimeoutError as exc:
+            logger.warning(
+                "join_allow_downstream timed out for execution %s",
+                history_entry_id,
+                exc,
             )
-
-            if isinstance(exc, WorkflowTimeoutError):
-                logger.warning(
-                    "join_allow_downstream timed out for execution %s: %s",
-                    history_entry_id,
-                    exc,
-                )
-                if hasattr(execution_result, "status"):
-                    execution_result.status = "error"
-                elif isinstance(execution_result, dict):
-                    execution_result["status"] = "error"
-                if hasattr(execution_result, "outputs") and isinstance(
-                    execution_result.outputs, dict
-                ):
-                    execution_result.outputs.setdefault(
-                        "error", str(exc) or "Workflow execution timed out"
-                    )
-                elif isinstance(execution_result, dict):
-                    outs = execution_result.setdefault("outputs", {})
-                    if isinstance(outs, dict):
-                        outs.setdefault("error", str(exc) or "Workflow execution timed out")
-            elif isinstance(exc, (WorkflowCancelledError, CancelledError, asyncio.CancelledError)):
-                logger.info("join_allow_downstream cancelled for execution %s", history_entry_id)
-                if hasattr(execution_result, "status"):
-                    execution_result.status = "cancelled"
-                elif isinstance(execution_result, dict):
-                    execution_result["status"] = "cancelled"
-            else:
-                logger.exception(
-                    "join_allow_downstream failed unexpectedly for execution %s", history_entry_id
-                )
-                if getattr(execution_result, "status", None) != "cancelled":
-                    if hasattr(execution_result, "status"):
-                        execution_result.status = "error"
-                    elif isinstance(execution_result, dict):
-                        execution_result["status"] = "error"
-                if hasattr(execution_result, "outputs") and isinstance(
-                    execution_result.outputs, dict
-                ):
-                    execution_result.outputs.setdefault("error", str(exc))
-                elif isinstance(execution_result, dict):
-                    outs = execution_result.setdefault("outputs", {})
-                    if isinstance(outs, dict):
-                        outs.setdefault("error", str(exc))
+            execution_result.status = "error"
+            execution_result.outputs.setdefault(
+                "error", str(exc) or "Workflow execution timed out"
+            )
+        except (WorkflowCancelledError, CancelledError, asyncio.CancelledError):
+            logger.info("join_allow_downstream cancelled for execution %s", history_entry_id)
+            execution_result.status = "cancelled"
+        except Exception as exc:
+            logger.exception(
+                "join_allow_downstream failed unexpectedly for execution %s",
+                history_entry_id,
+            )
+            if execution_result.status != "cancelled":
+                execution_result.status = "error"
+            execution_result.outputs.setdefault("error", str(exc))
 
         async with async_session_maker() as bg_db:
             history_result = await bg_db.execute(
@@ -629,10 +599,7 @@ async def _finalize_allow_downstream_history(
 
             outputs_json = _to_json_compatible(execution_result.outputs)
             if not marked:
-                if isinstance(outputs_json, dict):
-                    outputs_json["_downstream_finalized"] = True
-                else:
-                    outputs_json = {"_downstream_finalized": True}
+                outputs_json["_downstream_finalized"] = True
 
             history_entry.outputs = outputs_json
             history_entry.node_results = (
@@ -644,80 +611,40 @@ async def _finalize_allow_downstream_history(
             flag_modified(history_entry, "node_results")
 
             for idx, sub_exec in enumerate(execution_result.sub_workflow_executions):
-                if getattr(sub_exec, "history_written", False):
+                if sub_exec.history_written:
                     continue
-                if isinstance(sub_exec, dict) and sub_exec.get("history_written"):
-                    continue
-                sw_id = getattr(sub_exec, "workflow_id", None) or (
-                    sub_exec.get("workflow_id") if isinstance(sub_exec, dict) else None
-                )
-                if not sw_id:
+                if not sub_exec.workflow_id:
                     continue
 
-                sub_exec_id = getattr(sub_exec, "execution_id", None) or (
-                    sub_exec.get("execution_id") if isinstance(sub_exec, dict) else None
+                inv_key = (
+                    str(sub_exec.execution_id)
+                    if sub_exec.execution_id
+                    else f"{sub_exec.workflow_id}:{idx}"
                 )
-                inv_key = str(sub_exec_id) if sub_exec_id else f"{sw_id}:{idx}"
                 sub_history_id = uuid.uuid5(history_entry_id, f"sub:{inv_key}")
                 existing_sub = await bg_db.get(ExecutionHistory, sub_history_id)
                 if existing_sub is not None:
                     continue
 
-                inputs = (
-                    getattr(sub_exec, "inputs", {})
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("inputs", {})
-                )
-                outputs = (
-                    getattr(sub_exec, "outputs", {})
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("outputs", {})
-                )
-                node_results = (
-                    getattr(sub_exec, "node_results", [])
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("node_results", [])
-                )
-                st = (
-                    getattr(sub_exec, "status", "success")
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("status", "success")
-                )
-                exec_ms = (
-                    getattr(sub_exec, "execution_time_ms", 0.0)
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("execution_time_ms", 0.0)
-                )
-                trig = (
-                    getattr(sub_exec, "trigger_source", "SUB_WORKFLOW")
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("trigger_source", "SUB_WORKFLOW")
-                )
-                wf_name = (
-                    getattr(sub_exec, "workflow_name", "")
-                    if not isinstance(sub_exec, dict)
-                    else sub_exec.get("workflow_name", "")
-                )
-
                 sub_history = ExecutionHistory(
                     id=sub_history_id,
-                    workflow_id=uuid.UUID(str(sw_id)),
-                    inputs=_to_json_compatible(inputs),
-                    outputs=_to_json_compatible(outputs),
-                    node_results=_to_json_compatible(node_results),
-                    status=st,
-                    execution_time_ms=exec_ms,
-                    trigger_source=trig,
+                    workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
+                    inputs=_to_json_compatible(sub_exec.inputs),
+                    outputs=_to_json_compatible(sub_exec.outputs),
+                    node_results=_to_json_compatible(sub_exec.node_results),
+                    status=sub_exec.status,
+                    execution_time_ms=sub_exec.execution_time_ms,
+                    trigger_source=sub_exec.trigger_source,
                 )
                 bg_db.add(sub_history)
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
-                    workflow_id=uuid.UUID(str(sw_id)),
+                    workflow_id=uuid.UUID(str(sub_exec.workflow_id)),
                     owner_id=None,
-                    workflow_name_snapshot=wf_name or "Sub-workflow",
-                    status=st,
-                    execution_time_ms=exec_ms,
-                    started_at=getattr(history_entry, "started_at", None),
+                    workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                    status=sub_exec.status,
+                    execution_time_ms=sub_exec.execution_time_ms,
+                    started_at=history_entry.started_at,
                 )
 
             await _persist_global_variables_from_execution(
@@ -728,39 +655,21 @@ async def _finalize_allow_downstream_history(
                 _to_json_compatible(execution_result.node_results),
                 execution_result.sub_workflow_executions,
             )
-            analytics_already_recorded = getattr(execution_result, "analytics_recorded", False) or (
-                execution_result.get("analytics_recorded", False)
-                if isinstance(execution_result, dict)
-                else False
-            )
-            if not analytics_already_recorded:
+            if not execution_result.analytics_recorded:
                 await upsert_workflow_analytics_snapshot(
                     bg_db,
                     workflow_id=workflow_id,
                     owner_id=owner_id,
                     workflow_name_snapshot=workflow_name,
-                    status=getattr(execution_result, "status", "success")
-                    if not isinstance(execution_result, dict)
-                    else execution_result.get("status", "success"),
-                    execution_time_ms=getattr(execution_result, "execution_time_ms", 0.0)
-                    if not isinstance(execution_result, dict)
-                    else execution_result.get("execution_time_ms", 0.0),
-                    started_at=getattr(history_entry, "started_at", None),
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                    started_at=history_entry.started_at,
                 )
             await bg_db.commit()
 
-            # Mark in-memory objects finalized ONLY after commit succeeds
-            if hasattr(execution_result, "analytics_recorded"):
-                execution_result.analytics_recorded = True
-            elif isinstance(execution_result, dict):
-                execution_result["analytics_recorded"] = True
+            execution_result.analytics_recorded = True
             for sub_exec in execution_result.sub_workflow_executions:
-                if hasattr(sub_exec, "history_written"):
-                    sub_exec.history_written = True
-                elif isinstance(sub_exec, dict):
-                    sub_exec["history_written"] = True
-    except Exception:
-        logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
+                sub_exec.history_written = True
 
 
 logger = logging.getLogger(__name__)
@@ -3355,33 +3264,6 @@ async def execute_workflow_endpoint(
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
-        )
-    except WorkflowTimeoutError as exc:
-        if not test_run:
-            history_entry = ExecutionHistory(
-                id=execution_id,
-                workflow_id=workflow.id,
-                inputs=enriched_inputs,
-                outputs={"error": str(exc)},
-                node_results=[],
-                status="error",
-                execution_time_ms=0,
-                trigger_source=trigger_source,
-            )
-            db.add(history_entry)
-            await upsert_workflow_analytics_snapshot(
-                db,
-                workflow_id=workflow.id,
-                owner_id=workflow.owner_id,
-                workflow_name_snapshot=workflow.name,
-                status="error",
-                execution_time_ms=0.0,
-                started_at=datetime.now(timezone.utc),
-            )
-            await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=str(exc) or "Workflow execution timed out",
         )
     except WorkflowCancelledError:
         if not test_run:

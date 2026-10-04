@@ -357,6 +357,60 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertIn("boom", runs[0].error)
         self.assertEqual(card.run_status, "failed")
 
+    async def test_allow_downstream_failure_updates_history_analytics_and_chain(self):
+        card, board, session, factory, links, context = _chain_env()
+
+        execution_result = SimpleNamespace(
+            status="success",
+            outputs={"text": "early"},
+            node_results=[
+                {"node_id": "output", "status": "success", "output": {"text": "early"}}
+            ],
+            execution_time_ms=1.0,
+            sub_workflow_executions=[],
+            allow_downstream_pending=True,
+        )
+
+        def join_allow_downstream() -> None:
+            execution_result.status = "error"
+            execution_result.outputs = {"error": "Downstream service failed"}
+            execution_result.node_results.append(
+                {
+                    "node_id": "downstream",
+                    "status": "error",
+                    "error": "Downstream service failed",
+                }
+            )
+            execution_result.execution_time_ms = 25.0
+
+        execution_result.join_allow_downstream = join_allow_downstream
+        patches = _runner_patches(context, lambda **_kwargs: execution_result)
+        for patcher in patches:
+            patcher.start()
+        try:
+            analytics = board_run_service.upsert_workflow_analytics_snapshot
+            await board_run_service._run_chain(
+                card_id=card.id,
+                board_id=board.id,
+                column_id=card.column_id,
+                links=links,
+                move=None,
+                rerun=False,
+                session_factory=factory,
+            )
+        finally:
+            for patcher in reversed(patches):
+                patcher.stop()
+
+        runs = [obj for obj in session.added if type(obj).__name__ == "BoardCardRun"]
+        self.assertEqual([run.status for run in runs], ["failed", "skipped"])
+        history = next(obj for obj in session.added if type(obj).__name__ == "ExecutionHistory")
+        self.assertEqual(history.status, "error")
+        self.assertEqual(history.outputs, {"error": "Downstream service failed"})
+        self.assertEqual(card.run_status, "failed")
+        analytics.assert_awaited_once()
+        self.assertEqual(analytics.await_args.kwargs["status"], "error")
+
     async def _run_pending_chain(self, pending_review):
         card, board, session, factory, links, context = _chain_env()
 

@@ -140,7 +140,6 @@ from app.services.workflow_dsl_prompt import (
 )
 from app.services.workflow_executor import (
     WorkflowCancelledError,
-    WorkflowTimeoutError,
     _to_json_compatible,
     execute_workflow,
 )
@@ -2596,8 +2595,6 @@ async def run_execute_workflow_tool(
             },
             default=str,
         )
-    except WorkflowTimeoutError as e:
-        return json.dumps({"status": "error", "error": str(e) or "Workflow execution timed out"})
     except WorkflowCancelledError:
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
     except Exception as e:

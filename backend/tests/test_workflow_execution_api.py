@@ -2088,6 +2088,123 @@ class SubWorkflowTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorded_trigger_sources[1], "SUB_WORKFLOW")
 
 
+class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_allow_downstream_failure_finalizes_error_history_and_analytics(self) -> None:
+        from fastapi import BackgroundTasks
+
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="API downstream failure",
+            nodes=[{"id": "n1", "type": "output"}],
+            edges=[],
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            cache_ttl_seconds=None,
+            sse_enabled=False,
+        )
+
+        execution_result = ExecutionResult(
+            workflow_id=workflow.id,
+            status="success",
+            outputs={"ack": True},
+            execution_time_ms=1.0,
+            node_results=[
+                {"node_id": "n1", "status": "success", "output": {"ack": True}}
+            ],
+            sub_workflow_executions=[],
+        )
+        execution_result._allow_downstream_pending = [MagicMock()]
+
+        def join_allow_downstream() -> None:
+            execution_result.status = "error"
+            execution_result.outputs = {"error": "API downstream failure"}
+            execution_result.node_results.append(
+                {
+                    "node_id": "downstream",
+                    "status": "error",
+                    "error": "API downstream failure",
+                }
+            )
+            execution_result.execution_time_ms = 55.0
+
+        execution_result.join_allow_downstream = join_allow_downstream
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_ScalarResult(workflow))
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        background_tasks = BackgroundTasks()
+
+        with (
+            patch("app.api.workflows.validate_workflow_auth", AsyncMock(return_value=workflow)),
+            patch("app.api.workflows.enforce_workflow_http_method"),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.register_execution", return_value=Event()),
+            patch("app.api.workflows.clear_active_execution"),
+            patch("app.api.workflows.dispatch_workflow", AsyncMock(return_value=execution_result)),
+        ):
+            response = await execute_workflow_endpoint(
+                workflow_id=workflow.id,
+                request=make_request(query_string=b"trigger_source=API"),
+                background_tasks=background_tasks,
+                current_user=None,
+                db=db,
+            )
+
+        self.assertEqual(response.status, "success")
+        history_entry = next(
+            row.args[0]
+            for row in db.add.call_args_list
+            if isinstance(row.args[0], ExecutionHistory)
+        )
+        self.assertEqual(history_entry.status, "success")
+        self.assertEqual(len(background_tasks.tasks), 1)
+
+        class FinalizerSession:
+            def __init__(self, history) -> None:
+                self.history = history
+                self.added: list[object] = []
+                self.commit_calls = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def execute(self, _statement):
+                return _ScalarResult(self.history)
+
+            async def get(self, *_args):
+                return None
+
+            def add(self, value) -> None:
+                self.added.append(value)
+
+            async def commit(self) -> None:
+                self.commit_calls += 1
+
+        finalizer_session = FinalizerSession(history_entry)
+        analytics = AsyncMock()
+        with (
+            patch("app.api.workflows.async_session_maker", return_value=finalizer_session),
+            patch("app.api.workflows.flag_modified"),
+            patch("app.api.workflows.upsert_workflow_analytics_snapshot", analytics),
+            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+        ):
+            await background_tasks()
+
+        self.assertEqual(history_entry.status, "error")
+        self.assertEqual(history_entry.outputs.get("error"), "API downstream failure")
+        analytics.assert_awaited_once()
+        self.assertEqual(analytics.await_args.kwargs["status"], "error")
+        self.assertEqual(finalizer_session.commit_calls, 1)
+
+
 class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
     """test_run=True (e.g. expression preview) must not insert ExecutionHistory rows."""
 

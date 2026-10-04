@@ -347,6 +347,83 @@ class ExecuteNodeDoNotWaitTests(unittest.TestCase):
         assert completed is not None
         self.assertEqual(completed["status"], "success")
 
+    def test_allow_downstream_failure_aborts_execute_node_and_records_error(self) -> None:
+        from app.services.node_execution.base import NodeExecutionContext
+        from app.services.node_execution.nodes.execute_node import execute as execute_node
+        from app.services.workflow_executor import ExecutionResult
+
+        parent_workflow_id = uuid.uuid4()
+        target_workflow_id = str(uuid.uuid4())
+        parent = WorkflowExecutor(
+            nodes=[],
+            edges=[],
+            workflow_cache={
+                target_workflow_id: {
+                    "name": "Target",
+                    "nodes": [{"id": "out", "type": "output"}],
+                    "edges": [],
+                }
+            },
+            workflow_id=parent_workflow_id,
+        )
+        ctx = NodeExecutionContext(
+            executor=parent,
+            node_id="execute",
+            inputs={},
+            allow_branch_skip=False,
+            start_time=time.time(),
+            node={
+                "id": "execute",
+                "type": "executeWorkflow",
+                "data": {"executeWorkflowId": target_workflow_id},
+            },
+            node_type="executeWorkflow",
+            node_data={"executeWorkflowId": target_workflow_id},
+            node_label="Execute",
+        )
+
+        child_result = ExecutionResult(
+            workflow_id=uuid.UUID(target_workflow_id),
+            status="success",
+            outputs={"ack": True},
+            execution_time_ms=2.0,
+            node_results=[
+                {"node_id": "out", "status": "success", "output": {"ack": True}}
+            ],
+        )
+        child_result._allow_downstream_pending = [unittest.mock.MagicMock()]
+
+        def join_allow_downstream() -> None:
+            child_result.status = "error"
+            child_result.outputs = {"error": "Downstream execute-node failure"}
+            child_result.node_results.append(
+                {
+                    "node_id": "downstream",
+                    "status": "error",
+                    "error": "Downstream execute-node failure",
+                }
+            )
+            raise RuntimeError("Downstream execute-node failure")
+
+        child_result.join_allow_downstream = join_allow_downstream
+
+        with (
+            unittest.mock.patch.object(
+                WorkflowExecutor, "execute", return_value=child_result
+            ),
+            unittest.mock.patch(
+                "app.services.node_execution.nodes.execute_node.complete_execution"
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                execute_node(ctx)
+
+        self.assertEqual(len(parent.sub_workflow_executions), 1)
+        sub_exec = parent.sub_workflow_executions[0]
+        self.assertEqual(sub_exec.status, "error")
+        self.assertIn("Downstream execute-node failure", sub_exec.outputs["error"])
+        self.assertEqual(sub_exec.node_results[-1]["status"], "error")
+
 
 if __name__ == "__main__":
     unittest.main()
