@@ -4,14 +4,16 @@ Cancellation is a separate persistence/publication boundary, so it must receive 
 same credential-redaction guarantees as normal execution paths.
 """
 
+import asyncio
 import json
 import threading
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.db.models import ExecutionHistory, User, Workflow, WorkflowAnalyticsSnapshot
 from app.db.session import async_session_maker, engine
