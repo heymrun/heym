@@ -540,7 +540,7 @@ async def _finalize_allow_downstream_history(
             await asyncio.to_thread(execution_result.join_allow_downstream)
         except WorkflowTimeoutError as exc:
             logger.warning(
-                "join_allow_downstream timed out for execution %s",
+                "join_allow_downstream timed out for execution %s: %s",
                 history_entry_id,
                 exc,
             )
@@ -670,6 +670,9 @@ async def _finalize_allow_downstream_history(
             execution_result.analytics_recorded = True
             for sub_exec in execution_result.sub_workflow_executions:
                 sub_exec.history_written = True
+
+    except Exception:
+        logger.exception("Failed to finalize allow_downstream execution %s", history_entry_id)
 
 
 logger = logging.getLogger(__name__)
