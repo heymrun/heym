@@ -1966,30 +1966,6 @@ def _restore_node_results(results: list[dict] | None) -> list[NodeResult]:
         )
     return restored
 
-def _serialize_sub_workflow_executions(
-    executions: list[SubWorkflowExecution],
-    credentials_context: dict[str, str] | None = None,
-) -> list[dict]:
-    serialized = [
-        {
-            "workflow_id": ex.workflow_id,
-            "inputs": _to_json_compatible(ex.inputs),
-            "outputs": _to_json_compatible(ex.outputs),
-            "status": ex.status,
-            "execution_time_ms": ex.execution_time_ms,
-            "node_results": _to_json_compatible(ex.node_results),
-            "workflow_name": ex.workflow_name,
-            "trigger_source": ex.trigger_source,
-            "history_written": getattr(ex, "history_written", False),
-            "execution_id": getattr(ex, "execution_id", "") or "",
-        }
-        for ex in executions
-    ]
-    if credentials_context:
-        return [_mask_sub_execution_dict(item, credentials_context) for item in serialized]
-    return serialized
-
-
 def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubWorkflowExecution]:
     restored: list[SubWorkflowExecution] = []
     for execution in executions or []:
@@ -2010,6 +1986,6127 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
             )
         )
     return restored
+
+class WorkflowExecutor:
+    def __init__(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+        workflow_cache: dict[str, dict] | None = None,
+        test_mode: bool = False,
+        credentials_context: dict[str, str] | None = None,
+        global_variables_context: dict[str, object] | None = None,
+        workflow_id: uuid.UUID | None = None,
+        trace_user_id: uuid.UUID | None = None,
+        actor_user_id: uuid.UUID | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        agent_progress_queue: queue.Queue | None = None,
+        sub_workflow_invocation_depth: int = 0,
+        cancel_event: Event | None = None,
+        configured_timezone: tzinfo | None = None,
+        invoked_by_agent: bool = False,
+        public_base_url: str = "",
+        return_on_chart_output: bool = False,
+        timeout_seconds: float | None = None,
+        workflow_name: str = "",
+        workflow_description: str = "",
+        execution_id: str = "",
+        node_pool: ThreadPoolExecutor | None = None,
+        llm_session_id: str | None = None,
+    ) -> None:
+        self.nodes = {node["id"]: node for node in nodes}
+        self._node_pool = node_pool or _SHARED_EXECUTOR
+        self.agent_progress_queue = agent_progress_queue
+        self.edges = edges
+        self.node_outputs: dict[str, dict] = {}
+        self.node_execution_contexts: dict[str, dict[str, object]] = {}
+        self.skipped_nodes: set[str] = set()
+        self.inactive_nodes: set[str] = set()
+        self.label_to_output: dict[str, dict] = {}
+        self._wrapped_label_output_cache: dict[str, object] = {}
+        self._incoming_edge_sources: dict[str, list[str]] = {}
+        self._upstream_node_ids_cache: dict[str, set[str]] = {}
+        self._upstream_node_labels_cache: dict[str, set[str]] = {}
+        self.lock = Lock()
+        self.workflow_cache = workflow_cache or {}
+        self.sub_workflow_executions: list[SubWorkflowExecution] = []
+        self.completed_node_results: list[dict] = []
+        self.execution_start_time: float | None = None
+        self.test_mode = test_mode
+        self.credentials_context = credentials_context or {}
+        self.global_variables_context = global_variables_context or {}
+        self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.workflow_description = workflow_description
+        self.execution_id = execution_id
+        self.llm_session_id = llm_session_id or execution_id or str(uuid.uuid4())
+        self.trace_user_id = trace_user_id
+        self.actor_user_id = actor_user_id
+        self.conversation_history = conversation_history
+        self._sub_workflow_invocation_depth = sub_workflow_invocation_depth
+        # True when this executor is running a workflow that was invoked (directly or
+        # transitively) by an agent's ``call_sub_workflow`` tool. Used to propagate the
+        # "AI Agents" trigger_source tag down to Execute Workflow nodes inside the chain.
+        self._invoked_by_agent = invoked_by_agent
+        self._base_url = public_base_url
+        self.return_on_chart_output = return_on_chart_output
+        self.cancel_event = cancel_event
+        # Cooperative timeout: a monotonic deadline checked at every node boundary
+        # via ``check_cancelled``. ``None`` (or non-positive timeout) disables it.
+        self.timeout_seconds = timeout_seconds
+        self._deadline: float | None = None
+        self.hitl_resume_context: dict[str, dict] = {}
+        self.error_handler_nodes = {
+            node_id for node_id, node in self.nodes.items() if node.get("type") == "errorHandler"
+        }
+        self.loop_states: dict[str, dict] = {}
+        self.vars: dict[str, object] = {}
+        self._wrapped_vars_cache: DotDict | None = None
+        self._wrapped_global_cache: DotDict | None = None
+        self._merged_global_context_cache: dict[str, object] | None = None
+        self._vars_context_dirty = True
+        self._sub_agent_call_depth = 0
+        self.delegated_agent_node_results: list[NodeResult] = []
+        self.notification_branch_node_results: list[NodeResult] = []
+        self.retry_node_results: list[NodeResult] = []
+        self._node_result_sequence = 0
+        self._node_result_sequence_lock = Lock()
+        self._bg_futures: list = []
+        self._bg_futures_lock = Lock()
+        self.configured_timezone = configured_timezone or get_configured_timezone()
+        self._downstream_global_node_ids: frozenset[str] = frozenset()
+        # Active OTel context (with the workflow root span) captured during execute();
+        # re-attached inside worker threads so node spans nest under the workflow span.
+        self._otel_root_context: object | None = None
+
+        for edge in self.edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if isinstance(source, str) and isinstance(target, str):
+                self._incoming_edge_sources.setdefault(target, []).append(source)
+
+        for node_id, node in self.nodes.items():
+            if node.get("data", {}).get("active") is False:
+                self.inactive_nodes.add(node_id)
+                self.skipped_nodes.add(node_id)
+
+        sub_agent_labels: set[str] = set()
+        for node in self.nodes.values():
+            if node.get("type") == "agent":
+                data = node.get("data", {}) or {}
+                if data.get("isOrchestrator") and data.get("subAgentLabels"):
+                    sub_agent_labels.update(data.get("subAgentLabels") or [])
+        for node_id, node in self.nodes.items():
+            if node.get("type") == "agent":
+                label = node.get("data", {}).get("label", "")
+                if label in sub_agent_labels:
+                    self.skipped_nodes.add(node_id)
+
+        # Orphan outputs are skipped when other executable nodes exist (disconnected
+        # terminals). A lone output on the canvas — sticky notes aside — still runs so a
+        # static message workflow works without an upstream node.
+        executable_node_count = sum(
+            1 for node in self.nodes.values() if node.get("type") != "sticky"
+        )
+        for node_id, node in self.nodes.items():
+            if node.get("type") == "output":
+                has_input = any(edge["target"] == node_id for edge in self.edges)
+                if not has_input and executable_node_count > 1:
+                    self.skipped_nodes.add(node_id)
+
+    def _get_accessible_credential(self, db, credential_id: object):
+        from app.db.models import Credential, CredentialShare, CredentialTeamShare, TeamMember
+
+        actor_user_id = self._require_actor_user_id("Credential")
+
+        credential = (
+            db.query(Credential)
+            .filter(
+                Credential.id == credential_id,
+                Credential.owner_id == actor_user_id,
+            )
+            .first()
+        )
+        if credential is not None:
+            return credential
+
+        credential = (
+            db.query(Credential)
+            .join(CredentialShare, CredentialShare.credential_id == Credential.id)
+            .filter(
+                Credential.id == credential_id,
+                CredentialShare.user_id == actor_user_id,
+            )
+            .first()
+        )
+        if credential is not None:
+            return credential
+
+        return (
+            db.query(Credential)
+            .join(CredentialTeamShare, CredentialTeamShare.credential_id == Credential.id)
+            .join(TeamMember, TeamMember.team_id == CredentialTeamShare.team_id)
+            .filter(
+                Credential.id == credential_id,
+                TeamMember.user_id == actor_user_id,
+            )
+            .first()
+        )
+
+    def _get_vector_store_backing_credential(self, db, credential_id: object):
+        from app.db.models import Credential
+
+        return db.query(Credential).filter(Credential.id == credential_id).first()
+
+    def _get_accessible_vector_store(self, db, vector_store_id: object):
+        from app.db.models import (
+            TeamMember,
+            VectorStore,
+            VectorStoreShare,
+            VectorStoreTeamShare,
+        )
+
+        actor_user_id = self._require_actor_user_id("Vector store")
+
+        store = (
+            db.query(VectorStore)
+            .filter(
+                VectorStore.id == vector_store_id,
+                VectorStore.owner_id == actor_user_id,
+            )
+            .first()
+        )
+        if store is not None:
+            return store
+
+        store = (
+            db.query(VectorStore)
+            .join(VectorStoreShare, VectorStoreShare.vector_store_id == VectorStore.id)
+            .filter(
+                VectorStore.id == vector_store_id,
+                VectorStoreShare.user_id == actor_user_id,
+            )
+            .first()
+        )
+        if store is not None:
+            return store
+
+        return (
+            db.query(VectorStore)
+            .join(VectorStoreTeamShare, VectorStoreTeamShare.vector_store_id == VectorStore.id)
+            .join(TeamMember, TeamMember.team_id == VectorStoreTeamShare.team_id)
+            .filter(
+                VectorStore.id == vector_store_id,
+                TeamMember.user_id == actor_user_id,
+            )
+            .first()
+        )
+
+    def _get_accessible_data_table(self, db, data_table_id: object, operation: str):
+        from app.db.models import DataTable, DataTableShare, DataTableTeamShare, TeamMember
+
+        write_required = operation not in ("find", "getAll", "getById", "count")
+        actor_user_id = self._require_actor_user_id("DataTable")
+
+        table = (
+            db.query(DataTable)
+            .filter(
+                DataTable.id == data_table_id,
+                DataTable.owner_id == actor_user_id,
+            )
+            .first()
+        )
+        if table is not None:
+            return table
+
+        has_read_share = False
+        user_shares = (
+            db.query(DataTable, DataTableShare.permission)
+            .join(DataTableShare, DataTableShare.table_id == DataTable.id)
+            .filter(
+                DataTable.id == data_table_id,
+                DataTableShare.user_id == actor_user_id,
+            )
+            .all()
+        )
+        for table, permission in user_shares:
+            has_read_share = True
+            if not write_required or permission == "write":
+                return table
+
+        team_shares = (
+            db.query(DataTable, DataTableTeamShare.permission)
+            .join(DataTableTeamShare, DataTableTeamShare.table_id == DataTable.id)
+            .join(TeamMember, TeamMember.team_id == DataTableTeamShare.team_id)
+            .filter(
+                DataTable.id == data_table_id,
+                TeamMember.user_id == actor_user_id,
+            )
+            .all()
+        )
+        for table, permission in team_shares:
+            has_read_share = True
+            if not write_required or permission == "write":
+                return table
+
+        if has_read_share and write_required:
+            raise ValueError("Write access required for this operation")
+        return None
+
+    def _require_actor_user_id(self, resource_label: str) -> uuid.UUID:
+        if self.actor_user_id is None:
+            raise ValueError(
+                f"{resource_label} lookup requires actor_user_id; refusing unrestricted lookup."
+            )
+        return self.actor_user_id
+
+    def get_node_label(self, node_id: str) -> str:
+        node = self.nodes.get(node_id)
+        if node:
+            return node.get("data", {}).get("label", node_id)
+        return node_id
+
+    def _stamp_node_result(self, result: NodeResult) -> NodeResult:
+        if _node_result_sequence_value(result) is not None:
+            return result
+        finished_ms = time.time() * 1000
+        duration_ms = max(float(result.execution_time_ms or 0), 0.0)
+        with self._node_result_sequence_lock:
+            self._node_result_sequence += 1
+            sequence = self._node_result_sequence
+        metadata = dict(result.metadata or {})
+        metadata["sequence"] = sequence
+        metadata.setdefault("ended_at_ms", finished_ms)
+        metadata.setdefault("started_at_ms", max(finished_ms - duration_ms, 0.0))
+        result.metadata = metadata
+        return result
+
+    def _attach_gc_pause_metadata(
+        self,
+        result: NodeResult,
+        tracker: _NodeGcPauseTracker,
+    ) -> NodeResult:
+        """Persist measured GC pauses onto node metadata for timeline/debug consumers."""
+        if not tracker.pauses:
+            return result
+
+        metadata = dict(result.metadata or {})
+        metadata["gc_pause_ms"] = round(tracker.total_pause_ms(), 3)
+        metadata["gc_pause_count"] = len(tracker.pauses)
+        metadata["gc_pause_intervals"] = [
+            {
+                "start_ms": round(start_ms, 3),
+                "duration_ms": round(duration_ms, 3),
+                "generation": generation,
+            }
+            for start_ms, duration_ms, generation in tracker.pauses
+        ]
+        result.metadata = metadata
+        return result
+
+    def _record_retry_attempt_result(
+        self,
+        *,
+        node_id: str,
+        node_label: str,
+        node_type: str,
+        error: Exception,
+        attempt: int,
+        max_attempts: int,
+        retry_wait_seconds: int | float,
+        execution_time_ms: float,
+    ) -> NodeResult:
+        message = f"Attempt {attempt}/{max_attempts} failed. Retrying in {retry_wait_seconds}s."
+        retry_result = self._stamp_node_result(
+            NodeResult(
+                node_id=node_id,
+                node_label=node_label,
+                node_type=node_type,
+                status="error",
+                output={
+                    "error": str(error),
+                    "message": message,
+                    "retry_attempt": attempt,
+                    "retry_max_attempts": max_attempts,
+                    "retry_wait_seconds": retry_wait_seconds,
+                },
+                execution_time_ms=execution_time_ms,
+                error=str(error),
+                metadata={
+                    "retry_stage": "attempt_failed",
+                    "retry_attempt": attempt,
+                    "retry_max_attempts": max_attempts,
+                    "retry_wait_seconds": retry_wait_seconds,
+                },
+            )
+        )
+        with self.lock:
+            self.retry_node_results.append(retry_result)
+        return retry_result
+
+    def _arm_deadline(self) -> None:
+        """Start the timeout clock. Call once at the beginning of a run."""
+        if self.timeout_seconds and self.timeout_seconds > 0:
+            self._deadline = time.monotonic() + self.timeout_seconds
+
+    def check_cancelled(self) -> None:
+        if self._deadline is not None and time.monotonic() > self._deadline:
+            raise WorkflowTimeoutError(
+                f"Workflow timed out after {int(self.timeout_seconds or 0)} seconds"
+            )
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise WorkflowCancelledError("Workflow execution cancelled")
+
+    def _terminate_subprocess(self, process: Any) -> None:
+        if process.poll() is not None:
+            return
+
+        import subprocess
+
+        try:
+            if os.name == "nt":
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+                return
+
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=2)
+        except ProcessLookupError:
+            return
+
+    def _get_workflow_name_for_log(self) -> str:
+        if not self.workflow_id:
+            return "?"
+        if hasattr(self, "_workflow_name_for_log"):
+            return self._workflow_name_for_log
+        try:
+            from app.db.models import Workflow
+            from app.db.session import SessionLocal
+
+            with SessionLocal() as db:
+                w = db.query(Workflow).filter(Workflow.id == self.workflow_id).first()
+                self._workflow_name_for_log = w.name if w else str(self.workflow_id)
+        except Exception:
+            self._workflow_name_for_log = str(self.workflow_id)
+        return self._workflow_name_for_log
+
+    def _get_workflow_metadata(self) -> tuple[str, str]:
+        """Return (name, description). Prefer explicitly supplied values; otherwise
+        lazily fetch once from the DB by workflow_id (mirrors
+        ``_get_workflow_name_for_log``)."""
+        if self.workflow_name or self.workflow_description:
+            return self.workflow_name, self.workflow_description
+        if not self.workflow_id:
+            return "", ""
+        if hasattr(self, "_workflow_metadata_cache"):
+            return self._workflow_metadata_cache
+        name, description = "", ""
+        try:
+            from app.db.models import Workflow
+            from app.db.session import SessionLocal
+
+            with SessionLocal() as db:
+                w = db.query(Workflow).filter(Workflow.id == self.workflow_id).first()
+                if w is not None:
+                    name = w.name or ""
+                    description = w.description or ""
+        except Exception:
+            pass
+        self._workflow_metadata_cache = (name, description)
+        return self._workflow_metadata_cache
+
+    def _build_workflow_url(self, workflow_path: str) -> str:
+        if not workflow_path:
+            return ""
+        base = (self._base_url or "").rstrip("/")
+        if not base:
+            from app.config import settings
+
+            base = (settings.frontend_url or "").rstrip("/")
+        if not base:
+            return ""
+        return f"{base}{workflow_path}"
+
+    def _build_llm_trace_context(
+        self, credential_id: str | None, node_id: str | None
+    ) -> LLMTraceContext | None:
+        if not credential_id or not self.trace_user_id:
+            return None
+        try:
+            credential_uuid = uuid.UUID(credential_id)
+        except ValueError:
+            return None
+        node_label = self.get_node_label(node_id) if node_id else None
+        return LLMTraceContext(
+            user_id=self.trace_user_id,
+            credential_id=credential_uuid,
+            workflow_id=self.workflow_id,
+            node_id=node_id,
+            node_label=node_label,
+            source="workflow",
+            session_id=self.llm_session_id,
+        )
+
+    @staticmethod
+    def _latest_trace_id(trace_context: LLMTraceContext | None) -> str | None:
+        if trace_context is None or not trace_context.trace_ids:
+            return None
+        return str(trace_context.trace_ids[-1])
+
+    @classmethod
+    def _attach_latest_trace_id(
+        cls, output: dict[str, Any], trace_context: LLMTraceContext | None
+    ) -> None:
+        trace_id = cls._latest_trace_id(trace_context)
+        if trace_id:
+            output["_trace_id"] = trace_id
+
+    @staticmethod
+    def _pop_internal_trace_id(output: dict[str, Any]) -> str | None:
+        trace_id = output.pop("_trace_id", None)
+        return trace_id if isinstance(trace_id, str) and trace_id else None
+
+    @staticmethod
+    def _pop_model_routing(output: dict[str, Any]) -> dict[str, Any] | None:
+        """Take the router summary off a node output so it lands in metadata instead."""
+        routing = output.pop("_model_routing", None)
+        return routing if isinstance(routing, dict) else None
+
+    @staticmethod
+    def _restore_internal_trace_id(output: dict[str, Any], trace_id: str | None) -> None:
+        if trace_id:
+            output["_trace_id"] = trace_id
+
+    def _is_early_return_node(self, node_id: str) -> bool:
+        """True when this node may complete the workflow before siblings finish."""
+        node = self.nodes.get(node_id, {})
+        node_type = node.get("type")
+        if node_type == "chartOutput" and self.return_on_chart_output:
+            return True
+        if node_type == "output" and node.get("data", {}).get("allowDownstream"):
+            return True
+        return False
+
+    def _prioritize_ready_node_ids(self, node_ids: list[str]) -> list[str]:
+        """Schedule early-return nodes ahead of siblings so they are not starved."""
+        return sorted(node_ids, key=lambda nid: 0 if self._is_early_return_node(nid) else 1)
+
+    def get_input_nodes(self) -> list[str]:
+        error_flow_nodes = self.get_error_flow_nodes()
+        target_ids = {edge["target"] for edge in self.get_active_edges()}
+        return [
+            node_id
+            for node_id in self.nodes
+            if node_id not in target_ids and node_id not in error_flow_nodes
+        ]
+
+    def get_output_nodes(self) -> list[str]:
+        error_flow_nodes = self.get_error_flow_nodes()
+        source_ids = {edge["source"] for edge in self.get_active_edges()}
+        output_nodes = [
+            node_id
+            for node_id, node in self.nodes.items()
+            if node.get("type") in OUTPUT_TERMINAL_NODE_TYPES
+            and node_id not in self.error_handler_nodes
+            and node_id not in error_flow_nodes
+        ]
+        leaf_nodes = [
+            node_id
+            for node_id in self.nodes
+            if node_id not in source_ids
+            and node_id not in self.error_handler_nodes
+            and node_id not in error_flow_nodes
+        ]
+        return list({*output_nodes, *leaf_nodes})
+
+    def get_active_edges(self) -> list[dict]:
+        edges = []
+        for edge in self.edges:
+            source_node = self.nodes.get(edge["source"])
+            target_node = self.nodes.get(edge["target"])
+            if not source_node or not target_node:
+                continue
+            if (
+                edge["source"] in self.error_handler_nodes
+                or edge["target"] in self.error_handler_nodes
+            ):
+                continue
+            if (
+                edge["source"] == edge["target"]
+                and target_node.get("type") == "loop"
+                and edge.get("targetHandle") == "loop"
+            ):
+                # Some canvas workflows contain a visual loop-handle self-edge in
+                # addition to the body node's real back-connection. The self-edge is
+                # not an execution dependency: scheduling it advances the loop while
+                # the body is still running.
+                continue
+            if source_node.get("type") in TERMINAL_MAPPER_NODE_TYPES:
+                continue
+            if source_node.get("type") == "output":
+                allow_downstream = source_node.get("data", {}).get("allowDownstream")
+                if not allow_downstream:
+                    continue
+            edges.append(edge)
+        return edges
+
+    def get_error_flow_nodes(self) -> set[str]:
+        if not self.error_handler_nodes:
+            return set()
+        visited: set[str] = set(self.error_handler_nodes)
+        queue = list(self.error_handler_nodes)
+
+        while queue:
+            current = queue.pop(0)
+            for edge in self.edges:
+                if edge["source"] == current:
+                    target = edge["target"]
+                    if target not in visited:
+                        visited.add(target)
+                        queue.append(target)
+        return visited
+
+    def get_node_inputs_for_edges(self, node_id: str, edges: list[dict]) -> dict:
+        inputs = {}
+        execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
+        for edge in edges:
+            if edge["target"] == node_id:
+                source_id = edge["source"]
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
+                    source_label = self.get_node_label(source_id)
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
+                    execution_context[source_label] = source_output
+                    inputs[source_label] = source_output
+        if execution_context:
+            inputs[_EXECUTION_CONTEXT_INPUT_KEY] = execution_context
+        return inputs
+
+    def get_loop_reexecution_inputs(
+        self,
+        loop_node_id: str,
+        feedback_source_node_id: str,
+        edges: list[dict],
+    ) -> dict:
+        """Return loop inputs with feedback only from the branch that just completed."""
+        relevant_edges = [
+            edge
+            for edge in edges
+            if edge.get("target") != loop_node_id
+            or edge.get("targetHandle") != "loop"
+            or edge.get("source") == feedback_source_node_id
+        ]
+        return self.get_node_inputs_for_edges(loop_node_id, relevant_edges)
+
+    def get_node_inputs(self, node_id: str) -> dict:
+        inputs = {}
+        execution_context: dict[str, object] = {}
+        with self.lock:
+            node_outputs_snapshot = dict(self.node_outputs)
+            node_execution_contexts_snapshot = dict(self.node_execution_contexts)
+            skipped_nodes_snapshot = set(self.skipped_nodes)
+        for edge in self.edges:
+            if edge["target"] == node_id:
+                source_id = edge["source"]
+                if source_id in node_outputs_snapshot and source_id not in skipped_nodes_snapshot:
+                    source_label = self.get_node_label(source_id)
+                    source_output = node_outputs_snapshot[source_id]
+                    execution_context.update(node_execution_contexts_snapshot.get(source_id, {}))
+                    execution_context[source_label] = source_output
+                    inputs[source_label] = source_output
+        if execution_context:
+            inputs[_EXECUTION_CONTEXT_INPUT_KEY] = execution_context
+        return inputs
+
+    def _edge_matches_source_handle(self, edge: dict, handle_id: str | None) -> bool:
+        if handle_id is None:
+            return True
+
+        source_handle = edge.get("sourceHandle")
+        if source_handle == handle_id:
+            return True
+
+        source_node = self.nodes.get(edge.get("source"), {})
+        if handle_id == "true" and source_node.get("type") == "condition" and not source_handle:
+            return True
+
+        return False
+
+    def _source_handle_is_skipped(self, edge: dict, skipped_handles: set[str]) -> bool:
+        """Return whether an edge's source handle is suppressed by node metadata."""
+        for handle_id in skipped_handles:
+            if self._edge_matches_source_handle(edge, handle_id):
+                return True
+        return False
+
+    def _loop_back_targets_for_source_handle(self, node_id: str, handle_id: str) -> set[str]:
+        """Return loop nodes reached directly by a specific branch handle."""
+        targets: set[str] = set()
+        for edge in self.edges:
+            if edge.get("source") != node_id:
+                continue
+            target = edge.get("target")
+            target_node = self.nodes.get(target, {})
+            if (
+                edge.get("targetHandle") == "loop"
+                and target_node.get("type") == "loop"
+                and self._edge_matches_source_handle(edge, handle_id)
+            ):
+                targets.add(target)
+        return targets
+
+    def get_downstream_nodes(self, node_id: str, handle_id: str | None = None) -> list[str]:
+        downstream = []
+        for edge in self.edges:
+            if edge["source"] == node_id:
+                if self._edge_matches_source_handle(edge, handle_id):
+                    downstream.append(edge["target"])
+        return downstream
+
+    def get_branch_node_ids(
+        self,
+        start_node_id: str,
+        edges: list[dict],
+        *,
+        exclude_node_ids: set[str] | None = None,
+    ) -> set[str]:
+        """Return the start node plus all downstream nodes reachable through the given edges."""
+        excluded = exclude_node_ids or set()
+        visited: set[str] = set()
+        queue = [start_node_id]
+
+        while queue:
+            current = queue.pop(0)
+            if current in visited or current in excluded:
+                continue
+            visited.add(current)
+
+            for edge in edges:
+                if edge["source"] != current:
+                    continue
+                target = edge["target"]
+                if target not in visited and target not in excluded:
+                    queue.append(target)
+
+        return visited
+
+    def get_incoming_edge_count_for_execution(self, node_id: str, edges: list[dict]) -> int:
+        """Return the pending dependency count for a node under the active execution graph."""
+        node = self.nodes.get(node_id, {})
+        if node.get("type") == "loop":
+            return sum(
+                1
+                for edge in edges
+                if edge["target"] == node_id and edge.get("targetHandle") != "loop"
+            )
+        return sum(1 for edge in edges if edge["target"] == node_id)
+
+    def get_upstream_node_ids(self, node_id: str) -> set[str]:
+        cached = self._upstream_node_ids_cache.get(node_id)
+        if cached is not None:
+            return cached
+
+        upstream: set[str] = set()
+        visited: set[str] = set()
+        pending: deque[str] = deque([node_id])
+
+        while pending:
+            current = pending.popleft()
+            if current in visited:
+                continue
+            visited.add(current)
+
+            for source_id in self._incoming_edge_sources.get(current, []):
+                if source_id in visited:
+                    continue
+                upstream.add(source_id)
+                pending.append(source_id)
+
+        self._upstream_node_ids_cache[node_id] = upstream
+        return upstream
+
+    def get_upstream_node_labels(self, node_id: str) -> set[str]:
+        cached = self._upstream_node_labels_cache.get(node_id)
+        if cached is not None:
+            return cached
+
+        upstream_ids = self.get_upstream_node_ids(node_id)
+        upstream_labels = {self.get_node_label(nid) for nid in upstream_ids}
+        self._upstream_node_labels_cache[node_id] = upstream_labels
+        return upstream_labels
+
+    def get_reachable_node_ids(
+        self,
+        start_node_ids: list[str],
+        *,
+        exclude_node_ids: set[str] | None = None,
+    ) -> set[str]:
+        """Return all nodes reachable from any start node, optionally stopping at excluded nodes."""
+        excluded = exclude_node_ids or set()
+        reachable: set[str] = set()
+        queue = list(start_node_ids)
+
+        while queue:
+            current = queue.pop(0)
+            if current in reachable or current in excluded:
+                continue
+            reachable.add(current)
+
+            for edge in self.edges:
+                if edge["source"] != current:
+                    continue
+                target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
+                if target not in reachable and target not in excluded:
+                    queue.append(target)
+
+        return reachable
+
+    def mark_branch_as_skipped(
+        self,
+        node_id: str,
+        *,
+        preserve_node_ids: set[str] | None = None,
+        stop_node_ids: set[str] | None = None,
+    ) -> None:
+        preserved = preserve_node_ids or set()
+        stopped = stop_node_ids or set()
+        if node_id in preserved or node_id in stopped:
+            return
+        self.skipped_nodes.add(node_id)
+        for edge in self.edges:
+            if edge["source"] == node_id:
+                target = edge["target"]
+                if (
+                    edge.get("targetHandle") == "loop"
+                    and self.nodes.get(target, {}).get("type") == "loop"
+                ):
+                    continue
+                if target in preserved or target in stopped:
+                    continue
+                self.mark_branch_as_skipped(
+                    target,
+                    preserve_node_ids=preserved,
+                    stop_node_ids=stopped,
+                )
+
+    def skip_branch_targets_preserving_shared_downstream(
+        self,
+        node_id: str,
+        *,
+        active_targets: list[str],
+        inactive_targets: list[str],
+        active_exclude_node_ids: set[str] | None = None,
+        inactive_stop_node_ids: set[str] | None = None,
+    ) -> None:
+        """Skip only nodes exclusive to inactive targets; keep shared downstream merge nodes active."""
+        preserved_node_ids = self.get_reachable_node_ids(
+            active_targets,
+            exclude_node_ids=active_exclude_node_ids,
+        )
+        for target in inactive_targets:
+            self.mark_branch_as_skipped(
+                target,
+                preserve_node_ids=preserved_node_ids,
+                stop_node_ids=inactive_stop_node_ids,
+            )
+
+    def get_loop_body_node_ids(self, loop_node_id: str, edges: list[dict]) -> set[str]:
+        """Return nodes in a loop body, stopping before the loop-back edge reaches the loop node."""
+        visited: set[str] = set()
+        queue = [
+            edge["target"]
+            for edge in edges
+            if edge["source"] == loop_node_id and edge.get("sourceHandle") == "loop"
+        ]
+
+        while queue:
+            current = queue.pop(0)
+            if current in visited or current == loop_node_id:
+                continue
+            visited.add(current)
+
+            for edge in edges:
+                if edge["source"] != current:
+                    continue
+                target = edge["target"]
+                if target != loop_node_id and target not in visited:
+                    queue.append(target)
+
+        return visited
+
+    def reset_nodes_for_execution(
+        self,
+        node_ids: set[str],
+        active_edges: list[dict],
+        completed_nodes: set[str],
+        pending_count: dict[str, int],
+    ) -> None:
+        """Reactivate nodes that were skipped/completed in an earlier branch or loop iteration."""
+        for branch_node in node_ids:
+            completed_nodes.discard(branch_node)
+            if branch_node not in self.inactive_nodes:
+                with self.lock:
+                    self.skipped_nodes.discard(branch_node)
+            pending_count[branch_node] = self.get_incoming_edge_count_for_execution(
+                branch_node, active_edges
+            )
+
+    def prepare_branch_targets_for_execution(
+        self,
+        *,
+        start_node_ids: list[str],
+        active_edges: list[dict],
+        completed_nodes: set[str],
+        pending_count: dict[str, int],
+    ) -> None:
+        branch_nodes: set[str] = set()
+        for start_node_id in start_node_ids:
+            branch_nodes.update(self.get_branch_node_ids(start_node_id, active_edges))
+        self.reset_nodes_for_execution(branch_nodes, active_edges, completed_nodes, pending_count)
+
+    def prepare_loop_for_reexecution(
+        self,
+        *,
+        loop_node_id: str,
+        active_edges: list[dict],
+        completed_nodes: set[str],
+        pending_count: dict[str, int],
+    ) -> bool:
+        """Reset loop state so the loop node can emit the next item or the final done output."""
+        loop_state = self.loop_states.get(loop_node_id)
+        if not loop_state or loop_state["current_index"] >= loop_state["total"]:
+            return False
+
+        completed_nodes.discard(loop_node_id)
+        with self.lock:
+            self.skipped_nodes.discard(loop_node_id)
+        self.reset_nodes_for_execution(
+            self.get_loop_body_node_ids(loop_node_id, active_edges),
+            active_edges,
+            completed_nodes,
+            pending_count,
+        )
+        return True
+
+    def get_execution_order(self) -> list[str]:
+        in_degree: dict[str, int] = {node_id: 0 for node_id in self.nodes}
+        for edge in self.edges:
+            if edge["target"] in in_degree:
+                in_degree[edge["target"]] += 1
+
+        queue = [node_id for node_id, degree in in_degree.items() if degree == 0]
+        order = []
+
+        while queue:
+            node_id = queue.pop(0)
+            order.append(node_id)
+
+            for edge in self.edges:
+                if edge["source"] == node_id:
+                    target = edge["target"]
+                    in_degree[target] -= 1
+                    if in_degree[target] == 0:
+                        queue.append(target)
+
+        return order
+
+    def get_execution_levels(self) -> list[list[str]]:
+        """Get nodes grouped by execution level for parallel execution."""
+        in_degree: dict[str, int] = {node_id: 0 for node_id in self.nodes}
+        for edge in self.edges:
+            if edge["target"] in in_degree:
+                in_degree[edge["target"]] += 1
+
+        levels: list[list[str]] = []
+        current_level = [node_id for node_id, degree in in_degree.items() if degree == 0]
+
+        while current_level:
+            levels.append(current_level)
+            next_level = []
+
+            for node_id in current_level:
+                for edge in self.edges:
+                    if edge["source"] == node_id:
+                        target = edge["target"]
+                        in_degree[target] -= 1
+                        if in_degree[target] == 0:
+                            next_level.append(target)
+
+            current_level = next_level
+
+        return levels
+
+    def _snapshot_execution_context(
+        self,
+        inputs: dict | None,
+        node_label: str,
+        output: dict,
+    ) -> dict[str, object]:
+        """Build the label context downstream nodes should inherit from this output."""
+        context: dict[str, object] = {}
+        if isinstance(inputs, dict):
+            inherited_context = inputs.get(_EXECUTION_CONTEXT_INPUT_KEY)
+            if isinstance(inherited_context, dict):
+                context.update(inherited_context)
+            for label, value in inputs.items():
+                if label == _EXECUTION_CONTEXT_INPUT_KEY:
+                    continue
+                context[label] = value
+        context[node_label] = output
+        return copy.deepcopy(context)
+
+    def _visible_inputs(self, inputs: dict) -> dict:
+        """Return user-facing node inputs without internal execution context."""
+        return {key: value for key, value in inputs.items() if key != _EXECUTION_CONTEXT_INPUT_KEY}
+
+    def _first_visible_input(self, inputs: dict) -> object:
+        """Return the first user-facing input value, preserving legacy `$input` behavior."""
+        visible_inputs = self._visible_inputs(inputs)
+        return next(iter(visible_inputs.values()), {})
+
+    def store_node_output(
+        self,
+        node_id: str,
+        node_label: str,
+        output: dict,
+        inputs: dict | None = None,
+    ) -> None:
+        """Store node output in shared state (thread-safe)."""
+        if inputs is None and node_id in self.node_execution_contexts:
+            execution_context = copy.deepcopy(self.node_execution_contexts[node_id])
+            execution_context[node_label] = copy.deepcopy(output)
+        else:
+            execution_context = self._snapshot_execution_context(inputs, node_label, output)
+        with self.lock:
+            self.node_outputs[node_id] = output
+            self.node_execution_contexts[node_id] = execution_context
+            self.label_to_output[node_label] = output
+            self._wrapped_label_output_cache[node_label] = self._wrap_value(output)
+
+    def _rebuild_wrapped_label_output_cache(self) -> None:
+        """Rebuild wrapped node output cache from stored plain outputs."""
+        self._wrapped_label_output_cache = {
+            node_label: self._wrap_value(output)
+            for node_label, output in self.label_to_output.items()
+        }
+
+    def build_resume_snapshot(
+        self,
+        *,
+        initial_inputs: dict,
+        node_results: list[NodeResult],
+        pending_count: dict[str, int],
+        completed_nodes: set[str],
+        paused_node_id: str,
+        paused_node_label: str,
+    ) -> dict:
+        return {
+            "workflow_id": str(self.workflow_id) if self.workflow_id else None,
+            "actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,
+            "nodes": copy.deepcopy(list(self.nodes.values())),
+            "edges": copy.deepcopy(self.edges),
+            "workflow_cache": copy.deepcopy(self.workflow_cache),
+            "initial_inputs": copy.deepcopy(initial_inputs),
+            "conversation_history": copy.deepcopy(self.conversation_history),
+            "llm_session_id": self.llm_session_id,
+            "node_results": _serialize_node_results(
+                _order_node_results(
+                    list(node_results)
+                    + list(getattr(self, "retry_node_results", []))
+                    + list(getattr(self, "delegated_agent_node_results", []))
+                    + list(getattr(self, "notification_branch_node_results", []))
+                )
+            ),
+            "node_outputs": copy.deepcopy(self.node_outputs),
+            "node_execution_contexts": copy.deepcopy(self.node_execution_contexts),
+            "label_to_output": copy.deepcopy(self.label_to_output),
+            "skipped_nodes": sorted(self.skipped_nodes),
+            "inactive_nodes": sorted(self.inactive_nodes),
+            "loop_states": copy.deepcopy(self.loop_states),
+            "vars": copy.deepcopy(self.vars),
+            "sub_workflow_executions": _serialize_sub_workflow_executions(
+                self.sub_workflow_executions
+            ),
+            "completed_nodes": sorted(completed_nodes),
+            "pending_count": copy.deepcopy(pending_count),
+            "paused_node_id": paused_node_id,
+            "paused_node_label": paused_node_label,
+            "sub_workflow_invocation_depth": self._sub_workflow_invocation_depth,
+            "invoked_by_agent": self._invoked_by_agent,
+            "test_mode": self.test_mode,
+        }
+
+    def build_notification_snapshot(self) -> dict[str, Any]:
+        return {
+            "workflow_id": str(self.workflow_id) if self.workflow_id else None,
+            "actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,
+            "nodes": copy.deepcopy(list(self.nodes.values())),
+            "edges": copy.deepcopy(self.edges),
+            "workflow_cache": copy.deepcopy(self.workflow_cache),
+            "conversation_history": copy.deepcopy(self.conversation_history),
+            "llm_session_id": self.llm_session_id,
+            "node_outputs": copy.deepcopy(self.node_outputs),
+            "node_execution_contexts": copy.deepcopy(self.node_execution_contexts),
+            "label_to_output": copy.deepcopy(self.label_to_output),
+            "skipped_nodes": sorted(self.skipped_nodes),
+            "inactive_nodes": sorted(self.inactive_nodes),
+            "loop_states": copy.deepcopy(self.loop_states),
+            "vars": copy.deepcopy(self.vars),
+            "sub_workflow_executions": _serialize_sub_workflow_executions(
+                self.sub_workflow_executions
+            ),
+            "sub_workflow_invocation_depth": self._sub_workflow_invocation_depth,
+            "invoked_by_agent": self._invoked_by_agent,
+            "test_mode": self.test_mode,
+        }
+
+    def drain_bg_futures(self) -> None:
+        """Block until all executeDoNotWait background sub-workflows have finished.
+
+        Each future appends to ``sub_workflow_executions`` via a done-callback when it
+        completes; this method only waits so callers (e.g. streaming API) can safely
+        serialize traces after the parent workflow returns.
+        """
+        with self._bg_futures_lock:
+            pending = list(self._bg_futures)
+            self._bg_futures.clear()
+        for item in pending:
+            if len(item) == 5:
+                fut, done_event, _wf_id, _wf_name, _inputs_snapshot = item
+            else:
+                fut, _wf_id, _wf_name, _inputs_snapshot = item
+                done_event = None
+            try:
+                fut.result()
+            except Exception as exc:
+                logger.warning(
+                    "drain_bg_futures: background sub-workflow raised: %s",
+                    exc,
+                    exc_info=True,
+                )
+            finally:
+                if done_event is not None:
+                    done_event.wait()
+
+    @staticmethod
+    def _record_bg_sub_workflow_done(
+        fut: Future,
+        parent: "WorkflowExecutor",
+        wf_id: str,
+        wf_name: str,
+        inputs_snapshot: dict,
+        execution_id: str = "",
+    ) -> None:
+        """Append SubWorkflowExecution when a fire-and-forget sub-workflow finishes."""
+        bg_trigger_source = "AI Agents" if parent._invoked_by_agent else "SUB_WORKFLOW"
+        try:
+            sub_res: ExecutionResult = fut.result()
+        except Exception:
+            with parent.lock:
+                parent.sub_workflow_executions.append(
+                    SubWorkflowExecution(
+                        workflow_id=wf_id,
+                        inputs=inputs_snapshot,
+                        outputs={},
+                        status="error",
+                        execution_time_ms=0.0,
+                        node_results=[],
+                        workflow_name=wf_name,
+                        trigger_source=bg_trigger_source,
+                        execution_id=execution_id,
+                    )
+                )
+            return
+        if sub_res.allow_downstream_pending:
+            try:
+                sub_res.join_allow_downstream()
+            except WorkflowTimeoutError as exc:
+                sub_res.status = "error"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
+            except (WorkflowCancelledError, CancelledError, asyncio.CancelledError) as exc:
+                sub_res.status = "cancelled"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc) or "Workflow execution cancelled")
+            except Exception as exc:
+                logger.exception("Unexpected exception in background sub-workflow allowDownstream")
+                sub_res.status = "error"
+                if isinstance(sub_res.outputs, dict):
+                    sub_res.outputs.setdefault("error", str(exc))
+        credentials_context = getattr(parent, "credentials_context", None) or {}
+        if sub_res.status == "pending":
+            _, pending_rows = mask_sub_workflow_result(sub_res, credentials_context)
+            with parent.lock:
+                parent.sub_workflow_executions.append(
+                    SubWorkflowExecution(
+                        workflow_id=wf_id,
+                        inputs=inputs_snapshot,
+                        outputs={"error": SUB_WORKFLOW_HITL_UNSUPPORTED},
+                        status="error",
+                        execution_time_ms=sub_res.execution_time_ms,
+                        node_results=pending_rows,
+                        workflow_name=wf_name,
+                        trigger_source=bg_trigger_source,
+                        execution_id=execution_id,
+                    )
+                )
+            return
+        masked_outputs, masked_rows = mask_sub_workflow_result(sub_res, credentials_context)
+        sub_exec = SubWorkflowExecution(
+            workflow_id=wf_id,
+            inputs=inputs_snapshot,
+            outputs=masked_outputs,
+            status=sub_res.status,
+            execution_time_ms=sub_res.execution_time_ms,
+            node_results=masked_rows,
+            workflow_name=wf_name,
+            trigger_source=bg_trigger_source,
+            execution_id=execution_id,
+        )
+        with parent.lock:
+            parent.sub_workflow_executions.append(sub_exec)
+            parent.sub_workflow_executions.extend(sub_res.sub_workflow_executions)
+
+    def _build_execution_result(
+        self,
+        *,
+        workflow_id: uuid.UUID,
+        status: str,
+        outputs: dict,
+        start_time: float,
+        node_results: list[NodeResult],
+        pending_review: dict | None = None,
+        resume_snapshot: dict | None = None,
+        allow_downstream_pending: list[Future] | None = None,
+        allow_downstream_node_results: list[NodeResult] | None = None,
+    ) -> ExecutionResult:
+        combined = _order_node_results(
+            list(node_results)
+            + list(getattr(self, "retry_node_results", []))
+            + list(getattr(self, "delegated_agent_node_results", []))
+            + list(getattr(self, "notification_branch_node_results", []))
+        )
+        with self._bg_futures_lock:
+            bg_pending = list(self._bg_futures)
+        return ExecutionResult(
+            workflow_id=workflow_id,
+            status=status,
+            outputs=_to_json_compatible(outputs),
+            execution_time_ms=(time.time() - start_time) * 1000,
+            node_results=_serialize_node_results(combined),
+            sub_workflow_executions=self.sub_workflow_executions,
+            pending_review=pending_review,
+            resume_snapshot=resume_snapshot,
+            _bg_pending=bg_pending,
+            _allow_downstream_pending=list(allow_downstream_pending or []),
+            _allow_downstream_node_results=(
+                allow_downstream_node_results if allow_downstream_node_results is not None else []
+            ),
+            _started_at=start_time,
+            _global_variable_node_ids=_collect_global_variable_node_ids(self.nodes),
+            _downstream_global_node_ids=getattr(self, "_downstream_global_node_ids", frozenset()),
+        )
+
+    def execute_node_parallel(
+        self,
+        node_id: str,
+        inputs: dict,
+        on_retry: Callable[[NodeResult, int, int], None] | None = None,
+    ) -> NodeResult:
+        """Execute node and store output atomically for parallel execution."""
+        _ensure_gc_tracking_callback_registered()
+        gc_tracker = _NodeGcPauseTracker(node_started_ms=time.perf_counter() * 1000)
+        _push_gc_tracker(gc_tracker)
+        record_execution_node_started(self.execution_id, node_id)
+        try:
+            result = self.execute_node(node_id, inputs, on_retry=on_retry)
+        finally:
+            _pop_gc_tracker(gc_tracker)
+        result = self._attach_gc_pause_metadata(result, gc_tracker)
+        result = self._stamp_node_result(result)
+        if result.status == "success":
+            self.store_node_output(node_id, result.node_label, result.output, inputs)
+            with self.lock:
+                if result.output.get("_errorBranch"):
+                    self._handle_error_branch_routing(node_id)
+                else:
+                    self._handle_success_branch_routing(node_id)
+        live_result = _serialize_node_result(result)
+        if self.credentials_context:
+            live_result["output"] = mask_sensitive_output(
+                result.output,
+                self.credentials_context,
+            )
+        record_execution_node_completed(self.execution_id, node_id, live_result)
+        with self.lock:
+            self.completed_node_results.append(live_result)
+        return result
+
+    def _handle_success_branch_routing(self, node_id: str) -> None:
+        """Skip error-handle branches when the source node completed successfully."""
+        active_edges = [
+            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
+        ]
+        success_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") != "error"
+        ]
+        error_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") == "error"
+        ]
+        if not error_targets:
+            return
+
+        preserved_node_ids: set[str] = set()
+        for target in success_targets:
+            preserved_node_ids.update(self.get_branch_node_ids(target, active_edges))
+
+        exclusive_nodes = self.get_exclusive_branch_node_ids(
+            root_node_id=node_id,
+            start_node_ids=error_targets,
+            edges=active_edges,
+            preserve_node_ids=preserved_node_ids,
+        )
+        self.skipped_nodes.update(exclusive_nodes)
+
+    def _handle_error_branch_routing(self, node_id: str) -> None:
+        """Skip only non-error downstream nodes that depend exclusively on the failed node."""
+        active_edges = [
+            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
+        ]
+        error_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") == "error"
+        ]
+        inactive_targets = [
+            edge["target"]
+            for edge in active_edges
+            if edge["source"] == node_id and edge.get("sourceHandle") != "error"
+        ]
+        preserved_node_ids: set[str] = set()
+        for target in error_targets:
+            preserved_node_ids.update(self.get_branch_node_ids(target, active_edges))
+
+        exclusive_nodes = self.get_exclusive_branch_node_ids(
+            root_node_id=node_id,
+            start_node_ids=inactive_targets,
+            edges=active_edges,
+            preserve_node_ids=preserved_node_ids,
+        )
+        self.skipped_nodes.update(exclusive_nodes)
+
+    def get_exclusive_branch_node_ids(
+        self,
+        *,
+        root_node_id: str,
+        start_node_ids: list[str],
+        edges: list[dict],
+        preserve_node_ids: set[str] | None = None,
+    ) -> set[str]:
+        """Return downstream nodes whose execution depends only on the branch root.
+
+        Shared downstream nodes, such as a common output reached by another parallel branch, must
+        stay active so the other branch can still complete the workflow.
+        """
+        preserved = preserve_node_ids or set()
+        branch_node_ids: set[str] = set()
+        for start_node_id in start_node_ids:
+            branch_node_ids.update(
+                self.get_branch_node_ids(
+                    start_node_id,
+                    edges,
+                    exclude_node_ids=preserved,
+                )
+            )
+
+        exclusive_node_ids: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for candidate in branch_node_ids - exclusive_node_ids - preserved:
+                incoming_edges = [
+                    edge
+                    for edge in edges
+                    if edge["target"] == candidate
+                    and not (
+                        self.nodes.get(candidate, {}).get("type") == "loop"
+                        and edge.get("targetHandle") == "loop"
+                    )
+                ]
+                if not incoming_edges:
+                    continue
+
+                depends_only_on_root_or_exclusive_nodes = all(
+                    edge["source"] == root_node_id or edge["source"] in exclusive_node_ids
+                    for edge in incoming_edges
+                )
+                if depends_only_on_root_or_exclusive_nodes:
+                    exclusive_node_ids.add(candidate)
+                    changed = True
+
+        return exclusive_node_ids
+
+    def _record_notification_branch_results(self, results: list[NodeResult]) -> None:
+        if not results:
+            return
+        self.notification_branch_node_results.extend(results)
+
+    def _handle_llm_batch_status_update(
+        self,
+        *,
+        node_id: str,
+        node_label: str,
+        payload: dict[str, Any],
+    ) -> None:
+        event_payload = copy.deepcopy(payload)
+        if "batchStatus" not in event_payload:
+            event_payload["batchStatus"] = event_payload.get("status")
+        if self.agent_progress_queue is not None:
+            self.agent_progress_queue.put(
+                _build_llm_batch_progress_event(
+                    node_id=node_id,
+                    node_label=node_label,
+                    entry=event_payload,
+                )
+            )
+
+        has_status_branch = any(
+            edge.get("source") == node_id and edge.get("sourceHandle") == "batchStatus"
+            for edge in self.edges
+        )
+        if not has_status_branch:
+            return
+
+        snapshot = self.build_notification_snapshot()
+        try:
+            branch_result = execute_llm_batch_notification_branch(
+                snapshot=snapshot,
+                source_node_id=node_id,
+                source_node_label=node_label,
+                notification_output=event_payload,
+                credentials_context=self.credentials_context,
+                global_variables_context=self.global_variables_context,
+                trace_user_id=self.trace_user_id,
+                agent_progress_queue=self.agent_progress_queue,
+            )
+        except Exception:
+            logger.exception("Failed to execute LLM batch status branch for node %s", node_id)
+            return
+
+        self._record_notification_branch_results(branch_result.get("node_results") or [])
+
+    def _resolve_template(self, template: str, inputs: dict, node_id: str) -> str:
+        if not template or "$" not in template:
+            return template
+
+        if template.startswith("$") and " " not in template:
+            result = self.resolve_expression(template, inputs, node_id)
+            return str(result) if result is not None else ""
+
+        # `$cond ? a : b` always contains spaces, so the check above misses it and the
+        # template path below would substitute only the leading `$span` and keep the rest
+        # as literal text -- the evaluate dialog resolves the same value as an expression.
+        if self._is_top_level_ternary_expression(template):
+            result = self.resolve_expression(template.strip(), inputs, node_id)
+            return str(result) if result is not None else ""
+
+        def replace_expr(expr: str) -> str:
+            result = self.resolve_expression(expr, inputs, node_id)
+            return str(result) if result is not None else expr
+
+        return self._replace_expressions(template, replace_expr)
+
+    def _execute_llm_node(
+        self,
+        credential_id: str | None,
+        node_id: str | None,
+        model: str,
+        system_instruction: str | None,
+        user_message: str | list[str],
+        temperature: float,
+        reasoning_effort: str | None,
+        max_tokens: int | None,
+        json_output_enabled: bool,
+        json_output_schema: str | None,
+        image_input: str | None,
+        output_type: str = "text",
+        image_size: str = "1024x1024",
+        image_quality: str = "auto",
+        guardrails_config: dict | None = None,
+        fallback_credential_id: str | None = None,
+        fallback_model: str | None = None,
+        batch_mode_enabled: bool = False,
+        use_responses_api: bool = False,
+        on_batch_status_update: Callable[[dict[str, Any]], None] | None = None,
+        should_abort: Callable[[], str | None] | None = None,
+        request_timeout: float = 60.0,
+        extra_body: dict[str, Any] | None = None,
+    ) -> dict:
+        if not credential_id or not model:
+            return {
+                "text": f"LLM processed (no credential): {user_message}",
+                "model": model or "none",
+                "error": "No credential or model configured",
+            }
+
+        attempts: list[tuple[str, str]] = [(credential_id, model)]
+        if fallback_credential_id and fallback_model:
+            attempts.append((fallback_credential_id, fallback_model))
+
+        from app.db.session import SessionLocal
+        from app.services.encryption import decrypt_config
+
+        guardrail_texts = user_message if isinstance(user_message, list) else [user_message]
+
+        if guardrails_config and guardrails_config.get("enabled"):
+            from app.services.guardrails_service import (
+                GuardrailCategory,
+                GuardrailConfig,
+                GuardrailSeverity,
+                check_guardrails,
+            )
+            from app.services.llm_service import GOOGLE_OPENAI_BASE_URL
+
+            raw_categories = guardrails_config.get("categories") or []
+            parsed_categories: list[GuardrailCategory] = []
+            for cat in raw_categories:
+                try:
+                    parsed_categories.append(GuardrailCategory(cat))
+                except ValueError:
+                    pass
+            raw_severity = guardrails_config.get("severity", "medium")
+            try:
+                parsed_severity = GuardrailSeverity(raw_severity)
+            except ValueError:
+                parsed_severity = GuardrailSeverity.MEDIUM
+
+            guardrail_credential_id = (guardrails_config.get("credential_id") or "").strip()
+            guardrail_model = (guardrails_config.get("model") or "").strip()
+            if not guardrail_credential_id or not guardrail_model:
+                return {
+                    "text": "",
+                    "model": model,
+                    "error": (
+                        "Guardrails are enabled but credential and model are required. "
+                        "Please select a Guardrail Credential and Guardrail Model in the node."
+                    ),
+                }
+
+            try:
+                with SessionLocal() as db:
+                    guardrail_cred = self._get_accessible_credential(db, guardrail_credential_id)
+                    if not guardrail_cred:
+                        return {
+                            "text": "",
+                            "model": model,
+                            "error": "Guardrail credential not found or not accessible.",
+                        }
+                    guardrail_credential_type = guardrail_cred.type
+                    gcred_cfg = decrypt_config(guardrail_cred.encrypted_config)
+                    guardrail_api_key = gcred_cfg.get("api_key")
+                    guardrail_base_url = gcred_cfg.get("base_url")
+                    if not guardrail_base_url and guardrail_cred.type.value == "google":
+                        guardrail_base_url = GOOGLE_OPENAI_BASE_URL
+                    elif guardrail_base_url and guardrail_cred.type.value == "custom":
+                        guardrail_base_url = guardrail_base_url.rstrip("/")
+                        if not guardrail_base_url.endswith("/v1"):
+                            guardrail_base_url = guardrail_base_url + "/v1"
+            except Exception as e:
+                return {
+                    "text": "",
+                    "model": model,
+                    "error": f"Failed to load guardrail credential: {e}",
+                }
+
+            if guardrail_api_key:
+                cfg = GuardrailConfig(
+                    enabled=True,
+                    categories=parsed_categories,
+                    severity=parsed_severity,
+                )
+                guardrail_trace_context = self._build_llm_trace_context(
+                    guardrail_credential_id, node_id
+                )
+                for guardrail_text in guardrail_texts:
+                    check_guardrails(
+                        text=guardrail_text,
+                        config=cfg,
+                        credential_type=guardrail_credential_type.value,
+                        api_key=guardrail_api_key,
+                        base_url=guardrail_base_url,
+                        model=guardrail_model,
+                        trace_context=guardrail_trace_context,
+                    )
+
+        response_format = None
+        if json_output_enabled:
+            if json_output_schema:
+                try:
+                    schema = json.loads(json_output_schema)
+                except json.JSONDecodeError as exc:
+                    return {
+                        "text": "",
+                        "model": model,
+                        "error": f"Invalid JSON output schema: {str(exc)}",
+                    }
+                if not isinstance(schema, dict):
+                    return {
+                        "text": "",
+                        "model": model,
+                        "error": "JSON output schema must be an object",
+                    }
+                schema = _ensure_additional_properties(schema)
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "output", "schema": schema, "strict": True},
+                }
+            else:
+                response_format = {"type": "json_object"}
+
+        if batch_mode_enabled:
+            normalized_messages, batch_input_error = normalize_batch_user_messages(
+                user_message=user_message,
+                model=model,
+                output_type=output_type,
+                image_input=image_input,
+            )
+            if batch_input_error is not None:
+                return batch_input_error
+            user_message = normalized_messages or []
+
+        last_error: Exception | None = None
+        last_model = model
+        last_trace_id: str | None = None
+        for attempt_idx, (cid, mod) in enumerate(attempts):
+            credential_type = None
+            credential_name = ""
+            api_key = None
+            base_url = None
+            credential_config: dict = {}
+            try:
+                with SessionLocal() as db:
+                    cred = self._get_accessible_credential(db, cid)
+                    if cred:
+                        credential_type = cred.type
+                        credential_name = cred.name
+                        credential_config = decrypt_config(cred.encrypted_config)
+                        api_key = credential_config.get("api_key")
+                        base_url = credential_config.get("base_url")
+            except Exception as e:
+                last_error = e
+                last_model = mod
+                continue
+
+            trace_context = self._build_llm_trace_context(cid, node_id)
+
+            router = None
+            if credential_type is not None:
+                try:
+                    router = build_router_for_credential(
+                        credential_id=cid,
+                        credential_name=credential_name,
+                        credential_type=credential_type.value,
+                        config=credential_config,
+                        trace_context=trace_context,
+                    )
+                except ModelRouterConfigError as e:
+                    last_error = e
+                    last_model = mod
+                    continue
+
+            # A router has no key of its own; the option it picks supplies one.
+            if not api_key and router is None:
+                last_error = ValueError("Credential has no API key")
+                last_model = mod
+                continue
+
+            if output_type == "image" and router is not None:
+                last_error = ValueError(
+                    "Model Router credentials cannot generate or edit images. "
+                    "Pick a specific credential and image model."
+                )
+                last_model = mod
+                continue
+
+            if output_type == "image":
+                try:
+                    if image_input:
+                        from app.services.llm_service import execute_image_edit
+
+                        result = run_async(
+                            execute_image_edit(
+                                credential_type=credential_type.value,
+                                api_key=api_key,
+                                base_url=base_url,
+                                model=mod,
+                                prompt=user_message,
+                                image_input=image_input,
+                                size=image_size,
+                                quality=image_quality,
+                                trace_context=trace_context,
+                            )
+                        )
+                        out = dict(result)
+                        self._attach_latest_trace_id(out, trace_context)
+                        last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                        if attempt_idx > 0:
+                            out["fallbackUsed"] = True
+                            out["model"] = mod
+                        return out
+
+                    from app.services.llm_service import execute_image_generation
+
+                    result = run_async(
+                        execute_image_generation(
+                            credential_type=credential_type.value,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=mod,
+                            prompt=user_message,
+                            size=image_size,
+                            quality=image_quality,
+                            trace_context=trace_context,
+                        )
+                    )
+                    out = dict(result)
+                    self._attach_latest_trace_id(out, trace_context)
+                    last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                    if attempt_idx > 0:
+                        out["fallbackUsed"] = True
+                        out["model"] = mod
+                    return out
+                except Exception as e:
+                    last_error = e
+                    last_model = mod
+                    last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                    continue
+
+            try:
+                if batch_mode_enabled:
+                    from app.services.llm_service import execute_llm_batch
+
+                    result = run_async(
+                        execute_llm_batch(
+                            credential_type=credential_type.value,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=mod,
+                            system_instruction=system_instruction,
+                            user_messages=user_message,
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,
+                            max_tokens=max_tokens,
+                            response_format=response_format,
+                            trace_context=trace_context,
+                            conversation_history=self.conversation_history,
+                            on_status_update=on_batch_status_update,
+                            should_abort=should_abort,
+                            request_timeout=request_timeout,
+                            extra_body=extra_body,
+                            router=router,
+                        )
+                    )
+                else:
+                    from app.services.llm_service import execute_llm
+
+                    result = run_async(
+                        execute_llm(
+                            credential_type=credential_type.value,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=mod,
+                            system_instruction=system_instruction,
+                            user_message=user_message,
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,
+                            max_tokens=max_tokens,
+                            response_format=response_format,
+                            image_input=image_input,
+                            trace_context=trace_context,
+                            conversation_history=self.conversation_history,
+                            request_timeout=request_timeout,
+                            extra_body=extra_body,
+                            use_responses_api=use_responses_api,
+                            router=router,
+                        )
+                    )
+                out = dict(result)
+                self._attach_latest_trace_id(out, trace_context)
+                last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                if attempt_idx > 0:
+                    out["fallbackUsed"] = True
+                    out["model"] = mod
+                return out
+            except Exception as e:
+                last_error = e
+                last_model = mod
+                last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                continue
+
+        error_output = {
+            "text": "",
+            "model": last_model,
+            "error": str(last_error) if last_error else "All credential/model attempts failed",
+        }
+        if last_trace_id:
+            error_output["_trace_id"] = last_trace_id
+        return error_output
+
+    def _resolve_mcp_connection(self, conn: dict, inputs: dict, node_id: str | None) -> dict:
+        """Resolve expression DSL in MCP connection env/url/header values."""
+        nid = node_id or ""
+        resolved = dict(conn)
+
+        def _resolve_json_like(raw: object, expected_type: type) -> object | None:
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    raw = json.loads(raw)
+                except json.JSONDecodeError:
+                    return None
+            if not isinstance(raw, expected_type):
+                return None
+            return self._resolve_mcp_config_value(raw, inputs, nid)
+
+        env = _resolve_json_like(resolved.get("env"), dict)
+        if env is not None:
+            resolved["env"] = env
+        url = resolved.get("url")
+        if isinstance(url, str) and "$" in url:
+            resolved["url"] = self._resolve_template(url, inputs, nid)
+        headers = _resolve_json_like(resolved.get("headers"), dict)
+        if headers is not None:
+            resolved["headers"] = headers
+        args = _resolve_json_like(resolved.get("args"), list)
+        if args is not None:
+            resolved["args"] = args
+        return resolved
+
+    def _resolve_mcp_config_value(
+        self,
+        raw: object,
+        inputs: dict,
+        node_id: str | None,
+    ) -> object:
+        """Resolve MCP config/tool argument expressions while preserving arrays and objects."""
+        if isinstance(raw, dict):
+            return {
+                key: self._resolve_mcp_config_value(value, inputs, node_id)
+                for key, value in raw.items()
+            }
+        if isinstance(raw, list):
+            return [self._resolve_mcp_config_value(value, inputs, node_id) for value in raw]
+        if not isinstance(raw, str) or "$" not in raw:
+            return raw
+
+        trimmed = raw.strip()
+        if trimmed.startswith(("{", "[")):
+            try:
+                parsed = json.loads(trimmed)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, (dict, list)):
+                return self._resolve_mcp_config_value(parsed, inputs, node_id)
+
+        if self._is_single_dollar_expression(trimmed):
+            return self.resolve_expression(trimmed, inputs, node_id, preserve_type=True)
+        if should_resolve_embedded_dollar_refs_arithmetically(trimmed, self):
+            return self.resolve_arithmetic_expression(
+                raw,
+                inputs,
+                node_id,
+                preserve_type=True,
+            )
+        return self.evaluate_message_template(raw, inputs, node_id, preserve_type=True)
+
+    def _list_mcp_tools(self, connection: dict, timeout_seconds: float) -> list[dict]:
+        """List tools from an MCP server connection."""
+        from app.services.mcp_tool_executor import list_mcp_tools
+
+        conn = dict(connection)
+        conn.setdefault("id", conn.get("label", "default"))
+        return list_mcp_tools(conn, timeout_seconds)
+
+    def _parse_json_output(self, text: str) -> object:
+        if not text:
+            raise ValueError("LLM returned empty JSON output")
+        parsed = json.loads(text)
+        if isinstance(parsed, str):
+            parsed_str = parsed.strip()
+            if parsed_str.startswith("{") or parsed_str.startswith("["):
+                parsed = json.loads(parsed_str)
+        return parsed
+
+    def _execute_sub_agent_tool(
+        self,
+        tool_def: dict,
+        _name: str,
+        args: dict,
+        _timeout_seconds: float,
+    ) -> dict:
+        """Execute a sub-agent node when orchestrator calls call_sub_agent tool."""
+        sub_agent_label = args.get("sub_agent_label", "")
+        prompt = args.get("prompt", "")
+        sub_agent_labels = tool_def.get("_sub_agent_labels") or []
+        if sub_agent_label not in sub_agent_labels:
+            return {"error": f"Invalid sub_agent_label: '{sub_agent_label}'"}
+        target_node_id = None
+        target_node_data = None
+        for nid, node in self.nodes.items():
+            if node.get("type") == "agent" and node.get("data", {}).get("label") == sub_agent_label:
+                target_node_id = nid
+                target_node_data = node.get("data", {})
+                break
+        if not target_node_id or not target_node_data:
+            return {"error": f"Sub-agent '{sub_agent_label}' not found"}
+        target_node = self.nodes.get(target_node_id)
+        if target_node and target_node.get("data", {}).get("active") is False:
+            return {"error": f"Sub-agent '{sub_agent_label}' is disabled"}
+        if self._sub_agent_call_depth >= 5:
+            return {"error": "Max sub-agent call depth exceeded (5)"}
+        self._sub_agent_call_depth += 1
+        sub_agent_label_display = target_node_data.get("label", sub_agent_label)
+        if self.agent_progress_queue is not None:
+            self.agent_progress_queue.put(
+                _build_node_start_event(target_node_id, sub_agent_label_display)
+            )
+        start_ms = time.time() * 1000
+        try:
+            synthetic_inputs = {"input": {"text": prompt, "body": {"text": prompt}}}
+            result = self._execute_agent_node(target_node_id, synthetic_inputs, target_node_data)
+            trace_id = self._pop_internal_trace_id(result)
+            if result.get("_hitl_pending"):
+                return {
+                    "text": "",
+                    "error": "HITL is not supported inside sub-agent tools. Request review from the parent agent before calling the sub-agent.",
+                }
+            elapsed_ms = round((time.time() * 1000) - start_ms)
+            log_output = _build_agent_execution_log_output(result)
+            llm_tool_result: dict[str, Any] = {"text": result.get("text", "")}
+            if trace_id:
+                # Private: stripped before the result reaches the model, and kept on the
+                # tool record so the Duration Breakdown can link to the sub-agent's run.
+                llm_tool_result["_trace_id"] = trace_id
+            # NodeResult keeps success/error for canvas/Debug UI compatibility.
+            # Lifecycle cancelled/timeout belongs only on the tool payload returned
+            # to the parent agent loop.
+            if result.get("error"):
+                lifecycle = self._sub_agent_tool_lifecycle_status(result) or "error"
+                llm_tool_result["error"] = result["error"]
+                llm_tool_result["status"] = lifecycle
+                node_status = "error"
+            else:
+                node_status = "success"
+            metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
+            if trace_id:
+                metadata["trace_id"] = trace_id
+            delegated_result = self._stamp_node_result(
+                NodeResult(
+                    node_id=target_node_id,
+                    node_label=sub_agent_label_display,
+                    node_type="agent",
+                    status=node_status,
+                    output=log_output,
+                    execution_time_ms=float(elapsed_ms),
+                    error=result.get("error"),
+                    metadata=metadata,
+                )
+            )
+            self.delegated_agent_node_results.append(delegated_result)
+            if self.agent_progress_queue is not None:
+                self.agent_progress_queue.put(
+                    _build_node_complete_event(delegated_result, log_output)
+                )
+            return llm_tool_result
+        except WorkflowTimeoutError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="timeout",
+                error=str(exc) or "Workflow execution timed out",
+                exc=exc,
+            )
+        except WorkflowCancelledError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="cancelled",
+                error=str(exc) or "Workflow execution cancelled",
+                exc=exc,
+            )
+        except Exception as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="error",
+                error=str(exc),
+                exc=exc,
+            )
+        finally:
+            self._sub_agent_call_depth -= 1
+
+    def _sub_agent_tool_lifecycle_status(self, result: dict[str, Any]) -> str | None:
+        """Return cancelled for a failed sub-agent when trusted cancel signals exist.
+
+        Does not infer from free-form error text. Parent Stop sets ``cancel_event``;
+        nested tools that abort the agent loop with explicit ``cancelled`` populate
+        tool_calls / tool_metrics.
+
+        Nested ``timeout`` is intentionally ignored here: timeouts do not abort the
+        agent loop, so a later unrelated ``result.error`` must stay ``error``.
+        Timeout status is reserved for ``WorkflowTimeoutError`` at the exception
+        boundary.
+        """
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            return "cancelled"
+        metrics = result.get("tool_metrics")
+        if isinstance(metrics, dict) and int(metrics.get("cancelled") or 0) > 0:
+            return "cancelled"
+        tool_calls = result.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for entry in tool_calls:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("status") == "cancelled":
+                    return "cancelled"
+                nested = entry.get("result")
+                if isinstance(nested, dict) and nested.get("status") == "cancelled":
+                    return "cancelled"
+        return None
+
+    def _finalize_sub_agent_tool_failure(
+        self,
+        *,
+        target_node_id: str,
+        sub_agent_label_display: str,
+        start_ms: float,
+        status: str,
+        error: str,
+        exc: BaseException,
+    ) -> dict[str, Any]:
+        """Record a failed sub-agent invocation and return a status-tagged tool payload.
+
+        ``NodeResult.status`` stays ``error`` so Debug/timeline UI keep working;
+        the tool payload carries the precise lifecycle status for the parent loop.
+        """
+        elapsed_ms = round((time.time() * 1000) - start_ms)
+        metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
+        trace_id = getattr(exc, "trace_id", None)
+        if isinstance(trace_id, str) and trace_id:
+            metadata["trace_id"] = trace_id
+        delegated_result = self._stamp_node_result(
+            NodeResult(
+                node_id=target_node_id,
+                node_label=sub_agent_label_display,
+                node_type="agent",
+                status="error",
+                output={},
+                execution_time_ms=float(elapsed_ms),
+                error=error,
+                metadata=metadata,
+            )
+        )
+        self.delegated_agent_node_results.append(delegated_result)
+        if self.agent_progress_queue is not None:
+            self.agent_progress_queue.put(_build_node_complete_event(delegated_result, {}))
+        return {"text": "", "status": status, "error": error}
+
+    def _execute_sub_workflow_tool(
+        self,
+        tool_def: dict,
+        _name: str,
+        args: dict,
+        _timeout_seconds: float,
+    ) -> dict:
+        """Execute a sub-workflow when agent calls call_sub_workflow tool."""
+        workflow_id_str = args.get("workflow_id", "")
+        inputs = args.get("inputs")
+        if inputs is None:
+            inputs = {}
+        if not isinstance(inputs, dict):
+            inputs = {"text": str(inputs)}
+
+        sub_workflow_ids = tool_def.get("_sub_workflow_ids") or []
+        if workflow_id_str not in sub_workflow_ids:
+            return {"error": f"Invalid workflow_id: '{workflow_id_str}'"}
+
+        if self._sub_workflow_invocation_depth >= 5:
+            return {"error": "Max sub-workflow call depth exceeded (5)"}
+
+        if workflow_id_str not in self.workflow_cache:
+            return {"error": f"Workflow '{workflow_id_str}' not found in cache"}
+
+        target_workflow = self.workflow_cache[workflow_id_str]
+        input_fields = target_workflow.get("input_fields") or []
+        for f in input_fields:
+            key = f.get("key", "text")
+            if key not in inputs and f.get("defaultValue"):
+                inputs[key] = f.get("defaultValue")
+        self._refresh_vars_context_cache()
+        merged_global = (
+            self._merged_global_context_cache
+            if self._merged_global_context_cache is not None
+            else {}
+        )
+        _sub_execution_id = uuid.uuid4()
+        sub_cancel_event = Event()
+        _register_sub_execution(
+            workflow_id=uuid.UUID(workflow_id_str),
+            execution_id=_sub_execution_id,
+            event=sub_cancel_event,
+            recoverable=False,
+        )
+        bridge = CancellationBridge(
+            self.cancel_event,
+            sub_cancel_event,
+            bridge_name="_bridge_parent_cancel",
+        )
+        downstream_submitted = False
+        try:
+            sub_executor = WorkflowExecutor(
+                nodes=target_workflow["nodes"],
+                edges=target_workflow["edges"],
+                workflow_cache=self.workflow_cache,
+                test_mode=False,
+                credentials_context=self.credentials_context,
+                global_variables_context=merged_global,
+                workflow_id=uuid.UUID(workflow_id_str),
+                trace_user_id=self.trace_user_id,
+                actor_user_id=self.actor_user_id,
+                sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
+                cancel_event=sub_cancel_event,
+                invoked_by_agent=True,
+                execution_id=str(_sub_execution_id),
+                llm_session_id=self.llm_session_id,
+                node_pool=self._node_pool,
+            )
+            enriched_inputs = {
+                "headers": {},
+                "query": {},
+                "body": inputs,
+            }
+            start_ms = time.time() * 1000
+            sub_result: ExecutionResult | None = None
+
+            def _record_sub_failure(status: str, exc: BaseException) -> None:
+                if sub_result is None:
+                    return
+                _, masked_rows = mask_sub_workflow_result(sub_result, self.credentials_context)
+                sub_exec = SubWorkflowExecution(
+                    workflow_id=workflow_id_str,
+                    inputs=inputs,
+                    outputs={"error": str(exc)},
+                    status=status,
+                    execution_time_ms=sub_result.execution_time_ms,
+                    node_results=masked_rows,
+                    workflow_name=target_workflow.get("name", ""),
+                    trigger_source="AI Agents",
+                    execution_id=str(_sub_execution_id),
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(sub_exec)
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
+
+            def _sub_tool_error(status: str, exc: BaseException, default_msg: str = "") -> dict:
+                elapsed_ms = round((time.time() * 1000) - start_ms)
+                _record_sub_failure("cancelled" if status == "cancelled" else "error", exc)
+                return {
+                    "status": status,
+                    "outputs": {},
+                    "execution_time_ms": elapsed_ms,
+                    "error": str(exc) or default_msg,
+                }
+
+            try:
+                sub_result = sub_executor.execute(
+                    workflow_id=uuid.UUID(workflow_id_str),
+                    initial_inputs=enriched_inputs,
+                )
+                if sub_result.status == "pending":
+                    return {
+                        "status": "error",
+                        "outputs": {},
+                        "execution_time_ms": round((time.time() * 1000) - start_ms),
+                        "error": "HITL is not supported inside sub-workflow tools.",
+                    }
+                elapsed_ms = round((time.time() * 1000) - start_ms)
+                masked_outputs, masked_rows = mask_sub_workflow_result(
+                    sub_result, self.credentials_context
+                )
+                sub_exec = SubWorkflowExecution(
+                    workflow_id=workflow_id_str,
+                    inputs=inputs,
+                    outputs=masked_outputs,
+                    status=sub_result.status,
+                    execution_time_ms=sub_result.execution_time_ms,
+                    node_results=masked_rows,
+                    workflow_name=target_workflow.get("name", ""),
+                    trigger_source="AI Agents",
+                    execution_id=str(_sub_execution_id),
+                )
+                with self.lock:
+                    self.sub_workflow_executions.append(sub_exec)
+                    self.sub_workflow_executions.extend(sub_executor.sub_workflow_executions)
+
+                if sub_result.allow_downstream_pending:
+                    bg_callback_done = Event()
+
+                    def _on_sub_downstream_done() -> None:
+                        try:
+                            sub_result.join_allow_downstream()
+                            if sub_result.status != "success":
+                                sub_exec.status = sub_result.status
+                        except WorkflowTimeoutError as exc:
+                            sub_exec.status = "error"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault(
+                                    "error", str(exc) or "Workflow execution timed out"
+                                )
+                        except (
+                            WorkflowCancelledError,
+                            CancelledError,
+                            asyncio.CancelledError,
+                        ) as exc:
+                            sub_exec.status = "cancelled"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault(
+                                    "error", str(exc) or "Workflow execution cancelled"
+                                )
+                        except Exception as exc:
+                            logger.exception(
+                                "Unexpected exception in allowDownstream sub-workflow background execution"
+                            )
+                            sub_exec.status = "error"
+                            if isinstance(sub_exec.outputs, dict):
+                                sub_exec.outputs.setdefault("error", str(exc))
+                        finally:
+                            if sub_result is not None:
+                                _, updated_masked_rows = mask_sub_workflow_result(
+                                    sub_result, self.credentials_context
+                                )
+                                sub_exec.node_results = updated_masked_rows
+                                sub_exec.execution_time_ms = sub_result.execution_time_ms
+                            bg_callback_done.set()
+                            bridge.close()
+                            _clear_sub_execution(_sub_execution_id)
+
+                    bg_downstream_future = _submit_allow_downstream_work(_on_sub_downstream_done)
+                    with self._bg_futures_lock:
+                        self._bg_futures.append(
+                            (
+                                bg_downstream_future,
+                                bg_callback_done,
+                                workflow_id_str,
+                                target_workflow.get("name", ""),
+                                dict(inputs),
+                            )
+                        )
+                    downstream_submitted = True
+
+                out = {
+                    "status": sub_result.status,
+                    "outputs": sub_result.outputs,
+                    "execution_time_ms": elapsed_ms,
+                }
+                if sub_result.status == "error":
+                    err = sub_result.outputs.get("error") if sub_result.outputs else None
+                    if err:
+                        out["error"] = err
+                    elif sub_result.node_results:
+                        for nr in sub_result.node_results:
+                            if isinstance(nr, dict) and nr.get("error"):
+                                out["error"] = nr["error"]
+                                break
+                return out
+            except WorkflowTimeoutError as exc:
+                return _sub_tool_error("timeout", exc, "Workflow execution timed out")
+            except WorkflowCancelledError as exc:
+                return _sub_tool_error("cancelled", exc, "Workflow execution cancelled")
+            except Exception as exc:
+                return _sub_tool_error("error", exc)
+        finally:
+            if not downstream_submitted:
+                bridge.close()
+                _clear_sub_execution(_sub_execution_id)
+
+    @staticmethod
+    def _normalize_hitl_policy_token(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    @staticmethod
+    def _split_hitl_policy_segments(policy_text: str) -> list[str]:
+        raw_segments = re.split(r"[\r\n]+|(?<=[.!?;])\s+", policy_text or "")
+        return [segment.strip(" -\t") for segment in raw_segments if segment.strip()]
+
+    @staticmethod
+    def _segment_enables_hitl(segment: str) -> bool:
+        lowered = segment.lower()
+        positive_patterns = (
+            r"\bask before\b",
+            r"\bask\b.{0,24}\bbefore\b",
+            r"\balways\b.{0,24}\bask\b",
+            r"\bask\b.{0,24}\bfor\b.{0,24}\b(review|approval|permission|hitl)\b",
+            r"\bask\b.{0,24}\bfor\b.{0,24}\b(mcp|tool|workflow|sub[- ]workflow|sub[- ]agent)\b",
+            r"\bask\b.{0,24}\b(on each|each|every)\b",
+            r"\brequest human review\b",
+            r"\brequires?\b.{0,24}\b(review|approval|permission)\b",
+            r"\bneeds?\b.{0,24}\b(review|approval|permission)\b",
+            r"\bhuman review\b.{0,24}\bbefore\b",
+            r"\bapproval\b.{0,24}\bbefore\b",
+            r"\bpermission\b.{0,24}\bbefore\b",
+        )
+        return any(re.search(pattern, lowered) for pattern in positive_patterns)
+
+    @staticmethod
+    def _segment_disables_hitl(segment: str) -> bool:
+        lowered = segment.lower()
+        negative_patterns = (
+            r"\bdo not ask\b",
+            r"\bdon't ask\b",
+            r"\bnever\b.{0,24}\bask\b",
+            r"\bdo not require\b",
+            r"\bdoes not require\b",
+            r"\bwithout\b.{0,24}\b(review|approval|permission|hitl)\b",
+            r"\bskip\b.{0,24}\b(review|approval|permission|hitl)\b",
+            r"\bno\b.{0,24}\b(review|approval|permission|hitl)\b",
+            r"\balways approved\b",
+            r"\balready approved\b",
+            r"\bpre[- ]approved\b",
+            r"\bauto(?:matically)? approved\b",
+        )
+        return any(re.search(pattern, lowered) for pattern in negative_patterns)
+
+    @staticmethod
+    def _segment_uses_once_only_mode(segment: str) -> bool:
+        lowered = segment.lower()
+        once_patterns = (
+            r"\bonly once\b",
+            r"\bjust once\b",
+            r"\bonce per\b",
+            r"\bfirst time only\b",
+            r"\bonly on the first\b",
+            r"\bask once\b",
+        )
+        return any(re.search(pattern, lowered) for pattern in once_patterns)
+
+    @staticmethod
+    def _hitl_policy_limits_to_single_review(policy_text: str) -> bool:
+        """True when the HITL instructions allow only one human-review pause per run.
+
+        Covers phrasings like "ask only once ... then never ask again". This governs the
+        generic `request_human_review` tool (a single pause for the whole run), distinct from
+        the per-tool MCP "once" scope handled by ``_resolve_mcp_approval_mode``.
+        """
+        lowered = (policy_text or "").lower()
+        if not lowered.strip():
+            return False
+        # "once per tool / per call / each" is the per-tool MCP scope, not a whole-run cap.
+        if re.search(r"\bonce\b\s*(?:per|for each|each|every)\b", lowered):
+            return False
+        single_review_patterns = (
+            r"\bnever ask again\b",
+            r"\bnever\b.{0,16}\bask\b.{0,16}\bagain\b",
+            r"\b(do not|don't|dont)\b.{0,16}\bask\b.{0,16}\bagain\b",
+            r"\bask\b.{0,24}\bonly once\b",
+            r"\bonly\b.{0,10}\bask\b.{0,10}\bonce\b",
+            r"\bjust once\b",
+            r"\bask\b.{0,24}\bfor (approval|review)\b.{0,24}\bonly once\b",
+        )
+        return any(re.search(pattern, lowered) for pattern in single_review_patterns)
+
+    def _build_single_review_consumed_tool_result(self) -> dict[str, str]:
+        return {
+            "status": "not_required",
+            "message": (
+                "Human review has already been completed once for this run. The HITL guidelines "
+                "for this agent say to ask only once and then never ask again, so this checkpoint "
+                "is already satisfied. Do not request human review again. Continue now and produce "
+                "the final answer directly using the already approved content."
+            ),
+        }
+
+    @staticmethod
+    def _normalize_mcp_approval_mode(mode: str | None) -> str | None:
+        normalized = (mode or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {"always", "every_time", "each_time", "for_each", "on_each"}:
+            return "always"
+        if normalized in {"once", "once_per_tool", "only_once", "first_time_only"}:
+            return "once"
+        if normalized in {"never", "no", "disabled"}:
+            return "never"
+        return None
+
+    def _build_hitl_mcp_policy(self, policy_text: str, tools: list[dict]) -> dict:
+        segments = self._split_hitl_policy_segments(policy_text)
+        available_mcp_tools = [
+            str(tool.get("name") or "") for tool in tools if tool.get("_source") == "mcp"
+        ]
+        named_mcp_tool_modes: dict[str, str] = {}
+        default_mcp_tool_mode: str | None = None
+
+        for segment in segments:
+            lowered_segment = segment.lower()
+            normalized_segment = self._normalize_hitl_policy_token(segment)
+            enables_hitl = self._segment_enables_hitl(segment)
+            disables_hitl = self._segment_disables_hitl(segment)
+            approval_mode = "once" if self._segment_uses_once_only_mode(segment) else "always"
+
+            if "mcp" in lowered_segment:
+                if disables_hitl:
+                    default_mcp_tool_mode = "never"
+                elif enables_hitl:
+                    default_mcp_tool_mode = approval_mode
+
+            for tool_name in available_mcp_tools:
+                normalized_name = self._normalize_hitl_policy_token(tool_name)
+                if not normalized_name or normalized_name not in normalized_segment:
+                    continue
+                if disables_hitl:
+                    named_mcp_tool_modes[tool_name] = "never"
+                elif enables_hitl:
+                    named_mcp_tool_modes[tool_name] = approval_mode
+
+        return {
+            "default_mcp_tool_mode": default_mcp_tool_mode,
+            "named_mcp_tool_modes": named_mcp_tool_modes,
+            "available_mcp_tools": available_mcp_tools,
+        }
+
+    def _coerce_hitl_mcp_policy(
+        self,
+        raw_policy: dict | None,
+        *,
+        available_mcp_tools: list[str],
+        fallback_policy: dict | None = None,
+    ) -> dict:
+        fallback_policy = fallback_policy or {}
+        fallback_default_mode = self._normalize_mcp_approval_mode(
+            fallback_policy.get("default_mcp_tool_mode")
+        )
+        fallback_named_modes = {
+            str(tool_name): normalized_mode
+            for tool_name, mode in (fallback_policy.get("named_mcp_tool_modes") or {}).items()
+            if (normalized_mode := self._normalize_mcp_approval_mode(str(mode)))
+        }
+
+        if not isinstance(raw_policy, dict):
+            return {
+                "default_mcp_tool_mode": fallback_default_mode,
+                "named_mcp_tool_modes": fallback_named_modes,
+                "available_mcp_tools": list(available_mcp_tools),
+            }
+
+        coerced_default_mode = self._normalize_mcp_approval_mode(
+            raw_policy.get("default_mcp_tool_mode")
+            or raw_policy.get("global_mode")
+            or fallback_default_mode
+        )
+        named_modes: dict[str, str] = {}
+        for tool_name, mode in fallback_named_modes.items():
+            if tool_name in available_mcp_tools:
+                named_modes[tool_name] = mode
+
+        raw_named_modes = raw_policy.get("named_mcp_tool_modes")
+        if isinstance(raw_named_modes, dict):
+            for tool_name, mode in raw_named_modes.items():
+                normalized_mode = self._normalize_mcp_approval_mode(str(mode))
+                if normalized_mode and str(tool_name) in available_mcp_tools:
+                    named_modes[str(tool_name)] = normalized_mode
+
+        raw_tool_modes = raw_policy.get("tool_modes")
+        if isinstance(raw_tool_modes, list):
+            for item in raw_tool_modes:
+                if not isinstance(item, dict):
+                    continue
+                tool_name = str(item.get("tool_name") or "").strip()
+                normalized_mode = self._normalize_mcp_approval_mode(item.get("mode"))
+                if tool_name in available_mcp_tools and normalized_mode:
+                    named_modes[tool_name] = normalized_mode
+
+        return {
+            "default_mcp_tool_mode": coerced_default_mode,
+            "named_mcp_tool_modes": named_modes,
+            "available_mcp_tools": list(available_mcp_tools),
+        }
+
+    def _resolve_mcp_approval_mode(
+        self, hitl_mcp_policy: dict | None, tool_name: str
+    ) -> str | None:
+        if not isinstance(hitl_mcp_policy, dict):
+            return None
+        named_modes = hitl_mcp_policy.get("named_mcp_tool_modes") or {}
+        resolved_mode = named_modes.get(tool_name)
+        if resolved_mode is not None:
+            return self._normalize_mcp_approval_mode(str(resolved_mode))
+        return self._normalize_mcp_approval_mode(hitl_mcp_policy.get("default_mcp_tool_mode"))
+
+    def _classify_hitl_mcp_policy_with_model(
+        self,
+        *,
+        credential_type: str,
+        api_key: str,
+        base_url: str | None,
+        model: str,
+        policy_text: str,
+        available_mcp_tools: list[str],
+        trace_context: LLMTraceContext | None,
+    ) -> dict | None:
+        if not policy_text.strip() or not available_mcp_tools:
+            return None
+
+        from app.services.llm_service import execute_llm
+
+        classifier_system_instruction = (
+            "You extract human-review scope for MCP tools from freeform workflow instructions.\n"
+            "Classify MCP approval into exactly three modes:\n"
+            "- `always`: ask before each / every / for-each call\n"
+            "- `once`: ask only once / first time only, then keep it approved for that tool\n"
+            "- `never`: do not ask / pre-approved / always approved\n"
+            "If the instructions do not give a clear MCP policy, return `null` for the default.\n"
+            "You may also return tool-specific overrides.\n"
+            "Respond with JSON only."
+        )
+        classifier_user_message = json.dumps(
+            {
+                "instructions": policy_text,
+                "mcp_tools": available_mcp_tools,
+                "output_contract": {
+                    "default_mcp_tool_mode": "always | once | never | null",
+                    "tool_modes": [
+                        {"tool_name": "exact MCP tool name", "mode": "always | once | never"}
+                    ],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        try:
+            result = run_async(
+                execute_llm(
+                    credential_type=credential_type,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    system_instruction=classifier_system_instruction,
+                    user_message=classifier_user_message,
+                    temperature=0,
+                    max_tokens=250,
+                    response_format={"type": "json_object"},
+                    trace_context=trace_context,
+                    content_only=True,
+                )
+            )
+            parsed = json.loads(str(result.get("text") or "").strip() or "{}")
+        except Exception as exc:
+            logger.warning("Failed to classify HITL MCP policy with model: %s", exc)
+            return None
+
+        return self._coerce_hitl_mcp_policy(
+            parsed,
+            available_mcp_tools=available_mcp_tools,
+        )
+
+    def _build_mcp_policy_interpretation_hint(self, hitl_mcp_policy: dict | None) -> str:
+        if not isinstance(hitl_mcp_policy, dict):
+            return ""
+
+        parts: list[str] = []
+        default_mode = self._normalize_mcp_approval_mode(
+            hitl_mcp_policy.get("default_mcp_tool_mode")
+        )
+        if default_mode:
+            parts.append(f"default MCP approval scope: {default_mode}")
+
+        named_modes = hitl_mcp_policy.get("named_mcp_tool_modes") or {}
+        named_parts = []
+        for tool_name, mode in named_modes.items():
+            normalized_mode = self._normalize_mcp_approval_mode(str(mode))
+            if normalized_mode:
+                named_parts.append(f"{tool_name}={normalized_mode}")
+        if named_parts:
+            parts.append("tool-specific MCP approval scope: " + ", ".join(sorted(named_parts)))
+
+        if not parts:
+            return ""
+
+        return "Interpreted MCP approval scope from the current instructions:\n- " + "\n- ".join(
+            parts
+        )
+
+    def _hitl_request_targets_preapproved_mcp(
+        self,
+        *,
+        summary: str | None,
+        review_markdown: str,
+        reason: str | None,
+        hitl_mcp_policy: dict | None,
+    ) -> bool:
+        if not isinstance(hitl_mcp_policy, dict):
+            return False
+
+        combined_text = "\n".join(
+            value for value in (summary or "", review_markdown or "", reason or "") if value
+        )
+        lowered = combined_text.lower()
+        normalized = self._normalize_hitl_policy_token(combined_text)
+        available_mcp_tools = set(hitl_mcp_policy.get("available_mcp_tools") or [])
+        referenced_mcp_tools = {
+            tool_name
+            for tool_name in available_mcp_tools
+            if self._normalize_hitl_policy_token(tool_name) in normalized
+        }
+
+        if any(
+            self._resolve_mcp_approval_mode(hitl_mcp_policy, tool_name) == "never"
+            for tool_name in referenced_mcp_tools
+        ):
+            return True
+
+        if self._normalize_mcp_approval_mode(
+            hitl_mcp_policy.get("default_mcp_tool_mode")
+        ) == "never" and ("mcp" in lowered or bool(referenced_mcp_tools)):
+            return True
+
+        return False
+
+    def _build_preapproved_hitl_tool_result(
+        self,
+        *,
+        tool_name: str,
+        reason: str | None,
+    ) -> dict[str, str]:
+        target = reason or tool_name
+        return {
+            "status": "not_required",
+            "message": (
+                "Human review is not required for this step under the current HITL guidelines. "
+                f"Continue without pausing and execute the pre-approved action: {target}."
+            ),
+        }
+
+    def _extract_referenced_mcp_tool_name(
+        self,
+        *,
+        summary: str | None,
+        review_markdown: str,
+        reason: str | None,
+        hitl_mcp_policy: dict | None,
+    ) -> str | None:
+        if not isinstance(hitl_mcp_policy, dict):
+            return None
+
+        combined_text = "\n".join(
+            value for value in (summary or "", review_markdown or "", reason or "") if value
+        )
+        lowered = combined_text.lower()
+        normalized = self._normalize_hitl_policy_token(combined_text)
+        available_mcp_tools = [
+            str(tool_name)
+            for tool_name in (hitl_mcp_policy.get("available_mcp_tools") or [])
+            if str(tool_name).strip()
+        ]
+
+        referenced_mcp_tools = [
+            tool_name
+            for tool_name in available_mcp_tools
+            if self._normalize_hitl_policy_token(tool_name) in normalized
+        ]
+        if len(referenced_mcp_tools) == 1:
+            return referenced_mcp_tools[0]
+
+        if "mcp" in lowered and len(available_mcp_tools) == 1:
+            return available_mcp_tools[0]
+
+        return None
+
+    def _get_active_edited_hitl_checkpoint(self, node_id: str | None) -> dict | None:
+        if not node_id:
+            return None
+        node_context = self.hitl_resume_context.get(node_id) or {}
+        checkpoint = node_context.get("_approved_hitl_checkpoint")
+        if not isinstance(checkpoint, dict):
+            return None
+        if str(checkpoint.get("decision") or "") != "edited":
+            return None
+        if bool(checkpoint.get("consumed")):
+            return None
+        return checkpoint
+
+    def _consume_edited_hitl_checkpoint(self, node_id: str | None) -> None:
+        checkpoint = self._get_active_edited_hitl_checkpoint(node_id)
+        if checkpoint is not None:
+            checkpoint["consumed"] = True
+
+    def _build_edited_hitl_tool_result(self, approved_hitl_checkpoint: dict) -> dict[str, str]:
+        approved_markdown = str(approved_hitl_checkpoint.get("approved_markdown") or "").strip()
+        message = (
+            "This checkpoint was already edited and approved by a human. "
+            "Do not request approval again for the same step. Follow the approved instructions and continue."
+        )
+        result = {
+            "status": "already_approved",
+            "message": message,
+        }
+        if approved_markdown:
+            result["approved_markdown"] = approved_markdown
+        return result
+
+    @staticmethod
+    def _approved_tool_call_matches(
+        approved_tool_call: dict | None,
+        *,
+        source: str,
+        name: str,
+        args: dict,
+    ) -> bool:
+        if not isinstance(approved_tool_call, dict):
+            return False
+        if str(approved_tool_call.get("tool_source") or "") != source:
+            return False
+        if str(approved_tool_call.get("tool_name") or "") != name:
+            return False
+
+        match_strategy = str(approved_tool_call.get("match_strategy") or "exact_args")
+        if match_strategy in {"tool_name", "next_tool_call"}:
+            return True
+
+        approved_args = approved_tool_call.get("tool_arguments") or {}
+        try:
+            return json.dumps(approved_args, sort_keys=True, default=str) == json.dumps(
+                args or {}, sort_keys=True, default=str
+            )
+        except TypeError:
+            return approved_args == (args or {})
+
+    def _build_mcp_hitl_review_markdown(self, name: str, args: dict) -> str:
+        rendered_args = json.dumps(args or {}, indent=2, sort_keys=True, default=str)
+        return (
+            "## Approval Required\n\n"
+            f"The agent is about to call the MCP tool `{name}`.\n\n"
+            "### Planned Arguments\n"
+            f"```json\n{rendered_args}\n```\n\n"
+            "Approve to let this MCP call run."
+        )
+
+    @staticmethod
+    def _normalize_hitl_summary_candidate(text: str) -> str:
+        cleaned = re.sub(r"```[\s\S]*?```", " ", text or "")
+        cleaned = re.sub(r"`([^`]*)`", r"\1", cleaned)
+        cleaned = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", cleaned)
+        cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", cleaned)
+        cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"^\s*[-*+]\s+", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"^\s*\d+\.\s+", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;,.")
+        return cleaned
+
+    @staticmethod
+    def _is_generic_hitl_summary_candidate(text: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+        return normalized in {
+            "approval required",
+            "human review",
+            "human review required",
+            "planned arguments",
+            "review required",
+        }
+
+    @staticmethod
+    def _truncate_hitl_summary(text: str, max_length: int = 140) -> str:
+        if len(text) <= max_length:
+            return text
+        trimmed = text[: max_length - 3].rsplit(" ", 1)[0].strip()
+        if not trimmed:
+            trimmed = text[: max_length - 3].strip()
+        return f"{trimmed}..."
+
+    def _generate_hitl_summary(
+        self,
+        *,
+        summary: str | None,
+        review_markdown: str,
+        reason: str | None,
+        fallback: str,
+    ) -> str:
+        explicit_summary = self._normalize_hitl_summary_candidate(summary or "")
+        if explicit_summary:
+            return self._truncate_hitl_summary(explicit_summary)
+
+        for paragraph in re.split(r"\n\s*\n", review_markdown or ""):
+            candidate = self._normalize_hitl_summary_candidate(paragraph)
+            if candidate and not self._is_generic_hitl_summary_candidate(candidate):
+                return self._truncate_hitl_summary(candidate)
+
+        reason_summary = self._normalize_hitl_summary_candidate(reason or "")
+        if reason_summary:
+            return self._truncate_hitl_summary(reason_summary)
+
+        fallback_summary = self._normalize_hitl_summary_candidate(fallback or "")
+        if fallback_summary:
+            return self._truncate_hitl_summary(fallback_summary)
+        return "Human review required"
+
+    def _build_agent_tool_executor(
+        self,
+        *,
+        node_id: str | None,
+        hitl_fallback_summary: str | None = None,
+        hitl_mcp_policy: dict | None = None,
+        hitl_suppress_after_first_review: bool = False,
+    ) -> Callable:
+        """Build tool executor for agent nodes, including HITL, sub-agents, and sub-workflows.
+
+        ``hitl_suppress_after_first_review`` is set on a resume when the node's HITL guidelines
+        allow only one review for the whole run and a prior checkpoint was already approved. It
+        makes further ``request_human_review`` calls resolve without pausing again, so a model
+        that ignores the "ask only once" instruction cannot loop back into another review.
+        """
+
+        from app.services.llm_service import HumanReviewPause, _unified_tool_executor
+
+        def executor(
+            tool_def: dict,
+            name: str,
+            args: dict,
+            timeout_seconds: float,
+        ) -> object:
+            tool_source = str(tool_def.get("_source") or "python")
+            edited_hitl_checkpoint = self._get_active_edited_hitl_checkpoint(node_id)
+            if tool_source == "hitl":
+                if edited_hitl_checkpoint is not None:
+                    return self._build_edited_hitl_tool_result(edited_hitl_checkpoint)
+                if hitl_suppress_after_first_review:
+                    return self._build_single_review_consumed_tool_result()
+                review_markdown = str(
+                    args.get("review_markdown") or args.get("markdown") or args.get("text") or ""
+                ).strip()
+                if not review_markdown:
+                    review_markdown = "Human review is required before this agent continues."
+                reason = str(args.get("reason") or args.get("blocked_action") or "").strip() or None
+                raw_summary = str(args.get("summary") or "").strip() or None
+                if self._hitl_request_targets_preapproved_mcp(
+                    summary=raw_summary,
+                    review_markdown=review_markdown,
+                    reason=reason,
+                    hitl_mcp_policy=hitl_mcp_policy,
+                ):
+                    return self._build_preapproved_hitl_tool_result(
+                        tool_name=name,
+                        reason=reason,
+                    )
+                summary = self._generate_hitl_summary(
+                    summary=raw_summary,
+                    review_markdown=review_markdown,
+                    reason=reason,
+                    fallback=hitl_fallback_summary or "",
+                )
+                referenced_mcp_tool_name = self._extract_referenced_mcp_tool_name(
+                    summary=raw_summary,
+                    review_markdown=review_markdown,
+                    reason=reason,
+                    hitl_mcp_policy=hitl_mcp_policy,
+                )
+                referenced_mcp_match_strategy: str | None = None
+                if referenced_mcp_tool_name:
+                    referenced_mcp_mode = self._resolve_mcp_approval_mode(
+                        hitl_mcp_policy, referenced_mcp_tool_name
+                    )
+                    if referenced_mcp_mode == "once":
+                        referenced_mcp_match_strategy = "tool_name"
+                    elif referenced_mcp_mode == "always":
+                        referenced_mcp_match_strategy = "next_tool_call"
+                return HumanReviewPause(
+                    review_markdown=review_markdown,
+                    summary=summary,
+                    reason=reason,
+                    tool_name=referenced_mcp_tool_name,
+                    tool_source="mcp" if referenced_mcp_match_strategy else None,
+                    tool_arguments={} if referenced_mcp_match_strategy else None,
+                    match_strategy=referenced_mcp_match_strategy,
+                )
+            approved_tool_call = None
+            if node_id:
+                approved_tool_call = (
+                    self.hitl_resume_context.get(node_id, {}).get("_approved_tool_call") or None
+                )
+
+            mcp_approval_mode = self._resolve_mcp_approval_mode(hitl_mcp_policy, name)
+            should_gate_mcp = (
+                tool_source == "mcp"
+                and hitl_mcp_policy is not None
+                and edited_hitl_checkpoint is None
+                and mcp_approval_mode in {"always", "once"}
+            )
+            if should_gate_mcp:
+                effective_approved_tool_call = (
+                    copy.deepcopy(approved_tool_call)
+                    if isinstance(approved_tool_call, dict)
+                    else None
+                )
+                if isinstance(effective_approved_tool_call, dict):
+                    effective_approved_tool_call["match_strategy"] = str(
+                        effective_approved_tool_call.get("match_strategy")
+                        or ("tool_name" if mcp_approval_mode == "once" else "exact_args")
+                    )
+                approved_match_strategy = str(
+                    (effective_approved_tool_call or {}).get("match_strategy") or "exact_args"
+                )
+                if self._approved_tool_call_matches(
+                    effective_approved_tool_call,
+                    source=tool_source,
+                    name=name,
+                    args=args,
+                ):
+                    if (
+                        node_id
+                        and node_id in self.hitl_resume_context
+                        and approved_match_strategy != "tool_name"
+                    ):
+                        self.hitl_resume_context[node_id].pop("_approved_tool_call", None)
+                else:
+                    review_markdown = self._build_mcp_hitl_review_markdown(name, args)
+                    reason = f"Call MCP tool `{name}`"
+                    return HumanReviewPause(
+                        review_markdown=review_markdown,
+                        summary=self._generate_hitl_summary(
+                            summary=None,
+                            review_markdown=review_markdown,
+                            reason=reason,
+                            fallback=hitl_fallback_summary or "",
+                        ),
+                        reason=reason,
+                        tool_name=name,
+                        tool_source=tool_source,
+                        tool_arguments=copy.deepcopy(args),
+                        match_strategy=(
+                            "tool_name" if mcp_approval_mode == "once" else "exact_args"
+                        ),
+                    )
+
+            if edited_hitl_checkpoint is not None:
+                self._consume_edited_hitl_checkpoint(node_id)
+
+            if tool_source == "sub_agent":
+                return self._execute_sub_agent_tool(tool_def, name, args, timeout_seconds)
+            if tool_source == "sub_workflow":
+                return self._execute_sub_workflow_tool(tool_def, name, args, timeout_seconds)
+            if tool_source == "node_tool":
+                return self._execute_node_tool(tool_def, args)
+
+            return _unified_tool_executor(tool_def, name, args, timeout_seconds)
+
+        return executor
+
+    def _build_node_tool_schemas(self, agent_node_id: str) -> list[dict]:
+        """Build OpenAI-compatible tool schemas for canvas nodes on the tool-input handle."""
+        tool_node_ids = [
+            edge["source"]
+            for edge in self.edges
+            if edge.get("target") == agent_node_id and edge.get("targetHandle") == "tool-input"
+        ]
+
+        schemas: list[dict] = []
+        seen_names: set[str] = set()
+
+        for node_id in tool_node_ids:
+            node = self.nodes.get(node_id)
+            if node is None:
+                continue
+            if is_blocked_as_tool(node.get("type")):
+                continue
+            node_data = node.get("data", {})
+            label = node_data.get("label") or node_id
+            base_name = _slugify_tool_name(label)
+
+            name = base_name
+            suffix = 2
+            while name in seen_names:
+                name = f"{base_name}_{suffix}"
+                suffix += 1
+            seen_names.add(name)
+
+            agent_provided: list[str] = node_data.get("agentProvidedFields") or []
+            properties = {
+                field: {"type": "string", "description": f"Value for {field}"}
+                for field in agent_provided
+            }
+
+            schemas.append(
+                {
+                    "name": name,
+                    "description": f"Execute the '{label}' node",
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": list(agent_provided),
+                    },
+                    "_source": "node_tool",
+                    "_node_id": node_id,
+                }
+            )
+
+        return schemas
+
+    def _execute_node_tool(self, tool_def: dict, args: dict) -> dict:
+        node_id = tool_def.get("_node_id", "")
+        node = self.nodes.get(node_id)
+        if node is None:
+            return {"error": f"Tool node '{node_id}' not found"}
+
+        original_data = copy.deepcopy(node["data"])
+        if original_data.get("active") is False:
+            return {"error": f"Tool node '{original_data.get('label', node_id)}' is disabled"}
+
+        agent_provided: list[str] = original_data.get("agentProvidedFields") or []
+        merged_data = {**original_data}
+        for fname in agent_provided:
+            if fname in args:
+                merged_data[fname] = args[fname]
+
+        node_label = original_data.get("label", node_id)
+        _queue = getattr(self, "agent_progress_queue", None)
+        if _queue is not None:
+            _queue.put(_build_node_start_event(node_id, node_label))
+
+        node["data"] = merged_data
+        try:
+            result = self.execute_node(node_id, {}, allow_branch_skip=False)
+        finally:
+            node["data"] = original_data
+
+        if _queue is not None:
+            _queue.put(_build_node_complete_event(result))
+
+        if result.status == "error":
+            return {"error": result.error or "Node execution failed"}
+        return result.output or {}
+
+    def _execute_agent_node(
+        self,
+        node_id: str | None,
+        inputs: dict,
+        node_data: dict,
+        guardrails_config: dict | None = None,
+    ) -> dict:
+        """Execute agent node with optional tool calling."""
+        combined_input = ""
+        for data in self._visible_inputs(inputs).values():
+            if isinstance(data, dict) and "text" in data:
+                combined_input += str(data["text"]) + " "
+            else:
+                combined_input += str(data) + " "
+        combined_input = combined_input.strip()
+
+        credential_id = node_data.get("credentialId")
+        model = node_data.get("model", "")
+        system_instruction_template = node_data.get("systemInstruction", "")
+        user_message_template = node_data.get("userMessage", "$input.text")
+        temperature = node_data.get("temperature", 0.7)
+        reasoning_effort = node_data.get("reasoningEffort")
+        max_tokens = node_data.get("maxTokens")
+        tools = node_data.get("tools") or []
+        tool_timeout_seconds = float(node_data.get("toolTimeoutSeconds") or 30)
+        request_timeout_seconds = float(node_data.get("requestTimeoutSeconds") or 60)
+        max_tool_iterations = int(node_data.get("maxToolIterations") or 30)
+        image_input_enabled = bool(node_data.get("imageInputEnabled", False))
+        image_input_template = node_data.get("imageInput", "")
+        json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
+        json_output_schema = node_data.get("jsonOutputSchema", "")
+        hitl_enabled = bool(node_data.get("hitlEnabled", False))
+        agent_extra_body = resolve_extra_body(self, node_data, inputs, node_id)
+        hitl_resolution = copy.deepcopy(self.hitl_resume_context.get(node_id or "") or {})
+        hitl_agent_state = copy.deepcopy(hitl_resolution.get("_agent_state") or {})
+        is_hitl_resume = bool(hitl_resolution)
+        node_label = str(node_data.get("label") or node_id or "agent")
+        hitl_guidelines_template = str(node_data.get("hitlSummary", "") or "")
+        hitl_guidelines = self._resolve_template(hitl_guidelines_template, inputs, node_id).strip()
+        hitl_fallback_summary = f"{node_label} requires review."
+
+        base_system_instruction = (
+            self._resolve_template(system_instruction_template, inputs, node_id)
+            if system_instruction_template
+            else None
+        )
+
+        # A "ask only once / never ask again" HITL policy caps the whole run to a single review.
+        hitl_single_review = hitl_enabled and self._hitl_policy_limits_to_single_review(
+            "\n\n".join(part for part in (base_system_instruction or "", hitl_guidelines) if part)
+        )
+
+        skills = node_data.get("skills") or []
+        skills_used: list[str] = [s.get("name", "") for s in skills if s.get("name")]
+        skills_content_parts: list[str] = []
+        for s in skills:
+            content = s.get("content", "")
+            if content:
+                if s.get("driveFilesEnabled"):
+                    content = (
+                        content
+                        + "\n\nDrive files are enabled for this skill. Python code may import "
+                        "`heym_drive` and read accessible Drive files by id or filename."
+                    )
+                skills_content_parts.append(content)
+        skills_content = "\n\n---\n\n".join(skills_content_parts) if skills_content_parts else ""
+        system_instruction = (
+            (skills_content + "\n\n" + (base_system_instruction or "")).strip()
+            if skills_content
+            else base_system_instruction
+        )
+
+        if json_output_enabled and json_output_schema:
+            schema_hint = (
+                f"\n\nIMPORTANT: You MUST respond with valid JSON that follows this "
+                f"exact structure:\n{json_output_schema}\n"
+                "Do NOT use any other JSON structure. Match the field names exactly."
+            )
+            if system_instruction:
+                system_instruction = system_instruction + schema_hint
+            else:
+                system_instruction = schema_hint.strip()
+
+        user_message = self._resolve_template(user_message_template, inputs, node_id)
+        if not user_message:
+            user_message = combined_input
+
+        image_input = None
+        if image_input_enabled:
+            resolved = self.resolve_expression(image_input_template.strip(), inputs, node_id)
+            if resolved:
+                image_input = resolved
+        conversation_history = (
+            copy.deepcopy(self.conversation_history) if self.conversation_history else None
+        )
+        approved_markdown = ""
+        resume_messages: list[dict] | None = None
+        resume_tool_calls: list[dict] | None = None
+        resume_elapsed_ms = 0.0
+        resume_prompt_tokens = 0
+        resume_completion_tokens = 0
+        resume_max_tool_iterations = max_tool_iterations
+        hitl_history = []
+
+        if is_hitl_resume:
+            hitl_decision = str(hitl_resolution.get("decision") or "")
+            raw_hitl_history = hitl_resolution.get("hitlHistory")
+            if isinstance(raw_hitl_history, list):
+                hitl_history = [
+                    copy.deepcopy(entry) for entry in raw_hitl_history if isinstance(entry, dict)
+                ]
+            elif hitl_decision in {"accepted", "edited", "refused"}:
+                fallback_history_entry = {
+                    "decision": hitl_decision,
+                    "summary": str(hitl_resolution.get("summary") or "").strip(),
+                    "originalDraft": str(hitl_resolution.get("originalDraft") or "").strip(),
+                    "reviewText": str(hitl_resolution.get("reviewText") or "").strip(),
+                    "requestId": str(hitl_resolution.get("requestId") or "").strip(),
+                }
+                if hitl_resolution.get("editedText") is not None:
+                    fallback_history_entry["editedText"] = hitl_resolution.get("editedText")
+                if hitl_resolution.get("refusalReason") is not None:
+                    fallback_history_entry["refusalReason"] = hitl_resolution.get("refusalReason")
+                hitl_history = [fallback_history_entry]
+            if hitl_decision == "refused":
+                refused_output = {
+                    key: copy.deepcopy(value)
+                    for key, value in hitl_resolution.items()
+                    if not str(key).startswith("_")
+                }
+                refused_output["_skip_source_handles"] = ["hitl"]
+                return refused_output
+
+            approved_markdown = (
+                str(hitl_resolution.get("editedText") or "").strip()
+                or str(hitl_resolution.get("originalDraft") or "").strip()
+                or str(hitl_resolution.get("reviewText") or "").strip()
+                or str(hitl_resolution.get("text") or "").strip()
+            )
+            edited_checkpoint_note = ""
+            if hitl_decision == "edited":
+                edited_checkpoint_note = (
+                    "The human edited this checkpoint. The edited Markdown replaces the original "
+                    "plan for this step. Do not ask for human review again for the same "
+                    "checkpoint; carry out the edited instructions directly."
+                )
+            edited_checkpoint_block = (
+                f"{edited_checkpoint_note}\n\n" if edited_checkpoint_note else ""
+            )
+            # When the policy allows only one review, the resume prompt must not invite the model
+            # to ask again; otherwise it contradicts the "ask only once / never again" guideline.
+            if hitl_single_review:
+                resume_followup_clause = (
+                    "Do not request human review again for the rest of this run; the guidelines "
+                    "allow only one review. Continue and produce the final answer directly using "
+                    "the approved content."
+                )
+                review_context_followup = (
+                    "Do not request human review again; the guidelines allow only one review. "
+                    "Continue the task from here and finish without asking again."
+                )
+                task_followup_clause = (
+                    "Do not request another human review; only one review is allowed. Finish the "
+                    "task now using the approved plan."
+                )
+            else:
+                resume_followup_clause = (
+                    "If a different later step also requires human review, you may request another "
+                    "one at that point."
+                )
+                review_context_followup = (
+                    "If a later, different action still requires human review, you may request it "
+                    "again when needed."
+                )
+                task_followup_clause = (
+                    "You may ask for another human review later only if a different step genuinely "
+                    "requires it."
+                )
+            approval_resume_text = (
+                "Human review decision received for a previous approval checkpoint.\n"
+                f"Decision: {hitl_decision}\n"
+                f"Summary: {str(hitl_resolution.get('summary') or hitl_fallback_summary).strip()}\n\n"
+                "Approved Markdown:\n"
+                f"{approved_markdown}\n\n"
+                f"{edited_checkpoint_block}"
+            ) + (
+                "Continue from this approved checkpoint. Do not repeat the same approval request "
+                f"unless the approved plan materially changes. {resume_followup_clause}"
+            )
+            approval_resume_text = approval_resume_text.strip()
+            review_context = (
+                "A human reviewer has already reviewed a prior checkpoint in this agent run.\n"
+                f"Decision: {hitl_decision}\n"
+                "Treat the approved Markdown below as the source of truth for that checkpoint.\n"
+                f"Continue the task from there. {review_context_followup}\n\n"
+                f"{approved_markdown}"
+            ).strip()
+            if edited_checkpoint_note:
+                review_context = f"{review_context}\n\n{edited_checkpoint_note}"
+            user_message = (
+                "Continue the original task after human review.\n\n"
+                "Original task:\n"
+                f"{user_message}\n\n"
+                "Human-approved Markdown plan:\n"
+                f"{approved_markdown}\n\n"
+                f"{edited_checkpoint_block}"
+            ) + (
+                "Execute the approved plan now. Use tools, sub-agents, or sub-workflows only as "
+                f"needed to carry it out. Do not repeat the exact same approval request. "
+                f"{task_followup_clause}"
+            )
+            user_message = user_message.strip()
+            approval_history = [
+                {"role": "assistant", "content": approved_markdown},
+                {
+                    "role": "user",
+                    "content": (
+                        "This plan has been reviewed by a human. Continue from it and execute it "
+                        "now."
+                    ),
+                },
+            ]
+            if conversation_history:
+                conversation_history.extend(approval_history)
+            else:
+                conversation_history = approval_history
+            if system_instruction:
+                system_instruction = f"{system_instruction}\n\n{review_context}"
+            else:
+                system_instruction = review_context
+
+            if hitl_agent_state:
+                resume_messages = copy.deepcopy(hitl_agent_state.get("messages") or [])
+                resume_messages.append({"role": "user", "content": approval_resume_text})
+                raw_resume_tool_calls = hitl_agent_state.get("tool_calls") or []
+                resume_tool_calls = _reconcile_resumed_tool_calls(
+                    [entry for entry in raw_resume_tool_calls if isinstance(entry, dict)],
+                    decision=hitl_decision,
+                    finished_at=int(time.time() * 1000),
+                )
+                resume_elapsed_ms = float(hitl_agent_state.get("elapsed_ms") or 0.0)
+                resume_prompt_tokens = int(hitl_agent_state.get("prompt_tokens") or 0)
+                resume_completion_tokens = int(hitl_agent_state.get("completion_tokens") or 0)
+                resume_max_tool_iterations = max(
+                    1, int(hitl_agent_state.get("remaining_tool_iterations") or max_tool_iterations)
+                )
+
+        if not credential_id or not model:
+            return {
+                "text": f"Agent processed (no credential): {user_message}",
+                "model": model or "none",
+                "error": "No credential or model configured",
+            }
+
+        fallback_credential_id = (node_data.get("fallbackCredentialId") or "").strip() or None
+        fallback_model = (node_data.get("fallbackModel") or "").strip() or None
+        agent_use_responses_api = bool(node_data.get("responsesApiEnabled", False))
+        attempts: list[tuple[str, str]] = [(credential_id, model)]
+        if fallback_credential_id and fallback_model:
+            attempts.append((fallback_credential_id, fallback_model))
+
+        from app.db.session import SessionLocal
+        from app.services.encryption import decrypt_config
+        from app.services.llm_service import execute_llm, execute_llm_with_tools
+
+        if guardrails_config and guardrails_config.get("enabled"):
+            from app.services.guardrails_service import (
+                GuardrailCategory,
+                GuardrailConfig,
+                GuardrailSeverity,
+                check_guardrails,
+            )
+            from app.services.llm_service import GOOGLE_OPENAI_BASE_URL
+
+            raw_categories = guardrails_config.get("categories") or []
+            parsed_categories: list[GuardrailCategory] = []
+            for cat in raw_categories:
+                try:
+                    parsed_categories.append(GuardrailCategory(cat))
+                except ValueError:
+                    pass
+            raw_severity = guardrails_config.get("severity", "medium")
+            try:
+                parsed_severity = GuardrailSeverity(raw_severity)
+            except ValueError:
+                parsed_severity = GuardrailSeverity.MEDIUM
+
+            guardrail_credential_id = (guardrails_config.get("credential_id") or "").strip()
+            guardrail_model = (guardrails_config.get("model") or "").strip()
+            if not guardrail_credential_id or not guardrail_model:
+                return {
+                    "text": "",
+                    "model": model,
+                    "error": (
+                        "Guardrails are enabled but credential and model are required. "
+                        "Please select a Guardrail Credential and Guardrail Model in the node."
+                    ),
+                }
+
+            try:
+                with SessionLocal() as db:
+                    guardrail_cred = self._get_accessible_credential(db, guardrail_credential_id)
+                    if not guardrail_cred:
+                        return {
+                            "text": "",
+                            "model": model,
+                            "error": "Guardrail credential not found or not accessible.",
+                        }
+                    guardrail_credential_type = guardrail_cred.type
+                    gcred_cfg = decrypt_config(guardrail_cred.encrypted_config)
+                    guardrail_api_key = gcred_cfg.get("api_key")
+                    guardrail_base_url = gcred_cfg.get("base_url")
+                    if not guardrail_base_url and guardrail_cred.type.value == "google":
+                        guardrail_base_url = GOOGLE_OPENAI_BASE_URL
+                    elif guardrail_base_url and guardrail_cred.type.value == "custom":
+                        guardrail_base_url = guardrail_base_url.rstrip("/")
+                        if not guardrail_base_url.endswith("/v1"):
+                            guardrail_base_url = guardrail_base_url + "/v1"
+            except Exception as e:
+                return {
+                    "text": "",
+                    "model": model,
+                    "error": f"Failed to load guardrail credential: {e}",
+                }
+
+            if guardrail_api_key:
+                cfg = GuardrailConfig(
+                    enabled=True,
+                    categories=parsed_categories,
+                    severity=parsed_severity,
+                )
+                guardrail_trace_context = self._build_llm_trace_context(
+                    guardrail_credential_id, node_id
+                )
+                check_guardrails(
+                    text=user_message,
+                    config=cfg,
+                    credential_type=guardrail_credential_type.value,
+                    api_key=guardrail_api_key,
+                    base_url=guardrail_base_url,
+                    model=guardrail_model,
+                    trace_context=guardrail_trace_context,
+                )
+
+        mcp_connections = node_data.get("mcpConnections") or []
+        merged_tools: list[dict] = list(tools)
+
+        if hitl_enabled:
+            if hitl_guidelines:
+                hitl_guidelines_instruction = (
+                    f"Human review guidelines from the node configuration:\n{hitl_guidelines}"
+                )
+                if system_instruction:
+                    system_instruction = f"{system_instruction}\n\n{hitl_guidelines_instruction}"
+                else:
+                    system_instruction = hitl_guidelines_instruction
+            hitl_guidance = (
+                "Human review is available through the `request_human_review` tool.\n"
+                "Use it only when the system prompt or node HITL guidelines explicitly require "
+                "approval before a specific tool call, sub-agent, sub-workflow, MCP action, "
+                "skill execution, or other external/important action.\n"
+                "If those guidelines explicitly say an action is already approved or should not "
+                "use HITL, do not request human review for it.\n"
+                "Do not call it for every step.\n"
+                "When you call it, provide:\n"
+                "- `summary`: optional short reviewer-facing context that you generate when useful\n"
+                "- `review_markdown`: a single Markdown body describing the plan or action to approve\n"
+                "- `reason`: the action currently blocked on human approval\n"
+                "If you omit `summary`, Heym derives one from the review Markdown.\n"
+                + (
+                    "Request human review at most once for this entire run. After that single "
+                    "approval, continue and never request human review again; produce the final "
+                    "answer directly."
+                    if hitl_single_review
+                    else "You may call it multiple times in the same run if new approval-required "
+                    "steps appear later."
+                )
+            )
+            if system_instruction:
+                system_instruction = f"{system_instruction}\n\n{hitl_guidance}"
+            else:
+                system_instruction = hitl_guidance
+            merged_tools.append(
+                {
+                    "name": "request_human_review",
+                    "description": (
+                        "Pause and ask a human reviewer to approve a specific next step. Use only "
+                        "when the instructions explicitly require human approval before continuing."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {
+                                "type": "string",
+                                "description": (
+                                    "Optional short reviewer-facing summary. If omitted, Heym "
+                                    "derives one from the review Markdown."
+                                ),
+                            },
+                            "review_markdown": {
+                                "type": "string",
+                                "description": (
+                                    "Single Markdown body that explains the exact plan or action "
+                                    "the human should approve."
+                                ),
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "The action currently blocked on approval.",
+                            },
+                        },
+                        "required": ["review_markdown"],
+                    },
+                    "_source": "hitl",
+                }
+            )
+
+        for skill in skills:
+            skill_files = skill.get("files") or []
+            if not any(f.get("path", "").endswith(".py") for f in skill_files):
+                continue
+            skill_name = (skill.get("name") or "skill").replace(" ", "_").lower()
+            skill_timeout = float(skill.get("timeoutSeconds") or tool_timeout_seconds)
+            drive_files_enabled = bool(skill.get("driveFilesEnabled"))
+            skill_description = (
+                f"Run {skill.get('name', 'skill')} Python script. Pass arguments as JSON."
+            )
+            if drive_files_enabled:
+                skill_description += (
+                    " This skill can import heym_drive to read accessible Drive files by "
+                    "file_id or filename."
+                )
+            merged_tools.append(
+                {
+                    "name": f"skill_{skill_name}",
+                    "description": skill_description,
+                    "parameters": json.dumps(
+                        {
+                            "type": "object",
+                            "properties": {
+                                "input": {"type": "string", "description": "Input for the script"}
+                            },
+                            "required": [],
+                        }
+                    ),
+                    "_source": "skill",
+                    "_skill_files": skill_files,
+                    "_skill_timeout": skill_timeout,
+                    "_drive_files_enabled": drive_files_enabled,
+                    "_actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,
+                    "_owner_id": str(self.trace_user_id) if self.trace_user_id else None,
+                    "_workflow_id": str(self.workflow_id) if self.workflow_id else None,
+                    "_node_id": node_id,
+                    "_node_label": node_label,
+                }
+            )
+
+        mcp_list_start = time.time()
+        for conn in mcp_connections:
+            conn = self._resolve_mcp_connection(conn, inputs, node_id)
+            conn_timeout = float(conn.get("timeoutSeconds") or tool_timeout_seconds)
+            try:
+                mcp_tools = self._list_mcp_tools(conn, conn_timeout)
+                merged_tools.extend(mcp_tools)
+            except Exception as e:
+                logger.warning("MCP list_tools failed for %s: %s", conn.get("label", "?"), e)
+        mcp_list_ms = round((time.time() - mcp_list_start) * 1000, 2) if mcp_connections else 0.0
+        hitl_policy_text = "\n\n".join(
+            part for part in (base_system_instruction or "", hitl_guidelines) if part
+        )
+        fallback_hitl_mcp_policy = self._build_hitl_mcp_policy(hitl_policy_text, merged_tools)
+        mcp_tool_names = [
+            str(tool.get("name") or "") for tool in merged_tools if tool.get("_source") == "mcp"
+        ]
+        if hitl_enabled and mcp_tool_names:
+            mcp_tool_list = ", ".join(sorted(name for name in mcp_tool_names if name))
+            mcp_hint = (
+                "MCP tools available in this run: "
+                f"{mcp_tool_list}. If your instructions say to ask for approval before MCP calls, "
+                "that includes these tool names."
+            )
+            if system_instruction:
+                system_instruction = f"{system_instruction}\n\n{mcp_hint}"
+            else:
+                system_instruction = mcp_hint
+
+        is_orchestrator = bool(node_data.get("isOrchestrator", False))
+        sub_agent_labels = node_data.get("subAgentLabels") or []
+        sub_workflow_ids = [
+            wf_id
+            for wf_id in (node_data.get("subWorkflowIds") or [])
+            if isinstance(wf_id, str) and wf_id in self.workflow_cache
+        ]
+        if is_orchestrator and sub_agent_labels:
+            call_sub_agent_tool = {
+                "name": "call_sub_agent",
+                "description": "Delegate a task to a specialized sub-agent. Use when the task requires expertise from another agent. When multiple sub-agents are needed for the same task (e.g. distance + food for a city), call them all in one turn—they will run in parallel.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sub_agent_label": {
+                            "type": "string",
+                            "enum": sub_agent_labels,
+                            "description": "Label of the sub-agent to call",
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Task or prompt to send to the sub-agent",
+                        },
+                    },
+                    "required": ["sub_agent_label", "prompt"],
+                },
+                "_source": "sub_agent",
+                "_sub_agent_labels": sub_agent_labels,
+            }
+            merged_tools.append(call_sub_agent_tool)
+
+        if sub_workflow_ids:
+            sub_workflow_names: dict[str, str] = {}
+            configured_names = node_data.get("subWorkflowNames") or {}
+            if isinstance(configured_names, dict):
+                for wf_id in sub_workflow_ids:
+                    raw = configured_names.get(wf_id)
+                    if isinstance(raw, str) and raw.strip():
+                        sub_workflow_names[str(wf_id)] = raw.strip()
+            for wf_id in sub_workflow_ids:
+                if wf_id in sub_workflow_names:
+                    continue
+                wf = self.workflow_cache.get(wf_id, {})
+                cached_name = wf.get("name")
+                if isinstance(cached_name, str) and cached_name.strip():
+                    sub_workflow_names[wf_id] = cached_name.strip()
+            workflow_hints = []
+            for wf_id in sub_workflow_ids:
+                wf = self.workflow_cache.get(wf_id, {})
+                name = sub_workflow_names.get(wf_id) or wf.get("name") or wf_id[:8] + "..."
+                input_fields = wf.get("input_fields") or []
+                field_keys = [f.get("key", "text") for f in input_fields if f.get("key")]
+                if not field_keys:
+                    field_keys = ["text"]
+                fields_desc = ", ".join(field_keys)
+                workflow_hints.append(f"{name} ({wf_id}) expects inputs: {{{fields_desc}}}")
+            hints_str = "; ".join(workflow_hints)
+            call_sub_workflow_tool = {
+                "name": "call_sub_workflow",
+                "description": f"Execute a sub-workflow and get its result. Use when the task requires running a predefined workflow. Available workflows (each lists its required input keys): {hints_str}. Pass inputs as an object with those exact keys.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "workflow_id": {
+                            "type": "string",
+                            "enum": sub_workflow_ids,
+                            "description": "ID of the workflow to execute",
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": 'Input object. Keys must match the target workflow\'s expected fields (see workflow hints above). E.g. for text input use {"text": "value"}, for name+dob use {"name": "...", "dob": "..."}.',
+                        },
+                    },
+                    "required": ["workflow_id", "inputs"],
+                },
+                "_source": "sub_workflow",
+                "_sub_workflow_ids": sub_workflow_ids,
+                "_sub_workflow_names": sub_workflow_names,
+            }
+            merged_tools.append(call_sub_workflow_tool)
+
+        node_tool_schemas = self._build_node_tool_schemas(node_id) if node_id is not None else []
+        merged_tools.extend(node_tool_schemas)
+
+        needs_custom_executor = (
+            hitl_enabled
+            or (is_orchestrator and sub_agent_labels)
+            or bool(sub_workflow_ids)
+            or bool(node_tool_schemas)
+        )
+
+        def on_tool_call(entry: dict) -> None:
+            if self.agent_progress_queue is not None:
+                self.agent_progress_queue.put(
+                    {
+                        "type": "agent_progress",
+                        "node_id": node_id,
+                        "node_label": node_data.get("label", node_id or ""),
+                        "entry": entry,
+                    }
+                )
+
+        agent_response_format: dict | None = None
+        if json_output_enabled:
+            if json_output_schema:
+                try:
+                    schema = json.loads(json_output_schema)
+                except json.JSONDecodeError as exc:
+                    return {
+                        "text": "",
+                        "model": model,
+                        "error": f"Invalid JSON output schema: {str(exc)}",
+                    }
+                if not isinstance(schema, dict):
+                    return {
+                        "text": "",
+                        "model": model,
+                        "error": "JSON output schema must be an object",
+                    }
+                schema = _ensure_additional_properties(schema)
+                agent_response_format = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "output", "schema": schema, "strict": True},
+                }
+            else:
+                agent_response_format = {"type": "json_object"}
+
+        from app.services.agent_memory_service import augment_system_instruction_with_memory
+
+        system_instruction = augment_system_instruction_with_memory(
+            system_instruction,
+            self.workflow_id,
+            str(node_id) if node_id else None,
+            enabled=bool(node_data.get("persistentMemoryEnabled")),
+            workflow_nodes=self.nodes,
+            trace_user_id=self.trace_user_id,
+        )
+
+        agent_last_error: Exception | None = None
+        agent_last_model = model
+        agent_last_trace_id: str | None = None
+        for attempt_idx, (cid, mod) in enumerate(attempts):
+            credential_type = None
+            credential_name = ""
+            api_key = None
+            base_url = None
+            credential_config: dict = {}
+            try:
+                with SessionLocal() as db:
+                    cred = self._get_accessible_credential(db, cid)
+                    if cred:
+                        credential_type = cred.type
+                        credential_name = cred.name
+                        credential_config = decrypt_config(cred.encrypted_config)
+                        api_key = credential_config.get("api_key")
+                        base_url = credential_config.get("base_url")
+            except Exception as e:
+                agent_last_error = e
+                agent_last_model = mod
+                continue
+
+            trace_context = self._build_llm_trace_context(cid, node_id)
+
+            router = None
+            if credential_type is not None:
+                try:
+                    router = build_router_for_credential(
+                        credential_id=cid,
+                        credential_name=credential_name,
+                        credential_type=credential_type.value,
+                        config=credential_config,
+                        trace_context=trace_context,
+                    )
+                except ModelRouterConfigError as e:
+                    agent_last_error = e
+                    agent_last_model = mod
+                    continue
+
+            # A router has no key of its own; the option it picks supplies one.
+            if not api_key and router is None:
+                agent_last_error = ValueError("Credential has no API key")
+                agent_last_model = mod
+                continue
+
+            effective_hitl_mcp_policy = fallback_hitl_mcp_policy
+            attempt_system_instruction = system_instruction
+            # A fixed classification call, so it never routes; on Auto Model the
+            # configured fallback policy is used instead.
+            if hitl_enabled and mcp_tool_names and router is None:
+                classified_hitl_mcp_policy = self._classify_hitl_mcp_policy_with_model(
+                    credential_type=credential_type.value,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=mod,
+                    policy_text=hitl_policy_text,
+                    available_mcp_tools=mcp_tool_names,
+                    trace_context=trace_context,
+                )
+                effective_hitl_mcp_policy = self._coerce_hitl_mcp_policy(
+                    classified_hitl_mcp_policy,
+                    available_mcp_tools=mcp_tool_names,
+                    fallback_policy=fallback_hitl_mcp_policy,
+                )
+                interpreted_mcp_policy_hint = self._build_mcp_policy_interpretation_hint(
+                    effective_hitl_mcp_policy
+                )
+                if interpreted_mcp_policy_hint:
+                    if attempt_system_instruction:
+                        attempt_system_instruction = (
+                            f"{attempt_system_instruction}\n\n{interpreted_mcp_policy_hint}"
+                        )
+                    else:
+                        attempt_system_instruction = interpreted_mcp_policy_hint
+
+            # Under a single-review policy, once a prior checkpoint has been approved/edited on
+            # this resume, suppress any further request_human_review pauses so the agent cannot
+            # loop back into another review of re-done work.
+            hitl_suppress_after_first_review = hitl_single_review and any(
+                str(entry.get("decision") or "") in {"accepted", "edited"} for entry in hitl_history
+            )
+            custom_tool_executor = (
+                self._build_agent_tool_executor(
+                    node_id=node_id,
+                    hitl_fallback_summary=hitl_fallback_summary,
+                    hitl_mcp_policy=effective_hitl_mcp_policy,
+                    hitl_suppress_after_first_review=hitl_suppress_after_first_review,
+                )
+                if needs_custom_executor
+                else None
+            )
+
+            try:
+                if merged_tools:
+
+                    def should_abort_tool_loop() -> str | None:
+                        if self.cancel_event is not None and self.cancel_event.is_set():
+                            return "Workflow execution cancelled"
+                        return None
+
+                    result = run_async(
+                        execute_llm_with_tools(
+                            credential_type=credential_type.value,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=mod,
+                            system_instruction=attempt_system_instruction,
+                            user_message=user_message,
+                            tools=merged_tools,
+                            tool_timeout_seconds=tool_timeout_seconds,
+                            max_tool_iterations=resume_max_tool_iterations,
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,
+                            max_tokens=max_tokens,
+                            response_format=agent_response_format,
+                            image_input=image_input,
+                            trace_context=trace_context,
+                            conversation_history=conversation_history,
+                            skills_included=skills_used or None,
+                            on_tool_call=on_tool_call,
+                            tool_executor=custom_tool_executor,
+                            initial_messages=resume_messages,
+                            initial_tool_calls=resume_tool_calls,
+                            initial_elapsed_ms=resume_elapsed_ms,
+                            initial_prompt_tokens=resume_prompt_tokens,
+                            initial_completion_tokens=resume_completion_tokens,
+                            should_abort=should_abort_tool_loop,
+                            request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
+                            use_responses_api=agent_use_responses_api,
+                            router=router,
+                        )
+                    )
+                else:
+                    result = run_async(
+                        execute_llm(
+                            credential_type=credential_type.value,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=mod,
+                            system_instruction=attempt_system_instruction,
+                            user_message=user_message,
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,
+                            max_tokens=max_tokens,
+                            response_format=agent_response_format,
+                            image_input=image_input,
+                            trace_context=trace_context,
+                            conversation_history=conversation_history,
+                            skills_included=skills_used or None,
+                            request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
+                            use_responses_api=agent_use_responses_api,
+                            router=router,
+                        )
+                    )
+            except Exception as e:
+                agent_last_error = e
+                agent_last_model = mod
+                agent_last_trace_id = self._latest_trace_id(trace_context) or agent_last_trace_id
+                continue
+
+            result = dict(result)
+            self._attach_latest_trace_id(result, trace_context)
+            agent_last_trace_id = self._latest_trace_id(trace_context) or agent_last_trace_id
+            if attempt_idx > 0:
+                result["fallbackUsed"] = True
+                result["model"] = mod
+            if skills_used:
+                tool_calls_list = result.get("tool_calls") or []
+                invoked_tool_names = {
+                    tc.get("name", "") for tc in tool_calls_list if tc.get("source") == "skill"
+                }
+                actually_used = [
+                    s_name
+                    for s_name in skills_used
+                    if f"skill_{s_name.replace(' ', '_').lower()}" in invoked_tool_names
+                ]
+                if actually_used:
+                    result["skills_used"] = actually_used
+            if mcp_list_ms > 0:
+                result["mcp_list_ms"] = mcp_list_ms
+            tool_calls = result.get("tool_calls") or []
+            sub_agent_times = [
+                tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") == "call_sub_agent"
+            ]
+            other_times = [
+                tc.get("elapsed_ms", 0)
+                for tc in tool_calls
+                if tc.get("name") not in {"call_sub_agent", "_context_compression"}
+            ]
+            tools_total_ms = (max(sub_agent_times) if sub_agent_times else 0) + sum(other_times)
+            result["timing_breakdown"] = {
+                "llm_ms": result.get("elapsed_ms", 0),
+                "tools_ms": round(tools_total_ms, 2),
+                "mcp_list_ms": mcp_list_ms,
+            }
+            if is_hitl_resume and hitl_history:
+                result["hitlHistory"] = copy.deepcopy(hitl_history)
+            if is_hitl_resume and not result.get("error") and "_hitl_pending" not in result:
+                result["_skip_source_handles"] = ["hitl"]
+                result["decision"] = hitl_resolution.get("decision")
+                result["summary"] = hitl_resolution.get("summary")
+                result["originalDraft"] = hitl_resolution.get("originalDraft")
+                result["reviewText"] = hitl_resolution.get("reviewText")
+                result["requestId"] = hitl_resolution.get("requestId")
+                if hitl_resolution.get("editedText") is not None:
+                    result["editedText"] = hitl_resolution.get("editedText")
+                if hitl_resolution.get("refusalReason") is not None:
+                    result["refusalReason"] = hitl_resolution.get("refusalReason")
+                if approved_markdown:
+                    result["approvedMarkdown"] = approved_markdown
+            if (
+                self.workflow_id
+                and node_id
+                and not result.get("error")
+                and "_hitl_pending" not in result
+            ):
+                from app.services.agent_memory_service import (
+                    memory_extraction_targets_for_agent_node,
+                    schedule_agent_memory_extraction,
+                )
+
+                extraction_targets = memory_extraction_targets_for_agent_node(
+                    self.nodes,
+                    self.workflow_id,
+                    str(node_id),
+                    bool(node_data.get("persistentMemoryEnabled")),
+                    self.trace_user_id,
+                )
+                for mem_wf_id, mem_canvas_id in extraction_targets:
+                    schedule_agent_memory_extraction(
+                        workflow_id=mem_wf_id,
+                        canvas_node_id=mem_canvas_id,
+                        credential_id=str(cid),
+                        model=str(result.get("model") or mod),
+                        user_message=user_message,
+                        agent_result=copy.deepcopy(result),
+                        trace_context=trace_context,
+                    )
+            return result
+
+        error_output = {
+            "text": "",
+            "model": agent_last_model,
+            "error": str(agent_last_error)
+            if agent_last_error
+            else "All credential/model attempts failed",
+        }
+        if agent_last_trace_id:
+            error_output["_trace_id"] = agent_last_trace_id
+        return error_output
+
+    def _wrap_value(self, value: object) -> object:
+        """Wrap value in appropriate Dot* class for attribute access (recursive)."""
+        if isinstance(value, dict) and not isinstance(value, DotDict):
+            wrapped_dict = DotDict()
+            for k, v in value.items():
+                wrapped_dict[k] = self._wrap_value(v)
+            return wrapped_dict
+        if isinstance(value, list) and not isinstance(value, DotList):
+            return DotList([self._wrap_value(item) for item in value])
+        if isinstance(value, bool) and not isinstance(value, DotBool):
+            return DotBool(value)
+        if isinstance(value, int) and not isinstance(value, DotInt):
+            return DotInt(value)
+        if isinstance(value, float) and not isinstance(value, DotFloat):
+            return DotFloat(value)
+        if isinstance(value, str) and not isinstance(value, DotStr):
+            return DotStr(value)
+        return value
+
+    def _unwrap_value(self, value: object) -> object:
+        """Convert Dot* types back to native Python types for JSON serialization."""
+        if isinstance(value, DotDateTime):
+            return str(value.toISO())
+        if isinstance(value, DotDict):
+            return {k: self._unwrap_value(v) for k, v in dict.items(value)}
+        if isinstance(value, DotList):
+            return [self._unwrap_value(item) for item in value]
+        if isinstance(value, DotBool):
+            return value._value
+        if isinstance(value, DotInt):
+            return int(value)
+        if isinstance(value, DotFloat):
+            return float(value)
+        if isinstance(value, DotStr):
+            return str(value)
+        if isinstance(value, dict):
+            return {k: self._unwrap_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._unwrap_value(item) for item in value]
+        return value
+
+    def _unwrap_scalar_value(self, value: object) -> object:
+        """Convert Dot* scalars to native Python types without copying nested containers."""
+        if isinstance(value, DotDateTime):
+            return str(value.toISO())
+        if isinstance(value, DotBool):
+            return value._value
+        if isinstance(value, DotInt):
+            return int(value)
+        if isinstance(value, DotFloat):
+            return float(value)
+        if isinstance(value, DotStr):
+            return str(value)
+        return value
+
+    def _resolve_expression_body_raw(
+        self,
+        expression_body: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+    ) -> object:
+        """Evaluate an expression body without a leading ``$`` and keep raw Dot* results."""
+        combined = self._build_context(inputs, current_node_id)
+        expr = self._transform_ternary_expression(expression_body)
+
+        if "$" in expr:
+            expr = self._substitute_nested_dollar_refs_for_eval(expr, inputs, current_node_id)
+
+        try:
+            evaluator = HeymExpressionEval(
+                functions=self._get_evaluator_functions(),
+                names=combined,
+            )
+            return evaluator.eval(expr, previously_parsed=_parse_expression_tree(expr))
+        except Exception as e:
+            return self._fallback_after_eval_error(e, expr, combined)
+
+    def _string_concat_leaf_nodes(self, node: ast.AST) -> list[ast.AST] | None:
+        """Flatten a safe string-concat ``+`` chain into leaf nodes for one-shot joining."""
+        root = _expression_root_node(node)
+
+        if isinstance(root, ast.BinOp) and isinstance(root.op, ast.Add):
+            left_nodes = self._string_concat_leaf_nodes(root.left)
+            if left_nodes is None:
+                return None
+            right_nodes = self._string_concat_leaf_nodes(root.right)
+            if right_nodes is None:
+                return None
+            return left_nodes + right_nodes
+
+        if isinstance(root, ast.Constant) and isinstance(root.value, str):
+            return [root]
+
+        if (
+            isinstance(root, ast.Call)
+            and isinstance(root.func, ast.Name)
+            and root.func.id == "str"
+            and len(root.args) == 1
+            and not root.keywords
+        ):
+            return [root]
+
+        return None
+
+    def _try_evaluate_string_concat_expression(
+        self,
+        parsed: ast.AST,
+        evaluator: HeymExpressionEval,
+    ) -> str | None:
+        """Fast path for long ``'literal' + str(...) + ...`` chains used in set/output nodes."""
+        leaf_nodes = self._string_concat_leaf_nodes(parsed)
+        if leaf_nodes is None or len(leaf_nodes) < 4:
+            return None
+
+        parts: list[str] = []
+        for leaf in leaf_nodes:
+            value = evaluator._eval(leaf)
+            parts.append(str(value))
+        return "".join(parts)
+
+    def _try_resolve_variable_self_append(
+        self,
+        var_name: str,
+        var_value_template: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+    ) -> DotList | None:
+        """Optimize ``$vars.<sameVar>.add(item)`` by appending in place for array vars."""
+        trimmed = var_value_template.strip()
+        if not trimmed.startswith("$vars.") or not trimmed.endswith(")"):
+            return None
+
+        parts = self._split_expression_parts(trimmed[1:])
+        if len(parts) != 3 or parts[0] != "vars" or parts[1] != var_name:
+            return None
+
+        method_name, method_args = self._parse_method_call(parts[2])
+        if method_name != "add" or method_args is None or len(method_args) != 1:
+            return None
+
+        current_value = self.vars.get(var_name)
+        if isinstance(current_value, DotList):
+            target_list = current_value
+        elif isinstance(current_value, list):
+            wrapped_value = self._wrap_value(current_value)
+            if not isinstance(wrapped_value, DotList):
+                return None
+            target_list = wrapped_value
+        else:
+            return None
+
+        append_value = self._resolve_expression_body_raw(
+            method_args[0],
+            inputs,
+            current_node_id,
+        )
+        target_list.append(append_value)
+        return target_list
+
+    def _mark_vars_context_dirty(self) -> None:
+        """Invalidate cached wrapped vars/global contexts after a variable change."""
+        self._wrapped_vars_cache = None
+        self._wrapped_global_cache = None
+        self._merged_global_context_cache = None
+        self._vars_context_dirty = True
+
+    def _refresh_vars_context_cache(self) -> None:
+        """Refresh wrapped vars/global caches once per vars mutation."""
+        if (
+            not self._vars_context_dirty
+            and self._wrapped_vars_cache is not None
+            and self._wrapped_global_cache is not None
+            and self._merged_global_context_cache is not None
+        ):
+            return
+
+        wrapped_vars = self._wrap_value(self.vars)
+        self._wrapped_vars_cache = wrapped_vars if isinstance(wrapped_vars, DotDict) else DotDict()
+
+        merged_global = dict(self.global_variables_context)
+        merged_global.update(self.vars)
+        self._merged_global_context_cache = merged_global
+
+        wrapped_global = self._wrap_value(merged_global)
+        self._wrapped_global_cache = (
+            wrapped_global if isinstance(wrapped_global, DotDict) else DotDict()
+        )
+        self._vars_context_dirty = False
+
+    def _build_context(self, inputs: dict, current_node_id: str | None = None) -> DotDict:
+        combined = DotDict()
+        inherited_context = (
+            inputs.get(_EXECUTION_CONTEXT_INPUT_KEY) if isinstance(inputs, dict) else None
+        )
+        if isinstance(inherited_context, dict):
+            for label, data in inherited_context.items():
+                combined[label] = self._wrap_value(data)
+
+        for label, data in inputs.items():
+            if label == _EXECUTION_CONTEXT_INPUT_KEY:
+                continue
+            wrapped_data = self._wrap_value(data)
+            if isinstance(data, dict):
+                for key, val in data.items():
+                    combined[key] = self._wrap_value(val)
+            combined[label] = wrapped_data
+
+        with self.lock:
+            label_to_output_snapshot = dict(self.label_to_output)
+            wrapped_cache_snapshot = dict(self._wrapped_label_output_cache)
+
+        if current_node_id:
+            upstream_labels = self.get_upstream_node_labels(current_node_id)
+            for label in upstream_labels:
+                if label in combined:
+                    continue
+                if label in wrapped_cache_snapshot:
+                    combined[label] = wrapped_cache_snapshot[label]
+                elif label in label_to_output_snapshot:
+                    combined[label] = self._wrap_value(label_to_output_snapshot[label])
+        else:
+            for label, data in label_to_output_snapshot.items():
+                if label in combined:
+                    continue
+                if label in wrapped_cache_snapshot:
+                    combined[label] = wrapped_cache_snapshot[label]
+                else:
+                    combined[label] = self._wrap_value(data)
+
+        combined["now"] = DotDateTime(self._current_datetime())
+        combined["UUID"] = uuid.uuid4().hex
+        combined["null"] = None
+        combined["None"] = None
+        combined["undefined"] = None
+        combined["true"] = True
+        combined["false"] = False
+
+        workflow_name, workflow_description = self._get_workflow_metadata()
+        workflow_path = f"/workflows/{self.workflow_id}" if self.workflow_id else ""
+        combined["workflowName"] = DotStr(workflow_name)
+        combined["workflowDescription"] = DotStr(workflow_description)
+        combined["workflowPath"] = DotStr(workflow_path)
+        combined["workflowUrl"] = DotStr(self._build_workflow_url(workflow_path))
+        combined["executionId"] = DotStr(self.execution_id or "")
+
+        if self.credentials_context:
+            credentials_dict = DotDict()
+            for name, value in self.credentials_context.items():
+                credentials_dict[name] = DotStr(value)
+            combined["credentials"] = credentials_dict
+
+        self._refresh_vars_context_cache()
+        combined["vars"] = (
+            self._wrapped_vars_cache if self._wrapped_vars_cache is not None else DotDict()
+        )
+        combined["global"] = (
+            self._wrapped_global_cache if self._wrapped_global_cache is not None else DotDict()
+        )
+        # Keep `$input.foo` semantics without creating a self-referential cycle on `combined`.
+        combined["input"] = DotDict(combined)
+
+        return combined
+
+    def _current_datetime(self) -> datetime:
+        return datetime.now(self.configured_timezone)
+
+    def _serialize_result(self, value: object) -> object:
+        if callable(value):
+            # A method reference is not a value. Its repr carries a heap address, so it
+            # must never land in node output or execution history.
+            return None
+        unwrapped = self._unwrap_value(value)
+        if isinstance(unwrapped, (dict, list)):
+            return json.dumps(unwrapped, ensure_ascii=False)
+        return unwrapped
+
+    def _has_arithmetic(self, expression: str) -> bool:
+        """Check if expression contains arithmetic operators after $ references."""
+        if "$" not in expression:
+            return False
+        arithmetic_pattern = (
+            r"\$[a-zA-Z_][a-zA-Z0-9_.]*(?:\([^)]*\)|\[[^\]]*\])*"
+            r"(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\([^)]*\)|\[[^\]]*\])*)*\s*[+\-*/%]"
+        )
+        return bool(re.search(arithmetic_pattern, expression))
+
+    def _resolve_value_with_dollar_refs(
+        self,
+        template: str,
+        inputs: dict,
+        node_id: str,
+        *,
+        preserve_type: bool = False,
+    ) -> object:
+        """Use arithmetic resolution for code-like ``$`` usage (e.g. ``int($x)``), else templates."""
+        trimmed = template.strip()
+        if not trimmed:
+            return template
+        if should_resolve_embedded_dollar_refs_arithmetically(trimmed, self):
+            return self.resolve_arithmetic_expression(
+                template, inputs, node_id, preserve_type=preserve_type
+            )
+        return self.evaluate_message_template(
+            template, inputs, node_id, preserve_type=preserve_type
+        )
+
+    def _get_evaluator_functions(self) -> dict:
+        if hasattr(self, "_evaluator_functions_cache"):
+            return self._evaluator_functions_cache
+
+        def create_date(value: str | int | None = None) -> DotDateTime:
+            if value is None:
+                return DotDateTime(self._current_datetime())
+            if isinstance(value, str):
+                try:
+                    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = normalize_datetime_to_timezone(dt, self.configured_timezone)
+                    return DotDateTime(dt)
+                except ValueError:
+                    return DotDateTime(self._current_datetime())
+            if isinstance(value, int):
+                dt = datetime.fromtimestamp(value, tz=timezone.utc)
+                return DotDateTime(dt)
+            return DotDateTime(self._current_datetime())
+
+        def random_int(min_val: int = 0, max_val: int = 100) -> int:
+            return random.randint(min_val, max_val)
+
+        def _as_int_strict(value: object, name: str) -> int:
+            # Note: `bool` is a subclass of `int` in Python, so disallow it explicitly.
+            if isinstance(value, bool):
+                raise ExpressionFunctionError(f"{name} must be an integer, not boolean")
+            if isinstance(value, int):
+                return int(value)
+            if isinstance(value, float):
+                if value.is_integer():
+                    return int(value)
+                raise ExpressionFunctionError(f"{name} must be an integer")
+            if isinstance(value, str):
+                try:
+                    parsed = int(value.strip())
+                except ValueError as e:
+                    raise ExpressionFunctionError(f"{name} must be an integer") from e
+                return parsed
+            raise ExpressionFunctionError(f"{name} must be an integer")
+
+        def range_func(a: object, b: object) -> DotList:
+            start = _as_int_strict(a, "a")
+            end = _as_int_strict(b, "b")
+            if start > end:
+                raise ExpressionFunctionError("$range(a,b) requires a <= b")
+            # b is excluded: [a, a+1, ..., b-1]
+            return DotList(list(range(start, end)))
+
+        def concat_func(*args) -> DotStr:
+            return DotStr("".join(str(a) if a is not None else "" for a in args))
+
+        self._evaluator_functions_cache = {
+            **DEFAULT_FUNCTIONS,
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "abs": abs,
+            "min": min,
+            "max": max,
+            "round": round,
+            "sum": sum,
+            "sorted": lambda lst: DotList(sorted(lst)) if isinstance(lst, list) else lst,
+            "list": lambda x: DotList(x) if hasattr(x, "__iter__") else DotList([x]),
+            "dict": dict,
+            "array": lambda *args: DotList(args),
+            "notNull": lambda lst: (
+                DotList([x for x in lst if x is not None]) if isinstance(lst, list) else lst
+            ),
+            "upper": lambda s: s.upper() if isinstance(s, str) else s,
+            "lower": lambda s: s.lower() if isinstance(s, str) else s,
+            "strip": lambda s: s.strip() if isinstance(s, str) else s,
+            "capitalize": lambda s: s.capitalize() if isinstance(s, str) else s,
+            "title": lambda s: s.title() if isinstance(s, str) else s,
+            "base64Encode": lambda s: DotStr(_base64_encode_text(s)),
+            "base64Decode": lambda s: DotStr(_base64_decode_text(s)),
+            "toJson": _parse_json_text,
+            "split": lambda s, sep=None: (
+                DotList(list(s) if sep == "" else s.split(sep)) if isinstance(s, str) else s
+            ),
+            "join": lambda sep, lst: sep.join(lst) if isinstance(lst, list) else lst,
+            "replace": lambda s, old, new: s.replace(old, new) if isinstance(s, str) else s,
+            "concat": concat_func,
+            "Date": create_date,
+            "randomInt": random_int,
+            "range": range_func,
+        }
+        return self._evaluator_functions_cache
+
+    def _split_ternary_expression(self, expression: str) -> tuple[str, str, str] | None:
+        depth = 0
+        in_string = False
+        string_char = ""
+        question_index = -1
+
+        for index, char in enumerate(expression):
+            if in_string:
+                if char == string_char and expression[index - 1] != "\\":
+                    in_string = False
+                continue
+
+            if char in ("'", '"'):
+                in_string = True
+                string_char = char
+                continue
+
+            if char in "([{":
+                depth += 1
+                continue
+
+            if char in ")]}":
+                depth -= 1
+                continue
+
+            if char == "?" and depth == 0:
+                question_index = index
+                break
+
+        if question_index == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        string_char = ""
+        colon_index = -1
+
+        for index in range(question_index + 1, len(expression)):
+            char = expression[index]
+            if in_string:
+                if char == string_char and expression[index - 1] != "\\":
+                    in_string = False
+                continue
+
+            if char in ("'", '"'):
+                in_string = True
+                string_char = char
+                continue
+
+            if char in "([{":
+                depth += 1
+                continue
+
+            if char in ")]}":
+                depth -= 1
+                continue
+
+            if char == ":" and depth == 0:
+                colon_index = index
+                break
+
+        if colon_index == -1:
+            return None
+
+        condition = expression[:question_index].strip()
+        truthy = expression[question_index + 1 : colon_index].strip()
+        falsy = expression[colon_index + 1 :].strip()
+
+        return condition, truthy, falsy
+
+    def _transform_ternary_expression(self, expression: str) -> str:
+        split = self._split_ternary_expression(expression)
+        if not split:
+            return expression
+
+        condition, truthy, falsy = split
+        transformed_condition = self._transform_ternary_expression(condition)
+        transformed_truthy = self._transform_ternary_expression(truthy)
+        transformed_falsy = self._transform_ternary_expression(falsy)
+
+        return f"({transformed_truthy}) if ({transformed_condition}) else ({transformed_falsy})"
+
+    def _substitute_nested_dollar_refs_for_eval(
+        self,
+        expr: str,
+        inputs: dict,
+        current_node_id: str | None,
+    ) -> str:
+        """Turn ``range(1, int($node.field))`` into literals so ``HeymExpressionEval`` can run."""
+        for _ in range(64):
+            spans = self._find_expressions(expr)
+            if not spans:
+                break
+            replaced = False
+            for start, end, dollar_expr in sorted(spans, key=lambda t: t[0], reverse=True):
+                if _is_inside_item_expression_string(expr, start):
+                    continue
+                resolved = self.resolve_expression(
+                    dollar_expr, inputs, current_node_id, preserve_type=True
+                )
+                if resolved is None:
+                    replacement = "None"
+                elif isinstance(resolved, str):
+                    replacement = repr(resolved)
+                elif isinstance(resolved, bool):
+                    replacement = "True" if resolved else "False"
+                elif isinstance(resolved, (dict, list)):
+                    replacement = json.dumps(resolved, ensure_ascii=False)
+                else:
+                    replacement = str(resolved)
+                expr = expr[:start] + replacement + expr[end:]
+                replaced = True
+            if not replaced:
+                break
+        return expr
+
+    def resolve_expression(
+        self,
+        expression: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+        preserve_type: bool = False,
+        raw: bool = False,
+    ) -> object:
+        if not expression.startswith("$"):
+            return expression
+
+        combined = self._build_context(inputs, current_node_id)
+        expr = self._transform_ternary_expression(expression[1:])
+
+        if expr == "input":
+            first_input = self._first_visible_input(inputs)
+            data = first_input if isinstance(first_input, dict) else {"value": first_input}
+            if preserve_type or raw:
+                return data
+            return json.dumps(data, ensure_ascii=False)
+
+        if "$" in expr:
+            expr = self._substitute_nested_dollar_refs_for_eval(expr, inputs, current_node_id)
+
+        try:
+            parsed = _parse_expression_tree(expr)
+            evaluator = HeymExpressionEval(
+                functions=self._get_evaluator_functions(),
+                names=combined,
+            )
+            result = self._try_evaluate_string_concat_expression(parsed, evaluator)
+            if result is None:
+                result = evaluator.eval(expr, previously_parsed=parsed)
+            if raw:
+                return result
+            if preserve_type:
+                return self._unwrap_value(result)
+            return self._serialize_result(result)
+        except Exception as e:
+            # Critical: expression functions that indicate workflow-breaking failures must propagate.
+            result = self._fallback_after_eval_error(e, expr, combined)
+            if raw:
+                return result
+            if preserve_type:
+                return self._unwrap_value(result)
+            return self._serialize_result(result)
+
+    def resolve_arithmetic_expression(
+        self,
+        expression: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+        preserve_type: bool = False,
+    ) -> object:
+        """Resolve expression that may contain arithmetic operations with $ references."""
+        combined = self._build_context(inputs, current_node_id)
+
+        def replace_dollar_ref(dollar_expr: str) -> str:
+            expr = dollar_expr[1:] if dollar_expr.startswith("$") else dollar_expr
+            expr = self._substitute_nested_dollar_refs_for_eval(expr, inputs, current_node_id)
+            try:
+                evaluator = HeymExpressionEval(
+                    functions=self._get_evaluator_functions(),
+                    names=combined,
+                )
+                result = evaluator.eval(expr, previously_parsed=_parse_expression_tree(expr))
+                if result is None:
+                    return "None"
+                if isinstance(result, str):
+                    return repr(result)
+                return str(result)
+            except Exception as e:
+                result = self._fallback_after_eval_error(e, expr, combined)
+                if result is None:
+                    return "None"
+                if isinstance(result, str):
+                    return repr(result)
+                return str(result)
+
+        processed = self._replace_expressions(expression, replace_dollar_ref)
+        processed = self._transform_ternary_expression(processed)
+
+        try:
+            evaluator = HeymExpressionEval(
+                functions=self._get_evaluator_functions(),
+                names={},
+            )
+            result = evaluator.eval(
+                processed,
+                previously_parsed=_parse_expression_tree(processed),
+            )
+            if preserve_type:
+                return self._unwrap_value(result)
+            return self._serialize_result(result)
+        except Exception as e:
+            if isinstance(e, ExpressionFunctionError):
+                raise
+            return processed
+
+    def _fallback_after_eval_error(self, exc: BaseException, expr: str, combined: dict) -> object:
+        """Use the simple-expression fallback only when the sandbox did not reject private access."""
+        if isinstance(exc, ExpressionFunctionError):
+            raise
+        if _sandbox_rejected_private_access(exc, expr):
+            return None
+        return self._resolve_simple_expression(expr, combined)
+
+    def _resolve_simple_expression(self, expr: str, combined: dict) -> object:
+        try:
+            normalized_expr = expr.lstrip("$") if expr.startswith("$") else expr
+
+            if "(" in normalized_expr and normalized_expr.endswith(")"):
+                func_name, raw_args = normalized_expr.split("(", 1)
+                func_name = func_name.strip()
+                raw_args = raw_args[:-1].strip()
+                functions = {
+                    "len": len,
+                    "str": str,
+                    "int": int,
+                    "float": float,
+                    "bool": bool,
+                    "abs": abs,
+                    "min": min,
+                    "max": max,
+                    "round": round,
+                    "sum": sum,
+                    "sorted": lambda lst: DotList(sorted(lst)) if isinstance(lst, list) else lst,
+                    "list": lambda x: DotList(x) if hasattr(x, "__iter__") else DotList([x]),
+                    "dict": dict,
+                    "array": lambda *args: DotList(args),
+                    "notNull": lambda lst: (
+                        DotList([x for x in lst if x is not None]) if isinstance(lst, list) else lst
+                    ),
+                    "base64Encode": lambda value: DotStr(_base64_encode_text(value)),
+                    "base64Decode": lambda value: DotStr(_base64_decode_text(value)),
+                    "toJson": _parse_json_text,
+                }
+                if func_name in functions:
+                    args = []
+                    if raw_args:
+                        parsed_args = self._split_function_args(raw_args)
+                        for arg in parsed_args:
+                            args.append(self._resolve_simple_expression(arg.strip(), combined))
+                    return functions[func_name](*args)
+
+            parts = self._split_expression_parts(normalized_expr)
+            value = combined
+
+            string_methods = {
+                "orEmpty": lambda s: s if s is not None else "",
+                "or_empty": lambda s: s if s is not None else "",
+                "upper": lambda s: s.upper(),
+                "uppercase": lambda s: s.upper(),
+                "lower": lambda s: s.lower(),
+                "lowercase": lambda s: s.lower(),
+                "strip": lambda s: s.strip(),
+                "trim": lambda s: s.strip(),
+                "capitalize": lambda s: s.capitalize(),
+                "title": lambda s: s.title(),
+                "length": lambda s: len(s),
+                "base64Encode": _base64_encode_text,
+                "base64Decode": _base64_decode_text,
+                "urlEncode": lambda s: quote(s, safe=""),
+                "urlDecode": lambda s: unquote(s),
+                "escape": lambda s: json.dumps(s),
+                "unescape": lambda s: self._safe_json_parse(s),
+                "toJson": _parse_json_text,
+                "to_json": _parse_json_text,
+            }
+
+            for index, part in enumerate(parts):
+                method_name, method_args = self._parse_method_call(part)
+                if (
+                    value is None
+                    and method_name in {"orEmpty", "or_empty"}
+                    and method_args is not None
+                ):
+                    value = ""
+                elif method_name in string_methods and isinstance(value, str):
+                    value = string_methods[method_name](value)
+                elif method_name == "length" and isinstance(value, (str, list)):
+                    value = len(value)
+                elif method_args is not None:
+                    if _is_private_python_attr(method_name):
+                        return None
+                    if isinstance(value, dict) and method_name == "get":
+                        parsed_args = []
+                        for arg in method_args:
+                            if (arg.startswith('"') and arg.endswith('"')) or (
+                                arg.startswith("'") and arg.endswith("'")
+                            ):
+                                parsed_args.append(arg[1:-1])
+                            elif arg.isdigit() or (arg.startswith("-") and arg[1:].isdigit()):
+                                parsed_args.append(int(arg))
+                            elif arg.replace(".", "", 1).isdigit():
+                                parsed_args.append(float(arg))
+                            else:
+                                parsed_args.append(self._resolve_simple_expression(arg, combined))
+                        value = value.get(*parsed_args) if parsed_args else None
+                    else:
+                        return None
+                else:
+                    splitp = self._split_property_and_subscripts(part)
+                    if splitp is None:
+                        return None
+                    value = self._read_property_with_subscripts(value, splitp)
+
+                if value is None:
+                    next_part = parts[index + 1] if index + 1 < len(parts) else ""
+                    next_method_name, next_method_args = self._parse_method_call(next_part)
+                    if next_method_name in {"orEmpty", "or_empty"} and next_method_args is not None:
+                        continue
+                    return None
+
+                # Re-wrap intermediate scalars so chained calls like `.length.toString()`
+                # and `$Date().year.toString()` keep Dot* behavior on the next segment.
+                value = self._wrap_value(value)
+
+            return value
+        except Exception:
+            return None
+
+    def _safe_json_parse(self, value: str | None) -> str | None:
+        """Safely parse JSON string, handling errors gracefully."""
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            # Return original string if JSON parsing fails
+            return value
+
+    def _split_expression_parts(self, expr: str) -> list[str]:
+        parts = []
+        current = ""
+        depth = 0
+        for char in expr:
+            if char == "(" or char == "[":
+                depth += 1
+                current += char
+            elif char == ")" or char == "]":
+                depth -= 1
+                current += char
+            elif char == "." and depth == 0:
+                if current:
+                    parts.append(current)
+                current = ""
+            else:
+                current += char
+        if current:
+            parts.append(current)
+        return parts
+
+    def _split_function_args(self, args_str: str) -> list[str]:
+        """Split function arguments properly handling nested parentheses, brackets, and strings."""
+        args: list[str] = []
+        current = ""
+        depth = 0
+        in_string = False
+        string_char: str | None = None
+
+        for char in args_str:
+            if in_string:
+                current += char
+                if char == string_char and (len(current) < 2 or current[-2] != "\\"):
+                    in_string = False
+                    string_char = None
+                continue
+
+            if char in ('"', "'"):
+                in_string = True
+                string_char = char
+                current += char
+                continue
+
+            if char in ("(", "[", "{"):
+                depth += 1
+                current += char
+                continue
+
+            if char in (")", "]", "}"):
+                depth -= 1
+                current += char
+                continue
+
+            if char == "," and depth == 0:
+                if current.strip():
+                    args.append(current.strip())
+                current = ""
+                continue
+
+            current += char
+
+        if current.strip():
+            args.append(current.strip())
+
+        return args
+
+    def _parse_method_call(self, part: str) -> tuple[str, list[str] | None]:
+        if "(" not in part:
+            return part, None
+        idx = part.index("(")
+        method_name = part[:idx]
+        depth = 1
+        end_idx = idx + 1
+        in_string = False
+        string_char = None
+        while end_idx < len(part) and depth > 0:
+            char = part[end_idx]
+            if char in ('"', "'") and not in_string:
+                in_string = True
+                string_char = char
+            elif char == string_char and in_string:
+                in_string = False
+                string_char = None
+            elif char == "(" and not in_string:
+                depth += 1
+            elif char == ")" and not in_string:
+                depth -= 1
+            end_idx += 1
+        args_str = part[idx + 1 : end_idx - 1].strip() if depth == 0 else ""
+        if not args_str:
+            return method_name, []
+        args = []
+        current = ""
+        depth = 0
+        in_string = False
+        string_char = None
+        for char in args_str:
+            if char in ('"', "'") and not in_string:
+                in_string = True
+                string_char = char
+                current += char
+            elif char == string_char and in_string:
+                in_string = False
+                string_char = None
+                current += char
+            elif char == "(" and not in_string:
+                depth += 1
+                current += char
+            elif char == ")" and not in_string:
+                depth -= 1
+                current += char
+            elif char == "," and depth == 0 and not in_string:
+                args.append(current.strip())
+                current = ""
+            else:
+                current += char
+        if current.strip():
+            args.append(current.strip())
+        return method_name, args
+
+    @staticmethod
+    def _has_odd_trailing_backslashes(chars: list[str]) -> bool:
+        count = 0
+        for char in reversed(chars):
+            if char != "\\":
+                break
+            count += 1
+        return count % 2 == 1
+
+    def _split_curl_tokens_tolerant(self, command: str) -> list[str]:
+        """Split curl DSL that contains JSON strings inside single-quoted data args.
+
+        Users commonly paste curl like ``-d '{"content": "..."}'`` and then interpolate
+        JSON-escaped values. Apostrophes inside that JSON string (for example "What's")
+        are invalid for a real shell, but Heym parses the DSL directly instead of
+        executing a shell. This fallback preserves those apostrophes when they are inside
+        a double-quoted JSON string nested in a single-quoted token.
+        """
+        tokens: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        in_json_double_string = False
+        token_started = False
+        index = 0
+
+        while index < len(command):
+            char = command[index]
+
+            if quote is not None:
+                json_like_single_quote = quote == "'" and "".join(current).lstrip().startswith(
+                    ("{", "[")
+                )
+                if (
+                    json_like_single_quote
+                    and char == '"'
+                    and not self._has_odd_trailing_backslashes(current)
+                ):
+                    in_json_double_string = not in_json_double_string
+                    current.append(char)
+                    index += 1
+                    continue
+
+                if char == quote and not (quote == "'" and in_json_double_string):
+                    quote = None
+                    token_started = True
+                    index += 1
+                    continue
+
+                current.append(char)
+                index += 1
+                continue
+
+            if char.isspace():
+                if token_started or current:
+                    tokens.append("".join(current))
+                    current = []
+                    token_started = False
+                    in_json_double_string = False
+                index += 1
+                continue
+
+            if char in ("'", '"'):
+                quote = char
+                token_started = True
+                index += 1
+                continue
+
+            if char == "\\" and index + 1 < len(command):
+                current.append(command[index + 1])
+                token_started = True
+                index += 2
+                continue
+
+            current.append(char)
+            token_started = True
+            index += 1
+
+        if quote is not None:
+            raise ValueError("No closing quotation")
+        if token_started or current:
+            tokens.append("".join(current))
+        return tokens
+
+    def _split_curl_tokens(self, command: str) -> list[str]:
+        try:
+            return shlex.split(command)
+        except ValueError as original_error:
+            try:
+                return self._split_curl_tokens_tolerant(command)
+            except ValueError:
+                raise original_error from None
+
+    def _mask_curl_expressions(self, command: str) -> tuple[str, list[str]]:
+        """Replace every ``$…`` span with an inert placeholder before shell tokenizing.
+
+        Quotes, spaces and backslashes inside an expression are its own syntax, not
+        shell quoting: ``$url.text.replaceAll("\\n", "")`` is one value. ``shlex``
+        reads them as shell metacharacters and strips them, so the expression that
+        reaches the resolver is no longer the one the user wrote. Masking hides those
+        spans from the tokenizer and restores them verbatim afterwards.
+        """
+        spans = self._find_expressions(command)
+        if not spans:
+            return command, []
+        marker = "HEYMEXPR"
+        while marker in command:
+            marker += "X"
+        masked: list[str] = []
+        expressions: list[str] = []
+        last_end = 0
+        for start, end, expression in spans:
+            masked.append(command[last_end:start])
+            masked.append(f"{marker}{len(expressions)}{marker}")
+            expressions.append(expression)
+            last_end = end
+        masked.append(command[last_end:])
+        return "".join(masked), [marker, *expressions]
+
+    def _unmask_curl_expressions(self, token: str, masked: list[str]) -> str:
+        """Restore the expression spans hidden by :meth:`_mask_curl_expressions`."""
+        if not masked:
+            return token
+        marker, *expressions = masked
+        if marker not in token:
+            return token
+        for index, expression in enumerate(expressions):
+            token = token.replace(f"{marker}{index}{marker}", expression)
+        return token
+
+    def parse_curl(
+        self,
+        curl_command: str,
+        resolve: Callable[[str], str] | None = None,
+    ) -> tuple[str, str, dict[str, str], str | None, bool]:
+        """Parse a curl DSL command into its request parts.
+
+        ``resolve`` renders ``$…`` spans in every token except the ``-d`` payload,
+        which callers render themselves so JSON bodies keep their types. It must be
+        applied before the token is interpreted: a header-type credential resolves to
+        a whole ``key: value`` line and a URL can come entirely from an expression,
+        so parsing the raw template would drop the header and lose the URL.
+        """
+        if not curl_command:
+            return "GET", "", {}, None, False
+        normalized_cmd = curl_command.replace("\\\n", " ").replace("\\\r\n", " ")
+        masked_cmd, masked_expressions = self._mask_curl_expressions(normalized_cmd)
+        tokens = [
+            self._unmask_curl_expressions(token, masked_expressions)
+            for token in self._split_curl_tokens(masked_cmd)
+        ]
+        if tokens and tokens[0].lower() == "curl":
+            tokens = tokens[1:]
+
+        def rendered(token: str) -> str:
+            if resolve is None or "$" not in token:
+                return token
+            return resolve(token)
+
+        method = "GET"
+        headers: dict[str, str] = {}
+        data = None
+        url = ""
+        follow_redirects = False
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            if token in ("-X", "--request") and i + 1 < len(tokens):
+                i += 1
+                method = rendered(tokens[i]).upper()
+            elif token in ("-H", "--header") and i + 1 < len(tokens):
+                i += 1
+                header = rendered(tokens[i])
+                if ":" in header:
+                    key, value = header.split(":", 1)
+                    headers[key.strip()] = value.strip()
+            elif token in ("-L", "--location"):
+                follow_redirects = True
+            elif token in (
+                "-d",
+                "--data",
+                "--data-raw",
+                "--data-binary",
+                "--data-urlencode",
+            ) and i + 1 < len(tokens):
+                i += 1
+                data = tokens[i]
+                if method == "GET":
+                    method = "POST"
+            elif token == "--url" and i + 1 < len(tokens):
+                i += 1
+                url = rendered(tokens[i])
+            elif not token.startswith("-"):
+                candidate = rendered(token)
+                if candidate.startswith(("http://", "https://")):
+                    url = candidate
+            i += 1
+
+        if not url:
+            for token in reversed(tokens):
+                if token is data:
+                    continue
+                candidate = rendered(token)
+                if candidate.startswith(("http://", "https://")):
+                    url = candidate
+                    break
+
+        return method, url, headers, data, follow_redirects
+
+    def _find_expressions(self, text: str) -> list[tuple[int, int, str]]:
+        """Find all $ expressions with proper nested parentheses handling."""
+        expressions = []
+        i = 0
+        while i < len(text):
+            if text[i] == "$" and (i + 1 < len(text)) and text[i + 1].isalpha():
+                start = i
+                i += 1
+                while i < len(text) and (text[i].isalnum() or text[i] in "_."):
+                    i += 1
+                while i < len(text):
+                    while i < len(text) and text[i] in "([":
+                        bracket = text[i]
+                        close_bracket = ")" if bracket == "(" else "]"
+                        depth = 1
+                        i += 1
+                        while i < len(text) and depth > 0:
+                            if text[i] == bracket:
+                                depth += 1
+                            elif text[i] == close_bracket:
+                                depth -= 1
+                            elif text[i] == '"' or text[i] == "'":
+                                quote = text[i]
+                                i += 1
+                                while i < len(text) and text[i] != quote:
+                                    if text[i] == "\\":
+                                        i += 1
+                                    i += 1
+                            i += 1
+                    if i < len(text) and text[i] == ".":
+                        i += 1
+                        while i < len(text) and (text[i].isalnum() or text[i] == "_"):
+                            i += 1
+                        continue
+                    break
+                expressions.append((start, i, text[start:i]))
+            else:
+                i += 1
+        return expressions
+
+    def _is_single_dollar_expression(self, template: str) -> bool:
+        """True when the whole trimmed string is a single expression, not a text template."""
+        return _is_single_dollar_expression(
+            template,
+            find_expressions=self._find_expressions,
+            transform_ternary_expression=self._transform_ternary_expression,
+        )
+
+    def _is_top_level_ternary_expression(self, template: str) -> bool:
+        """True when the whole trimmed string is one ``$cond ? truthy : falsy`` ternary."""
+        return _is_top_level_ternary_expression(template, self)
+
+    def _extract_square_bracket_inner(self, s: str, start: int) -> tuple[str | None, int]:
+        """s[start] must be '['. Returns (inner_content, index_after_closing_bracket)."""
+        if start >= len(s) or s[start] != "[":
+            return None, start
+        i = start + 1
+        depth = 1
+        in_string = False
+        string_char: str | None = None
+        inner_start = i
+        while i < len(s) and depth > 0:
+            c = s[i]
+            if in_string:
+                if c == "\\" and i + 1 < len(s):
+                    i += 2
+                    continue
+                if c == string_char:
+                    in_string = False
+                    string_char = None
+                i += 1
+                continue
+            if c in ('"', "'"):
+                in_string = True
+                string_char = c
+                i += 1
+                continue
+            if c == "[":
+                depth += 1
+            elif c == "]":
+                depth -= 1
+                if depth == 0:
+                    return s[inner_start:i], i + 1
+            i += 1
+        return None, start
+
+    def _split_property_and_subscripts(self, part: str) -> tuple[str, list[str]] | None:
+        """Parse 'name', 'name[0]', 'name[\"a-b\"]' into base identifier and bracket contents."""
+        if "(" in part:
+            return None
+        if "[" not in part:
+            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", part):
+                return None
+            return (part, [])
+        m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)(.*)$", part)
+        if not m:
+            return None
+        base = m.group(1)
+        rest = m.group(2)
+        inners: list[str] = []
+        idx = 0
+        while idx < len(rest):
+            if rest[idx] != "[":
+                return None
+            inner, nxt = self._extract_square_bracket_inner(rest, idx)
+            if inner is None:
+                return None
+            inners.append(inner)
+            idx = nxt
+        return (base, inners)
+
+    def _coerce_subscript_key(self, inner: str) -> str | int:
+        """Turn bracket inner text into a dict key or integer index."""
+        inner_st = inner.strip()
+        if len(inner_st) >= 2 and inner_st[0] == inner_st[-1] and inner_st[0] in ('"', "'"):
+            raw = inner_st[1:-1]
+            return bytes(raw, "utf-8").decode("unicode_escape")
+        if inner_st.isdigit() or (inner_st.startswith("-") and inner_st[1:].isdigit()):
+            return int(inner_st)
+        if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", inner_st):
+            return inner_st
+        return inner_st
+
+    def _read_property_with_subscripts(
+        self, value: object, splitp: tuple[str, list[str]]
+    ) -> object | None:
+        base, inners = splitp
+        cur = _guarded_lookup(value, base)
+        for inner in inners:
+            key = self._coerce_subscript_key(inner)
+            if cur is None:
+                return None
+            if isinstance(key, int):
+                if isinstance(cur, (list, str)) and 0 <= key < len(cur):
+                    cur = cur[key]
+                else:
+                    return None
+            elif isinstance(cur, dict):
+                cur = cur.get(key)
+            else:
+                return None
+        return cur
+
+    def _replace_expressions(self, text: str, replacer: Callable[[str], str]) -> str:
+        """Replace all $ expressions in text using the replacer function."""
+        expressions = self._find_expressions(text)
+        if not expressions:
+            return text
+        result = []
+        last_end = 0
+        for start, end, expr in expressions:
+            result.append(text[last_end:start])
+            result.append(replacer(expr))
+            last_end = end
+        result.append(text[last_end:])
+        return "".join(result)
+
+    def _eval_substituted_python_expression(
+        self,
+        processed: str,
+        *,
+        coerce_bool: bool,
+    ) -> Any:
+        """Evaluate Python text after ``$...`` spans were replaced (shared by condition vs value).
+
+        SECURITY: This must NEVER use Python's built-in `eval()`. Clearing `__builtins__`
+        does not stop attribute traversal — exposing real Python types (`str`, `int`,
+        `len`) in the locals lets a workflow author reach `object.__subclasses__()`
+        and from there any class loaded in the interpreter (sandbox escape -> RCE).
+        The verified gadget is `str.__class__.__bases__[0].__subclasses__()` -> pick a
+        class whose `__init__.__globals__` exposes `__builtins__["__import__"]`.
+
+        We route through `HeymExpressionEval` (a `simpleeval.EvalWithCompoundTypes`
+        subclass) which walks an AST and refuses dunder attribute access. The JS-style
+        literal aliases (`true`/`false`/`null`/`undefined`) are passed via `names`
+        because simpleeval only recognises Python's `True`/`False`/`None` natively;
+        without them, conditions like `$x == true` raise `NameNotDefined`.
+
+        See security advisory GHSA-pm6h-x3h5-j38h, finding C1.
+        """
+        processed = _normalize_js_logical_ops_for_eval(processed)
+        evaluator = HeymExpressionEval(
+            functions=self._get_evaluator_functions(),
+            names={
+                # JS-style literal aliases — simpleeval doesn't recognise these
+                # as Python literals, so they must be in `names`. `True`/`False`/
+                # `None` are Python literals and simpleeval handles them natively.
+                "true": True,
+                "false": False,
+                "null": None,
+                "undefined": None,
+            },
+        )
+        try:
+            result = evaluator.eval(processed)
+        except Exception as exc:
+            # Re-raise as ValueError so callers (evaluate_condition) can fall back
+            # to False without surfacing internal exception types. The service path
+            # (ExpressionEvaluatorService.evaluate) catches this ValueError and
+            # returns ExpressionEvaluateResponse(result=None, result_type="null",
+            # error=str(exc)) -- so the executor raises and the service returns an
+            # error response, but both reject the same payloads.
+            raise ValueError(f"Invalid condition expression: {exc}") from exc
+        return bool(result) if coerce_bool else result
+
+    def evaluate_expression_tail_strict(
+        self,
+        expression: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+    ) -> Any:
+        """Evaluate one leading ``$...`` span plus a non-boolean tail (e.g. arithmetic); raw result."""
+
+        def replace_expr(expr: str) -> str:
+            result = self.resolve_expression(expr, inputs, current_node_id)
+            if result is None:
+                return "None"
+            if isinstance(result, str):
+                return repr(result)
+            return str(result)
+
+        processed = self._replace_expressions(expression, replace_expr)
+        return self._eval_substituted_python_expression(processed, coerce_bool=False)
+
+    def evaluate_condition_strict(
+        self, condition: str, inputs: dict, current_node_id: str | None = None
+    ) -> bool:
+        """Evaluate a condition string like the workflow branch node; propagate errors."""
+
+        def replace_expr(expr: str) -> str:
+            result = self.resolve_expression(expr, inputs, current_node_id)
+            if result is None:
+                return "None"
+            if isinstance(result, str):
+                return repr(result)
+            return str(result)
+
+        processed = self._replace_expressions(condition, replace_expr)
+        return self._eval_substituted_python_expression(processed, coerce_bool=True)
+
+    def evaluate_condition(
+        self, condition: str, inputs: dict, current_node_id: str | None = None
+    ) -> bool:
+        try:
+            return self.evaluate_condition_strict(condition, inputs, current_node_id)
+        except Exception:
+            return False
+
+    def evaluate_message_template(
+        self,
+        template: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+        preserve_type: bool = False,
+    ) -> str:
+        if not template:
+            return str(inputs)
+
+        # Same ternary carve-out as `_resolve_template`, so message-style fields agree with
+        # the evaluate dialog instead of rendering `1113 > 0 ? a.x : b.y` as literal text.
+        if self._is_top_level_ternary_expression(template):
+            ternary_result = self.resolve_expression(
+                template.strip(), inputs, current_node_id, preserve_type=preserve_type
+            )
+            if preserve_type and isinstance(ternary_result, str):
+                return ternary_result
+            return str(ternary_result) if ternary_result is not None else template
+
+        def replace_expr(expr: str) -> str:
+            result = self.resolve_expression(
+                expr, inputs, current_node_id, preserve_type=preserve_type
+            )
+            if preserve_type and isinstance(result, str):
+                return result
+            return str(result) if result is not None else expr
+
+        return self._replace_expressions(template, replace_expr)
+
+    def evaluate_nonempty_message_template(
+        self,
+        template: str,
+        inputs: dict,
+        current_node_id: str | None = None,
+    ) -> str:
+        """Evaluate a template; blank templates return empty instead of str(inputs)."""
+        normalized = str(template or "")
+        if not normalized.strip():
+            return ""
+        return self.evaluate_message_template(normalized, inputs, current_node_id)
+
+    def execute_node(
+        self,
+        node_id: str,
+        inputs: dict,
+        allow_branch_skip: bool = True,
+        on_retry: Callable[[NodeResult, int, int], None] | None = None,
+    ) -> NodeResult:
+        """Public entry: wrap node execution in an OTel span (no-op when disabled)."""
+        if not tracing.is_enabled():
+            return self._execute_node_inner(node_id, inputs, allow_branch_skip, on_retry)
+
+        def _run() -> NodeResult:
+            tracer = tracing.get_tracer()
+            node = self.nodes.get(node_id, {})
+            node_data = node.get("data", {}) if isinstance(node, dict) else {}
+            with tracer.start_as_current_span("heym.node.execute") as span:
+                span.set_attribute("heym.node.id", str(node_id))
+                span.set_attribute("heym.node.type", node.get("type", "unknown"))
+                span.set_attribute("heym.node.label", node_data.get("label", node_id))
+                if node.get("type") in ("llm", "agent"):
+                    span.set_attribute("heym.llm.transport", _llm_transport_attribute(node_data))
+                if self.workflow_id is not None:
+                    span.set_attribute("heym.workflow.id", str(self.workflow_id))
+                result = self._execute_node_inner(node_id, inputs, allow_branch_skip, on_retry)
+                _annotate_node_span(span, result)
+                if tracing.capture_node_io_enabled():
+                    _attach_node_io(span, inputs, result.output)
+                return result
+
+        # Re-attach the workflow root context so node spans nest under the workflow
+        # span even when this runs inside a ThreadPoolExecutor worker thread.
+        root_ctx = getattr(self, "_otel_root_context", None)
+        if root_ctx is not None:
+            return tracing.run_with_context(root_ctx, _run)
+        return _run()
+
+    def _execute_node_inner(
+        self,
+        node_id: str,
+        inputs: dict,
+        allow_branch_skip: bool = True,
+        on_retry: Callable[[NodeResult, int, int], None] | None = None,
+    ) -> NodeResult:
+        start_time = time.time()
+        self.check_cancelled()
+        node = self.nodes[node_id]
+        node_type = node.get("type", "unknown")
+        node_data = node.get("data", {})
+        node_label = node_data.get("label", node_id)
+
+        retry_enabled = node_data.get("retryEnabled", False)
+        retry_max_attempts = node_data.get("retryMaxAttempts", 3) if retry_enabled else 1
+        retry_wait_seconds = node_data.get("retryWaitSeconds", 5) if retry_enabled else 0
+        on_error_enabled = node_data.get("onErrorEnabled", False)
+
+        last_error = None
+        attempt = 0
+        pending_retry_result: NodeResult | None = None
+
+        while attempt < retry_max_attempts:
+            attempt += 1
+            self.check_cancelled()
+            if attempt > 1 and on_retry and pending_retry_result is not None:
+                on_retry(pending_retry_result, attempt, retry_max_attempts)
+                pending_retry_result = None
+            attempt_start_time = time.time()
+            try:
+                return self._execute_node_logic(
+                    node_id,
+                    inputs,
+                    allow_branch_skip,
+                    start_time,
+                    node,
+                    node_type,
+                    node_data,
+                    node_label,
+                )
+            except Exception as e:
+                if isinstance(e, WorkflowCancelledError):
+                    raise
+                last_error = e
+                # GuardrailViolationError is an intentional block — never retry
+                from app.services.guardrails_service import GuardrailViolationError
+
+                if isinstance(e, GuardrailViolationError):
+                    break
+                if attempt < retry_max_attempts:
+                    pending_retry_result = self._record_retry_attempt_result(
+                        node_id=node_id,
+                        node_label=node_label,
+                        node_type=node_type,
+                        error=e,
+                        attempt=attempt,
+                        max_attempts=retry_max_attempts,
+                        retry_wait_seconds=retry_wait_seconds,
+                        execution_time_ms=(time.time() - attempt_start_time) * 1000,
+                    )
+                    self.check_cancelled()
+                    time.sleep(retry_wait_seconds)
+                    continue
+                break
+
+        execution_time = (time.time() - start_time) * 1000
+
+        from app.services.guardrails_service import GuardrailViolationError
+
+        output_base = {"error": str(last_error)}
+        if isinstance(last_error, GuardrailViolationError):
+            output_base["guardrail_violated_categories"] = getattr(last_error, "categories", [])
+        error_metadata: dict[str, Any] = {}
+        trace_id = getattr(last_error, "trace_id", None)
+        if isinstance(trace_id, str) and trace_id:
+            error_metadata["trace_id"] = trace_id
+        error_routing = getattr(last_error, "model_routing", None)
+        if isinstance(error_routing, dict):
+            error_metadata["model_routing"] = error_routing
+
+        if on_error_enabled:
+            output_base["_errorBranch"] = True
+            return NodeResult(
+                node_id=node_id,
+                node_label=node_label,
+                node_type=node_type,
+                status="success",
+                output=output_base,
+                execution_time_ms=execution_time,
+                metadata=error_metadata,
+            )
+
+        return NodeResult(
+            node_id=node_id,
+            node_label=node_label,
+            node_type=node_type,
+            status="error",
+            output=output_base,
+            execution_time_ms=execution_time,
+            error=str(last_error),
+            metadata=error_metadata,
+        )
+
+    def _execute_node_logic(
+        self,
+        node_id: str,
+        inputs: dict,
+        allow_branch_skip: bool,
+        start_time: float,
+        node: dict,
+        node_type: str,
+        node_data: dict,
+        node_label: str,
+    ) -> NodeResult:
+        try:
+            self.check_cancelled()
+            if self.test_mode and node_data.get("pinnedData") is not None:
+                pinned_output = node_data.get("pinnedData")
+                output = (
+                    copy.deepcopy(pinned_output)
+                    if isinstance(pinned_output, dict)
+                    else {"value": pinned_output}
+                )
+                if allow_branch_skip and node_type == "condition":
+                    branch = output.get("branch")
+                    true_targets = self.get_downstream_nodes(node_id, "true")
+                    false_targets = self.get_downstream_nodes(node_id, "false")
+                    if branch == "true":
+                        output["_skip_loop_source_handles"] = ["false"]
+                        loop_back_targets = self._loop_back_targets_for_source_handle(
+                            node_id, "true"
+                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=true_targets,
+                                inactive_targets=false_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
+                    elif branch == "false":
+                        output["_skip_loop_source_handles"] = ["true"]
+                        loop_back_targets = self._loop_back_targets_for_source_handle(
+                            node_id, "false"
+                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=false_targets,
+                                inactive_targets=true_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
+                if allow_branch_skip and node_type == "switch":
+                    branch = output.get("branch")
+                    cases = node_data.get("cases", [])
+                    if isinstance(cases, list):
+                        handles = [f"case-{index}" for index in range(len(cases))]
+                    else:
+                        handles = []
+                    handles.append("default")
+                    if branch:
+                        active_targets = self.get_downstream_nodes(node_id, branch)
+                        inactive_targets: list[str] = []
+                        skipped_handles: list[str] = []
+                        for handle_id in handles:
+                            if handle_id != branch:
+                                skipped_handles.append(handle_id)
+                                inactive_targets.extend(
+                                    self.get_downstream_nodes(node_id, handle_id)
+                                )
+                        output["_skip_loop_source_handles"] = skipped_handles
+                        loop_back_targets = self._loop_back_targets_for_source_handle(
+                            node_id, branch
+                        )
+                        with self.lock:
+                            self.skip_branch_targets_preserving_shared_downstream(
+                                node_id,
+                                active_targets=active_targets,
+                                inactive_targets=inactive_targets,
+                                active_exclude_node_ids=loop_back_targets,
+                                inactive_stop_node_ids=loop_back_targets,
+                            )
+                execution_time_ms = (time.time() - start_time) * 1000
+                return NodeResult(
+                    node_id=node_id,
+                    node_label=node_label,
+                    node_type=node_type,
+                    status="success",
+                    output=output,
+                    execution_time_ms=execution_time_ms,
+                )
+            handler_output = execute_node_handler(
+                NodeExecutionContext(
+                    executor=self,
+                    node_id=node_id,
+                    inputs=inputs,
+                    allow_branch_skip=allow_branch_skip,
+                    start_time=start_time,
+                    node=node,
+                    node_type=node_type,
+                    node_data=node_data,
+                    node_label=node_label,
+                )
+            )
+            if isinstance(handler_output, NodeResult):
+                return handler_output
+            output = handler_output
+
+            execution_time = (time.time() - start_time) * 1000
+            metadata: dict = {}
+            skip_source_handles = output.pop("_skip_source_handles", None)
+            if isinstance(skip_source_handles, list):
+                metadata["skip_source_handles"] = skip_source_handles
+            skip_loop_source_handles = output.pop("_skip_loop_source_handles", None)
+            if isinstance(skip_loop_source_handles, list):
+                metadata["skip_loop_source_handles"] = skip_loop_source_handles
+            trace_id = self._pop_internal_trace_id(output)
+            if trace_id:
+                metadata["trace_id"] = trace_id
+            model_routing = self._pop_model_routing(output)
+            if model_routing:
+                metadata["model_routing"] = model_routing
+            # JSON output replaces the LLM payload, so token usage survives only here.
+            usage = output.pop("_usage", None)
+            if isinstance(usage, dict):
+                metadata["usage"] = usage
+
+            return NodeResult(
+                node_id=node_id,
+                node_label=node_label,
+                node_type=node_type,
+                status="success",
+                output=output,
+                execution_time_ms=execution_time,
+                metadata=metadata,
+            )
+
+        except Exception:
+            raise
+
+    def execute_error_flow(
+        self, error_nodes: set[str], edges: list[dict], error_payload: dict
+    ) -> tuple[list[NodeResult], dict | None]:
+        pending_count = {node_id: 0 for node_id in error_nodes}
+        for edge in edges:
+            if edge["target"] in pending_count:
+                pending_count[edge["target"]] += 1
+
+        queue = [node_id for node_id, count in pending_count.items() if count == 0]
+        results: list[NodeResult] = []
+        completed: set[str] = set()
+        error_flow_output = None
+
+        output_nodes_with_downstream = set()
+        for node_id in error_nodes:
+            node = self.nodes.get(node_id, {})
+            if node.get("type") == "output" and node.get("data", {}).get("allowDownstream"):
+                output_nodes_with_downstream.add(node_id)
+
+        while queue:
+            node_id = queue.pop(0)
+            if node_id in completed:
+                continue
+            node = self.nodes.get(node_id, {})
+            node_type = node.get("type")
+            if node_id in self.skipped_nodes:
+                node_label = node.get("data", {}).get("label", node_id)
+                results.append(
+                    self._stamp_node_result(
+                        NodeResult(
+                            node_id=node_id,
+                            node_label=node_label,
+                            node_type=node_type or "unknown",
+                            status="skipped",
+                            output={},
+                            execution_time_ms=0,
+                        )
+                    )
+                )
+                completed.add(node_id)
+                for edge in edges:
+                    if edge["source"] == node_id:
+                        target = edge["target"]
+                        if target in pending_count:
+                            pending_count[target] -= 1
+                            if pending_count[target] == 0:
+                                queue.append(target)
+                continue
+            if node_type == "errorHandler":
+                inputs = {"error": error_payload}
+            else:
+                inputs = self.get_node_inputs_for_edges(node_id, edges)
+            result = self.execute_node_parallel(node_id, inputs)
+            results.append(result)
+            completed.add(node_id)
+
+            if node_type == "output" and result.status == "success":
+                error_flow_output = {result.node_label: result.output}
+                if node_id in output_nodes_with_downstream:
+                    remaining_queue = list(queue)
+                    remaining_pending = dict(pending_count)
+                    remaining_completed = set(completed)
+                    for edge in edges:
+                        if edge["source"] == node_id:
+                            target = edge["target"]
+                            if target in remaining_pending:
+                                remaining_pending[target] -= 1
+                                if remaining_pending[target] == 0:
+                                    remaining_queue.append(target)
+                    if remaining_queue:
+
+                        def run_downstream():
+                            dq = remaining_queue
+                            dp = remaining_pending
+                            dc = remaining_completed
+                            while dq:
+                                nid = dq.pop(0)
+                                if nid in dc:
+                                    continue
+                                if nid in self.skipped_nodes:
+                                    dc.add(nid)
+                                    for e in edges:
+                                        if e["source"] == nid and e["target"] in dp:
+                                            dp[e["target"]] -= 1
+                                            if dp[e["target"]] == 0:
+                                                dq.append(e["target"])
+                                    continue
+                                inp = self.get_node_inputs_for_edges(nid, edges)
+                                self.execute_node_parallel(nid, inp)
+                                dc.add(nid)
+                                for e in edges:
+                                    if e["source"] == nid and e["target"] in dp:
+                                        dp[e["target"]] -= 1
+                                        if dp[e["target"]] == 0:
+                                            dq.append(e["target"])
+
+                        self._node_pool.submit(run_downstream)
+                    return results, error_flow_output
+
+            for edge in edges:
+                if edge["source"] == node_id:
+                    target = edge["target"]
+                    if target in pending_count:
+                        pending_count[target] -= 1
+                        if pending_count[target] == 0:
+                            queue.append(target)
+
+        return results, error_flow_output
+
+    def _ensure_execution_id(self) -> None:
+        """Assign a runtime execution id once per run (empty in the preview evaluator,
+        which never enters a run entry point). Set before nodes run so `$executionId`
+        is stable across all nodes. The API layer normally passes the same id it uses
+        for the ExecutionHistory row, so `$executionId` is a valid deep-link segment;
+        this fallback (canonical UUID string) only applies when no id was supplied."""
+        if not self.execution_id:
+            self.execution_id = str(uuid.uuid4())
+
+    def execute(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
+        """Public entry: wrap the whole workflow run in an OTel root span."""
+        self._ensure_execution_id()
+        if not tracing.is_enabled():
+            return self._execute_inner(workflow_id, initial_inputs)
+
+        tracer = tracing.get_tracer()
+        from opentelemetry.trace import Status, StatusCode
+
+        with tracer.start_as_current_span("heym.workflow.execute") as span:
+            span.set_attribute("heym.workflow.id", str(workflow_id))
+            span.set_attribute("heym.node.count", len(self.nodes))
+            span.set_attribute("heym.workflow.test_mode", bool(self.test_mode))
+            span.set_attribute("heym.sub_workflow.depth", int(self._sub_workflow_invocation_depth))
+            # Capture the context (with the root span active) so node spans created in
+            # worker threads can re-attach it and nest correctly.
+            self._otel_root_context = tracing.capture_context()
+            try:
+                result = self._execute_inner(workflow_id, initial_inputs)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+            finally:
+                self._otel_root_context = None
+            if getattr(result, "status", "") in ("error", "failed"):
+                span.set_status(Status(StatusCode.ERROR, "workflow failed"))
+            else:
+                span.set_attribute("heym.workflow.status", getattr(result, "status", ""))
+            return result
+
+    def _execute_inner(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
+        start_time = time.time()
+        self.execution_start_time = start_time
+        self._arm_deadline()
+        self.check_cancelled()
+        node_results: list[NodeResult] = []
+        error_flow_nodes = self.get_error_flow_nodes()
+        # Set of node IDs that are connected as tools to an agent (should not run in regular flow)
+        tool_node_ids = {
+            edge["source"] for edge in self.edges if edge.get("targetHandle") == "tool-input"
+        }
+        active_edges = [
+            edge
+            for edge in self.get_active_edges()
+            if edge["source"] not in error_flow_nodes
+            and edge["target"] not in error_flow_nodes
+            and edge.get("targetHandle") != "tool-input"
+        ]
+        active_nodes = [
+            node_id
+            for node_id in self.nodes
+            if node_id not in error_flow_nodes and node_id not in tool_node_ids
+        ]
+
+        for node_id in self.get_input_nodes():
+            node = self.nodes[node_id]
+            if node.get("type") == "textInput":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+                body = initial_inputs.get("body") if isinstance(initial_inputs, dict) else {}
+                if isinstance(body, dict) and "text" in body:
+                    node["data"]["value"] = body["text"]
+                elif isinstance(initial_inputs, dict) and "text" in initial_inputs:
+                    node["data"]["value"] = initial_inputs["text"]
+            elif (
+                node.get("type") == "rabbitmq"
+                and node.get("data", {}).get("rabbitmqOperation") == "receive"
+            ):
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "imapTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "websocketTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "slackTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "discordTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "telegramTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "heymTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
+
+        pending_count: dict[str, int] = {}
+        for node_id in active_nodes:
+            node = self.nodes.get(node_id, {})
+            if node.get("type") == "loop":
+                count = sum(
+                    1
+                    for e in active_edges
+                    if e["target"] == node_id and e.get("targetHandle") != "loop"
+                )
+            else:
+                count = sum(1 for e in active_edges if e["target"] == node_id)
+            pending_count[node_id] = count
+
+        completed_nodes: set[str] = set()
+        running_futures: dict = {}
+        has_error = False
+        error_result = None
+        pending_result = None
+        pending_lock = Lock()
+        early_return_output = None
+
+        output_nodes_with_downstream = set()
+        for node_id in active_nodes:
+            node = self.nodes.get(node_id, {})
+            if (node.get("type") == "output" and node.get("data", {}).get("allowDownstream")) or (
+                self.return_on_chart_output and node.get("type") == "chartOutput"
+            ):
+                output_nodes_with_downstream.add(node_id)
+        self._downstream_global_node_ids = frozenset()
+
+        def schedule_downstream(
+            source_node_id: str, source_result: NodeResult | None = None
+        ) -> None:
+            self.check_cancelled()
+            skip_source_handles = (
+                set(source_result.metadata.get("skip_source_handles") or [])
+                if source_result
+                else set()
+            )
+            skip_loop_source_handles = (
+                set(source_result.metadata.get("skip_loop_source_handles") or [])
+                if source_result
+                else set()
+            )
+            source_is_skipped = source_result is not None and source_result.status == "skipped"
+            source_node = self.nodes.get(source_node_id, {})
+            if (
+                source_node.get("type") == "loop"
+                and source_result is not None
+                and source_result.output.get("branch") == "done"
+            ):
+                self.prepare_branch_targets_for_execution(
+                    start_node_ids=self.get_downstream_nodes(source_node_id, "done"),
+                    active_edges=active_edges,
+                    completed_nodes=completed_nodes,
+                    pending_count=pending_count,
+                )
+            ready_targets: list[str] = []
+            for edge in active_edges:
+                if edge["source"] == source_node_id:
+                    if self._source_handle_is_skipped(edge, skip_source_handles):
+                        continue
+                    target = edge["target"]
+                    target_handle = edge.get("targetHandle")
+                    target_node = self.nodes.get(target, {})
+
+                    if target_node.get("type") == "loop" and target_handle == "loop":
+                        if source_is_skipped:
+                            continue
+                        if self._source_handle_is_skipped(edge, skip_loop_source_handles):
+                            continue
+                        if self.prepare_loop_for_reexecution(
+                            loop_node_id=target,
+                            active_edges=active_edges,
+                            completed_nodes=completed_nodes,
+                            pending_count=pending_count,
+                        ):
+                            already_running = any(nid == target for nid in running_futures.values())
+                            if not already_running:
+                                inputs = self.get_loop_reexecution_inputs(
+                                    target, source_node_id, active_edges
+                                )
+                                new_future = self._node_pool.submit(
+                                    self.execute_node_parallel, target, inputs
+                                )
+                                running_futures[new_future] = target
+                        continue
+
+                    if target not in pending_count:
+                        continue
+                    if target in completed_nodes:
+                        continue
+                    pending_count[target] -= 1
+                    if pending_count[target] == 0:
+                        if target in self.skipped_nodes:
+                            node = self.nodes[target]
+                            node_label = node.get("data", {}).get("label", target)
+                            skipped_result = self._stamp_node_result(
+                                NodeResult(
+                                    node_id=target,
+                                    node_label=node_label,
+                                    node_type=node.get("type", "unknown"),
+                                    status="skipped",
+                                    output={},
+                                    execution_time_ms=0,
+                                )
+                            )
+                            node_results.append(skipped_result)
+                            completed_nodes.add(target)
+                            schedule_downstream(target, skipped_result)
+                        else:
+                            already_running = any(nid == target for nid in running_futures.values())
+                            if not already_running:
+                                ready_targets.append(target)
+
+            for target in self._prioritize_ready_node_ids(ready_targets):
+                already_running = any(nid == target for nid in running_futures.values())
+                if already_running:
+                    continue
+                inputs = self.get_node_inputs_for_edges(target, active_edges)
+                new_future = self._node_pool.submit(self.execute_node_parallel, target, inputs)
+                running_futures[new_future] = target
+
+        root_nodes = self._prioritize_ready_node_ids(
+            [nid for nid, count in pending_count.items() if count == 0]
+        )
+        for node_id in root_nodes:
+            self.check_cancelled()
+            if node_id in self.skipped_nodes:
+                node = self.nodes[node_id]
+                node_label = node.get("data", {}).get("label", node_id)
+                node_results.append(
+                    self._stamp_node_result(
+                        NodeResult(
+                            node_id=node_id,
+                            node_label=node_label,
+                            node_type=node.get("type", "unknown"),
+                            status="skipped",
+                            output={},
+                            execution_time_ms=0,
+                        )
+                    )
+                )
+                completed_nodes.add(node_id)
+                schedule_downstream(node_id)
+            else:
+                future = self._node_pool.submit(
+                    self.execute_node_parallel,
+                    node_id,
+                    self.get_node_inputs_for_edges(node_id, active_edges),
+                )
+                running_futures[future] = node_id
+
+        while (
+            running_futures
+            and not has_error
+            and pending_result is None
+            and early_return_output is None
+        ):
+            self.check_cancelled()
+            done, _ = wait(running_futures.keys(), return_when=FIRST_COMPLETED)
+
+            for future in done:
+                node_id = running_futures.pop(future)
+                self.check_cancelled()
+                result = future.result()
+                node_results.append(result)
+
+                if result.status == "error":
+                    has_error = True
+                    error_result = result
+                    break
+
+                if result.status == "pending":
+                    pending_result = result
+                    break
+
+                completed_nodes.add(node_id)
+
+                if node_id in output_nodes_with_downstream and result.status == "success":
+                    early_return_output = {result.node_label: result.output}
+                    self._downstream_global_node_ids = _collect_downstream_global_node_ids(
+                        self, {node_id}, active_edges
+                    )
+
+                with pending_lock:
+                    schedule_downstream(node_id, result)
+
+                if early_return_output is not None:
+                    allow_downstream_node_results: list[NodeResult] = []
+
+                    def run_remaining_downstream():
+                        nonlocal has_error
+                        remaining_futures = dict(running_futures)
+                        while remaining_futures:
+                            done_bg, _ = wait(remaining_futures.keys(), return_when=FIRST_COMPLETED)
+                            for future_bg in done_bg:
+                                nid = remaining_futures.pop(future_bg)
+                                res = future_bg.result()
+                                with pending_lock:
+                                    node_results.append(res)
+                                    allow_downstream_node_results.append(res)
+                                skip_add_to_completed = False
+                                if res.status == "success":
+                                    with pending_lock:
+                                        result_node = self.nodes.get(nid, {})
+                                        skip_source_handles = set(
+                                            res.metadata.get("skip_source_handles") or []
+                                        )
+                                        skip_loop_source_handles = set(
+                                            res.metadata.get("skip_loop_source_handles") or []
+                                        )
+                                        if (
+                                            result_node.get("type") == "loop"
+                                            and res.output.get("branch") == "done"
+                                        ):
+                                            self.prepare_branch_targets_for_execution(
+                                                start_node_ids=self.get_downstream_nodes(
+                                                    nid, "done"
+                                                ),
+                                                active_edges=active_edges,
+                                                completed_nodes=completed_nodes,
+                                                pending_count=pending_count,
+                                            )
+                                        for edge in active_edges:
+                                            if edge["source"] == nid:
+                                                if self._source_handle_is_skipped(
+                                                    edge, skip_source_handles
+                                                ):
+                                                    continue
+                                                tgt = edge["target"]
+                                                tgt_handle = edge.get("targetHandle")
+                                                tgt_node = self.nodes.get(tgt, {})
+                                                if (
+                                                    tgt_node.get("type") == "loop"
+                                                    and tgt_handle == "loop"
+                                                ):
+                                                    if self._source_handle_is_skipped(
+                                                        edge, skip_loop_source_handles
+                                                    ):
+                                                        continue
+                                                    if self.prepare_loop_for_reexecution(
+                                                        loop_node_id=tgt,
+                                                        active_edges=active_edges,
+                                                        completed_nodes=completed_nodes,
+                                                        pending_count=pending_count,
+                                                    ):
+                                                        skip_add_to_completed = True
+                                                        already = any(
+                                                            n == tgt
+                                                            for n in remaining_futures.values()
+                                                        )
+                                                        if not already:
+                                                            inp = self.get_loop_reexecution_inputs(
+                                                                tgt, nid, active_edges
+                                                            )
+                                                            new_f = self._node_pool.submit(
+                                                                self.execute_node_parallel,
+                                                                tgt,
+                                                                inp,
+                                                            )
+                                                            remaining_futures[new_f] = tgt
+                                                    continue
+                                                if tgt not in pending_count:
+                                                    continue
+                                                if tgt in completed_nodes:
+                                                    continue
+                                                pending_count[tgt] -= 1
+                                                if pending_count[tgt] == 0:
+                                                    if tgt not in self.skipped_nodes:
+                                                        already = any(
+                                                            n == tgt
+                                                            for n in remaining_futures.values()
+                                                        )
+                                                        if not already:
+                                                            inp = self.get_node_inputs_for_edges(
+                                                                tgt, active_edges
+                                                            )
+                                                            new_f = self._node_pool.submit(
+                                                                self.execute_node_parallel,
+                                                                tgt,
+                                                                inp,
+                                                            )
+                                                            remaining_futures[new_f] = tgt
+                                if not skip_add_to_completed:
+                                    completed_nodes.add(nid)
+                        self.drain_bg_futures()
+
+                    allow_downstream_future = _submit_allow_downstream_work(
+                        run_remaining_downstream
+                    )
+                    break
+
+        if pending_result is not None:
+            for future in running_futures:
+                future.cancel()
+
+            pending_review = _extract_pending_metadata(pending_result)
+            resume_snapshot = self.build_resume_snapshot(
+                initial_inputs=initial_inputs,
+                node_results=node_results,
+                pending_count=pending_count,
+                completed_nodes=completed_nodes,
+                paused_node_id=pending_result.node_id,
+                paused_node_label=pending_result.node_label,
+            )
+            return self._build_execution_result(
+                workflow_id=workflow_id,
+                status="pending",
+                outputs={pending_result.node_label: copy.deepcopy(pending_result.output)},
+                start_time=start_time,
+                node_results=node_results,
+                pending_review=pending_review,
+                resume_snapshot=resume_snapshot,
+            )
+
+        if early_return_output is not None:
+            return self._build_execution_result(
+                workflow_id=workflow_id,
+                status="success",
+                outputs=early_return_output,
+                start_time=start_time,
+                node_results=node_results,
+                allow_downstream_pending=[allow_downstream_future],
+                allow_downstream_node_results=allow_downstream_node_results,
+            )
+
+        if has_error and error_result:
+            error_flow_final_output = None
+            if error_flow_nodes:
+                error_edges = [
+                    edge
+                    for edge in self.edges
+                    if edge["source"] in error_flow_nodes and edge["target"] in error_flow_nodes
+                ]
+                error_payload = {
+                    "node_id": error_result.node_id,
+                    "node_label": error_result.node_label,
+                    "node_type": error_result.node_type,
+                    "message": error_result.error,
+                }
+                error_results, error_flow_final_output = self.execute_error_flow(
+                    error_flow_nodes, error_edges, error_payload
+                )
+                node_results.extend(error_results)
+
+            final_outputs = error_flow_final_output or {"error": error_result.error}
+            return self._build_execution_result(
+                workflow_id=workflow_id,
+                status="error",
+                outputs=final_outputs,
+                start_time=start_time,
+                node_results=node_results,
+            )
+
+        output_nodes = self.get_output_nodes()
+        final_outputs = {}
+        for node_id in output_nodes:
+            if node_id in self.node_outputs and node_id not in self.skipped_nodes:
+                node = self.nodes.get(node_id, {})
+                if node.get("type") == "sticky":
+                    continue
+                node_label = self.get_node_label(node_id)
+                final_outputs[node_label] = self.node_outputs[node_id]
+
+        final_outputs = unwrap_single_json_output_terminal_outputs(self, final_outputs)
+
+        return self._build_execution_result(
+            workflow_id=workflow_id,
+            status="success",
+            outputs=final_outputs,
+            start_time=start_time,
+            node_results=node_results,
+        )
+
 
 def _credential_secret_parts(value: str) -> list[str]:
     """Return a credential value plus the bare secret inside a composite value.
@@ -2135,6 +8232,7 @@ def mask_credentials_context(credentials_context: dict[str, str] | None) -> dict
         else:
             masked_context[name] = "**"
     return masked_context
+
 
 def execute_workflow(
     workflow_id: uuid.UUID,
