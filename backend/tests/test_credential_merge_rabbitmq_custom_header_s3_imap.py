@@ -9,6 +9,8 @@ are kept blank) wiped out the stored secret keys and caused HTTP 400 validation 
 
 import unittest
 
+from fastapi import HTTPException
+
 from app.api.credentials import (
     get_masked_value,
     get_public_credential_fields,
@@ -175,7 +177,7 @@ class TestS3CredentialMerge(unittest.TestCase):
             "aws_session_token": "token123",
         }
 
-    def test_editing_region_only_keeps_keys(self) -> None:
+    def test_editing_region_only_keeps_keys_and_session_token(self) -> None:
         merged = merge_credential_config_for_update(
             CredentialType.s3,
             self._full_config(),
@@ -192,7 +194,40 @@ class TestS3CredentialMerge(unittest.TestCase):
         self.assertEqual(merged["aws_region"], "eu-central-1")
         self.assertEqual(merged["aws_session_token"], "token123")
 
-    def test_rotating_keys_overwrites(self) -> None:
+    def test_editing_region_with_blank_token_in_dialog_preserves_session_token(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.s3,
+            self._full_config(),
+            {
+                "aws_access_key_id": "",
+                "aws_secret_access_key": "",
+                "aws_region": "eu-central-1",
+                "aws_session_token": "",
+            },
+        )
+        self.assertEqual(merged["aws_access_key_id"], "AKIAIOSFODNN7EXAMPLE")
+        self.assertEqual(
+            merged["aws_secret_access_key"], "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        )
+        self.assertEqual(merged["aws_region"], "eu-central-1")
+        self.assertEqual(merged["aws_session_token"], "token123")
+
+    def test_key_rotation_with_blank_session_token_clears_stored_token(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.s3,
+            self._full_config(),
+            {
+                "aws_access_key_id": "AKIA2NEWKEYIDEXAMPLE",
+                "aws_secret_access_key": "newSecretAccessKeyExample12345",
+                "aws_session_token": "",
+            },
+        )
+        self.assertEqual(merged["aws_access_key_id"], "AKIA2NEWKEYIDEXAMPLE")
+        self.assertEqual(merged["aws_secret_access_key"], "newSecretAccessKeyExample12345")
+        self.assertEqual(merged["aws_region"], "us-east-1")
+        self.assertEqual(merged["aws_session_token"], "")
+
+    def test_key_rotation_with_omitted_session_token_clears_stored_token(self) -> None:
         merged = merge_credential_config_for_update(
             CredentialType.s3,
             self._full_config(),
@@ -204,6 +239,53 @@ class TestS3CredentialMerge(unittest.TestCase):
         self.assertEqual(merged["aws_access_key_id"], "AKIA2NEWKEYIDEXAMPLE")
         self.assertEqual(merged["aws_secret_access_key"], "newSecretAccessKeyExample12345")
         self.assertEqual(merged["aws_region"], "us-east-1")
+        self.assertEqual(merged["aws_session_token"], "")
+
+    def test_key_rotation_with_new_session_token_updates_token(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.s3,
+            self._full_config(),
+            {
+                "aws_access_key_id": "AKIA2NEWKEYIDEXAMPLE",
+                "aws_secret_access_key": "newSecretAccessKeyExample12345",
+                "aws_session_token": "newToken456",
+            },
+        )
+        self.assertEqual(merged["aws_access_key_id"], "AKIA2NEWKEYIDEXAMPLE")
+        self.assertEqual(merged["aws_secret_access_key"], "newSecretAccessKeyExample12345")
+        self.assertEqual(merged["aws_session_token"], "newToken456")
+
+    def test_new_access_key_without_secret_is_rejected(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            merge_credential_config_for_update(
+                CredentialType.s3,
+                self._full_config(),
+                {
+                    "aws_access_key_id": "AKIA2NEWKEYIDEXAMPLE",
+                    "aws_secret_access_key": "",
+                },
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(
+            ctx.exception.detail,
+            "Amazon S3 credential requires aws_secret_access_key",
+        )
+
+    def test_new_secret_without_access_key_is_rejected(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            merge_credential_config_for_update(
+                CredentialType.s3,
+                self._full_config(),
+                {
+                    "aws_access_key_id": "",
+                    "aws_secret_access_key": "newSecretAccessKeyExample12345",
+                },
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(
+            ctx.exception.detail,
+            "Amazon S3 credential requires aws_access_key_id",
+        )
 
 
 class TestS3CredentialPublicFields(unittest.TestCase):

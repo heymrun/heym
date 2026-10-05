@@ -295,15 +295,30 @@ def merge_credential_config_for_update(
 
     if credential_type == CredentialType.s3:
         merged_config = dict(existing_config)
-        for key in ("aws_access_key_id", "aws_secret_access_key"):
-            incoming_value = str(incoming_config.get(key, "") or "").strip()
-            if incoming_value:
-                merged_config[key] = incoming_value
-        for key in ("aws_region", "aws_session_token"):
-            if key in incoming_config:
-                incoming_value = str(incoming_config.get(key, "") or "").strip()
-                if incoming_value:
-                    merged_config[key] = incoming_value
+        incoming_key_id = str(incoming_config.get("aws_access_key_id", "") or "").strip()
+        incoming_secret = str(incoming_config.get("aws_secret_access_key", "") or "").strip()
+
+        if incoming_key_id or incoming_secret:
+            if not incoming_key_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Amazon S3 credential requires aws_access_key_id",
+                )
+            if not incoming_secret:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Amazon S3 credential requires aws_secret_access_key",
+                )
+            merged_config["aws_access_key_id"] = incoming_key_id
+            merged_config["aws_secret_access_key"] = incoming_secret
+            merged_config["aws_session_token"] = str(
+                incoming_config.get("aws_session_token", "") or ""
+            ).strip()
+
+        if "aws_region" in incoming_config:
+            incoming_region = str(incoming_config.get("aws_region", "") or "").strip()
+            if incoming_region:
+                merged_config["aws_region"] = incoming_region
         return merged_config
 
     if credential_type == CredentialType.imap:

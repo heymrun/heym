@@ -896,7 +896,10 @@ const isValid = computed(() => {
     return !!notionToken.value.trim() || isEditing.value;
   } else if (type.value === "s3") {
     if (isEditing.value) {
-      return !hasS3CredentialConfigChange.value || !!s3Region.value.trim();
+      const hasKeyId = !!s3AccessKeyId.value.trim();
+      const hasSecret = !!s3SecretAccessKey.value.trim();
+      const hasBothOrNeitherKeys = hasKeyId === hasSecret;
+      return hasBothOrNeitherKeys && !!s3Region.value.trim();
     }
     return (
       !!s3AccessKeyId.value.trim() &&
