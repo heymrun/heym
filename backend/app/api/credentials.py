@@ -293,19 +293,6 @@ def merge_credential_config_for_update(
             merged_config["rabbitmq_password"] = incoming_password
         return merged_config
 
-    if credential_type == CredentialType.s3:
-        merged_config = dict(existing_config)
-        for key in ("aws_access_key_id", "aws_secret_access_key"):
-            incoming_value = str(incoming_config.get(key, "") or "").strip()
-            if incoming_value:
-                merged_config[key] = incoming_value
-        for key in ("aws_region", "aws_session_token"):
-            if key in incoming_config:
-                incoming_value = str(incoming_config.get(key, "") or "").strip()
-                if incoming_value:
-                    merged_config[key] = incoming_value
-        return merged_config
-
     if credential_type == CredentialType.imap:
         merged_config = dict(existing_config)
         for key in ("imap_host", "imap_port", "imap_username", "imap_mailbox"):
@@ -592,8 +579,6 @@ def get_public_credential_fields(
             "rabbitmq_username": str(config.get("rabbitmq_username", "")).strip() or None,
             "rabbitmq_vhost": str(config.get("rabbitmq_vhost", "")).strip() or None,
         }
-    if credential_type == CredentialType.s3:
-        return {"aws_region": str(config.get("aws_region", "")).strip() or None}
     if credential_type == CredentialType.imap:
         use_ssl = config.get("imap_use_ssl")
         return {

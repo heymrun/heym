@@ -313,7 +313,7 @@ const storedS3Region = computed((): string => {
   if (!props.credential || props.credential.type !== "s3") {
     return "";
   }
-  return props.credential.public_fields?.aws_region || parseS3RegionFromMaskedValue(props.credential.masked_value);
+  return parseS3RegionFromMaskedValue(props.credential.masked_value);
 });
 
 const hasS3CredentialConfigChange = computed((): boolean => {
@@ -645,8 +645,7 @@ watch(
         s3SecretAccessKey.value = "";
         s3Region.value =
           props.credential.type === "s3"
-            ? props.credential.public_fields?.aws_region ||
-              parseS3RegionFromMaskedValue(props.credential.masked_value)
+            ? parseS3RegionFromMaskedValue(props.credential.masked_value)
             : "";
         s3SessionToken.value = "";
       } else {
@@ -896,7 +895,11 @@ const isValid = computed(() => {
     return !!notionToken.value.trim() || isEditing.value;
   } else if (type.value === "s3") {
     if (isEditing.value) {
-      return !hasS3CredentialConfigChange.value || !!s3Region.value.trim();
+      return !hasS3CredentialConfigChange.value || (
+        !!s3AccessKeyId.value.trim() &&
+        !!s3SecretAccessKey.value.trim() &&
+        !!s3Region.value.trim()
+      );
     }
     return (
       !!s3AccessKeyId.value.trim() &&
