@@ -313,7 +313,7 @@ const storedS3Region = computed((): string => {
   if (!props.credential || props.credential.type !== "s3") {
     return "";
   }
-  return parseS3RegionFromMaskedValue(props.credential.masked_value);
+  return props.credential.public_fields?.aws_region || parseS3RegionFromMaskedValue(props.credential.masked_value);
 });
 
 const hasS3CredentialConfigChange = computed((): boolean => {
@@ -464,7 +464,9 @@ watch(
         codexSignedInAccount.value =
           props.credential.public_fields?.account_id || "";
         baseUrl.value =
-          props.credential.type === "jira" || props.credential.type === "opencode"
+          props.credential.type === "jira" ||
+          props.credential.type === "opencode" ||
+          props.credential.type === "custom"
             ? props.credential.public_fields?.base_url ?? ""
             : "";
         jiraEmail.value =
@@ -481,19 +483,35 @@ watch(
             ? props.credential.public_fields?.api_version ?? "3"
             : "3";
         bearerToken.value = "";
-        headerKey.value = props.credential.header_key || "";
+        headerKey.value =
+          props.credential.public_fields?.header_key ?? props.credential.header_key ?? "";
         headerValue.value = "";
         telegramBotToken.value = "";
         telegramSecretToken.value = "";
         webhookUrl.value = "";
         signingSecret.value = "";
         discordPublicKey.value = "";
-        imapHost.value = "";
-        imapPort.value = "993";
-        imapUsername.value = "";
-        imapPassword.value = "";
-        imapMailbox.value = "INBOX";
-        imapUseSsl.value = true;
+        imapHost.value =
+          props.credential.type === "imap"
+            ? props.credential.public_fields?.imap_host ?? ""
+            : "";
+        imapPort.value =
+          props.credential.type === "imap"
+            ? props.credential.public_fields?.imap_port ?? "993"
+            : "993";
+        imapUsername.value =
+          props.credential.type === "imap"
+            ? props.credential.public_fields?.imap_username ?? ""
+            : "";
+        imapPassword.value = ""; // secret, never pre-filled, same as every other type
+        imapMailbox.value =
+          props.credential.type === "imap"
+            ? props.credential.public_fields?.imap_mailbox ?? "INBOX"
+            : "INBOX";
+        imapUseSsl.value =
+          props.credential.type === "imap"
+            ? (props.credential.public_fields?.imap_use_ssl ?? "true") === "true"
+            : true;
         smtpServer.value =
           props.credential.type === "smtp"
             ? props.credential.public_fields?.smtp_server ?? ""
@@ -551,11 +569,23 @@ watch(
         void applyModelRouterCredential(props.credential);
         gristApiKey.value = "";
         gristServerUrl.value = "";
-        rabbitmqHost.value = "";
-        rabbitmqPort.value = "5672";
-        rabbitmqUsername.value = "";
+        rabbitmqHost.value =
+          props.credential.type === "rabbitmq"
+            ? props.credential.public_fields?.rabbitmq_host ?? ""
+            : "";
+        rabbitmqPort.value =
+          props.credential.type === "rabbitmq"
+            ? props.credential.public_fields?.rabbitmq_port ?? "5672"
+            : "5672";
+        rabbitmqUsername.value =
+          props.credential.type === "rabbitmq"
+            ? props.credential.public_fields?.rabbitmq_username ?? ""
+            : "";
         rabbitmqPassword.value = "";
-        rabbitmqVhost.value = "/";
+        rabbitmqVhost.value =
+          props.credential.type === "rabbitmq"
+            ? props.credential.public_fields?.rabbitmq_vhost ?? "/"
+            : "/";
         cohereApiKey.value = "";
         flaresolverrUrl.value = "";
         gsClientId.value = "";
@@ -615,7 +645,8 @@ watch(
         s3SecretAccessKey.value = "";
         s3Region.value =
           props.credential.type === "s3"
-            ? parseS3RegionFromMaskedValue(props.credential.masked_value)
+            ? props.credential.public_fields?.aws_region ||
+              parseS3RegionFromMaskedValue(props.credential.masked_value)
             : "";
         s3SessionToken.value = "";
       } else {
@@ -865,11 +896,7 @@ const isValid = computed(() => {
     return !!notionToken.value.trim() || isEditing.value;
   } else if (type.value === "s3") {
     if (isEditing.value) {
-      return !hasS3CredentialConfigChange.value || (
-        !!s3AccessKeyId.value.trim() &&
-        !!s3SecretAccessKey.value.trim() &&
-        !!s3Region.value.trim()
-      );
+      return !hasS3CredentialConfigChange.value || !!s3Region.value.trim();
     }
     return (
       !!s3AccessKeyId.value.trim() &&
@@ -1551,7 +1578,9 @@ async function handleSave(): Promise<void> {
         updateData.name = name.value;
       }
 
-      const headerKeyChanged = headerKey.value.trim() !== (props.credential.header_key || "");
+      const headerKeyChanged =
+        headerKey.value.trim() !==
+        (props.credential.public_fields?.header_key ?? props.credential.header_key ?? "");
       // OAuth configs are managed by their callbacks after connection.
       const hasConfigChange =
         type.value !== "google_sheets" &&

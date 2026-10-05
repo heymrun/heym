@@ -259,6 +259,67 @@ def merge_credential_config_for_update(
                 merged_config["base_url"] = incoming_base_url
         return merged_config
 
+    if credential_type == CredentialType.custom:
+        merged_config = dict(existing_config)
+        incoming_api_key = str(incoming_config.get("api_key", "") or "").strip()
+        if incoming_api_key:
+            merged_config["api_key"] = incoming_api_key
+        if "base_url" in incoming_config:
+            incoming_base_url = str(incoming_config.get("base_url", "") or "").strip()
+            if incoming_base_url:
+                merged_config["base_url"] = incoming_base_url
+        return merged_config
+
+    if credential_type == CredentialType.header:
+        merged_config = dict(existing_config)
+        if "header_key" in incoming_config:
+            incoming_key = str(incoming_config.get("header_key", "") or "").strip()
+            if incoming_key:
+                merged_config["header_key"] = incoming_key
+        incoming_value = str(incoming_config.get("header_value", "") or "").strip()
+        if incoming_value:
+            merged_config["header_value"] = incoming_value
+        return merged_config
+
+    if credential_type == CredentialType.rabbitmq:
+        merged_config = dict(existing_config)
+        for key in ("rabbitmq_host", "rabbitmq_port", "rabbitmq_username", "rabbitmq_vhost"):
+            if key in incoming_config:
+                incoming_value = str(incoming_config.get(key, "") or "").strip()
+                if incoming_value:
+                    merged_config[key] = incoming_value
+        incoming_password = str(incoming_config.get("rabbitmq_password", "") or "").strip()
+        if incoming_password:
+            merged_config["rabbitmq_password"] = incoming_password
+        return merged_config
+
+    if credential_type == CredentialType.s3:
+        merged_config = dict(existing_config)
+        for key in ("aws_access_key_id", "aws_secret_access_key"):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
+        for key in ("aws_region", "aws_session_token"):
+            if key in incoming_config:
+                incoming_value = str(incoming_config.get(key, "") or "").strip()
+                if incoming_value:
+                    merged_config[key] = incoming_value
+        return merged_config
+
+    if credential_type == CredentialType.imap:
+        merged_config = dict(existing_config)
+        for key in ("imap_host", "imap_port", "imap_username", "imap_mailbox"):
+            if key in incoming_config:
+                incoming_value = str(incoming_config.get(key, "") or "").strip()
+                if incoming_value:
+                    merged_config[key] = incoming_value
+        if "imap_use_ssl" in incoming_config:
+            merged_config["imap_use_ssl"] = incoming_config["imap_use_ssl"]
+        incoming_password = str(incoming_config.get("imap_password", "") or "").strip()
+        if incoming_password:
+            merged_config["imap_password"] = incoming_password
+        return merged_config
+
     if credential_type != CredentialType.github:
         return incoming_config
 
@@ -421,6 +482,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     elif credential_type == CredentialType.cohere:
         api_key = config.get("api_key", "")
         return mask_api_key(api_key)
+    elif credential_type == CredentialType.rabbitmq:
+        host = str(config.get("rabbitmq_host", "")).strip()
+        user = str(config.get("rabbitmq_username", "")).strip()
+        if host and user:
+            return f"{user}@{host}"
+        return host or None
     return None
 
 
@@ -514,6 +581,28 @@ def get_public_credential_fields(
         }
     if credential_type == CredentialType.opencode:
         return {"base_url": str(config.get("base_url", "")).strip() or None}
+    if credential_type == CredentialType.custom:
+        return {"base_url": str(config.get("base_url", "")).strip() or None}
+    if credential_type == CredentialType.header:
+        return {"header_key": str(config.get("header_key", "")).strip() or None}
+    if credential_type == CredentialType.rabbitmq:
+        return {
+            "rabbitmq_host": str(config.get("rabbitmq_host", "")).strip() or None,
+            "rabbitmq_port": str(config.get("rabbitmq_port", "")).strip() or None,
+            "rabbitmq_username": str(config.get("rabbitmq_username", "")).strip() or None,
+            "rabbitmq_vhost": str(config.get("rabbitmq_vhost", "")).strip() or None,
+        }
+    if credential_type == CredentialType.s3:
+        return {"aws_region": str(config.get("aws_region", "")).strip() or None}
+    if credential_type == CredentialType.imap:
+        use_ssl = config.get("imap_use_ssl")
+        return {
+            "imap_host": str(config.get("imap_host", "")).strip() or None,
+            "imap_port": str(config.get("imap_port", "")).strip() or None,
+            "imap_username": str(config.get("imap_username", "")).strip() or None,
+            "imap_mailbox": str(config.get("imap_mailbox", "INBOX")).strip() or "INBOX",
+            "imap_use_ssl": str(bool(use_ssl)).lower() if use_ssl is not None else None,
+        }
     return {}
 
 
