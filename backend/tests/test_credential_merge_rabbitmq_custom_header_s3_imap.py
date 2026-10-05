@@ -1,9 +1,9 @@
 """Regression tests for credential update, public fields, and masked values for
-custom, header, rabbitmq, and imap credentials.
+custom, header, rabbitmq, s3, and imap credentials.
 
 Extends the pattern from issue #631 (PR #636) and issue #643 (PR #654).
 Previously, merge_credential_config_for_update had no branch for custom, header,
-rabbitmq, or imap, so updating a credential from the UI (where secret fields
+rabbitmq, s3, or imap, so updating a credential from the UI (where secret fields
 are kept blank) wiped out the stored secret keys and caused HTTP 400 validation failures.
 """
 
@@ -164,6 +164,61 @@ class TestRabbitMQCredentialPublicFieldsAndMasking(unittest.TestCase):
             },
         )
         self.assertEqual(masked, "heym_worker@amqp.example.com")
+
+
+class TestS3CredentialMerge(unittest.TestCase):
+    def _full_config(self) -> dict:
+        return {
+            "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+            "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "aws_region": "us-east-1",
+            "aws_session_token": "token123",
+        }
+
+    def test_editing_region_only_keeps_keys(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.s3,
+            self._full_config(),
+            {
+                "aws_access_key_id": "",
+                "aws_secret_access_key": "",
+                "aws_region": "eu-central-1",
+            },
+        )
+        self.assertEqual(merged["aws_access_key_id"], "AKIAIOSFODNN7EXAMPLE")
+        self.assertEqual(
+            merged["aws_secret_access_key"], "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        )
+        self.assertEqual(merged["aws_region"], "eu-central-1")
+        self.assertEqual(merged["aws_session_token"], "token123")
+
+    def test_rotating_keys_overwrites(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.s3,
+            self._full_config(),
+            {
+                "aws_access_key_id": "AKIA2NEWKEYIDEXAMPLE",
+                "aws_secret_access_key": "newSecretAccessKeyExample12345",
+            },
+        )
+        self.assertEqual(merged["aws_access_key_id"], "AKIA2NEWKEYIDEXAMPLE")
+        self.assertEqual(merged["aws_secret_access_key"], "newSecretAccessKeyExample12345")
+        self.assertEqual(merged["aws_region"], "us-east-1")
+
+
+class TestS3CredentialPublicFields(unittest.TestCase):
+    def test_public_fields_returns_region_only(self) -> None:
+        fields = get_public_credential_fields(
+            CredentialType.s3,
+            {
+                "aws_access_key_id": "AKIAEXAMPLE",
+                "aws_secret_access_key": "SECRETEXAMPLE",
+                "aws_region": "ap-southeast-1",
+            },
+        )
+        self.assertEqual(fields, {"aws_region": "ap-southeast-1"})
+        self.assertNotIn("aws_access_key_id", fields)
+        self.assertNotIn("aws_secret_access_key", fields)
 
 
 class TestImapCredentialMerge(unittest.TestCase):
