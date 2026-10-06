@@ -10,14 +10,17 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timezone
+from threading import Event
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import delete, select
 
 from app.api.chats import (
     ChatTurnResult,
+    _cancel_events,
     _chat_tasks,
     _dequeue_next_turn,
+    _process_chat,
     run_mcp_chat_turn,
     send_message,
 )
@@ -401,3 +404,137 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             turn = await task
             self.assertTrue(dequeue_finished)
             self.assertIsNone(turn)
+
+    async def test_old_worker_exception_does_not_reset_real_postgres_state(self) -> None:
+        """Prove against real PostgreSQL that when an old worker raises an exception
+        after a newer worker took ownership:
+        1. conversation.is_running remains True in the database.
+        2. DashboardChatQueueItem is NOT deleted from the database.
+        3. The newer worker's task and cancel event remain registered.
+        4. Conversely, when the owning worker fails, is_running is set to False and queue is cleared.
+        """
+        queue_item_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+
+        # 1. Setup conversation as running with a queued item in real PostgreSQL
+        async with async_session_maker() as s:
+            c = (
+                await s.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            c.is_running = True
+            queue_item = DashboardChatQueueItem(
+                id=queue_item_id,
+                conversation_id=self.conv_id,
+                content="Queued item to preserve",
+                credential_id=self.cred_id,
+                model="gpt-4o",
+                created_at=now,
+                updated_at=now,
+            )
+            s.add(queue_item)
+            await s.commit()
+
+        newer_task = asyncio.create_task(asyncio.sleep(10))
+        newer_event = Event()
+        conv_id_str = str(self.conv_id)
+
+        async def _supersede_and_fail(*args, **kwargs):
+            _chat_tasks[conv_id_str] = newer_task
+            _cancel_events[conv_id_str] = newer_event
+            raise RuntimeError("Old worker simulated error")
+
+        try:
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats.registry.finish", new_callable=AsyncMock) as mock_finish,
+                patch("app.api.chats.registry.publish", new_callable=AsyncMock) as mock_publish,
+                patch("app.api.chats._run_chat_turn", side_effect=_supersede_and_fail),
+            ):
+                await _process_chat(
+                    conv_id=conv_id_str,
+                    user_id=self.user_id,
+                    content="Old msg",
+                    credential_id=self.cred_id,
+                    model="gpt-4o",
+                    attachment_data=None,
+                    public_base_url="http://localhost:10105",
+                    should_generate_title=False,
+                )
+
+            # Invariants on real PostgreSQL:
+            async with async_session_maker() as s:
+                conv = (
+                    await s.execute(
+                        select(DashboardConversation).where(
+                            DashboardConversation.id == self.conv_id
+                        )
+                    )
+                ).scalar_one()
+                self.assertTrue(conv.is_running)
+
+                q_item = (
+                    await s.execute(
+                        select(DashboardChatQueueItem).where(
+                            DashboardChatQueueItem.id == queue_item_id
+                        )
+                    )
+                ).scalar_one_or_none()
+                self.assertIsNotNone(q_item)
+
+            self.assertIs(_chat_tasks.get(conv_id_str), newer_task)
+            self.assertIs(_cancel_events.get(conv_id_str), newer_event)
+            mock_finish.assert_not_called()
+            mock_publish.assert_not_called()
+
+            # Now test current/owning worker failure: cleans up in real PostgreSQL
+            current_task = asyncio.current_task()
+            _chat_tasks[conv_id_str] = current_task
+
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats.registry.finish", new_callable=AsyncMock) as mock_finish2,
+                patch("app.api.chats.registry.publish", new_callable=AsyncMock),
+                patch(
+                    "app.api.chats._run_chat_turn",
+                    side_effect=RuntimeError("Current worker error"),
+                ),
+            ):
+                await _process_chat(
+                    conv_id=conv_id_str,
+                    user_id=self.user_id,
+                    content="Current msg",
+                    credential_id=self.cred_id,
+                    model="gpt-4o",
+                    attachment_data=None,
+                    public_base_url="http://localhost:10105",
+                    should_generate_title=False,
+                )
+
+            # Invariants on real PostgreSQL after current worker failure:
+            async with async_session_maker() as s:
+                conv = (
+                    await s.execute(
+                        select(DashboardConversation).where(
+                            DashboardConversation.id == self.conv_id
+                        )
+                    )
+                ).scalar_one()
+                self.assertFalse(conv.is_running)
+
+                q_item = (
+                    await s.execute(
+                        select(DashboardChatQueueItem).where(
+                            DashboardChatQueueItem.id == queue_item_id
+                        )
+                    )
+                ).scalar_one_or_none()
+                self.assertIsNone(q_item)
+
+            self.assertIsNone(_chat_tasks.get(conv_id_str))
+            self.assertIsNone(_cancel_events.get(conv_id_str))
+            mock_finish2.assert_awaited_once_with(conv_id_str)
+        finally:
+            newer_task.cancel()
+            await asyncio.gather(newer_task, return_exceptions=True)

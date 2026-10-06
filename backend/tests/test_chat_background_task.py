@@ -1,11 +1,20 @@
+import asyncio
 import unittest
 import uuid
 from datetime import datetime, timezone
+from threading import Event
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
-from app.api.chats import mark_conversation_read, send_message
+from app.api.chats import (
+    _cancel_events,
+    _chat_tasks,
+    _process_chat,
+    _process_chat_queue,
+    mark_conversation_read,
+    send_message,
+)
 from app.db.models import CredentialType, DashboardChatQueueItem, DashboardConversation
 from app.models.chat_schemas import MessageCreate
 
@@ -292,3 +301,265 @@ class TestMarkConversationRead(unittest.IsolatedAsyncioTestCase):
 # The chat task registry is now backed by Postgres LISTEN/NOTIFY plus a
 # chat_stream_events table; its behavior is exercised end-to-end through the
 # chat endpoints rather than via white-box tests against the old in-memory dict.
+
+
+class TestWorkerOwnershipExceptionCleanup(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.conv_id = str(uuid.uuid4())
+        self.user_id = uuid.uuid4()
+        self.cred_id = uuid.uuid4()
+        _chat_tasks.pop(self.conv_id, None)
+        _cancel_events.pop(self.conv_id, None)
+
+    async def asyncTearDown(self) -> None:
+        _chat_tasks.pop(self.conv_id, None)
+        _cancel_events.pop(self.conv_id, None)
+
+    async def test_process_chat_old_worker_superseded_in_flight_exception_does_not_clear_newer_worker_state(
+        self,
+    ) -> None:
+        newer_task = asyncio.create_task(asyncio.sleep(10))
+        newer_event = Event()
+
+        mock_db = AsyncMock()
+        mock_db_context = AsyncMock()
+        mock_db_context.__aenter__.return_value = mock_db
+        mock_db_maker = MagicMock(return_value=mock_db_context)
+
+        mock_finish = AsyncMock()
+        mock_publish = AsyncMock()
+        mock_clear_queue = AsyncMock()
+
+        async def _supersede_and_fail(*args, **kwargs):
+            # Simulate a newer worker replacing ownership while the old worker was in-flight
+            _chat_tasks[self.conv_id] = newer_task
+            _cancel_events[self.conv_id] = newer_event
+            raise RuntimeError("Old worker failure")
+
+        try:
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats.registry.finish", mock_finish),
+                patch("app.api.chats.registry.publish", mock_publish),
+                patch("app.api.chats._clear_queue_items", mock_clear_queue),
+                patch("app.api.chats.async_session_maker", mock_db_maker),
+                patch(
+                    "app.api.chats._run_chat_turn",
+                    new_callable=AsyncMock,
+                    side_effect=_supersede_and_fail,
+                ),
+            ):
+                await _process_chat(
+                    conv_id=self.conv_id,
+                    user_id=self.user_id,
+                    content="Hello",
+                    credential_id=self.cred_id,
+                    model="gpt-4o",
+                    attachment_data=None,
+                    public_base_url="http://localhost",
+                    should_generate_title=False,
+                )
+
+            # Invariant: Newer worker's state is completely preserved
+            self.assertIs(_chat_tasks.get(self.conv_id), newer_task)
+            self.assertIs(_cancel_events.get(self.conv_id), newer_event)
+            mock_finish.assert_not_called()
+            mock_publish.assert_not_called()
+            mock_clear_queue.assert_not_called()
+            mock_db_maker.assert_not_called()
+        finally:
+            newer_task.cancel()
+            await asyncio.gather(newer_task, return_exceptions=True)
+
+    async def test_process_chat_old_worker_already_superseded_before_start(self) -> None:
+        newer_task = asyncio.create_task(asyncio.sleep(10))
+        newer_event = Event()
+        _chat_tasks[self.conv_id] = newer_task
+        _cancel_events[self.conv_id] = newer_event
+
+        mock_run_turn = AsyncMock()
+        try:
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats._run_chat_turn", mock_run_turn),
+            ):
+                await _process_chat(
+                    conv_id=self.conv_id,
+                    user_id=self.user_id,
+                    content="Hello",
+                    credential_id=self.cred_id,
+                    model="gpt-4o",
+                    attachment_data=None,
+                    public_base_url="http://localhost",
+                    should_generate_title=False,
+                )
+
+            # Invariant: Superseded worker aborts before starting; newer state untouched
+            self.assertIs(_chat_tasks.get(self.conv_id), newer_task)
+            self.assertIs(_cancel_events.get(self.conv_id), newer_event)
+            mock_run_turn.assert_not_called()
+        finally:
+            newer_task.cancel()
+            await asyncio.gather(newer_task, return_exceptions=True)
+
+    async def test_process_chat_current_worker_exception_performs_failure_cleanup(self) -> None:
+        current_task = asyncio.current_task()
+        _chat_tasks[self.conv_id] = current_task
+
+        mock_db = AsyncMock()
+        mock_db_context = AsyncMock()
+        mock_db_context.__aenter__.return_value = mock_db
+        mock_db_maker = MagicMock(return_value=mock_db_context)
+
+        mock_finish = AsyncMock()
+        mock_publish = AsyncMock()
+        mock_clear_queue = AsyncMock()
+
+        with (
+            patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+            patch("app.api.chats.registry.finish", mock_finish),
+            patch("app.api.chats.registry.publish", mock_publish),
+            patch("app.api.chats._clear_queue_items", mock_clear_queue),
+            patch("app.api.chats.async_session_maker", mock_db_maker),
+            patch(
+                "app.api.chats._run_chat_turn",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Current worker failure"),
+            ),
+        ):
+            await _process_chat(
+                conv_id=self.conv_id,
+                user_id=self.user_id,
+                content="Hello",
+                credential_id=self.cred_id,
+                model="gpt-4o",
+                attachment_data=None,
+                public_base_url="http://localhost",
+                should_generate_title=False,
+            )
+
+        # Invariant: Current worker cleans up on failure
+        self.assertIsNone(_chat_tasks.get(self.conv_id))
+        self.assertIsNone(_cancel_events.get(self.conv_id))
+        mock_finish.assert_awaited_once_with(self.conv_id)
+        mock_clear_queue.assert_awaited_once()
+        self.assertEqual(mock_publish.await_count, 2)
+        mock_db.commit.assert_awaited_once()
+
+    async def test_process_chat_queue_old_worker_superseded_in_flight_exception_does_not_clear_newer_worker_state(
+        self,
+    ) -> None:
+        newer_task = asyncio.create_task(asyncio.sleep(10))
+        newer_event = Event()
+
+        mock_db = AsyncMock()
+        mock_db_context = AsyncMock()
+        mock_db_context.__aenter__.return_value = mock_db
+        mock_db_maker = MagicMock(return_value=mock_db_context)
+
+        mock_finish = AsyncMock()
+        mock_publish = AsyncMock()
+        mock_clear_queue = AsyncMock()
+
+        async def _supersede_and_fail(*args, **kwargs):
+            # Simulate a newer worker replacing ownership while the old queue worker was in-flight
+            _chat_tasks[self.conv_id] = newer_task
+            _cancel_events[self.conv_id] = newer_event
+            raise RuntimeError("Old queue worker failure")
+
+        try:
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats.registry.finish", mock_finish),
+                patch("app.api.chats.registry.publish", mock_publish),
+                patch("app.api.chats._clear_queue_items", mock_clear_queue),
+                patch("app.api.chats.async_session_maker", mock_db_maker),
+                patch(
+                    "app.api.chats._dequeue_next_turn",
+                    new_callable=AsyncMock,
+                    side_effect=_supersede_and_fail,
+                ),
+            ):
+                await _process_chat_queue(
+                    conv_id=self.conv_id,
+                    user_id=self.user_id,
+                    public_base_url="http://localhost",
+                )
+
+            # Invariant: Newer worker's state is completely preserved
+            self.assertIs(_chat_tasks.get(self.conv_id), newer_task)
+            self.assertIs(_cancel_events.get(self.conv_id), newer_event)
+            mock_finish.assert_not_called()
+            mock_publish.assert_not_called()
+            mock_clear_queue.assert_not_called()
+            mock_db_maker.assert_not_called()
+        finally:
+            newer_task.cancel()
+            await asyncio.gather(newer_task, return_exceptions=True)
+
+    async def test_process_chat_queue_old_worker_already_superseded_before_start(self) -> None:
+        newer_task = asyncio.create_task(asyncio.sleep(10))
+        newer_event = Event()
+        _chat_tasks[self.conv_id] = newer_task
+        _cancel_events[self.conv_id] = newer_event
+
+        mock_dequeue = AsyncMock()
+        try:
+            with (
+                patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+                patch("app.api.chats._dequeue_next_turn", mock_dequeue),
+            ):
+                await _process_chat_queue(
+                    conv_id=self.conv_id,
+                    user_id=self.user_id,
+                    public_base_url="http://localhost",
+                )
+
+            # Invariant: Superseded queue worker aborts before starting; newer state untouched
+            self.assertIs(_chat_tasks.get(self.conv_id), newer_task)
+            self.assertIs(_cancel_events.get(self.conv_id), newer_event)
+            mock_dequeue.assert_not_called()
+        finally:
+            newer_task.cancel()
+            await asyncio.gather(newer_task, return_exceptions=True)
+
+    async def test_process_chat_queue_current_worker_exception_performs_failure_cleanup(
+        self,
+    ) -> None:
+        current_task = asyncio.current_task()
+        _chat_tasks[self.conv_id] = current_task
+
+        mock_db = AsyncMock()
+        mock_db_context = AsyncMock()
+        mock_db_context.__aenter__.return_value = mock_db
+        mock_db_maker = MagicMock(return_value=mock_db_context)
+
+        mock_finish = AsyncMock()
+        mock_publish = AsyncMock()
+        mock_clear_queue = AsyncMock()
+
+        with (
+            patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+            patch("app.api.chats.registry.finish", mock_finish),
+            patch("app.api.chats.registry.publish", mock_publish),
+            patch("app.api.chats._clear_queue_items", mock_clear_queue),
+            patch("app.api.chats.async_session_maker", mock_db_maker),
+            patch(
+                "app.api.chats._dequeue_next_turn",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Current queue worker failure"),
+            ),
+        ):
+            await _process_chat_queue(
+                conv_id=self.conv_id,
+                user_id=self.user_id,
+                public_base_url="http://localhost",
+            )
+
+        # Invariant: Current worker cleans up on failure
+        self.assertIsNone(_chat_tasks.get(self.conv_id))
+        self.assertIsNone(_cancel_events.get(self.conv_id))
+        mock_finish.assert_awaited_once_with(self.conv_id)
+        mock_clear_queue.assert_awaited_once()
+        self.assertEqual(mock_publish.await_count, 2)
+        mock_db.commit.assert_awaited_once()
