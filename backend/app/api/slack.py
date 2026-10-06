@@ -113,6 +113,23 @@ async def _get_signing_secret(db: AsyncSession, credential_id: str) -> str | Non
     return config.get("signing_secret")
 
 
+def _redact_response_url(value: object, raw_response_url: str) -> object:
+    """Recursively drop Slack's response_url from anything persisted.
+
+    response_url is a ~30-minute bearer webhook that posts into the originating
+    Slack channel with no further auth - a capability secret, same class as
+    Discord's interaction token. New containers are returned rather than
+    mutating in place, because the live run still needs the raw URL.
+    """
+    if isinstance(value, dict):
+        return {k: _redact_response_url(v, raw_response_url) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_response_url(item, raw_response_url) for item in value]
+    if isinstance(value, str) and raw_response_url and raw_response_url in value:
+        return value.replace(raw_response_url, "[redacted]")
+    return value
+
+
 async def _execute_workflow_background(
     workflow: Workflow,
     node_id: str,
@@ -128,6 +145,14 @@ async def _execute_workflow_background(
             "event": event_body,
             "headers": safe_headers,
         }
+
+        # One redactor for this run, applied at every persistence boundary below.
+        # The live `inputs` dict keeps the raw URL because the workflow still
+        # needs it to post a follow-up into the originating Slack channel.
+        raw_response_url = str(event_body.get("response_url") or "")
+
+        def redact(value: object) -> object:
+            return _redact_response_url(value, raw_response_url) if raw_response_url else value
 
         async with async_session_maker() as db:
             workflow_result = await db.execute(select(Workflow).where(Workflow.id == workflow.id))
@@ -150,7 +175,7 @@ async def _execute_workflow_background(
             cancel_event = register_execution(
                 workflow_id=fresh_workflow.id,
                 execution_id=execution_id,
-                inputs=inputs,
+                inputs=redact(inputs),
                 trigger_source="slack",
                 actor_user_id=fresh_workflow.owner_id,
             )
@@ -187,13 +212,14 @@ async def _execute_workflow_background(
                 history_entry, _ = await persist_pending_execution(
                     db=db,
                     workflow=fresh_workflow,
-                    enriched_inputs=inputs,
+                    enriched_inputs=redact(inputs),
                     execution_result=result,
                     trigger_source="Slack",
                     credentials_owner_id=fresh_workflow.owner_id,
                     trace_user_id=fresh_workflow.owner_id,
                     public_base_url=build_default_public_base_url(),
                     history_entry_id=execution_id,
+                    redact=redact,
                 )
                 await upsert_workflow_analytics_snapshot(
                     db,
@@ -211,9 +237,9 @@ async def _execute_workflow_background(
             history_entry = ExecutionHistory(
                 id=execution_id,
                 workflow_id=fresh_workflow.id,
-                inputs=inputs,
-                outputs=result.outputs,
-                node_results=result.node_results,
+                inputs=redact(inputs),
+                outputs=redact(result.outputs),
+                node_results=redact(result.node_results),
                 status=result.status,
                 execution_time_ms=result.execution_time_ms,
                 trigger_source="Slack",
@@ -231,9 +257,9 @@ async def _execute_workflow_background(
             for sub_exec in result.sub_workflow_executions:
                 sub_history = ExecutionHistory(
                     workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
+                    inputs=redact(sub_exec.inputs),
+                    outputs=redact(sub_exec.outputs),
+                    node_results=redact(sub_exec.node_results),
                     status=sub_exec.status,
                     execution_time_ms=sub_exec.execution_time_ms,
                     trigger_source=sub_exec.trigger_source,

@@ -164,6 +164,63 @@ class TestSlackValidSignature(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history.inputs["trigger_node_id"], "slack-node")
         self.assertEqual(history.inputs["event"]["event"]["text"], "hello")
 
+    async def test_response_url_is_redacted_from_persisted_history(self) -> None:
+        """End-to-end: a response_url on the incoming event must never reach the
+        persisted ExecutionHistory row, not just the standalone redactor function."""
+        from app.api.slack import _execute_workflow_background
+
+        response_url = "https://hooks.slack.com/actions/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX"
+        owner_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            name="Slack workflow",
+            nodes=[],
+            edges=[],
+        )
+        added_rows: list[object] = []
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow)),
+            add=added_rows.append,
+            commit=AsyncMock(),
+        )
+        execution_result = ExecutionResult(
+            workflow_id=workflow_id,
+            status="success",
+            outputs={"message": f"will post a follow-up to {response_url}"},
+            execution_time_ms=12.3,
+            node_results=[{"node_type": "slackTrigger", "output": {"response_url": response_url}}],
+            sub_workflow_executions=[],
+        )
+
+        with (
+            patch("app.api.slack.async_session_maker") as mock_session_maker,
+            patch("app.api.slack.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.slack.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.slack.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.slack.dispatch_workflow", AsyncMock(return_value=execution_result)),
+            patch("app.api.slack.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.slack._persist_global_variables_from_execution", AsyncMock()),
+        ):
+            mock_session = AsyncMock()
+            mock_session.__aenter__.return_value = db
+            mock_session.__aexit__.return_value = None
+            mock_session_maker.return_value = mock_session
+
+            await _execute_workflow_background(
+                workflow,
+                "slack-node",
+                {"type": "slash_command", "response_url": response_url},
+                {"x-slack-request-timestamp": "123"},
+            )
+
+        history = next(row for row in added_rows if isinstance(row, ExecutionHistory))
+        self.assertNotIn(response_url, json.dumps(history.inputs))
+        self.assertNotIn(response_url, json.dumps(history.outputs))
+        self.assertNotIn(response_url, json.dumps(history.node_results))
+        self.assertEqual(history.inputs["event"]["response_url"], "[redacted]")
+
     async def test_a_paused_run_mints_its_review_request(self) -> None:
         """A Slack-started run that pauses must get a review link, not a dead row."""
         from app.api.slack import _execute_workflow_background
