@@ -287,6 +287,11 @@ watch(
   },
 );
 
+watch(
+  () => workflowStore.runInputFocusRequest,
+  () => { rightPanelOpen.value = true; },
+);
+
 // Collapse both side panels when the viewport becomes mobile so the canvas
 // (standard workflow or dashboard widget) is shown on its own.
 watch(isMobile, (mobile) => {
@@ -577,14 +582,15 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
     }
     event.preventDefault();
     if (!workflowStore.isExecuting && workflowStore.nodes.length > 0) {
-      const validation = workflowStore.validateWorkflow();
+      const targetNodeId = workflowStore.runUntilNodeId ?? undefined;
+      const validation = workflowStore.validateWorkflow(targetNodeId);
       if (!validation.isValid) {
         validationErrors.value = validation.errors;
         showValidationDialog.value = true;
         pushOverlayState();
         return;
       }
-      const executeTargetValidation = await workflowStore.validateExecuteTargetsExist();
+      const executeTargetValidation = await workflowStore.validateExecuteTargetsExist(targetNodeId);
       if (!executeTargetValidation.isValid) {
         validationErrors.value = executeTargetValidation.errors;
         showValidationDialog.value = true;
@@ -600,8 +606,8 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
       ) {
         return;
       }
-      const body = workflowStore.buildExecutionRequestBody();
-      void workflowStore.executeWorkflow(body).catch(() => {
+      const body = workflowStore.buildExecutionRequestBody(targetNodeId);
+      void workflowStore.executeWorkflow(body, targetNodeId).catch(() => {
         // Errors are reflected via execution state / debug UI.
       });
     }

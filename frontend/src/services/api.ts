@@ -257,7 +257,7 @@ export interface WorkflowExecuteOptions {
 
 function buildWorkflowExecuteRequest(
   body: unknown,
-  options?: WorkflowExecuteOptions,
+  options?: WorkflowExecuteOptions & { runUntilNodeId?: string },
 ): { payload: unknown; query: string } {
   const bodyMode = options?.bodyMode || "legacy";
   const testRun = options?.testRun ?? false;
@@ -269,6 +269,9 @@ function buildWorkflowExecuteRequest(
   }
   if (triggerSource) {
     queryParams.set("trigger_source", triggerSource);
+  }
+  if (options?.runUntilNodeId) {
+    queryParams.set("run_until_node_id", options.runUntilNodeId);
   }
   const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
 
@@ -1001,13 +1004,14 @@ export const workflowApi = {
     }) => void,
     onAgentProgress?: (data: AgentProgressEvent) => void,
     onLlmBatchProgress?: (data: LLMBatchProgressEvent) => void,
-    options?: Omit<WorkflowExecuteOptions, "testRun">,
+    options?: Omit<WorkflowExecuteOptions, "testRun"> & { runUntilNodeId?: string },
   ): void => {
     const API_URL = import.meta.env.VITE_API_URL || "";
     const request = buildWorkflowExecuteRequest(body, {
       bodyMode: options?.bodyMode,
       testRun: testRun ?? false,
       triggerSource: options?.triggerSource,
+      runUntilNodeId: options?.runUntilNodeId,
     });
 
     fetch(`${API_URL}/api/workflows/${id}/execute/stream${request.query}`, {

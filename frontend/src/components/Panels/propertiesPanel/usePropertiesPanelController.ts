@@ -345,7 +345,7 @@ export function usePropertiesPanelController() {
   });
   const runInputValues = computed(() => workflowStore.runInputValues);
   const runInputJson = computed(() => workflowStore.runInputJson);
-  const allInputFields = computed(() => workflowStore.allInputFields);
+  const allInputFields = computed(() => workflowStore.runInputFields);
   const isGenericWebhookBodyMode = computed(() => workflowStore.webhookBodyMode === "generic");
 
   const slackTriggerWebhookUrl = computed((): string => {
@@ -9055,7 +9055,6 @@ export function usePropertiesPanelController() {
     updateNodeData("inputCount", newValue);
   }
 
-
   function deleteNode(): void {
     if (!selectedNode.value) return;
     if (!confirm("Are you sure you want to delete this node?")) return;
@@ -9063,14 +9062,15 @@ export function usePropertiesPanelController() {
   }
 
   async function handleExecute(): Promise<void> {
-    const validation = workflowStore.validateWorkflow();
+    const targetNodeId = workflowStore.runUntilNodeId ?? undefined;
+    const validation = workflowStore.validateWorkflow(targetNodeId);
     if (!validation.isValid) {
       validationErrors.value = validation.errors;
       showValidationDialog.value = true;
       return;
     }
 
-    const executeTargetValidation = await workflowStore.validateExecuteTargetsExist();
+    const executeTargetValidation = await workflowStore.validateExecuteTargetsExist(targetNodeId);
     if (!executeTargetValidation.isValid) {
       validationErrors.value = executeTargetValidation.errors;
       showValidationDialog.value = true;
@@ -9081,8 +9081,8 @@ export function usePropertiesPanelController() {
       return;
     }
 
-    const body = workflowStore.buildExecutionRequestBody();
-    await workflowStore.executeWorkflow(body);
+    const body = workflowStore.buildExecutionRequestBody(targetNodeId);
+    await workflowStore.executeWorkflow(body, targetNodeId);
   }
 
   function closeValidationDialog(): void {

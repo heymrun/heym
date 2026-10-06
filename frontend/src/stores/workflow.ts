@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
 import axios from "axios";
 
@@ -6,6 +6,7 @@ import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, string
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
+import { workflowRunNodeIds } from "@/lib/workflowRunScope";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
 import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
@@ -83,7 +84,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const staleSaveServerUpdatedAt = ref<string | null>(null);
   // A run that hit a stale-save conflict and is waiting on the dialog. Wrapped in an object so a
   // legitimately undefined body is still distinguishable from "no run pending".
-  const pendingStaleSaveRun = ref<{ body: unknown } | null>(null);
+  const pendingStaleSaveRun = ref<{ body: unknown; targetNodeId?: string } | null>(null);
   const staleSaveBlockedARun = computed(() => pendingStaleSaveRun.value !== null);
   // "overwrite": this tab has edits that would replace the newer server version.
   // "reload": this tab has no edits, so it is simply showing an outdated workflow.
@@ -127,6 +128,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const fileUploadPollAbortController = ref<AbortController | null>(null);
   const debugPanelHeight = ref(192);
   const nodeSearchQuery = ref("");
+  const runUntilNodeId = ref<string | null>(null);
+  const runInputFocusRequest = ref(0);
   const runInputText = ref("");
   const runInputValues = ref<Record<string, string>>({});
   const runInputJson = ref("{}");
@@ -164,6 +167,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     );
 
     const fields: Array<{
+      nodeId: string;
       nodeLabel: string;
       key: string;
       defaultValue: string;
@@ -173,6 +177,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       const nodeFields = node.data.inputFields || [];
       for (const field of nodeFields) {
         fields.push({
+          nodeId: node.id,
           nodeLabel: node.data.label,
           key: field.key,
           defaultValue: field.defaultValue || "",
@@ -183,13 +188,44 @@ export const useWorkflowStore = defineStore("workflow", () => {
     return fields;
   });
 
+  const runUntilNode = computed(() => nodes.value.find((node) => node.id === runUntilNodeId.value) ?? null);
+
+  watch(runUntilNode, (node) => {
+    if (!node) runUntilNodeId.value = null;
+  });
+
+  function getRunInputFields(targetNodeId?: string): typeof allInputFields.value {
+    if (!targetNodeId) return allInputFields.value;
+    const scope = workflowRunNodeIds(nodes.value, edges.value, targetNodeId);
+    return allInputFields.value.filter((field) => scope.has(field.nodeId)
+      && nodes.value.find((node) => node.id === field.nodeId)?.data.pinnedData == null);
+  }
+
+  const runInputFields = computed(() => getRunInputFields(runUntilNodeId.value ?? undefined));
+
+  function prepareNodeRun(nodeId: string): boolean {
+    const node = nodes.value.find((candidate) => candidate.id === nodeId);
+    if (!node || node.type === "sticky" || isExecuting.value || isSaving.value) return false;
+    runUntilNodeId.value = nodeId;
+    const scope = workflowRunNodeIds(nodes.value, edges.value, nodeId);
+    const needsInput = getRunInputFields(nodeId).length > 0
+      || (webhookBodyMode.value === "generic" && nodes.value.some((candidate) =>
+        scope.has(candidate.id) && candidate.type === "textInput" && candidate.data.active !== false
+        && candidate.data.pinnedData == null));
+    if (needsInput) {
+      propertiesPanelTab.value = "config";
+      runInputFocusRequest.value += 1;
+    }
+    return !needsInput;
+  }
+
   const webhookBodyMode = computed(() => {
     return currentWorkflow.value?.webhook_body_mode || "legacy";
   });
 
-  function buildLegacyExecutionBody(): Record<string, string> {
+  function buildLegacyExecutionBody(targetNodeId?: string): Record<string, string> {
     return buildLegacyWebhookBody(
-      allInputFields.value,
+      getRunInputFields(targetNodeId),
       runInputValues.value,
       runInputText.value,
     );
@@ -212,12 +248,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
     resetRunInputJsonFromMode();
   }
 
-  function buildExecutionRequestBody(): unknown {
+  function buildExecutionRequestBody(targetNodeId?: string): unknown {
     if (webhookBodyMode.value === "generic") {
       return parseWebhookJson(runInputJson.value).value;
     }
 
-    return buildLegacyExecutionBody();
+    return buildLegacyExecutionBody(targetNodeId);
   }
 
   function loadHistoryInputs(
@@ -591,6 +627,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   async function loadWorkflow(id: string): Promise<void> {
+    runUntilNodeId.value = null;
     if (currentExecutionWorkflowId.value && currentExecutionWorkflowId.value !== id) {
       // The backend keeps the run alive, but this canvas must stop consuming its stream before
       // another workflow is loaded. Otherwise late events from the old run mutate the new canvas.
@@ -746,7 +783,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     const pendingRun = pendingStaleSaveRun.value;
     pendingStaleSaveRun.value = null;
     const saved = await _executeSave();
-    if (saved && pendingRun) await executeWorkflow(pendingRun.body);
+    if (saved && pendingRun) await executeWorkflow(pendingRun.body, pendingRun.targetNodeId);
   }
 
   /** Dismiss the conflict, keeping the local edits — and abandon any run that was waiting. */
@@ -765,7 +802,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     const wf = currentWorkflow.value;
     if (!wf) return;
     await loadWorkflow(wf.id);
-    if (pendingRun) await executeWorkflow(pendingRun.body);
+    if (pendingRun) await executeWorkflow(pendingRun.body, pendingRun.targetNodeId);
   }
 
   /**
@@ -1427,9 +1464,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
   async function executeWorkflow(
     body: unknown,
+    targetNodeId?: string,
   ): Promise<void> {
     const wf = currentWorkflow.value;
-    if (!wf) return;
+    if (!wf || isExecuting.value) return;
+    runUntilNodeId.value = targetNodeId ?? null;
     fileUploadPollAbortController.value?.abort();
     fileUploadPollAbortController.value = null;
 
@@ -1443,7 +1482,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     // workflow — so the run would silently execute a definition this tab is not showing.
     if (hasUnsavedChanges.value && !isReadOnly.value) {
       if (!(await saveWorkflow())) {
-        pendingStaleSaveRun.value = { body };
+        pendingStaleSaveRun.value = { body, targetNodeId };
         return;
       }
     } else {
@@ -1452,7 +1491,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         staleSaveMode.value = "reload";
         staleSaveServerUpdatedAt.value = serverUpdatedAt;
         staleSaveDialogOpen.value = true;
-        pendingStaleSaveRun.value = { body };
+        pendingStaleSaveRun.value = { body, targetNodeId };
         return;
       }
     }
@@ -1473,8 +1512,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
     serverClockOffsetMs.value = 0;
 
     try {
+      const scope = targetNodeId ? workflowRunNodeIds(nodes.value, edges.value, targetNodeId) : null;
       nodes.value.forEach((node) => {
-        setNodeStatus(node.id, "pending");
+        if (!scope || scope.has(node.id)) setNodeStatus(node.id, "pending");
       });
 
       let receivedFinalOutput = false;
@@ -1733,6 +1773,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         {
           bodyMode: wf.webhook_body_mode,
           triggerSource: "Canvas",
+          runUntilNodeId: targetNodeId,
         },
       );
       });
@@ -2002,6 +2043,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     abortController.value = null;
     fileUploadPollAbortController.value?.abort();
     fileUploadPollAbortController.value = null;
+    runUntilNodeId.value = null;
     currentWorkflow.value = null;
     nodes.value = [];
     edges.value = [];
@@ -2250,7 +2292,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     return loopBranchNodes;
   }
 
-  function validateWorkflow(): ValidationResult {
+  function validateWorkflow(targetNodeId?: string): ValidationResult {
+    const scope = targetNodeId ? workflowRunNodeIds(nodes.value, edges.value, targetNodeId) : null;
     const errors: ValidationError[] = [];
 
     const loopNodes = nodes.value.filter((n) => n.type === "loop");
@@ -2262,7 +2305,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
 
     for (const node of nodes.value) {
-      if (node.data.active === false) continue;
+      if (node.data.active === false || (scope && !scope.has(node.id))) continue;
 
       if (
         (node.type === "output" || node.type === "jsonOutputMapper")
@@ -3281,7 +3324,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     };
   }
 
-  async function validateExecuteTargetsExist(): Promise<ValidationResult> {
+  async function validateExecuteTargetsExist(targetNodeId?: string): Promise<ValidationResult> {
+    const scope = targetNodeId ? workflowRunNodeIds(nodes.value, edges.value, targetNodeId) : null;
     const errors: ValidationError[] = [];
     let validWorkflowIds = new Set<string>();
 
@@ -3293,7 +3337,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
 
     for (const node of nodes.value) {
-      if (node.data.active === false || node.type !== "execute") continue;
+      if (node.data.active === false || node.type !== "execute" || (scope && !scope.has(node.id))) continue;
 
       const executeWorkflowId = (node.data.executeWorkflowId as string | undefined) ?? "";
       const existsInOptions = !!executeWorkflowId && validWorkflowIds.has(executeWorkflowId);
@@ -3704,6 +3748,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
     redo,
     canTogglePin,
     togglePinnedData,
+    runUntilNodeId,
+    runUntilNode,
+    runInputFocusRequest,
+    runInputFields,
+    prepareNodeRun,
     runInputText,
     runInputValues,
     runInputJson,

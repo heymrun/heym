@@ -468,6 +468,8 @@ See also [Node Types](./node-types.md), [Expression DSL](./expression-dsl.md), a
 
 ### [Canvas Features](./canvas-features.md)
 
+Hover any non-sticky canvas node and click **Run** to execute up to that node. Required inputs open in the Run panel with the first field focused; paths without inputs start immediately. See [Run to Node](./canvas-features.md#run-to-node).
+
 The workflow editor provides Data Pin (pin a node's last output for testing downstream without re-running), Execution Logs (real-time node results and agent progress that complement [Execution History](./execution-history.md)), Enable/Disable (skip nodes during execution), and Extract to Sub-Workflow (move a selection into a new workflow and replace it with an [Execute](../nodes/execute-node.md) node). A running production execution can be opened from History or a Board card; the editor restores its current snapshot, attaches to SSE, and keeps the canvas animation and Debug logs live. [Keyboard Shortcuts](./keyboard-shortcuts.md) support copy, paste, run, and inline node search.
 
 See also [Keyboard Shortcuts](./keyboard-shortcuts.md), [Edit History](./edit-history.md), and [Execution History](./execution-history.md).

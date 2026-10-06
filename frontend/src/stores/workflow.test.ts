@@ -411,3 +411,69 @@ describe("read-only workflow access", () => {
     expect(workflowApi.update).not.toHaveBeenCalled();
   });
 });
+
+
+describe("canvas run targets", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  function scopedWorkflow(): Workflow {
+    const workflow = makeWorkflow("partial");
+    workflow.nodes = [
+      { id: "input", type: "textInput", position: { x: 0, y: 0 }, data: { label: "input", inputFields: [{ key: "text" }, { key: "extra" }] } },
+      { id: "target", type: "set", position: { x: 200, y: 0 }, data: { label: "target", mappings: [{ key: "text", value: "$input.text" }] } },
+      { id: "later", type: "llm", position: { x: 400, y: 0 }, data: { label: "later" } },
+      { id: "other", type: "textInput", position: { x: 0, y: 200 }, data: { label: "other", inputFields: [{ key: "unrelated" }] } },
+      { id: "note", type: "sticky", position: { x: 0, y: 400 }, data: { label: "note" } },
+    ];
+    workflow.edges = [{ id: "a", source: "input", target: "target" }, { id: "b", source: "target", target: "later" }];
+    return workflow;
+  }
+
+  it("requests only upstream inputs and validates only the run scope", async () => {
+    vi.mocked(workflowApi.get).mockResolvedValue(scopedWorkflow());
+    const store = useWorkflowStore();
+    await store.loadWorkflow("partial");
+    expect(store.prepareNodeRun("target")).toBe(false);
+    expect(store.runInputFocusRequest).toBe(1);
+    expect(store.propertiesPanelTab).toBe("config");
+    expect(store.runInputFields.map((field) => field.key)).toEqual(["text", "extra"]);
+    expect(store.validateWorkflow("target").isValid).toBe(true);
+    expect(store.validateWorkflow().isValid).toBe(false);
+    store.runInputValues.text = "hello";
+    expect(store.buildExecutionRequestBody("target")).toEqual({ text: "hello", extra: "" });
+    expect(store.prepareNodeRun("note")).toBe(false);
+    expect(store.runUntilNodeId).toBe("target");
+  });
+
+  it("runs without opening inputs when the only upstream input is pinned", async () => {
+    const workflow = scopedWorkflow();
+    workflow.nodes[0].data.pinnedData = { text: "cached" };
+    vi.mocked(workflowApi.get).mockResolvedValue(workflow);
+    const store = useWorkflowStore();
+    await store.loadWorkflow("partial");
+    expect(store.prepareNodeRun("target")).toBe(true);
+    expect(store.runInputFocusRequest).toBe(0);
+    expect(store.runInputFields).toEqual([]);
+  });
+
+  it("preserves the target through a stale-save reload", async () => {
+    const workflow = scopedWorkflow();
+    vi.mocked(workflowApi.get).mockResolvedValue(workflow);
+    const store = useWorkflowStore();
+    await store.loadWorkflow("partial");
+    vi.mocked(workflowApi.get).mockResolvedValue({ ...workflow, updated_at: "2026-10-06T12:00:00Z" });
+    await store.executeWorkflow({ text: "hello" }, "target");
+    expect(store.staleSaveDialogOpen).toBe(true);
+    expect(workflowApi.executeStream).not.toHaveBeenCalled();
+    vi.mocked(workflowApi.executeStream).mockImplementation((_id, _body, _start, _nodeStart, _nodeComplete, complete) => {
+      complete({ workflow_id: "partial", status: "success", outputs: {}, node_results: [], execution_time_ms: 1 });
+    });
+    await store.reloadStaleWorkflowAndRun();
+    const call = vi.mocked(workflowApi.executeStream).mock.calls[0];
+    expect(call.at(-1)).toMatchObject({ runUntilNodeId: "target" });
+    expect(store.nodes.find((node) => node.id === "later")?.data.status).toBeUndefined();
+  });
+});

@@ -15,6 +15,7 @@ import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 
 import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 
+import CanvasNodeRunButton from "./CanvasNodeRunButton.vue";
 import BaseNode from "@/components/Nodes/BaseNode.vue";
 import InsertableEdge from "@/components/Canvas/InsertableEdge.vue";
 import NodeContextMenu from "@/components/Canvas/NodeContextMenu.vue";
@@ -1931,6 +1932,11 @@ watch(
           :data="data"
           :selected="selected"
           @open-agent-memory="handleOpenAgentMemory"
+        />
+        <CanvasNodeRunButton
+          v-if="data.nodeType !== 'sticky' && !isRunbookPlaying"
+          :node-id="id"
+          :label="data.label"
         />
       </template>
 

@@ -146,6 +146,7 @@ from app.services.workflow_lifecycle import (
     has_unfinished_workflow_executions,
     set_automatic_triggers_paused,
 )
+from app.services.workflow_run_scope import scope_workflow_run
 from app.services.workflow_status import (
     compute_trigger_status,
     refine_manual_status,
@@ -4014,6 +4015,10 @@ async def execute_workflow_stream(
     request: Request,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
+    run_until_node_id: Annotated[
+        str | None,
+        Query(description="Canvas test run: execute this node and its upstream dependencies"),
+    ] = None,
 ) -> StreamingResponse:
     raw_body, test_run, trigger_source, simple_response = await parse_execute_body(request)
 
@@ -4026,6 +4031,16 @@ async def execute_workflow_stream(
             detail="Workflow not found",
         )
 
+    if run_until_node_id is not None:
+        if not test_run:
+            raise HTTPException(status_code=400, detail="Partial execution requires a test run")
+        if current_user is None or not await user_has_workflow_access(
+            db, workflow, current_user.id
+        ):
+            raise HTTPException(
+                status_code=403, detail="Workflow access required for partial execution"
+            )
+
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
     enforce_workflow_http_method(workflow, request, test_run)
 
@@ -4034,6 +4049,8 @@ async def execute_workflow_stream(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SSE streaming is disabled for this workflow",
         )
+
+    execution_graph = scope_workflow_run(workflow.nodes, workflow.edges, run_until_node_id)
 
     enriched_inputs = {
         "headers": _sanitize_headers(dict(request.headers), _webhook_secret_names(workflow)),
@@ -4136,14 +4153,16 @@ async def execute_workflow_stream(
                     },
                 )
 
-    if not workflow.nodes:
+    if not execution_graph.nodes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workflow has no nodes",
         )
 
-    upload_node = file_intake_service.find_file_upload_trigger(workflow.nodes)
-    if upload_node is not None:
+    upload_node = file_intake_service.find_file_upload_trigger(execution_graph.nodes)
+    # Partial test runs use trigger sample/pinned data. An upload slot would later
+    # start a separate production run without this node boundary.
+    if upload_node is not None and run_until_node_id is None:
         minter_id = current_user.id if current_user else workflow.owner_id
         slot, token = await file_intake_service.mint_slot(
             db,
@@ -4184,7 +4203,9 @@ async def execute_workflow_stream(
         )
 
     workflow_cache = await collect_referenced_workflows(
-        db, workflow.nodes, actor_user_id=current_user.id if current_user else workflow.owner_id
+        db,
+        execution_graph.nodes,
+        actor_user_id=current_user.id if current_user else workflow.owner_id,
     )
 
     credentials_owner_id = current_user.id if current_user else workflow.owner_id
@@ -4245,8 +4266,8 @@ async def execute_workflow_stream(
         try:
             for event in execute_workflow_streaming(
                 workflow_id=workflow.id,
-                nodes=workflow.nodes,
-                edges=workflow.edges,
+                nodes=execution_graph.nodes,
+                edges=execution_graph.edges,
                 inputs=enriched_inputs,
                 workflow_cache=workflow_cache,
                 test_run=test_run,

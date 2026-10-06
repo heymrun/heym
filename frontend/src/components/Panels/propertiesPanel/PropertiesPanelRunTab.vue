@@ -5,7 +5,11 @@ import JsonTree from "@/components/ui/JsonTree.vue";
 import Label from "@/components/ui/Label.vue";
 import RunInputField from "@/components/Panels/RunInputField.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import RunTargetNotice from "./RunTargetNotice.vue";
+import { useRunPanelTarget } from "./useRunPanelTarget";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
+
+const { runPanel, runLabel } = useRunPanelTarget();
 
 const {
   activeTab,
@@ -44,6 +48,7 @@ const {
 <template>
   <div
     v-if="activeTab === 'config'"
+    ref="runPanel"
     class="flex-1 flex flex-col overflow-hidden overflow-x-hidden min-h-0"
     @dragenter="onRunPanelFileDragEnter"
     @dragleave="onRunPanelFileDragLeave"
@@ -57,6 +62,7 @@ const {
           lastExecutedNode && !isExecuting ? 'flex-[3]' : 'flex-1',
         ]"
       >
+        <RunTargetNotice />
         <template v-if="isGenericWebhookBodyMode">
           <div class="space-y-2 min-w-0">
             <div class="flex items-center justify-between gap-3">
@@ -114,11 +120,11 @@ const {
           :class="isRunbookPlaying && 'runbook-pulse'"
           :loading="isExecuting"
           :disabled="!hasNodes || !!runBodyError"
-          :aria-label="isExecuting ? 'Executing...' : 'Run Workflow'"
+          :aria-label="isExecuting ? 'Executing...' : runLabel"
           @click="handleExecute"
         >
           <Play class="w-4 h-4 shrink-0" />
-          <span class="hidden sm:inline truncate">{{ isExecuting ? 'Executing...' : 'Run Workflow' }}</span>
+          <span class="hidden sm:inline truncate">{{ isExecuting ? 'Executing...' : runLabel }}</span>
         </Button>
 
         <p
