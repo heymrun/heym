@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_client_ip, get_current_user
@@ -135,8 +135,12 @@ async def register_account(
             detail="Password sign-in is disabled on this instance. Use SSO.",
         )
 
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    if result.scalar_one_or_none():
+    # Addresses compare case-insensitively everywhere else, so a case variant is not a new account.
+    normalized_email = user_data.email.strip().lower()
+    result = await db.execute(
+        select(User.id).where(func.lower(func.trim(User.email)) == normalized_email).limit(1)
+    )
+    if result.scalar_one_or_none() is not None:
         audit(
             action="auth.register",
             outcome=OUTCOME_FAILURE,
