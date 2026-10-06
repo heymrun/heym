@@ -114,7 +114,7 @@ class TestSendMessage(unittest.IsolatedAsyncioTestCase):
         mock_result_msgs.scalars.return_value.all.return_value = [
             MagicMock(role="user", content="First")
         ]
-        mock_db.execute.side_effect = [mock_result_conv, mock_result_msgs]
+        mock_db.execute.side_effect = [mock_result_conv, mock_result_msgs, mock_result_conv]
         added: list[object] = []
         mock_db.add = MagicMock(side_effect=lambda obj: added.append(obj))
 
@@ -148,6 +148,53 @@ class TestSendMessage(unittest.IsolatedAsyncioTestCase):
         create_task.assert_not_awaited()
         mock_create_task.assert_not_called()
         publish.assert_awaited_once()
+
+    async def test_queued_message_starts_queue_worker_when_conversation_becomes_idle(self) -> None:
+        user = _make_user()
+        conv_initial = _make_conversation(user.id)
+        conv_initial.is_running = True
+        conv_idle = _make_conversation(user.id)
+        conv_idle.id = conv_initial.id
+        conv_idle.is_running = False
+        cred = _make_credential()
+
+        mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_result_conv1 = MagicMock()
+        mock_result_conv1.scalar_one_or_none.return_value = conv_initial
+        mock_result_msgs = MagicMock()
+        mock_result_msgs.scalars.return_value.all.return_value = []
+        mock_result_conv2 = MagicMock()
+        mock_result_conv2.scalar_one_or_none.return_value = conv_idle
+        mock_db.execute.side_effect = [mock_result_conv1, mock_result_msgs, mock_result_conv2]
+
+        body = MessageCreate(
+            content="Queued item",
+            credential_id=str(cred.id),
+            model="gpt-4o",
+        )
+
+        with (
+            patch(
+                "app.api.chats.get_accessible_credential", new_callable=AsyncMock, return_value=cred
+            ),
+            patch("app.api.chats.build_public_base_url", return_value="http://localhost"),
+            patch("app.api.chats.registry.publish", new_callable=AsyncMock),
+            patch("app.api.chats.registry.create_task", new_callable=AsyncMock) as create_task,
+            patch("asyncio.create_task", side_effect=_close_created_task) as mock_create_task,
+        ):
+            result = await send_message(
+                http_request=MagicMock(),
+                conversation_id=conv_initial.id,
+                body=body,
+                current_user=user,
+                db=mock_db,
+            )
+
+        self.assertEqual(result.status, "queued")
+        self.assertTrue(conv_idle.is_running)
+        create_task.assert_awaited_once()
+        mock_create_task.assert_called_once()
 
     async def test_raises_404_when_credential_not_found(self) -> None:
         user = _make_user()
