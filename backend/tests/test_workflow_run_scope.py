@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException, Request
 
 from app.api.workflows import execute_workflow_stream
+from app.models.schemas import WorkflowAuthType
+from app.services.auth import create_workflow_execution_token
 from app.services.workflow_executor import WorkflowExecutor
 from app.services.workflow_run_scope import scope_workflow_run
 
@@ -198,7 +200,9 @@ class WorkflowRunScopeTests(unittest.TestCase):
 
 class PartialRunAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_partial_run_requires_test_mode_and_workflow_access(self) -> None:
-        workflow = SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(), owner_id=uuid.uuid4(), auth_type=WorkflowAuthType.anonymous
+        )
         for test_run, user, allowed, expected in [
             (False, SimpleNamespace(id=workflow.owner_id), True, 400),
             (True, None, False, 403),
@@ -234,3 +238,100 @@ class PartialRunAccessTests(unittest.IsolatedAsyncioTestCase):
                             run_until_node_id="target",
                         )
                 self.assertEqual(error.exception.status_code, expected)
+
+    async def test_partial_run_succeeds_with_execution_token_auth(self) -> None:
+        owner_id = uuid.uuid4()
+        collaborator_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        nodes = [
+            node("start", "textInput"),
+            node("target", "set"),
+            node("later", "set"),
+        ]
+        edges = [
+            edge("start", "target"),
+            edge("target", "later"),
+        ]
+        workflow = SimpleNamespace(
+            id=workflow_id,
+            owner_id=owner_id,
+            name="Test Workflow",
+            auth_type=WorkflowAuthType.jwt,
+            nodes=nodes,
+            edges=edges,
+            sse_enabled=True,
+            sse_node_config={},
+            rate_limit_requests=None,
+            rate_limit_window_seconds=None,
+            cache_ttl_seconds=None,
+        )
+        token, jti, _exp = create_workflow_execution_token(collaborator_id, workflow.id, 3600)
+        actor = SimpleNamespace(id=collaborator_id)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: workflow),
+                SimpleNamespace(scalar_one_or_none=lambda: SimpleNamespace(jti=jti)),
+                SimpleNamespace(scalar_one_or_none=lambda: actor),
+            ]
+        )
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "headers": [
+                    (b"authorization", f"Bearer {token}".encode("utf-8")),
+                    (b"host", b"localhost"),
+                ],
+                "query_string": b"test_run=true",
+            },
+            receive,
+        )
+
+        captured_executor_nodes: list[dict[str, Any]] = []
+
+        def fake_streaming_executor(**kwargs: Any):
+            captured_executor_nodes.extend(kwargs.get("nodes") or [])
+            yield {
+                "type": "execution_complete",
+                "workflow_id": str(workflow.id),
+                "status": "success",
+                "outputs": {"result": "done"},
+                "node_results": [],
+            }
+
+        with (
+            patch(
+                "app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)
+            ) as mock_access,
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.workflows.register_execution", MagicMock()),
+            patch("app.api.workflows.complete_active_execution", MagicMock()),
+            patch("app.api.workflows.clear_active_execution", MagicMock()),
+            patch(
+                "app.api.workflows.execute_workflow_streaming",
+                fake_streaming_executor,
+            ),
+        ):
+            response = await execute_workflow_stream(
+                workflow.id,
+                request,
+                current_user=None,
+                db=db,
+                run_until_node_id="target",
+            )
+            self.assertIsNotNone(response)
+            self.assertEqual(response.status_code, 200)
+
+            async for _chunk in response.body_iterator:
+                pass
+
+            mock_access.assert_any_call(db, workflow, collaborator_id)
+            self.assertEqual({n["id"] for n in captured_executor_nodes}, {"start", "target"})

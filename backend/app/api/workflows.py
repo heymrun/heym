@@ -4031,6 +4031,9 @@ async def execute_workflow_stream(
             detail="Workflow not found",
         )
 
+    current_user = await validate_workflow_auth(workflow, request, current_user, db)
+    enforce_workflow_http_method(workflow, request, test_run)
+
     if run_until_node_id is not None:
         if not test_run:
             raise HTTPException(status_code=400, detail="Partial execution requires a test run")
@@ -4040,9 +4043,6 @@ async def execute_workflow_stream(
             raise HTTPException(
                 status_code=403, detail="Workflow access required for partial execution"
             )
-
-    current_user = await validate_workflow_auth(workflow, request, current_user, db)
-    enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:
         raise HTTPException(
