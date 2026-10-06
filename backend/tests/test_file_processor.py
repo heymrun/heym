@@ -32,10 +32,19 @@ class CleanPdfTextTests(unittest.TestCase):
         self.assertEqual(FileProcessor()._clean_pdf_text(""), "")
 
     def test_single_letter_runs_collapse(self) -> None:
-        # Verified against the real function's output, not the docstring's own
-        # (stale) example - see heymrun/heym discussion #688.
         result = FileProcessor()._clean_pdf_text("m m m i i ss ss i i oo nn")
-        self.assertEqual(result, "mision")
+        self.assertEqual(result, "mission")
+
+    def test_overlapping_pairs_are_rejoined(self) -> None:
+        result = FileProcessor()._clean_pdf_text("m mo ov ve em me en nt t")
+        self.assertEqual(result, "movement")
+
+    def test_fake_bold_doubled_letters_collapse(self) -> None:
+        result = FileProcessor()._clean_pdf_text("mm ii ss ss ii oo nn")
+        self.assertEqual(result, "mission")
+
+    def test_trailing_single_letter_word_is_kept_separate(self) -> None:
+        self.assertEqual(FileProcessor()._clean_pdf_text("data a"), "data a")
 
     def test_normal_text_is_not_mangled(self) -> None:
         text = "The quick brown fox jumps over the lazy dog."

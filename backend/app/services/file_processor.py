@@ -66,7 +66,7 @@ class FileProcessor:
         cleaned = " ".join(result)
 
         while True:
-            new_cleaned = re.sub(r"([a-zA-Z])\s+\1(\s|$)", r"\1\1\2", cleaned)
+            new_cleaned = re.sub(r"(?<!\S)([a-zA-Z])\s+\1(\s|$)", r"\1\1\2", cleaned)
             if new_cleaned == cleaned:
                 break
             cleaned = new_cleaned
@@ -80,10 +80,14 @@ class FileProcessor:
             part = cleaned_parts[i]
             if len(part) == 1 and part.isalpha():
                 word_chars = [part]
+                paired = False
                 j = i + 1
                 while j < len(cleaned_parts):
                     next_part = cleaned_parts[j]
                     if len(next_part) == 1 and next_part.isalpha():
+                        if paired and next_part == word_chars[-1][-1]:
+                            j += 1
+                            break
                         word_chars.append(next_part)
                         j += 1
                     elif (
@@ -91,7 +95,7 @@ class FileProcessor:
                         and next_part[0] == next_part[1]
                         and next_part[0].isalpha()
                     ):
-                        word_chars.append(next_part[0])
+                        word_chars.append(next_part)
                         j += 1
                     elif (
                         len(next_part) == 2
@@ -99,6 +103,7 @@ class FileProcessor:
                         and next_part[0].isalpha()
                     ):
                         word_chars.append(next_part[1])
+                        paired = True
                         j += 1
                     else:
                         break
@@ -107,11 +112,15 @@ class FileProcessor:
                     i = j
                     continue
             elif len(part) == 2 and part[0] == part[1] and part[0].isalpha():
-                word_chars = [part[0]]
+                word_chars = [part]
+                paired = False
                 j = i + 1
                 while j < len(cleaned_parts):
                     next_part = cleaned_parts[j]
                     if len(next_part) == 1 and next_part.isalpha():
+                        if paired and next_part == word_chars[-1][-1]:
+                            j += 1
+                            break
                         word_chars.append(next_part)
                         j += 1
                     elif (
@@ -119,7 +128,7 @@ class FileProcessor:
                         and next_part[0] == next_part[1]
                         and next_part[0].isalpha()
                     ):
-                        word_chars.append(next_part[0])
+                        word_chars.append(next_part)
                         j += 1
                     elif (
                         len(next_part) == 2
@@ -127,6 +136,7 @@ class FileProcessor:
                         and next_part[0].isalpha()
                     ):
                         word_chars.append(next_part[1])
+                        paired = True
                         j += 1
                     else:
                         break
