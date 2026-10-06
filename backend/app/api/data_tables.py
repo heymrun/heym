@@ -325,6 +325,12 @@ async def _check_unique_constraints(
     """Check unique constraints for columns marked as unique. Uses a single query."""
     from sqlalchemy import text
 
+    col_type_map = {
+        col.get("name"): col.get("type", "string")
+        for col in columns
+        if isinstance(col, dict) and col.get("name")
+    }
+
     unique_checks = []
     for col in columns:
         if not col.get("unique"):
@@ -335,7 +341,14 @@ async def _check_unique_constraints(
         value = data[name]
         if value is None or value == "":
             continue
-        unique_checks.append((name, str(value)))
+        col_type = col_type_map.get(name, "string")
+        if isinstance(value, bool) or col_type == "boolean":
+            val_str = (
+                "true" if (value is True or str(value).lower() in ("true", "1", "yes")) else "false"
+            )
+        else:
+            val_str = str(value)
+        unique_checks.append((name, val_str))
 
     if not unique_checks:
         return []
@@ -358,9 +371,21 @@ async def _check_unique_constraints(
 
     errors: list[str] = []
     for col_name, col_value in unique_checks:
+        col_type = col_type_map.get(col_name, "string")
         for row in existing_rows:
             row_data = row[0] if isinstance(row[0], dict) else {}
-            if str(row_data.get(col_name, "")) == col_value:
+            row_val = row_data.get(col_name)
+            if row_val is None or row_val == "":
+                continue
+            if isinstance(row_val, bool) or col_type == "boolean":
+                row_str = (
+                    "true"
+                    if (row_val is True or str(row_val).lower() in ("true", "1", "yes"))
+                    else "false"
+                )
+            else:
+                row_str = str(row_val)
+            if row_str == col_value:
                 errors.append(f"Duplicate value for unique column '{col_name}': {col_value}")
                 break
     return errors
@@ -795,7 +820,7 @@ async def update_row(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="; ".join(errors))
 
     unique_errors = await _check_unique_constraints(
-        table_id, row_data.data, table.columns or [], db, exclude_row_id=row_id
+        table_id, merged, table.columns or [], db, exclude_row_id=row_id
     )
     if unique_errors:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="; ".join(unique_errors))
