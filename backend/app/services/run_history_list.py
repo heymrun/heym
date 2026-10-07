@@ -70,8 +70,12 @@ def run_history_rows(
     trigger_source: str | None = None,
     workflow_id: str | None = None,
     instance_id: str | None = None,
+    is_admin: bool | None = None,
 ) -> Subquery:
-    """The filtered run list as a subquery; the caller counts, orders and pages it."""
+    """The filtered run list as a subquery; the caller counts, orders and pages it.
+
+    ``is_admin`` works as in ``workflow_access_clause``.
+    """
     exec_subq = (
         select(
             ExecutionHistory.id,
@@ -87,7 +91,7 @@ def run_history_rows(
             ExecutionHistory.executed_by_instance_name,
         )
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(workflow_access_clause(user_id))
+        .where(workflow_access_clause(user_id, is_admin=is_admin))
     )
     if workflow_id:
         exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)

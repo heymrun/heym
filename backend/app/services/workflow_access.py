@@ -7,7 +7,7 @@ supplies the session and the engine.
 
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -39,7 +39,16 @@ def explicit_workflow_share_ids(user_id: UUID):
     )
 
 
-def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
+def _instance_admin_clause(user_id: UUID, is_admin: bool | None) -> ColumnElement[bool]:
+    if is_admin is not None:
+        return true() if is_admin else false()
+    # Unset means Heym's own HEYM_ADMIN_EMAILS, which needs Heym's settings.
+    from app.services.instance_admin import instance_admin_clause
+
+    return instance_admin_clause(user_id)
+
+
+def workflow_access_clause(user_id: UUID, *, is_admin: bool | None = None) -> ColumnElement[bool]:
     """Return the WHERE clause matching every workflow ``user_id`` can reach.
 
     Instance administrators reach every workflow. Other users reach a workflow by
@@ -47,10 +56,11 @@ def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
     A dashboard widget's hidden
     workflow is also reachable with write access to its dashboard; read access
     to a dashboard never reaches a workflow.
-    """
-    # Heym Work imports these access helpers without loading Heym's settings.
-    from app.services.instance_admin import instance_admin_clause
 
+    ``is_admin`` says whether ``user_id`` administers the instance. Heym leaves it
+    unset and reads ``HEYM_ADMIN_EMAILS``; Heym Work imports this module without
+    Heym's settings and passes its own answer.
+    """
     return or_(
         Workflow.owner_id == user_id,
         Workflow.id.in_(explicit_workflow_share_ids(user_id)),
@@ -65,7 +75,7 @@ def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
             Workflow.kind == "dashboard_widget",
             Workflow.id.in_(writable_shared_widget_workflow_ids(user_id)),
         ),
-        instance_admin_clause(user_id),
+        _instance_admin_clause(user_id, is_admin),
     )
 
 
@@ -73,18 +83,22 @@ async def get_accessible_workflow(
     db: AsyncSession,
     workflow_id: UUID,
     user_id: UUID,
+    *,
+    is_admin: bool | None = None,
 ) -> Workflow | None:
     """Return a workflow reached through ownership, sharing, or instance administration."""
     result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            workflow_access_clause(user_id),
+            workflow_access_clause(user_id, is_admin=is_admin),
         )
     )
     return result.scalar_one_or_none()
 
 
-async def user_has_workflow_access(db: AsyncSession, workflow: Workflow, user_id: UUID) -> bool:
+async def user_has_workflow_access(
+    db: AsyncSession, workflow: Workflow, user_id: UUID, *, is_admin: bool | None = None
+) -> bool:
     """Return whether ``user_id`` can reach ``workflow``.
 
     Goes through ``workflow_access_clause``'s ``IN`` subqueries rather than joining
@@ -97,7 +111,9 @@ async def user_has_workflow_access(db: AsyncSession, workflow: Workflow, user_id
     if workflow.owner_id == user_id:
         return True
     result = await db.execute(
-        select(Workflow.id).where(Workflow.id == workflow.id, workflow_access_clause(user_id))
+        select(Workflow.id).where(
+            Workflow.id == workflow.id, workflow_access_clause(user_id, is_admin=is_admin)
+        )
     )
     return result.scalar_one_or_none() is not None
 
@@ -107,7 +123,7 @@ PERMISSION_WRITE = "write"
 
 
 async def get_workflow_permission(
-    db: AsyncSession, workflow: Workflow, user_id: UUID
+    db: AsyncSession, workflow: Workflow, user_id: UUID, *, is_admin: bool | None = None
 ) -> str | None:
     """Return the highest permission ``user_id`` holds on ``workflow``.
 
@@ -115,14 +131,17 @@ async def get_workflow_permission(
     hosting the workflow as a widget get ``"write"``. Otherwise the highest permission
     across the user's direct share and every
     team share wins, so a write grant through one path is never weakened by a read grant
-    through another. ``None`` means the user has no access at all.
+    through another. ``None`` means the user has no access at all. ``is_admin`` works as
+    in ``workflow_access_clause``.
     """
-    from app.services.instance_admin import is_instance_admin_id
-
     if workflow.owner_id == user_id:
         return PERMISSION_WRITE
 
-    if await is_instance_admin_id(db, user_id):
+    if is_admin is None:
+        from app.services.instance_admin import is_instance_admin_id
+
+        is_admin = await is_instance_admin_id(db, user_id)
+    if is_admin:
         return PERMISSION_WRITE
 
     permissions: list[str] = []
@@ -161,9 +180,12 @@ async def get_workflow_permission(
     return PERMISSION_WRITE if PERMISSION_WRITE in permissions else PERMISSION_READ
 
 
-async def user_can_write_workflow(db: AsyncSession, workflow: Workflow, user_id: UUID) -> bool:
+async def user_can_write_workflow(
+    db: AsyncSession, workflow: Workflow, user_id: UUID, *, is_admin: bool | None = None
+) -> bool:
     """Return whether ``user_id`` may edit ``workflow`` (owner or a write share)."""
-    return await get_workflow_permission(db, workflow, user_id) == PERMISSION_WRITE
+    permission = await get_workflow_permission(db, workflow, user_id, is_admin=is_admin)
+    return permission == PERMISSION_WRITE
 
 
 async def revoke_execution_tokens_without_access(db: AsyncSession, workflow: Workflow) -> None:
