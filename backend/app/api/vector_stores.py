@@ -45,6 +45,7 @@ from app.services.vector_store import (
     create_vector_store_service_for_credential,
     rag_credential_backend,
 )
+from app.services.vector_store_access import get_vector_store_with_grant
 from app.services.vector_store_pg import VectorStoreBackendUnavailableError
 
 router = APIRouter()
@@ -1128,44 +1129,10 @@ async def _get_accessible_store(
     user_id: uuid.UUID,
     db: AsyncSession,
 ) -> VectorStore:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == user_id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        shared_result = await db.execute(
-            select(VectorStore)
-            .join(VectorStoreShare, VectorStoreShare.vector_store_id == VectorStore.id)
-            .where(
-                VectorStore.id == vector_store_id,
-                VectorStoreShare.user_id == user_id,
-            )
-        )
-        store = shared_result.scalar_one_or_none()
-
-    if store is None:
-        team_result = await db.execute(
-            select(VectorStore).where(
-                VectorStore.id == vector_store_id,
-                VectorStore.id.in_(
-                    select(VectorStoreTeamShare.vector_store_id).where(
-                        VectorStoreTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-                        )
-                    )
-                ),
-            )
-        )
-        store = team_result.scalar_one_or_none()
-
-    if store is None:
+    reached = await get_vector_store_with_grant(db, vector_store_id, user_id)
+    if reached is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vector store not found",
         )
-
-    return store
+    return reached[0]
