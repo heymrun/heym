@@ -1142,6 +1142,23 @@ class VectorStoreItemsResponse(BaseModel):
     total_items: int
 
 
+class VectorStoreSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(5, ge=1, le=20)
+
+
+class VectorStoreSearchResult(BaseModel):
+    id: str
+    text: str
+    score: float
+    source: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class VectorStoreSearchResponse(BaseModel):
+    results: list[VectorStoreSearchResult]
+
+
 class MCPToolInputProperty(BaseModel):
     type: str = "string"
     description: str | None = None

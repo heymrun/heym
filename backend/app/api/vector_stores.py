@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 
@@ -29,6 +30,9 @@ from app.models.schemas import (
     VectorStoreItemsResponse,
     VectorStoreListResponse,
     VectorStoreResponse,
+    VectorStoreSearchRequest,
+    VectorStoreSearchResponse,
+    VectorStoreSearchResult,
     VectorStoreShareRequest,
     VectorStoreShareResponse,
     VectorStoreSourceGroup,
@@ -1031,6 +1035,52 @@ async def list_vector_store_items(
             for sg in source_groups
         ],
         total_items=total_items,
+    )
+
+
+@router.post("/{vector_store_id}/search", response_model=VectorStoreSearchResponse)
+async def search_vector_store(
+    vector_store_id: uuid.UUID,
+    body: VectorStoreSearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VectorStoreSearchResponse:
+    """The chunks a RAG node's search returns for a query, to test a store's retrieval."""
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+
+    cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
+    credential = cred_result.scalar_one_or_none()
+    if not credential:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+
+    config = decrypt_config(credential.encrypted_config)
+    service = get_vector_store_service_from_config(config, credential.type)
+    try:
+        # Embedding the query calls the provider; keep the event loop free meanwhile.
+        results = await asyncio.to_thread(
+            service.search, store.collection_name, body.query, limit=body.limit
+        )
+    except Exception as exc:
+        logger.warning("Vector store search failed for %s: %s", vector_store_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The vector store could not be searched. Check its credential and try again.",
+        ) from exc
+
+    return VectorStoreSearchResponse(
+        results=[
+            VectorStoreSearchResult(
+                id=result.id,
+                text=result.text,
+                score=result.score,
+                source=result.metadata.get("source"),
+                metadata=result.metadata,
+            )
+            for result in results
+        ]
     )
 
 
