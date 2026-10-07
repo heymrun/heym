@@ -466,6 +466,10 @@ class Dashboard(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Dashboard")
+    # Which `?record=` values this dashboard accepts as a detail page (app/services/page_params).
+    record_format: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="id", server_default="id"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -556,6 +560,31 @@ class DashboardWidget(Base):
 
     dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="widgets")
     workflow: Mapped["Workflow"] = relationship("Workflow")
+
+
+class DashboardWidgetRecordCache(Base):
+    """A widget's chart for one detail-page record.
+
+    The widget's own cached_* columns hold the dashboard opened without a record; this
+    table holds the newest records per widget (see app/services/dashboard_data).
+    """
+
+    __tablename__ = "dashboard_widget_record_cache"
+    __table_args__ = (
+        UniqueConstraint("widget_id", "record", name="uq_dashboard_widget_record_cache"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    widget_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_widgets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    record: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cached_workflow_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class WorkflowShare(Base):

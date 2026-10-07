@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field
 
 from app.models.schemas import HighlightPayloadSchema
+from app.services.page_params import RecordFormat
 
 SharePermission = Literal["read", "write"]
 
@@ -46,6 +47,8 @@ class DashboardSummaryResponse(BaseModel):
     # Set only on dashboards shared with the caller.
     owner_name: str | None = None
     shared_by: str | None = None
+    # Which `?record=` values the dashboard accepts as a detail page.
+    record_format: RecordFormat = "id"
     updated_at: datetime
 
 
@@ -58,7 +61,8 @@ class DashboardCreateRequest(BaseModel):
 
 
 class DashboardUpdateRequest(BaseModel):
-    name: DashboardName
+    name: DashboardName | None = None
+    record_format: RecordFormat | None = None
 
 
 class DashboardShareRequest(BaseModel):

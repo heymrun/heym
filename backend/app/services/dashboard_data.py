@@ -6,16 +6,18 @@ from concurrent.futures import CancelledError
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.models import DashboardWidget, ExecutionHistory, Workflow
+from app.db.models import DashboardWidget, DashboardWidgetRecordCache, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.models.dashboard_schemas import WidgetDataResponse
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.highlight.highlight_builder import build_highlight_payload
+from app.services.page_params import page_inputs
 from app.services.workflow_executor import (
     WorkflowCancelledError,
     WorkflowTimeoutError,
@@ -23,6 +25,9 @@ from app.services.workflow_executor import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Detail-page records cached per widget; the oldest beyond this are dropped on write.
+RECORD_CACHE_LIMIT = 50
 
 _CHART_PAYLOAD_TYPES = frozenset(
     (
@@ -54,7 +59,7 @@ def _is_hitl_chart_workflow(nodes: list[dict[str, Any]] | None) -> bool:
 
 
 async def _record_widget_execution(
-    db: AsyncSession, workflow: Workflow, result
+    db: AsyncSession, workflow: Workflow, result, inputs: dict[str, Any]
 ) -> ExecutionHistory | None:
     """Record an execution-history row + analytics snapshot for a widget run.
 
@@ -73,7 +78,7 @@ async def _record_widget_execution(
             paused_entry, _ = await persist_pending_execution(
                 db=db,
                 workflow=workflow,
-                enriched_inputs={},
+                enriched_inputs=inputs,
                 execution_result=result,
                 trigger_source="dashboard",
                 credentials_owner_id=workflow.owner_id,
@@ -94,7 +99,7 @@ async def _record_widget_execution(
         history_entry = ExecutionHistory(
             id=uuid.uuid4(),
             workflow_id=workflow.id,
-            inputs={},
+            inputs=inputs,
             outputs=result.outputs,
             node_results=result.node_results,
             status=result.status,
@@ -118,6 +123,63 @@ async def _record_widget_execution(
 
 def _version_token(workflow: Workflow) -> str:
     return workflow.updated_at.isoformat() if workflow.updated_at else ""
+
+
+async def _load_record_cache(
+    db: AsyncSession, widget_id: uuid.UUID, record: str
+) -> DashboardWidgetRecordCache | None:
+    result = await db.execute(
+        select(DashboardWidgetRecordCache).where(
+            DashboardWidgetRecordCache.widget_id == widget_id,
+            DashboardWidgetRecordCache.record == record,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def store_record_cache(
+    db: AsyncSession,
+    widget_id: uuid.UUID,
+    record: str,
+    payload: dict | None,
+    cached_at: datetime,
+    version: str,
+) -> None:
+    """Upsert one record's chart, then keep only the newest records for the widget.
+
+    Two viewers opening the same record at once both write; the upsert lets the
+    later one win instead of failing on the unique constraint.
+    """
+    statement = pg_insert(DashboardWidgetRecordCache).values(
+        id=uuid.uuid4(),
+        widget_id=widget_id,
+        record=record,
+        payload=payload,
+        cached_at=cached_at,
+        cached_workflow_version=version,
+    )
+    await db.execute(
+        statement.on_conflict_do_update(
+            constraint="uq_dashboard_widget_record_cache",
+            set_={
+                "payload": statement.excluded.payload,
+                "cached_at": statement.excluded.cached_at,
+                "cached_workflow_version": statement.excluded.cached_workflow_version,
+            },
+        )
+    )
+    newest = (
+        select(DashboardWidgetRecordCache.id)
+        .where(DashboardWidgetRecordCache.widget_id == widget_id)
+        .order_by(DashboardWidgetRecordCache.cached_at.desc())
+        .limit(RECORD_CACHE_LIMIT)
+    )
+    await db.execute(
+        delete(DashboardWidgetRecordCache).where(
+            DashboardWidgetRecordCache.widget_id == widget_id,
+            DashboardWidgetRecordCache.id.not_in(newest),
+        )
+    )
 
 
 def _field(value: Any, name: str) -> Any:
@@ -266,12 +328,18 @@ async def _finalize_widget_allow_downstream(
 
 
 async def compute_widget_data(
-    db: AsyncSession, widget: DashboardWidget, run_as_user_id: uuid.UUID, force: bool = False
+    db: AsyncSession,
+    widget: DashboardWidget,
+    run_as_user_id: uuid.UUID,
+    force: bool = False,
+    record: str | None = None,
 ) -> WidgetDataResponse:
     """Serve the widget's cached chart, or run its workflow as ``run_as_user_id``.
 
     Callers pass the dashboard owner, whoever is viewing: the cache is shared by
-    every viewer, so the run behind it must not depend on who asked.
+    every viewer, so the run behind it must not depend on who asked. ``record`` is a
+    detail page's ``?record=`` value, already checked against the dashboard's record
+    format; the workflow reads it as ``$page.record`` and its chart is cached per record.
     """
     wf_result = await db.execute(select(Workflow).where(Workflow.id == widget.workflow_id))
     workflow = wf_result.scalar_one_or_none()
@@ -307,23 +375,31 @@ async def compute_widget_data(
 
     version = _version_token(workflow)
     now = datetime.now(timezone.utc)
+    cache = widget if record is None else await _load_record_cache(db, widget.id, record)
+    cached_payload = None
+    cached_at = None
+    if cache is not None:
+        cached_payload = cache.cached_payload if record is None else cache.payload
+        cached_at = cache.cached_at
     fresh = (
         not force
-        and widget.cached_payload is not None
-        and widget.cached_at is not None
-        and widget.cached_workflow_version == version
-        and (now - widget.cached_at).total_seconds() < widget.cache_ttl_seconds
+        and cache is not None
+        and cached_payload is not None
+        and cached_at is not None
+        and cache.cached_workflow_version == version
+        and (now - cached_at).total_seconds() < widget.cache_ttl_seconds
     )
     if fresh:
         return WidgetDataResponse(
             widget_id=widget.id,
-            payload=widget.cached_payload,
+            payload=cached_payload,
             cached=True,
-            computed_at=widget.cached_at,
+            computed_at=cached_at,
         )
 
     nodes = workflow.nodes or []
     edges = workflow.edges or []
+    inputs = page_inputs(record)
 
     try:
         (
@@ -335,7 +411,7 @@ async def compute_widget_data(
             workflow_id=workflow.id,
             nodes=nodes,
             edges=edges,
-            inputs={},
+            inputs=inputs,
             workflow_cache=workflow_cache,
             test_run=False,
             trigger_source="dashboard",
@@ -356,16 +432,19 @@ async def compute_widget_data(
     history_entry = (
         None
         if getattr(result, "history_written", False) is True
-        else await _record_widget_execution(db, workflow, result)
+        else await _record_widget_execution(db, workflow, result, inputs)
     )
 
     background_finalize = bool(getattr(result, "allow_downstream_pending", False))
     if not background_finalize and result.status != "pending":
         await _persist_widget_global_variables(db, run_as_user_id, nodes, workflow_cache, result)
 
-    widget.cached_payload = payload
-    widget.cached_at = now
-    widget.cached_workflow_version = version
+    if record is None:
+        widget.cached_payload = payload
+        widget.cached_at = now
+        widget.cached_workflow_version = version
+    else:
+        await store_record_cache(db, widget.id, record, payload, now, version)
     await db.commit()
 
     if background_finalize:

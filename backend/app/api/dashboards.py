@@ -70,6 +70,11 @@ from app.services.markdown_task_list import (
     update_or_remove_task_item,
 )
 from app.services.model_router import build_router_for_credential
+from app.services.page_params import (
+    DEFAULT_RECORD_FORMAT,
+    MAX_RECORD_LENGTH,
+    is_valid_record,
+)
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 
@@ -193,6 +198,8 @@ def _dashboard_summary(
         permission=permission,
         owner_name=owner.name if shared else None,
         shared_by=owner.email if shared else None,
+        # A dashboard created in this request has no server default loaded yet.
+        record_format=dashboard.record_format or DEFAULT_RECORD_FORMAT,
         updated_at=dashboard.updated_at,
     )
 
@@ -500,7 +507,10 @@ async def update_dashboard(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardSummaryResponse:
     dashboard = await _get_owned_dashboard(db, dashboard_id, current_user)
-    dashboard.name = body.name
+    if body.name is not None:
+        dashboard.name = body.name
+    if body.record_format is not None:
+        dashboard.record_format = body.record_format
     await db.commit()
     await db.refresh(dashboard)
     audit(
@@ -509,6 +519,7 @@ async def update_dashboard(
         target_type="dashboard",
         target_id=dashboard.id,
         target_name=dashboard.name,
+        record_format=dashboard.record_format,
     )
     return _dashboard_summary(dashboard, current_user, PERMISSION_OWNER)
 
@@ -727,13 +738,21 @@ async def delete_widget(
 async def get_widget_data(
     widget_id: uuid.UUID,
     force: bool = Query(default=False),
+    record: str | None = Query(default=None, max_length=MAX_RECORD_LENGTH),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WidgetDataResponse:
+    """The widget's chart; ``record`` is the detail page's ``?record=`` value."""
     widget, dashboard, permission = await _load_widget_for_user(
         db, widget_id, current_user, write=False
     )
-    response = await compute_widget_data(db, widget, dashboard.owner_id, force=force)
+    # The record comes from a URL: check it before any workflow sees it.
+    if record is not None and not is_valid_record(record, dashboard.record_format):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="This page does not accept that record",
+        )
+    response = await compute_widget_data(db, widget, dashboard.owner_id, force=force, record=record)
     return _widget_data_for(response, permission)
 
 

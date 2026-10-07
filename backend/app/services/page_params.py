@@ -7,10 +7,35 @@ cluster run queue and HITL resume snapshots, and expressions read it as
 reach no node.
 """
 
-from typing import Any
+import re
+from typing import Any, Literal
 
 PAGE_INPUT_KEY = "__heym_page"
 PAGE_CONTEXT_NAME = "page"
+
+# The record comes from a URL anyone can type, so the detail dashboard declares which
+# values it accepts and the dashboards API rejects the rest before a workflow runs. The
+# formats are fixed patterns: a dashboard owner cannot supply a regular expression,
+# which could make the server backtrack for seconds on a crafted value.
+RecordFormat = Literal["id", "number", "uuid", "email"]
+DEFAULT_RECORD_FORMAT: RecordFormat = "id"
+MAX_RECORD_LENGTH = 128
+RECORD_FORMATS: dict[str, re.Pattern[str]] = {
+    "id": re.compile(r"[A-Za-z0-9._-]{1,128}"),
+    "number": re.compile(r"[0-9]{1,32}"),
+    "uuid": re.compile(
+        r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+    ),
+    "email": re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+"),
+}
+
+
+def is_valid_record(value: str, record_format: str | None) -> bool:
+    """Whether ``value`` is a record the dashboard's format accepts."""
+    pattern = RECORD_FORMATS.get(record_format or DEFAULT_RECORD_FORMAT)
+    if pattern is None or len(value) > MAX_RECORD_LENGTH:
+        return False
+    return pattern.fullmatch(value) is not None
 
 
 def page_inputs(record: str | None) -> dict[str, Any]:
