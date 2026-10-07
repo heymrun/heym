@@ -54,7 +54,6 @@ from app.db.models import (
     User,
     Workflow,
     WorkflowTeamShare,
-    WorkflowVersion,
 )
 from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
@@ -144,6 +143,7 @@ from app.services.workflow_executor import (
     execute_workflow,
 )
 from app.services.workflow_run_history_tool import get_workflow_run_history
+from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -2399,30 +2399,12 @@ async def _record_chat_workflow_edit_version(
     old_edges: list[dict[str, Any]],
 ) -> None:
     """Store the pre-edit workflow snapshot so Chat edits appear in Edit History."""
-    max_version_result = await db.execute(
-        select(func.max(WorkflowVersion.version_number)).where(
-            WorkflowVersion.workflow_id == workflow.id
-        )
+    before = replace(
+        WorkflowSnapshot.capture(workflow),
+        nodes=copy.deepcopy(old_nodes),
+        edges=copy.deepcopy(old_edges),
     )
-    max_version = max_version_result.scalar() or 0
-    db.add(
-        WorkflowVersion(
-            workflow_id=workflow.id,
-            version_number=max_version + 1,
-            name=workflow.name,
-            description=workflow.description,
-            nodes=copy.deepcopy(old_nodes),
-            edges=copy.deepcopy(old_edges),
-            auth_type=workflow.auth_type,
-            auth_header_key=workflow.auth_header_key,
-            auth_header_value=workflow.auth_header_value,
-            webhook_body_mode=workflow.webhook_body_mode,
-            cache_ttl_seconds=workflow.cache_ttl_seconds,
-            rate_limit_requests=workflow.rate_limit_requests,
-            rate_limit_window_seconds=workflow.rate_limit_window_seconds,
-            created_by_id=user_id,
-        )
-    )
+    await add_workflow_version(db, workflow, before, user_id)
 
 
 async def run_execute_workflow_tool(

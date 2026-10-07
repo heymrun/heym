@@ -104,7 +104,6 @@ from app.services.global_variables_service import (
 from app.services.heym_event_service import (
     EVENT_WORKFLOW_CREATED,
     EVENT_WORKFLOW_DELETED,
-    EVENT_WORKFLOW_UPDATED,
     publish_event,
     workflow_event_payload,
 )
@@ -152,6 +151,11 @@ from app.services.workflow_lifecycle import (
     set_automatic_triggers_paused,
 )
 from app.services.workflow_run_scope import scope_workflow_run
+from app.services.workflow_save import (
+    WorkflowSnapshot,
+    add_workflow_version,
+    announce_workflow_saved,
+)
 from app.services.workflow_status import (
     compute_trigger_status,
     refine_manual_status,
@@ -1816,51 +1820,27 @@ async def update_workflow(
                 widget.cached_workflow_version = None
 
     if should_create_version:
-        max_version_result = await db.execute(
-            select(func.max(WorkflowVersion.version_number)).where(
-                WorkflowVersion.workflow_id == workflow_id
-            )
+        await add_workflow_version(
+            db,
+            workflow,
+            WorkflowSnapshot(
+                nodes=old_nodes,
+                edges=old_edges,
+                auth_type=old_auth_type,
+                auth_header_key=old_auth_header_key,
+                auth_header_value=old_auth_header_value,
+                webhook_body_mode=old_webhook_body_mode,
+                cache_ttl_seconds=old_cache_ttl_seconds,
+                rate_limit_requests=old_rate_limit_requests,
+                rate_limit_window_seconds=old_rate_limit_window_seconds,
+            ),
+            current_user.id,
         )
-        max_version = max_version_result.scalar() or 0
-        new_version_number = max_version + 1
-
-        workflow_version = WorkflowVersion(
-            workflow_id=workflow_id,
-            version_number=new_version_number,
-            name=workflow.name,
-            description=workflow.description,
-            nodes=old_nodes,
-            edges=old_edges,
-            auth_type=old_auth_type,
-            auth_header_key=old_auth_header_key,
-            auth_header_value=old_auth_header_value,
-            webhook_body_mode=old_webhook_body_mode,
-            cache_ttl_seconds=old_cache_ttl_seconds,
-            rate_limit_requests=old_rate_limit_requests,
-            rate_limit_window_seconds=old_rate_limit_window_seconds,
-            created_by_id=current_user.id,
-        )
-        db.add(workflow_version)
 
     await db.flush()
     await db.commit()
     await db.refresh(workflow)
-    from app.services.websocket_trigger_service import websocket_trigger_manager
-
-    websocket_trigger_manager.request_sync()
-    # Dashboard widgets are Workflow rows too, but they are not workflows a user
-    # subscribes to - only real workflows produce platform events.
-    if getattr(workflow, "kind", "workflow") == "workflow":
-        updated_payload = workflow_event_payload(workflow, actor_user_id=current_user.id)
-        # Key on the saved revision so a retried or duplicated save collapses onto
-        # one event instead of waking every subscriber twice.
-        await publish_event(
-            name=EVENT_WORKFLOW_UPDATED,
-            payload=updated_payload,
-            owner_id=workflow.owner_id,
-            workflow_id=workflow.id,
-            dedupe_key=f"{EVENT_WORKFLOW_UPDATED}:{workflow.id}:{updated_payload['updated_at']}",
-        )
+    await announce_workflow_saved(workflow, current_user.id, publish=publish_event)
     audit(
         action="workflow.update",
         actor=current_user,
