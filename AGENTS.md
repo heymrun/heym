@@ -162,6 +162,14 @@ run's own history instead. `execution_history` already carries
 did what, where" from one query. `file_intake_service.write_audit` is the
 pattern: a helper that writes to a table, called from a router.
 
+### Components Heym Work imports
+Heym Work renders some of Heym's frontend components inside its own app, where `@/services/api`, the Pinia stores and the router are Work's. `frontend/src/ports/presentationalImports.test.ts` lists those components and fails when anything they import, directly or through other modules (type imports included), reaches `@/services/`, `@/stores/`, `axios`, `pinia` or `vue-router`.
+
+- Data goes in through props; everything else comes from a port in `frontend/src/ports/` through `usePort()`. Heym provides its implementations in `installHeymPorts.ts`; Work provides its own.
+- A port has the shape of what the component used to import, so the code below the injection line does not change. Logic both apps need lives in an API-free core (`createTextToSpeechPlayer`, `createInteractiveVoice`, `createClarifyDataTables`) that Heym's composable binds to Heym's API.
+- Where a store supplies the props, Heym keeps a thin wrapper (`ChartRenderer` over `ChartView`, `QuickWorkflowRunPanel` over `QuickWorkflowRunView`). Put UI changes in the presentational component so both apps get them.
+- Types these components need belong in `frontend/src/types/`, not in `services/api.ts`.
+
 ### PropertiesPanel modularity
 `frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
 
