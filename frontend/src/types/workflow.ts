@@ -1,3 +1,5 @@
+import type { StatusTone } from "@/types/dashboard";
+
 /** Share this agent node's persistent memory graph with another agent (runtime prompt + optional write extraction). */
 export interface AgentMemoryShareEntry {
   /** Workflow that contains the peer agent node (may differ from this node's workflow). */
@@ -1051,6 +1053,9 @@ export interface NodeData {
   max?: number;
   series?: { name: string; field: string }[];
   columns?: string[];
+  // Table column shown as status chips, and tones for values the defaults do not cover.
+  statusColumn?: string;
+  statusTones?: Record<string, StatusTone>;
   unit?: string;
   // Static markdown body for the `text` chart type.
   text?: string;

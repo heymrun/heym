@@ -2,6 +2,7 @@
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import ChartOutputStatusFields from "./ChartOutputStatusFields.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -148,6 +149,8 @@ const {
         Dot path to the rows array inside the upstream output. Leave empty to auto-detect.
       </p>
     </div>
+
+    <ChartOutputStatusFields v-if="selectedNode.data.chartType === 'table'" />
 
     <template
       v-if="['bar', 'line', 'area', 'pie', 'numeric', 'gauge', 'proportion', 'barGauge'].includes(selectedNode.data.chartType || 'bar')"
