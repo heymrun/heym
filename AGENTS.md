@@ -100,6 +100,15 @@ Every model request to OpenCode must include a nonempty `x-opencode-session` hea
 - Chat and assistant surfaces must preserve their conversation ID across requests. Kanban uses the card ID across reruns and column moves. Standalone workflow runs can use the execution ID. If no ID is available, generate a UUID and retain it for that conversation; never send an empty header.
 - When adding a new LLM call path or changing a coding-agent SDK/CLI integration, verify that the outgoing OpenCode model requests carry this header with the correct session scope. Add regression coverage for stable follow-ups, distinct new conversations, and the nonempty fallback. Preserve the shared client's Heym User-Agent and SSRF protection.
 
+### Chat build mode
+A dashboard chat turn that carries `allow_build` (Heym Work's Chat, MCP `heym_chat`) may save, test-run and finish workflows. Heym's own Chat tab does not set it.
+
+- `backend/app/services/chat_build_mode.py` holds the rules (test budget, finish, run report, instructions); `backend/app/api/chat_build.py` runs `save_workflow`, `run_workflow_test` and `finish` for one turn.
+- `MAX_BUILD_TEST_RUNS` equals the editor's `MAX_YOLO_ATTEMPTS` (`yoloProtocol.ts`); change both together.
+- Saves go through `backend/app/services/workflow_save.py`, like the editor's update endpoint, so Edit History, trigger resync and platform events stay identical. Do not write workflow versions anywhere else.
+- `finish` is refused until a test run of the latest save has passed. The Verified card depends on that; keep it.
+- Every model request and test run in a build turn carries the conversation id as its OpenCode session (`ChatBuildSession.llm_session_id`); see the OpenCode section above.
+
 ### Node and operation integration
 When adding a new node type, operation, or operation-specific field, keep the canvas affordances in sync with the schema:
 
@@ -148,9 +157,10 @@ Heym Work reads Heym's database with a role that holds column-level SELECT only,
 of whichever instance ran the code, so where it is called from decides whether
 the audit trail stays in one place.
 
-Call `audit()` from `backend/app/api/` routers only. Ingress points at the main
-instance, so a router call keeps the whole trail on one machine, where a log
-shipper can collect it. All 128 call sites are routers today; keep it that way.
+Call `audit()` from `backend/app/api/` only: routers, and the chat build tools in
+`chat_build.py`, which run inside the chat turn of the request that started them.
+Ingress points at the main instance, so these calls keep the whole trail on one
+machine, where a log shipper can collect it. Keep it that way.
 
 Never call `audit()` from `workflow_executor.py`, a node handler, or anything
 else reachable from the run queue. Those run on whichever instance claimed the

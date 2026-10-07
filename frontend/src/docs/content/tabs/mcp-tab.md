@@ -40,7 +40,8 @@ The **Heym Capabilities** section turns the Chat tab engine into a single MCP to
 
 When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools. An MCP client sends one natural-language message and the Heym engine takes it from there, with the same abilities the Chat tab has:
 
-- Build, edit, inspect, and run workflows through the Workflow AI Builder
+- Build a workflow, test-run it with sample inputs, fix it, and finish when a run passes (see [Build mode](#build-mode))
+- Inspect and run your existing workflows
 - Report analytics, recent executions, and upcoming cron schedules
 - Report the run history of one workflow: how many times it ran, status counts, when it ran, and on request the inputs, outputs, and per-node errors of a single run
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
@@ -50,6 +51,15 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
+
+### Build mode
+
+`heym_chat` always runs the Chat engine in build mode. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
+
+- Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
+- Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.
+- To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
+- When the five test runs are used up, the assistant stops and explains what still fails.
 
 Credentials stay in the UI: `heym_chat` never lists, chooses or creates them. When it builds or edits a workflow, new nodes that need a credential are left empty and the reply names them, so you can set them in the editor.
 
