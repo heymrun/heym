@@ -15,6 +15,7 @@ _MODULES = (
     "app.services.alert_access",
     "app.services.data_table_access",
     "app.services.vector_store_access",
+    "app.services.drive_file_access",
 )
 _PROBE = (
     "import importlib, sys\n"
