@@ -1977,6 +1977,7 @@ class DashboardConversation(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     has_unread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_credential_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True

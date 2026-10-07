@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -56,6 +57,7 @@ from app.models.chat_schemas import (
     SendMessageResponse,
 )
 from app.services import chat_task_registry as registry
+from app.services.chat_stream_bus import chat_stream_bus
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.encryption import decrypt_config
@@ -79,6 +81,7 @@ DEFAULT_QUICK_PROMPTS: list[str] = [
 MAX_QUICK_PROMPTS = 7
 MAX_PROMPT_LENGTH = 200
 CHAT_STREAM_HEARTBEAT_SECONDS = 10.0
+CHAT_CANCEL_POLL_INTERVAL_SECONDS = 2.0
 CLARIFY_FENCE = "```heym-clarify"
 
 
@@ -278,31 +281,118 @@ async def _get_conversation_or_404(
     return conversation
 
 
-# Maps an in-progress conversation id to the cancel Event and asyncio task of its
-# background chat coroutine. In-process only: works for the single-worker dev/self-host
-# setup. A multi-worker deployment would need to broadcast the cancel via the
-# Postgres-backed registry.
+# Maps an in-progress conversation id to the cancel Event, asyncio task, and active run ID
+# of its background chat coroutine. Local task state lives in the process executing the turn;
+# cross-worker cancellation is broadcast via Postgres LISTEN/NOTIFY over chat_stream_bus
+# (cancel:<conv_id>:<run_id>) and backed up by lightweight DB polling.
 _cancel_events: dict[str, Event] = {}
 _chat_tasks: dict[str, "asyncio.Task[None]"] = {}
+_chat_task_run_ids: dict[str, uuid.UUID] = {}
 
 
-def request_chat_cancel(conv_id: str) -> bool:
+def request_chat_cancel(
+    conv_id: str,
+    run_id: uuid.UUID | str | None = None,
+) -> bool:
     """Stop a running background chat task immediately. Returns True if one was found.
 
     Sets the cooperative cancel Event (checked at tool boundaries) AND cancels the
-    asyncio task so an in-flight LLM/tool `await` is interrupted right away instead of
-    finishing the current request first.
+    asyncio task so an in-flight LLM/tool `await` is interrupted right away.
+
+    Guards against double cancellation: if the task is already cancelling
+    (e.g. from a prior local cancel call or duplicate NOTIFY), task.cancel()
+    is skipped so its CancelledError cleanup (persisting the partial reply) is not
+    interrupted.
+
+    If run_id is specified and the registered task belongs to a different run_id,
+    cancellation is ignored so an old or superseded worker cannot cancel a newer run.
     """
     found = False
+    if run_id is not None:
+        active_run_id = _chat_task_run_ids.get(conv_id)
+        if active_run_id is not None and str(active_run_id) != str(run_id):
+            return False
+
     event = _cancel_events.get(conv_id)
     if event is not None:
         event.set()
         found = True
+
     task = _chat_tasks.get(conv_id)
     if task is not None and not task.done():
-        task.cancel()
+        is_cancelling = False
+        if hasattr(task, "cancelling"):
+            try:
+                cancelling_val = task.cancelling()
+                if isinstance(cancelling_val, int):
+                    is_cancelling = cancelling_val > 0
+                elif isinstance(cancelling_val, bool):
+                    is_cancelling = cancelling_val
+            except Exception:
+                pass
+        if not is_cancelling:
+            task.cancel()
         found = True
+
     return found
+
+
+def _handle_chat_cancel_notification(
+    conv_id: uuid.UUID,
+    run_id: uuid.UUID | None = None,
+) -> None:
+    """Callback invoked by chat_stream_bus when a cancel broadcast is received."""
+    request_chat_cancel(str(conv_id), run_id=run_id)
+
+
+chat_stream_bus.register_cancel_handler(_handle_chat_cancel_notification)
+
+
+async def _poll_cancel_fallback(
+    conv_uuid: uuid.UUID,
+    run_id: uuid.UUID,
+    cancel_event: Event,
+    target_task: asyncio.Task[None] | None,
+) -> None:
+    """Lightweight DB fallback: periodically check if this turn has been cancelled in the database.
+
+    Runs in the owning worker process during a turn. If a cross-worker cancel NOTIFY was
+    dropped due to listener reconnection, this detects that active_run_id was cleared or
+    changed, or is_running is false, and triggers local cancellation.
+    """
+    try:
+        while True:
+            await asyncio.sleep(CHAT_CANCEL_POLL_INTERVAL_SECONDS)
+            if cancel_event.is_set():
+                break
+            async with async_session_maker() as check_db:
+                result = await check_db.execute(
+                    select(
+                        DashboardConversation.is_running,
+                        DashboardConversation.active_run_id,
+                    ).where(DashboardConversation.id == conv_uuid)
+                )
+                row = result.one_or_none()
+                if row is None or not row[0] or row[1] != run_id:
+                    cancel_event.set()
+                    if target_task is not None and not target_task.done():
+                        is_cancelling = False
+                        if hasattr(target_task, "cancelling"):
+                            try:
+                                cancelling_val = target_task.cancelling()
+                                if isinstance(cancelling_val, int):
+                                    is_cancelling = cancelling_val > 0
+                                elif isinstance(cancelling_val, bool):
+                                    is_cancelling = cancelling_val
+                            except Exception:
+                                pass
+                        if not is_cancelling:
+                            target_task.cancel()
+                    break
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Error in chat cancellation DB fallback poll for %s", conv_uuid)
 
 
 async def _run_chat_turn(
@@ -310,13 +400,28 @@ async def _run_chat_turn(
     user_id: uuid.UUID,
     turn: ChatTurn,
     public_base_url: str,
+    run_id: uuid.UUID | None = None,
 ) -> ChatTurnResult:
     """Stream and persist one assistant turn for a conversation worker."""
     conv_uuid = uuid.UUID(conv_id)
+    if run_id is None:
+        run_id = _chat_task_run_ids.get(conv_id)
+    if run_id is None:
+        run_id = uuid.uuid4()
     assistant_message_id = uuid.uuid4()
     assistant_chunks: list[str] = []
     workflow_context_markers: list[str] = []
     tool_calls_for_message: list[dict] = []
+
+    cancel_event = _cancel_events.get(conv_id)
+    if cancel_event is None:
+        cancel_event = Event()
+        _cancel_events[conv_id] = cancel_event
+
+    current_task = asyncio.current_task()
+    watchdog = asyncio.create_task(
+        _poll_cancel_fallback(conv_uuid, run_id, cancel_event, current_task)
+    )
 
     try:
         async with async_session_maker() as db:
@@ -368,10 +473,6 @@ async def _run_chat_turn(
                 credential_mode=turn.credential_mode,
             )
 
-            cancel_event = _cancel_events.get(conv_id)
-            if cancel_event is None:
-                cancel_event = Event()
-                _cancel_events[conv_id] = cancel_event
             workflow_note_ids: set[str] = set()
 
             client, provider, model, trace_context = resolve_model_binding(
@@ -438,13 +539,18 @@ async def _run_chat_turn(
                 )
 
             conv_result = await db.execute(
-                select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
+                select(DashboardConversation)
+                .where(DashboardConversation.id == conv_uuid)
+                .with_for_update()
             )
             conversation = conv_result.scalar_one_or_none()
-            if conversation is not None:
+            if conversation is not None and (
+                run_id is None or conversation.active_run_id == run_id
+            ):
                 conversation.has_unread = True
                 if paused_for_clarification:
                     conversation.is_running = False
+                    conversation.active_run_id = None
                     conversation.queue_paused_by_message_id = assistant_message_id
                 if turn.should_generate_title and conversation.title == DEFAULT_CONVERSATION_TITLE:
                     conversation.title = _fallback_title_from_content(turn.content)
@@ -473,6 +579,7 @@ async def _run_chat_turn(
                 entry["status"] = "cancelled"
                 if not entry.get("response_summary"):
                     entry["response_summary"] = "Cancelled"
+        should_publish_queue_cleared = False
         async with async_session_maker() as cancel_db:
             if assistant_content or tool_calls_for_message:
                 cancel_db.add(
@@ -485,15 +592,22 @@ async def _run_chat_turn(
                     )
                 )
             conv_result = await cancel_db.execute(
-                select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
+                select(DashboardConversation)
+                .where(DashboardConversation.id == conv_uuid)
+                .with_for_update()
             )
             conversation = conv_result.scalar_one_or_none()
-            if conversation is not None:
+            if conversation is not None and (
+                run_id is None or conversation.active_run_id == run_id
+            ):
                 conversation.is_running = False
+                conversation.active_run_id = None
                 conversation.queue_paused_by_message_id = None
-            await _clear_queue_items(cancel_db, conv_uuid)
+                await _clear_queue_items(cancel_db, conv_uuid)
+                should_publish_queue_cleared = True
             await cancel_db.commit()
-        await registry.publish(conv_id, {"type": "queue_cleared"})
+        if should_publish_queue_cleared:
+            await registry.publish(conv_id, {"type": "queue_cleared"})
         await registry.publish(
             conv_id,
             {
@@ -503,9 +617,18 @@ async def _run_chat_turn(
             },
         )
         raise
+    finally:
+        watchdog.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watchdog
 
 
-async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
+async def _dequeue_next_turn(
+    conv_id: str,
+    run_id: uuid.UUID | None = None,
+) -> ChatTurn | None:
+    if run_id is None:
+        run_id = _chat_task_run_ids.get(conv_id)
     conv_uuid = uuid.UUID(conv_id)
     async with async_session_maker() as db:
         conv_result = await db.execute(
@@ -516,8 +639,12 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
         conversation = conv_result.scalar_one_or_none()
         if conversation is None:
             return None
+        if run_id is not None and conversation.active_run_id != run_id:
+            return None
         if conversation.queue_paused_by_message_id is not None:
             conversation.is_running = False
+            if run_id is None or conversation.active_run_id == run_id:
+                conversation.active_run_id = None
             await db.commit()
             return None
 
@@ -530,6 +657,8 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
         item = item_result.scalar_one_or_none()
         if item is None:
             conversation.is_running = False
+            if run_id is None or conversation.active_run_id == run_id:
+                conversation.active_run_id = None
             await db.commit()
             return None
 
@@ -579,14 +708,22 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
     return turn
 
 
-def _worker_has_ownership(conv_id: str) -> bool:
+def _worker_has_ownership(conv_id: str, run_id: uuid.UUID | None = None) -> bool:
     """Return True if the current task owns the conversation worker slot."""
     current = asyncio.current_task()
     active_task = _chat_tasks.get(conv_id)
-    return active_task is None or active_task is current
+    if active_task is not None and active_task is not current:
+        return False
+    if run_id is not None:
+        current_run_id = _chat_task_run_ids.get(conv_id)
+        if current_run_id is not None and current_run_id != run_id:
+            return False
+    return True
 
 
-async def _finish_worker_state(conv_id: str) -> None:
+async def _finish_worker_state(conv_id: str, run_id: uuid.UUID | None = None) -> None:
+    if run_id is None:
+        run_id = _chat_task_run_ids.get(conv_id)
     async with async_session_maker() as db:
         conv_uuid = uuid.UUID(conv_id)
         result = await db.execute(
@@ -595,9 +732,11 @@ async def _finish_worker_state(conv_id: str) -> None:
             .with_for_update()
         )
         conversation = result.scalar_one_or_none()
-        if conversation is not None and conversation.queue_paused_by_message_id is None:
-            if _worker_has_ownership(conv_id):
-                conversation.is_running = False
+        if conversation is not None and (run_id is None or conversation.active_run_id == run_id):
+            if _worker_has_ownership(conv_id, run_id=run_id):
+                if conversation.queue_paused_by_message_id is None:
+                    conversation.is_running = False
+                conversation.active_run_id = None
         await db.commit()
 
 
@@ -610,13 +749,18 @@ async def _process_chat(
     attachment_data: dict | None,
     public_base_url: str,
     should_generate_title: bool,
+    run_id: uuid.UUID | None = None,
 ) -> None:
     """Background coroutine: streams assistant replies and drains queued messages."""
-    if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id):
+    if run_id is None:
+        run_id = _chat_task_run_ids.get(conv_id)
+    if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id, run_id=run_id):
         return
 
     cancel_event = Event()
     _cancel_events[conv_id] = cancel_event
+    if run_id is not None:
+        _chat_task_run_ids[conv_id] = run_id
     turn: ChatTurn | None = ChatTurn(
         content=content,
         credential_id=credential_id,
@@ -630,26 +774,37 @@ async def _process_chat(
             result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
             if result.stop_worker or result.paused_for_clarification:
                 break
-            turn = await _dequeue_next_turn(conv_id)
-        await _finish_worker_state(conv_id)
-        if _worker_has_ownership(conv_id):
+            turn = await _dequeue_next_turn(conv_id, run_id=run_id)
+        await _finish_worker_state(conv_id, run_id=run_id)
+        if _worker_has_ownership(conv_id, run_id=run_id):
             await registry.finish(conv_id)
     except asyncio.CancelledError:
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             await registry.finish(conv_id)
         return
     except Exception:
         logger.exception("Background chat task failed for conv_id=%s", conv_id)
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             async with async_session_maker() as err_db:
                 conv_uuid = uuid.UUID(conv_id)
-                await err_db.execute(
-                    sa.text(
-                        "UPDATE dashboard_conversations "
-                        "SET is_running = false WHERE id = CAST(:id AS uuid)"
-                    ),
-                    {"id": conv_id},
-                )
+                if run_id is not None:
+                    await err_db.execute(
+                        sa.text(
+                            "UPDATE dashboard_conversations "
+                            "SET is_running = false, active_run_id = NULL "
+                            "WHERE id = CAST(:id AS uuid) AND active_run_id = CAST(:run_id AS uuid)"
+                        ),
+                        {"id": conv_id, "run_id": str(run_id)},
+                    )
+                else:
+                    await err_db.execute(
+                        sa.text(
+                            "UPDATE dashboard_conversations "
+                            "SET is_running = false, active_run_id = NULL "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": conv_id},
+                    )
                 await _clear_queue_items(err_db, conv_uuid)
                 await err_db.commit()
             await registry.publish(
@@ -658,7 +813,7 @@ async def _process_chat(
             await registry.publish(conv_id, {"type": "queue_cleared"})
             await registry.finish(conv_id)
     finally:
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             if (
                 _cancel_events.get(conv_id) is cancel_event
                 or _chat_tasks.get(conv_id) is asyncio.current_task()
@@ -666,45 +821,62 @@ async def _process_chat(
                 _cancel_events.pop(conv_id, None)
             if _chat_tasks.get(conv_id) is asyncio.current_task():
                 _chat_tasks.pop(conv_id, None)
+                _chat_task_run_ids.pop(conv_id, None)
 
 
 async def _process_chat_queue(
     conv_id: str,
     user_id: uuid.UUID,
     public_base_url: str,
+    run_id: uuid.UUID | None = None,
 ) -> None:
     """Background coroutine: starts from the persisted queue and drains it."""
-    if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id):
+    if run_id is None:
+        run_id = _chat_task_run_ids.get(conv_id)
+    if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id, run_id=run_id):
         return
 
     cancel_event = Event()
     _cancel_events[conv_id] = cancel_event
+    if run_id is not None:
+        _chat_task_run_ids[conv_id] = run_id
     try:
-        turn = await _dequeue_next_turn(conv_id)
+        turn = await _dequeue_next_turn(conv_id, run_id=run_id)
         while turn is not None:
             result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
             if result.stop_worker or result.paused_for_clarification:
                 break
-            turn = await _dequeue_next_turn(conv_id)
-        await _finish_worker_state(conv_id)
-        if _worker_has_ownership(conv_id):
+            turn = await _dequeue_next_turn(conv_id, run_id=run_id)
+        await _finish_worker_state(conv_id, run_id=run_id)
+        if _worker_has_ownership(conv_id, run_id=run_id):
             await registry.finish(conv_id)
     except asyncio.CancelledError:
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             await registry.finish(conv_id)
         return
     except Exception:
         logger.exception("Background queued chat task failed for conv_id=%s", conv_id)
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             async with async_session_maker() as err_db:
                 conv_uuid = uuid.UUID(conv_id)
-                await err_db.execute(
-                    sa.text(
-                        "UPDATE dashboard_conversations "
-                        "SET is_running = false WHERE id = CAST(:id AS uuid)"
-                    ),
-                    {"id": conv_id},
-                )
+                if run_id is not None:
+                    await err_db.execute(
+                        sa.text(
+                            "UPDATE dashboard_conversations "
+                            "SET is_running = false, active_run_id = NULL "
+                            "WHERE id = CAST(:id AS uuid) AND active_run_id = CAST(:run_id AS uuid)"
+                        ),
+                        {"id": conv_id, "run_id": str(run_id)},
+                    )
+                else:
+                    await err_db.execute(
+                        sa.text(
+                            "UPDATE dashboard_conversations "
+                            "SET is_running = false, active_run_id = NULL "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": conv_id},
+                    )
                 await _clear_queue_items(err_db, conv_uuid)
                 await err_db.commit()
             await registry.publish(
@@ -713,7 +885,7 @@ async def _process_chat_queue(
             await registry.publish(conv_id, {"type": "queue_cleared"})
             await registry.finish(conv_id)
     finally:
-        if _worker_has_ownership(conv_id):
+        if _worker_has_ownership(conv_id, run_id=run_id):
             if (
                 _cancel_events.get(conv_id) is cancel_event
                 or _chat_tasks.get(conv_id) is asyncio.current_task()
@@ -721,6 +893,7 @@ async def _process_chat_queue(
                 _cancel_events.pop(conv_id, None)
             if _chat_tasks.get(conv_id) is asyncio.current_task():
                 _chat_tasks.pop(conv_id, None)
+                _chat_task_run_ids.pop(conv_id, None)
 
 
 MCP_CONVERSATION_SOURCE = "mcp"
@@ -797,7 +970,9 @@ async def run_mcp_chat_turn(
                 created_at=datetime.now(timezone.utc),
             )
         )
+        run_id = uuid.uuid4()
         conversation.is_running = True
+        conversation.active_run_id = run_id
         conversation.has_unread = False
         conversation.queue_paused_by_message_id = None
         conversation.last_credential_id = credential_id
@@ -814,11 +989,13 @@ async def run_mcp_chat_turn(
         credential_mode=CredentialPromptMode.OFF,
     )
     await registry.create_task(conv_id)
+    _chat_task_run_ids[conv_id] = run_id
     try:
         result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
     finally:
         _cancel_events.pop(conv_id, None)
-        await _finish_worker_state(conv_id)
+        _chat_task_run_ids.pop(conv_id, None)
+        await _finish_worker_state(conv_id, run_id=run_id)
         await registry.finish(conv_id)
 
     async with async_session_maker() as db:
@@ -1068,10 +1245,13 @@ async def cancel_conversation_stream(
     conversation = await _get_conversation_or_404(
         conversation_id, current_user.id, db, for_update=True
     )
-    request_chat_cancel(str(conversation_id))
+    active_run_id = conversation.active_run_id
+    request_chat_cancel(str(conversation_id), run_id=active_run_id)
     await _clear_queue_items(db, conversation_id)
     if conversation.is_running:
         conversation.is_running = False
+    conversation.active_run_id = None
+    await registry.publish_cancel(db, conversation_id, active_run_id)
     await db.commit()
     await registry.publish(str(conversation_id), {"type": "queue_cleared"})
 
@@ -1141,7 +1321,9 @@ async def send_message(
         )
         locked_conv = conv_result.scalar_one_or_none()
         if locked_conv is not None and not locked_conv.is_running:
+            run_id = uuid.uuid4()
             locked_conv.is_running = True
+            locked_conv.active_run_id = run_id
             await db.commit()
             await registry.create_task(conv_id_str)
             task = asyncio.create_task(
@@ -1149,9 +1331,11 @@ async def send_message(
                     conv_id=conv_id_str,
                     user_id=current_user.id,
                     public_base_url=build_public_base_url(http_request),
+                    run_id=run_id,
                 )
             )
             _chat_tasks[conv_id_str] = task
+            _chat_task_run_ids[conv_id_str] = run_id
         else:
             await db.commit()
             await registry.publish(
@@ -1186,7 +1370,9 @@ async def send_message(
         created_at=message_created_at,
     )
     db.add(message)
+    run_id = uuid.uuid4()
     conversation.is_running = True
+    conversation.active_run_id = run_id
     conversation.has_unread = False
     conversation.queue_paused_by_message_id = None
     conversation.last_credential_id = credential.id
@@ -1210,9 +1396,11 @@ async def send_message(
             attachment_data=attachment_data,
             public_base_url=public_base_url,
             should_generate_title=should_generate_title,
+            run_id=run_id,
         )
     )
     _chat_tasks[conv_id_str] = task
+    _chat_task_run_ids[conv_id_str] = run_id
 
     return SendMessageResponse(
         conversation_id=conversation_id,

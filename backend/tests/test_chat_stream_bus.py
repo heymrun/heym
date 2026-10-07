@@ -117,6 +117,77 @@ class BusRoutingTests(unittest.TestCase):
 
         self.assertTrue(settings["application_name"].startswith("heym-"))
 
+    def test_cancel_notification_invokes_registered_handler(self) -> None:
+        bus = ChatStreamBus()
+        called_args: list[tuple[uuid.UUID, uuid.UUID | None]] = []
+
+        def handler(conv_id: uuid.UUID, run_id: uuid.UUID | None) -> None:
+            called_args.append((conv_id, run_id))
+
+        bus.register_cancel_handler(handler)
+        conv_id = uuid.uuid4()
+        bus.handle_payload(f"cancel:{conv_id}")
+
+        self.assertEqual(len(called_args), 1)
+        self.assertEqual(called_args[0][0], conv_id)
+        self.assertIsNone(called_args[0][1])
+
+    def test_cancel_notification_with_run_id_invokes_registered_handler(self) -> None:
+        bus = ChatStreamBus()
+        called_args: list[tuple[uuid.UUID, uuid.UUID | None]] = []
+
+        def handler(conv_id: uuid.UUID, run_id: uuid.UUID | None) -> None:
+            called_args.append((conv_id, run_id))
+
+        bus.register_cancel_handler(handler)
+        conv_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        bus.handle_payload(f"cancel:{conv_id}:{run_id}")
+
+        self.assertEqual(len(called_args), 1)
+        self.assertEqual(called_args[0], (conv_id, run_id))
+
+    def test_cancel_notification_ignores_invalid_uuid(self) -> None:
+        bus = ChatStreamBus()
+        called = False
+
+        def handler(_conv_id: uuid.UUID, _run_id: uuid.UUID | None) -> None:
+            nonlocal called
+            called = True
+
+        bus.register_cancel_handler(handler)
+        bus.handle_payload("cancel:not-a-valid-uuid")
+
+        self.assertFalse(called)
+
+    def test_cancel_notification_wakes_sse_subscribers(self) -> None:
+        bus = ChatStreamBus()
+        event = asyncio.Event()
+        conv_id = str(uuid.uuid4())
+        bus.register(conv_id, event)
+
+        woken = bus.handle_payload(f"cancel:{conv_id}")
+
+        self.assertEqual(woken, 1)
+        self.assertTrue(event.is_set())
+
+    def test_unregister_cancel_handler(self) -> None:
+        bus = ChatStreamBus()
+        call_count = 0
+
+        def handler(_conv_id: uuid.UUID, _run_id: uuid.UUID | None) -> None:
+            nonlocal call_count
+            call_count += 1
+
+        bus.register_cancel_handler(handler)
+        conv_id = str(uuid.uuid4())
+        bus.handle_payload(f"cancel:{conv_id}")
+        self.assertEqual(call_count, 1)
+
+        bus.unregister_cancel_handler(handler)
+        bus.handle_payload(f"cancel:{conv_id}")
+        self.assertEqual(call_count, 1)
+
 
 class BusListenLoopTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

@@ -50,6 +50,19 @@ async def _notify(session: Any, conv_id: str) -> None:
     )
 
 
+async def publish_cancel(
+    session: Any,
+    conv_id: Any,
+    run_id: Any = None,
+) -> None:
+    """Announce a cancellation signal across workers for ``conv_id``."""
+    payload = f"cancel:{conv_id}:{run_id}" if run_id is not None else f"cancel:{conv_id}"
+    await session.execute(
+        sa.text("SELECT pg_notify(:channel, :payload)"),
+        {"channel": CHAT_STREAM_CHANNEL, "payload": payload},
+    )
+
+
 def _serialize_event(event: ChatEvent) -> str:
     if isinstance(event, str):
         return event

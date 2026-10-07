@@ -1,4 +1,4 @@
-"""One shared LISTEN connection per process for dashboard chat stream wake-ups.
+"""One shared LISTEN connection per process for dashboard chat stream wake-ups and cancel broadcasts.
 
 Chat streams used to open a dedicated asyncpg connection per subscriber and
 LISTEN on a channel named after the conversation. Every open stream therefore
@@ -6,11 +6,15 @@ held a database connection for its whole lifetime, so connection usage grew
 with traffic instead of with the number of processes.
 
 This bus replaces that with a single connection per process on a single
-channel. The payload of each notification is the conversation id; the bus turns
-it into an in-process wake-up for whoever is subscribed to that conversation.
-The notification carries no event data - subscribers still read the durable
-``chat_stream_events`` rows - so a missed notification costs latency, never
-events. Subscribers keep a slow polling fallback for exactly that case.
+channel (``heym_chat_stream``). The payload of each notification is either:
+  - the conversation id: wakes up in-process stream subscribers to read new events
+    from the durable ``chat_stream_events`` table.
+  - ``cancel:<conversation_id>`` or ``cancel:<conversation_id>:<run_id>``: dispatches
+    a cancellation signal to whichever worker owns the running turn, and wakes
+    subscribers so open client streams immediately read the cancelled state.
+
+Subscribers and turn workers maintain a slow polling fallback for reconnection
+windows where a notification might be missed.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import uuid
+from collections.abc import Callable
 from typing import Any
 
 import asyncpg
@@ -42,6 +48,7 @@ class ChatStreamBus:
 
     def __init__(self) -> None:
         self._waiters: dict[str, set[asyncio.Event]] = {}
+        self._cancel_handlers: list[Callable[..., Any]] = []
         self._task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ready: asyncio.Event | None = None
@@ -68,9 +75,71 @@ class ChatStreamBus:
         if not events:
             self._waiters.pop(key, None)
 
+    def register_cancel_handler(self, handler: Callable[..., Any]) -> None:
+        """Register a callback for cross-worker cancellation notifications."""
+        if handler not in self._cancel_handlers:
+            self._cancel_handlers.append(handler)
+
+    def unregister_cancel_handler(self, handler: Callable[..., Any]) -> None:
+        """Unregister a previously registered cancellation callback."""
+        if handler in self._cancel_handlers:
+            self._cancel_handlers.remove(handler)
+
     def handle_payload(self, payload: str) -> int:
-        """Wake the subscribers of the named conversation. Returns how many woke."""
-        events = self._waiters.get(_key(payload))
+        """Handle an incoming notification payload.
+
+        If payload starts with "cancel:", it is parsed as a cancel broadcast
+        (format: "cancel:<conversation_id>" or "cancel:<conversation_id>:<run_id>"),
+        validated, dispatched to registered cancel callbacks, and wakes up any
+        subscribers for that conversation.
+
+        Otherwise, the payload is treated as a conversation id and wakes up
+        subscribers for that conversation.
+
+        Returns how many subscriber events woke up.
+        """
+        payload_str = str(payload).strip()
+        if payload_str.startswith("cancel:"):
+            body = payload_str[len("cancel:") :].strip()
+            parts = body.split(":")
+            conv_id_raw = parts[0].strip() if parts else ""
+            run_id_raw = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+
+            try:
+                conv_uuid = uuid.UUID(conv_id_raw)
+            except (ValueError, AttributeError):
+                logger.warning(
+                    "Ignoring chat cancel notification with invalid conversation UUID: %r", payload
+                )
+                return 0
+
+            run_uuid: uuid.UUID | None = None
+            if run_id_raw:
+                try:
+                    run_uuid = uuid.UUID(run_id_raw)
+                except (ValueError, AttributeError):
+                    logger.warning(
+                        "Ignoring chat cancel notification with invalid run UUID: %r", payload
+                    )
+                    return 0
+
+            for handler in list(self._cancel_handlers):
+                try:
+                    try:
+                        handler(conv_uuid, run_uuid)
+                    except TypeError:
+                        handler(conv_uuid)
+                except Exception:
+                    logger.exception("Chat cancel handler failed for payload %r", payload)
+
+            events = self._waiters.get(_key(str(conv_uuid)))
+            if not events:
+                return 0
+            for event in tuple(events):
+                event.set()
+            return len(events)
+
+        events = self._waiters.get(_key(payload_str))
         if not events:
             return 0
         for event in tuple(events):
