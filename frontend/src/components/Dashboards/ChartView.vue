@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import type { ChartPayload } from "@/types/dashboard";
 import ChartMarkdown from "@/components/Dashboards/ChartMarkdown.vue";
+import ChartTable from "@/components/Dashboards/ChartTable.vue";
 import HitlCarousel from "@/components/Dashboards/HitlCarousel.vue";
 import MarkdownTextContent from "@/components/Dashboards/MarkdownTextContent.vue";
 import {
@@ -15,6 +16,7 @@ import {
   toBarGaugeRows,
   toProportionSegments,
 } from "@/components/Dashboards/chartModel";
+import type { TableRecord, TableRowLink } from "@/components/Dashboards/chartTable";
 import { hasTaskItems } from "@/lib/markdownTaskList";
 
 const props = defineProps<{
@@ -22,11 +24,14 @@ const props = defineProps<{
   markdownTaskSaving?: boolean;
   /** Dark palette for ApexCharts, which does not follow the page's CSS theme. */
   dark: boolean;
+  /** Table rows open this detail page when set (see chartTable.ts). */
+  rowLink?: TableRowLink | null;
 }>();
 
 const emit = defineEmits<{
   (e: "markdown-task-toggle", lineIndex: number): void;
   (e: "markdown-task-update", payload: { lineIndex: number; text: string }): void;
+  (e: "row-open", record: TableRecord): void;
 }>();
 
 const chartPayload = computed((): ChartPayload | null => normalizeChartPayload(props.payload));
@@ -139,34 +144,14 @@ const apexOptions = computed(() =>
       v-else-if="chartPayload && chartPayload.type === 'table'"
       class="h-full overflow-auto pb-3"
     >
-      <table class="w-full text-sm text-foreground">
-        <thead class="sticky top-0 bg-card">
-          <tr class="border-b border-border">
-            <th
-              v-for="col in chartPayload.columns"
-              :key="col"
-              class="px-2 py-1 text-left font-medium text-muted-foreground"
-            >
-              {{ col }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="(row, rowIndex) in chartPayload.rows"
-            :key="rowIndex"
-            class="border-b border-border/50"
-          >
-            <td
-              v-for="(cell, cellIndex) in row"
-              :key="cellIndex"
-              class="px-2 py-1"
-            >
-              {{ cell }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <ChartTable
+        :columns="chartPayload.columns ?? []"
+        :rows="chartPayload.rows ?? []"
+        :status-column="chartPayload.statusColumn"
+        :status-tones="chartPayload.statusTones"
+        :row-link="rowLink"
+        @row-open="(record) => emit('row-open', record)"
+      />
     </div>
 
     <div

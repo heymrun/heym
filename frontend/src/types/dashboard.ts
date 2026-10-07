@@ -18,6 +18,9 @@ export interface HitlWidgetItem {
   created_at?: string;
 }
 
+/** Tone of a status chip in a table widget's status column. */
+export type StatusTone = "success" | "attention" | "failure" | "waiting" | "neutral";
+
 export interface ChartPayload {
   type:
     | "pie"
@@ -37,6 +40,9 @@ export interface ChartPayload {
   series?: ChartSeries[];
   columns?: string[];
   rows?: unknown[][];
+  // Table column rendered as status chips, and the tone of each value in it.
+  statusColumn?: string;
+  statusTones?: Record<string, StatusTone>;
   value?: number | string | null;
   // Markdown content for the `text` chart type.
   text?: string;
