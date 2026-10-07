@@ -1,5 +1,15 @@
 import { inject, type InjectionKey } from "vue";
 
+import type {
+  CreateCredentialRequest,
+  Credential,
+  CredentialListItem,
+  CredentialTestRequest,
+  CredentialTestResponse,
+  LLMModel,
+  ModelRouterConfigResponse,
+  UpdateCredentialRequest,
+} from "@/types/credential";
 import type { HITLDecisionPayload, HITLInbox } from "@/types/workflow";
 import type { ClarifyDataTables } from "@/composables/clarifyDataTables";
 import type { InteractiveVoice } from "@/composables/interactiveVoice";
@@ -53,6 +63,34 @@ export interface ClarifyPort {
 }
 
 export const clarifyPortKey: InjectionKey<ClarifyPort> = Symbol("clarifyPort");
+
+/**
+ * The credential calls the credential dialog makes: create, edit, test, model lists and OAuth.
+ * Heym provides `credentialsApi`. The dialog hands the OAuth methods to its popup unbound, so an
+ * implementation must not rely on `this`.
+ */
+export interface CredentialsPort {
+  get: (id: string) => Promise<Credential>;
+  create: (data: CreateCredentialRequest) => Promise<Credential>;
+  update: (id: string, data: UpdateCredentialRequest) => Promise<Credential>;
+  testConnection: (data: CredentialTestRequest) => Promise<CredentialTestResponse>;
+  getModels: (id: string) => Promise<LLMModel[]>;
+  getModelRouterConfig: (id: string) => Promise<ModelRouterConfigResponse>;
+  listLLM: () => Promise<CredentialListItem[]>;
+  listDecision: () => Promise<CredentialListItem[]>;
+  googleSheetsOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
+  googleDriveOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
+  bigQueryOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
+  notionOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
+  linearOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
+  codexOAuthStart: () => Promise<{ authorize_url: string; state: string }>;
+  codexOAuthComplete: (
+    state: string,
+    redirectUrl: string,
+  ) => Promise<{ config: Record<string, unknown>; account_id: string }>;
+}
+
+export const credentialsPortKey: InjectionKey<CredentialsPort> = Symbol("credentialsPort");
 
 /** Returns the host's implementation of a port; throws when the host did not provide one. */
 export function usePort<T>(key: InjectionKey<T>): T {

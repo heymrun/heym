@@ -9,12 +9,14 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import { credentialsApi } from "@/services/api";
+import { credentialsPortKey, usePort } from "@/ports";
 import ModelRouterOptionsEditor from "./ModelRouterOptionsEditor.vue";
 import type { ModelRouterForm, ModelRouterOptionForm } from "./modelRouterConfig";
 
 const props = defineProps<{ form: ModelRouterForm }>();
 const emit = defineEmits<{ "update:form": [value: ModelRouterForm] }>();
+
+const credentialsApi = usePort(credentialsPortKey);
 
 const decisionCredentials = ref<CredentialListItem[]>([]);
 const llmCredentials = ref<CredentialListItem[]>([]);

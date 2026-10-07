@@ -13,9 +13,11 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PRESENTATIONAL = [
   "components/Chat/ChatToolCall.vue",
   "components/Chat/InteractiveVoiceMode.vue",
+  "components/Credentials/CredentialDialog.vue",
   "components/Dashboards/ChartView.vue",
   "components/Dashboards/HitlCarousel.vue",
   "components/Dashboards/HitlReviewActions.vue",
+  "components/ui/ClarifyCard.vue",
   "composables/clarifyDataTables.ts",
   "composables/interactiveVoice.ts",
   "composables/textToSpeechPlayer.ts",

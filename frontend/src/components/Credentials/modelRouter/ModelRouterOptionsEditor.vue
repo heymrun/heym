@@ -10,7 +10,7 @@ import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import { credentialsApi } from "@/services/api";
+import { credentialsPortKey, usePort } from "@/ports";
 import {
   buildOptionModelChoices,
   createEmptyOption,
@@ -26,6 +26,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:options": [value: ModelRouterOptionForm[]];
 }>();
+
+const credentialsApi = usePort(credentialsPortKey);
 
 const modelsByCredential = ref<Record<string, LLMModel[]>>({});
 const loadingFor = ref<Record<string, boolean>>({});

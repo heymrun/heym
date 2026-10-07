@@ -5,11 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 import { useClarifyDataTables } from "@/composables/useClarifyDataTables";
 import { useInteractiveVoice } from "@/composables/useInteractiveVoice";
 import { useTextToSpeech } from "@/composables/useTextToSpeech";
-import { clarifyPortKey, hitlPortKey, usePort, voicePortKey } from "@/ports";
+import { clarifyPortKey, credentialsPortKey, hitlPortKey, usePort, voicePortKey } from "@/ports";
 import { installHeymPorts } from "@/ports/installHeymPorts";
-import { hitlApi } from "@/services/api";
+import { credentialsApi, hitlApi } from "@/services/api";
 
 vi.mock("@/services/api", () => ({
+  credentialsApi: { get: vi.fn(), create: vi.fn(), update: vi.fn() },
   hitlApi: {
     inbox: vi.fn(async () => ({ items: [], pending_total: 0 })),
     inboxDecide: vi.fn(async () => ({ request_id: "r-1", status: "accepted" })),
@@ -65,5 +66,11 @@ describe("installHeymPorts", () => {
     const { app } = heymApp();
 
     expect(app.runWithContext(() => usePort(clarifyPortKey))).toEqual({ useClarifyDataTables });
+  });
+
+  it("gives the credential dialog Heym's credentials API", () => {
+    const { app } = heymApp();
+
+    expect(app.runWithContext(() => usePort(credentialsPortKey))).toBe(credentialsApi);
   });
 });

@@ -26,7 +26,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
-import { credentialsApi } from "@/services/api";
+import { credentialsPortKey, usePort } from "@/ports";
 import { AWS_REGION_OPTIONS } from "@/lib/awsRegions";
 import {
   CREDENTIAL_TYPE_DESCRIPTIONS,
@@ -48,6 +48,8 @@ const emit = defineEmits<{
   close: [];
   saved: [credential: Credential];
 }>();
+
+const credentialsApi = usePort(credentialsPortKey);
 
 const isEditing = computed(() => !!props.credential);
 
