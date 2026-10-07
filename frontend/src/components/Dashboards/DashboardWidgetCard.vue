@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import type { Component } from "vue";
-import { onClickOutside } from "@vueuse/core";
+import { computed, inject, onMounted, provide, ref, watch } from "vue";
 import {
   Copy,
   ExternalLink,
   History,
   Loader2,
-  MoreVertical,
   Pencil,
   RefreshCw,
   Settings,
@@ -17,13 +14,14 @@ import {
 
 import type { ChartPayload, DashboardWidget } from "@/types/dashboard";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
+import WidgetActionsMenu from "@/components/Dashboards/WidgetActionsMenu.vue";
 import {
   openHitlHistoryKey,
   setHitlHistoryTargetKey,
   type HitlHistoryTarget,
 } from "@/components/Dashboards/hitlHistory";
-import { toggleTaskItemLocal, updateOrRemoveTaskItemLocal } from "@/lib/markdownTaskList";
-import { dashboardApi } from "@/services/api";
+import { useWidgetData } from "@/components/Dashboards/useWidgetData";
+import type { WidgetAction } from "@/components/Dashboards/widgetActions";
 
 const props = defineProps<{
   widget: DashboardWidget;
@@ -41,8 +39,16 @@ const emit = defineEmits<{
   (e: "title-change", payload: { id: string; title: string }): void;
 }>();
 
-const payload = ref<ChartPayload | null>(null);
-const markdownTaskSaving = ref(false);
+const {
+  payload,
+  loading,
+  error,
+  markdownTaskSaving,
+  loadData,
+  toggleMarkdownTask,
+  updateMarkdownTask,
+} = useWidgetData(() => props.widget.id);
+
 // Only surface http(s) links. The url can come from a dynamic expression over upstream
 // data, so reject javascript:/data:/relative values to avoid an injected-link XSS.
 const externalUrl = computed<string | null>(() => {
@@ -55,21 +61,8 @@ const externalUrl = computed<string | null>(() => {
     return null;
   }
 });
-const loading = ref(true);
-const error = ref<string | null>(null);
 const editingTitle = ref(false);
 const titleDraft = ref(props.widget.title);
-
-// Header actions are shared between the inline icon row (sm+) and the collapsed
-// 3-dot menu (small screens), so the two stay in sync from a single source.
-interface WidgetAction {
-  key: string;
-  icon: Component;
-  label: string;
-  danger?: boolean;
-  disabled?: () => boolean;
-  run: () => void;
-}
 
 const actions: WidgetAction[] = [
   {
@@ -140,121 +133,6 @@ const displayPayload = computed<ChartPayload | null>(() =>
   props.canWrite || !payload.value ? payload.value : { ...payload.value, text_interactive: false },
 );
 
-const menuOpen = ref(false);
-const triggerRef = ref<HTMLElement | null>(null);
-const menuPanelRef = ref<HTMLElement | null>(null);
-const menuPos = ref<{ top: number; left: number }>({ top: 0, left: 0 });
-const MENU_WIDTH = 176;
-
-// The menu is teleported to <body> because each grid item is transformed and so
-// forms its own stacking/clipping context — a z-indexed dropdown would otherwise
-// be hidden behind neighbouring widgets.
-onClickOutside(
-  triggerRef,
-  () => {
-    menuOpen.value = false;
-  },
-  { ignore: [menuPanelRef] },
-);
-
-function toggleMenu(): void {
-  if (menuOpen.value) {
-    menuOpen.value = false;
-    return;
-  }
-  const rect = triggerRef.value?.getBoundingClientRect();
-  if (rect) {
-    menuPos.value = {
-      top: rect.bottom + 4,
-      left: Math.max(8, rect.right - MENU_WIDTH),
-    };
-  }
-  menuOpen.value = true;
-}
-
-function closeMenu(): void {
-  menuOpen.value = false;
-}
-
-function runAction(action: WidgetAction): void {
-  menuOpen.value = false;
-  action.run();
-}
-
-watch(menuOpen, (open) => {
-  if (open) {
-    window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("resize", closeMenu);
-  } else {
-    window.removeEventListener("scroll", closeMenu, true);
-    window.removeEventListener("resize", closeMenu);
-  }
-});
-
-async function loadData(force = false): Promise<void> {
-  loading.value = true;
-  error.value = null;
-  try {
-    const response = await dashboardApi.getWidgetData(props.widget.id, force);
-    payload.value = response.payload;
-    error.value = response.error ?? null;
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load widget";
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function onMarkdownTaskToggle(lineIndex: number): Promise<void> {
-  if (!payload.value || payload.value.type !== "text" || !payload.value.text_interactive) {
-    return;
-  }
-  const previousPayload = payload.value;
-  const previousText = previousPayload.text ?? "";
-  markdownTaskSaving.value = true;
-  try {
-    payload.value = {
-      ...previousPayload,
-      text: toggleTaskItemLocal(previousText, lineIndex),
-    };
-    const response = await dashboardApi.toggleMarkdownTask(props.widget.id, lineIndex);
-    payload.value = response.payload;
-    error.value = response.error ?? null;
-  } catch (e) {
-    payload.value = previousPayload;
-    error.value = e instanceof Error ? e.message : "Failed to update checkbox";
-  } finally {
-    markdownTaskSaving.value = false;
-  }
-}
-
-async function onMarkdownTaskUpdate(update: { lineIndex: number; text: string }): Promise<void> {
-  if (!payload.value || payload.value.type !== "text" || !payload.value.text_interactive) {
-    return;
-  }
-  const previousPayload = payload.value;
-  const previousText = previousPayload.text ?? "";
-  markdownTaskSaving.value = true;
-  try {
-    payload.value = {
-      ...previousPayload,
-      text: updateOrRemoveTaskItemLocal(previousText, update.lineIndex, update.text),
-    };
-    const response = await dashboardApi.updateMarkdownTask(
-      props.widget.id,
-      update.lineIndex,
-      update.text,
-    );
-    payload.value = response.payload;
-    error.value = response.error ?? null;
-  } catch (e) {
-    payload.value = previousPayload;
-    error.value = e instanceof Error ? e.message : "Failed to update checkbox item";
-  } finally {
-    markdownTaskSaving.value = false;
-  }
-}
-
 function commitTitle(): void {
   editingTitle.value = false;
   const next = titleDraft.value.trim();
@@ -280,11 +158,6 @@ watch(
 
 onMounted(() => {
   void loadData();
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener("scroll", closeMenu, true);
-  window.removeEventListener("resize", closeMenu);
 });
 </script>
 
@@ -326,65 +199,7 @@ onBeforeUnmount(() => {
         <ExternalLink class="h-3.5 w-3.5" />
       </a>
 
-      <!-- sm+: inline icon row -->
-      <div class="hidden shrink-0 items-center gap-1 sm:flex">
-        <button
-          v-for="action in visibleActions"
-          :key="action.key"
-          class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          :class="[
-            action.danger ? 'hover:bg-destructive/10 hover:text-destructive' : '',
-            action.disabled?.() ? 'cursor-not-allowed opacity-50' : '',
-          ]"
-          :title="action.label"
-          :aria-label="action.label"
-          :disabled="action.disabled?.()"
-          @click="action.run()"
-        >
-          <component
-            :is="action.icon"
-            class="h-3.5 w-3.5"
-          />
-        </button>
-      </div>
-
-      <!-- below sm: collapsed 3-dot menu so the title keeps its space -->
-      <div
-        ref="triggerRef"
-        class="shrink-0 sm:hidden"
-      >
-        <button
-          class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="Actions"
-          @click.stop="toggleMenu"
-        >
-          <MoreVertical class="h-4 w-4" />
-        </button>
-      </div>
-
-      <Teleport to="body">
-        <div
-          v-if="menuOpen"
-          ref="menuPanelRef"
-          class="fixed z-[100] w-44 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg"
-          :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }"
-        >
-          <button
-            v-for="action in visibleActions"
-            :key="action.key"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
-            :class="action.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground'"
-            :disabled="action.disabled?.()"
-            @click.stop="runAction(action)"
-          >
-            <component
-              :is="action.icon"
-              class="h-4 w-4 shrink-0"
-            />
-            {{ action.label }}
-          </button>
-        </div>
-      </Teleport>
+      <WidgetActionsMenu :actions="visibleActions" />
     </div>
 
     <div
@@ -407,8 +222,8 @@ onBeforeUnmount(() => {
         v-else
         :payload="displayPayload"
         :markdown-task-saving="markdownTaskSaving"
-        @markdown-task-toggle="onMarkdownTaskToggle"
-        @markdown-task-update="onMarkdownTaskUpdate"
+        @markdown-task-toggle="toggleMarkdownTask"
+        @markdown-task-update="updateMarkdownTask"
       />
     </div>
   </div>
