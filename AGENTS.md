@@ -134,6 +134,14 @@ When placement depends on configuration rather than node type — `agent` with a
 skill tool attached — express it as a predicate over the node's own data in the
 same module. Never branch on node type in the scheduler.
 
+### Modules Heym Work imports
+Heym Work reads Heym's database with a role that holds column-level SELECT only, and it imports a fixed set of heymrun modules without Heym's settings. `backend/tests/test_models_importable.py` lists them and fails when one of them starts importing `app.config`.
+
+- Access helpers (`*_access.py`) expose query fragments (`*_access_rows(user_id)`, clauses) that Work joins to explicit columns, plus single-item checks the routers use. Keep access rules there, not inline in routers.
+- Read services (`analytics_metrics.py`, `trace_metrics.py`, `schedule_events.py`, `run_history_list.py`) select explicit columns, never whole ORM rows, and return their own dataclasses: `app.models.schemas` imports settings. Routers map the dataclasses to their response models.
+- Instance administration is a parameter, not a settings read. `workflow_access_clause`, `get_workflow_permission` and the helpers built on them take `is_admin`: Heym leaves it unset and reads `HEYM_ADMIN_EMAILS`, Work passes its own answer. `tests/test_workflow_access_admin.py` calls them without settings. A new helper that needs to know who administers the instance takes the same parameter.
+- Writes stay in routers and their services; Work never writes Heym's tables.
+
 ### Audit logging stays on the main instance
 `audit()` writes a line to stdout and nothing to the database — see
 `backend/app/services/audit_log.py`. In a cluster that line lands on the stdout
@@ -198,7 +206,7 @@ OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstr
 
 - Do not add `alert_type` branches to the evaluator. A new alert type is one handler module, one registry entry, one config model in `backend/app/models/alert_schemas.py`, and focused tests.
 - Handlers compute a metric over a window and return an `AlertObservation`. They must not write events, dispatch notifications, mutate alert state, or re-derive scope — `workflow_ids` arrives already resolved on the `AlertEvaluationContext`.
-- Cost metrics must resolve USD through `app/services/llm_pricing.py`, and duration percentiles through `app/api/analytics.py::calculate_percentile`. An alert that disagrees with the Traces or Analytics tab about the same window is worse than no alert.
+- Cost metrics must resolve USD through `app/services/llm_pricing.py`, and duration percentiles through `app/services/analytics_metrics.py::calculate_percentile`. An alert that disagrees with the Traces or Analytics tab about the same window is worse than no alert.
 - Evaluation runs inside the leader-gated `CronScheduler` loop and claims rows with `FOR UPDATE SKIP LOCKED` while advancing `next_check_at` in the same statement. Preserve that claim when touching the loop; without it a leader handoff mid-pass double-fires.
 - The frontend mirrors this: `StepCondition.vue` selects per-type field components from a lookup map, not a `v-if` chain, and node-type-style branching does not belong in `AlertsTab.vue`.
 - When adding a new alert type, also update `frontend/src/docs/content/tabs/alerts-tab.md`, `reference/features.md`, and the alert tool descriptions in `backend/app/api/ai_assistant.py`.
