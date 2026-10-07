@@ -157,7 +157,8 @@ def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None
         "- save_workflow: pass the complete workflow (name, description, every node and edge) "
         "in the format of the Workflow DSL reference below. It creates a workflow, or updates "
         "the target workflow when the turn has one. That format is the tool's `workflow` "
-        "argument: never paste workflow JSON in your reply.",
+        "argument: never paste workflow JSON in your reply. To change a workflow saved earlier "
+        "in this conversation, pass its workflow_id instead of creating a second one.",
         "- run_workflow_test: run the saved workflow with realistic sample inputs keyed by its "
         "input field keys, and one `expect` sentence describing a successful run. Runs are "
         "real, so their side effects happen. The result is a run report with the status, each "

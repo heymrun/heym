@@ -846,6 +846,8 @@ async def run_mcp_chat_turn(
         attachment_data=None,
         should_generate_title=should_generate_title,
         credential_mode=CredentialPromptMode.OFF,
+        # heym_chat exists only when MCP chat is enabled, and it always builds.
+        build=BuildRequest(),
     )
     await registry.create_task(conv_id)
     try:
@@ -866,11 +868,15 @@ async def run_mcp_chat_turn(
 
     tool_calls = assistant_message.tool_calls or []
     tool_names = [str(call.get("name") or "") for call in tool_calls if call.get("name")]
+    verified = any(
+        call.get("name") == "finish" and call.get("status") == "success" for call in tool_calls
+    )
     return MCPChatResult(
         conversation_id=conv_uuid,
         text=_strip_hidden_markers(assistant_message.content),
         tool_names=tool_names,
         awaiting_clarification=result.paused_for_clarification,
+        verified=verified,
     )
 
 

@@ -152,6 +152,34 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.db.commit.assert_not_awaited()
         self.assertEqual(self.target.name, "Shared")
 
+    async def test_save_changes_an_earlier_workflow_by_id(self) -> None:
+        self.target = Workflow(
+            id=uuid.uuid4(), owner_id=self.user.id, name="Old", description="", nodes=[], edges=[]
+        )
+        session = self._session()
+
+        outcome = await session.call(
+            "save_workflow", {"workflow_id": str(self.target.id), "workflow": DSL}
+        )
+
+        self.assertEqual(json.loads(outcome.result)["status"], "saved")
+        self.assertEqual(self.target.name, "Lead intake")
+        self.assertEqual(session.progress.workflow_id, self.target.id)
+
+    async def test_save_refuses_another_workflow_on_a_targeted_turn(self) -> None:
+        target = uuid.uuid4()
+        session = self._session(target=target)
+
+        other = await session.call(
+            "save_workflow", {"workflow_id": str(uuid.uuid4()), "workflow": DSL}
+        )
+        invalid = await session.call("save_workflow", {"workflow_id": "nope", "workflow": DSL})
+
+        self.assertIn(str(target), other.result)
+        self.assertIn("UUID", invalid.result)
+        self.db.commit.assert_not_awaited()
+        self.assertEqual(session.progress.workflow_id, target)
+
     async def test_a_test_run_needs_a_saved_workflow(self) -> None:
         outcome = await self._session().call("run_workflow_test", {"inputs": {}, "expect": "x"})
 

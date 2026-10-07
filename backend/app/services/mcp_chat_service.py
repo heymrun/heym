@@ -27,9 +27,11 @@ MCP_CHAT_TOOL_NAME = "heym_chat"
 MCP_CHAT_TOOL_DESCRIPTION = (
     "Talk to the Heym assistant in natural language and let it act on the user's Heym "
     "account. This is the same engine that powers the Heym Chat tab, so it can do "
-    "everything that tab can: list, inspect, create, edit and run workflows with the AI "
-    "workflow builder; report analytics, recent executions, the run history of one "
-    "workflow (how many times it ran, statuses, when, and the details of a single run), "
+    "everything that tab can: list, inspect and run workflows; build a new workflow or "
+    "change one it built earlier in the conversation, test-run it with sample inputs (at "
+    "most 5 test runs per call) and fix it until a run passes; report analytics, recent "
+    "executions, the run history of one workflow (how many times it ran, statuses, when, "
+    "and the details of a single run), "
     "and which executions are "
     "running right now (with elapsed time, current node, and a link to each live run); "
     "read and resolve "
@@ -70,6 +72,8 @@ class MCPChatResult:
     text: str
     tool_names: list[str]
     awaiting_clarification: bool
+    # True when the turn ended with build mode's finish: the latest test run passed.
+    verified: bool = False
 
 
 def build_chat_mcp_tool() -> MCPTool:
@@ -236,6 +240,8 @@ def format_chat_tool_text(result: MCPChatResult) -> str:
     lines.append(f"conversation_id: {result.conversation_id}")
     if result.tool_names:
         lines.append(f"heym actions: {', '.join(result.tool_names)}")
+    if result.verified:
+        lines.append("Verified: the latest test run of the saved workflow passed.")
     if result.awaiting_clarification:
         lines.append(
             "The assistant is waiting for answers to its clarifying questions. "

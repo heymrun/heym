@@ -85,6 +85,13 @@ SAVE_WORKFLOW_TOOL_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
+                "workflow_id": {
+                    "type": "string",
+                    "description": (
+                        "Id of a workflow saved earlier in this conversation, to change it "
+                        "instead of creating a new one. Omit it when the turn has a target."
+                    ),
+                },
                 "workflow": {
                     "type": "object",
                     "description": "The workflow: name, description, nodes and edges.",
@@ -249,7 +256,7 @@ class ChatBuildSession:
         return f"{instructions}\n## Workflow DSL reference\n\n{reference}"
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """The turn's tools: the chat's own, minus the AI Builder, plus what build mode allows now."""
+        """The chat's own tools without the AI Builder, plus what build mode allows now."""
         tools = [t for t in base_tools if t["function"]["name"] not in AI_BUILDER_TOOL_NAMES]
         if not self.progress.budget_spent:
             return tools + [
@@ -306,9 +313,13 @@ class ChatBuildSession:
         except ValueError as exc:
             return _error(str(exc))
 
+        requested = self._requested_workflow_id(args.get("workflow_id"))
+        if isinstance(requested, BuildToolOutcome):
+            return requested
+        workflow_id = requested or self.progress.workflow_id
         existing: Workflow | None = None
-        if self.progress.workflow_id is not None:
-            existing = await self._target_workflow()
+        if workflow_id is not None:
+            existing = await get_workflow_for_user(self.db, workflow_id, self.user.id)
             if existing is None:
                 return _error("Workflow not found or no access")
             if not await user_can_write_workflow(self.db, existing, self.user.id):
@@ -423,6 +434,19 @@ class ChatBuildSession:
             "edges": edges,
         }
         return BuildToolOutcome(result=result, summary=summary, status="success", events=[event])
+
+    def _requested_workflow_id(self, raw: object) -> "uuid.UUID | BuildToolOutcome | None":
+        """The workflow save_workflow should change, when the model names one."""
+        if raw in (None, ""):
+            return None
+        try:
+            requested = uuid.UUID(str(raw))
+        except ValueError:
+            return _error("workflow_id must be a workflow UUID.")
+        target = self.request.target_workflow_id
+        if target is not None and requested != target:
+            return _error(f"This turn changes workflow {target}; pass that id or none.")
+        return requested
 
     async def _run_test(self, args: dict[str, Any]) -> BuildToolOutcome:
         if self.progress.budget_spent:
