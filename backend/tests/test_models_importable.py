@@ -18,6 +18,7 @@ _MODULES = (
     "app.services.drive_file_access",
     "app.services.global_variable_access",
     "app.services.analytics_metrics",
+    "app.services.trace_metrics",
 )
 _PROBE = (
     "import importlib, sys\n"
