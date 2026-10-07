@@ -224,7 +224,7 @@ async def upload_to_slot(
         node_results=execution_result.node_results,
         status=execution_result.status,
         execution_time_ms=execution_result.execution_time_ms,
-        trigger_source="file_upload",
+        trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
     )
     db.add(history)
     await db.flush()

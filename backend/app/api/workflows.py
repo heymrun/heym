@@ -49,6 +49,7 @@ from app.models.schemas import (
     ExecutionTokenCreate,
     ExecutionTokenListItem,
     ExecutionTokenResponse,
+    FileInputSchema,
     HighlightPayloadSchema,
     HistoryListResponse,
     InputFieldSchema,
@@ -754,6 +755,19 @@ def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSch
     return input_fields
 
 
+def extract_file_input_from_workflow(workflow: Workflow) -> FileInputSchema | None:
+    """The file a File Upload trigger asks for, so a run form can offer a drop zone."""
+    node = file_intake_service.find_file_upload_trigger(workflow.nodes or [])
+    if node is None:
+        return None
+    config = file_intake_service.resolve_slot_config(node)
+    return FileInputSchema(
+        label=str((node.get("data") or {}).get("label") or "file"),
+        max_size_mb=config.max_size_bytes // (1024 * 1024),
+        allowed_types=config.allowed_mime or [],
+    )
+
+
 def get_node_output_expression(node: dict) -> str | None:
     node_type = node.get("type", "")
     node_data = node.get("data", {})
@@ -969,6 +983,7 @@ async def list_workflows_with_inputs(
             name=w.name,
             description=w.description,
             input_fields=extract_input_fields_from_workflow(w),
+            file_input=extract_file_input_from_workflow(w),
             output_node=extract_output_node_from_workflow(w),
             created_at=w.created_at,
             updated_at=w.updated_at,
@@ -3301,7 +3316,7 @@ async def execute_workflow_endpoint(
             workflow_id=workflow.id,
             node=upload_node,
             created_by_user_id=minter_id,
-            mint_source="http",
+            mint_source=file_intake_service.mint_source_for(trigger_source, "http"),
         )
         await file_intake_service.write_audit(
             db,
@@ -4037,7 +4052,7 @@ async def execute_workflow_stream(
             workflow_id=workflow.id,
             node=upload_node,
             created_by_user_id=minter_id,
-            mint_source="canvas",
+            mint_source=file_intake_service.mint_source_for(trigger_source, "canvas"),
         )
         await file_intake_service.write_audit(
             db,

@@ -381,6 +381,14 @@ class InputFieldSchema(BaseModel):
     default_value: str | None = Field(None, serialization_alias="defaultValue")
 
 
+class FileInputSchema(BaseModel):
+    """The file a workflow's File Upload trigger takes, for run forms with a drop zone."""
+
+    label: str
+    max_size_mb: int
+    allowed_types: list[str] = []
+
+
 class OutputNodeSchema(BaseModel):
     label: str
     node_type: str
@@ -411,6 +419,7 @@ class WorkflowListWithInputsResponse(BaseModel):
     name: str
     description: str | None
     input_fields: list[InputFieldSchema] = []
+    file_input: FileInputSchema | None = None
     output_node: OutputNodeSchema | None = None
     created_at: datetime
     updated_at: datetime
