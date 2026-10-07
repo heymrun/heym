@@ -13,6 +13,7 @@ _MODULES = (
     "app.services.credential_access",
     "app.services.dashboard_access",
     "app.services.alert_access",
+    "app.services.data_table_access",
 )
 _PROBE = (
     "import importlib, sys\n"
