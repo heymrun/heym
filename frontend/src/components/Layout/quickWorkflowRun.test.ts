@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { NodeResult } from "@/types/workflow";
 import {
+  extractErrorMessage,
   extractImages,
+  fileRunState,
   formatExecutionTime,
   latestNodeResults,
   resultToneClasses,
@@ -66,5 +68,31 @@ describe("resultToneClasses", () => {
     expect(resultToneClasses("success")).toContain("text-success");
     expect(resultToneClasses("error")).toContain("text-destructive");
     expect(resultToneClasses("idle")).toContain("text-muted-foreground");
+  });
+});
+
+describe("file run results", () => {
+  it("reads the reason a run's outputs give for failing", () => {
+    expect(extractErrorMessage({ detail: " Quota spent " })).toBe("Quota spent");
+    expect(extractErrorMessage({ error: "Timed out", message: "ignored" })).toBe("Timed out");
+    expect(extractErrorMessage({ total: 3 })).toBeNull();
+    expect(extractErrorMessage(null)).toBeNull();
+  });
+
+  it("turns an upload's result into a run state", () => {
+    const file = { id: "f", name: "a.pdf", mime: "application/pdf", size: 1, download_url: "" };
+
+    expect(fileRunState({ run_id: "r", status: "success", file, output: { a: 1 } }, 10, 40)).toEqual({
+      status: "success",
+      executionId: null,
+      outputs: { a: 1 },
+      executionTimeMs: 30,
+      executionHistoryId: "r",
+      errorMessage: null,
+      nodeResults: [],
+      startedAt: 10,
+    });
+    expect(fileRunState({ run_id: "r", status: "failed", file, output: {} }, 0, 1).errorMessage)
+      .toBe("Workflow execution failed");
   });
 });

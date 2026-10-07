@@ -1,4 +1,4 @@
-import type { QuickDrawerRunState } from "@/types/quickDrawer";
+import type { FileRunResult, QuickDrawerRunState } from "@/types/quickDrawer";
 import type { NodeResult } from "@/types/workflow";
 
 /** Classes for the run status badge. */
@@ -111,4 +111,35 @@ export function extractImages(
   }
 
   return images;
+}
+
+/** The reason a run's outputs give for failing, if they give one. */
+export function extractErrorMessage(outputs: Record<string, unknown> | null): string | null {
+  if (!outputs) return null;
+  for (const key of ["detail", "error", "message"]) {
+    const value = outputs[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/** The run state for a finished file upload run (the upload response has no step list). */
+export function fileRunState(
+  result: FileRunResult,
+  startedAt: number,
+  finishedAt: number = Date.now(),
+): QuickDrawerRunState {
+  const status: QuickDrawerRunState["status"] =
+    result.status === "success" || result.status === "pending" ? result.status : "error";
+  return {
+    status,
+    executionId: null,
+    outputs: result.output,
+    executionTimeMs: finishedAt - startedAt,
+    executionHistoryId: result.run_id,
+    errorMessage:
+      status === "error" ? extractErrorMessage(result.output) ?? "Workflow execution failed" : null,
+    nodeResults: [],
+    startedAt,
+  };
 }

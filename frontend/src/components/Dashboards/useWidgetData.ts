@@ -1,11 +1,11 @@
 import { ref, type Ref } from "vue";
 
-import type { ChartPayload } from "@/types/dashboard";
+import type { ChartPayload, FileRunPayload } from "@/types/dashboard";
 import { toggleTaskItemLocal, updateOrRemoveTaskItemLocal } from "@/lib/markdownTaskList";
-import { dashboardApi } from "@/services/api";
+import { dashboardApi, getErrorDetail } from "@/services/api";
 
 export interface WidgetData {
-  payload: Ref<ChartPayload | null>;
+  payload: Ref<ChartPayload | FileRunPayload | null>;
   loading: Ref<boolean>;
   error: Ref<string | null>;
   markdownTaskSaving: Ref<boolean>;
@@ -22,7 +22,7 @@ export function useWidgetData(
   widgetId: () => string,
   record: () => string | null = () => null,
 ): WidgetData {
-  const payload = ref<ChartPayload | null>(null);
+  const payload = ref<ChartPayload | FileRunPayload | null>(null);
   const loading = ref(true);
   const error = ref<string | null>(null);
   const markdownTaskSaving = ref(false);
@@ -35,7 +35,8 @@ export function useWidgetData(
       payload.value = response.payload;
       error.value = response.error ?? null;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : "Failed to load widget";
+      // The server's reason, such as a ?record= the page does not accept.
+      error.value = getErrorDetail(e, "Failed to load widget");
     } finally {
       loading.value = false;
     }

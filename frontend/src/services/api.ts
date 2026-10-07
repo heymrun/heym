@@ -143,11 +143,13 @@ import type {
   DashboardSummary,
   DashboardTeamShare,
   DashboardWidget,
+  FileRunSlot,
   RecordFormat,
   WidgetCreateRequest,
   WidgetDataResponse,
   WidgetUpdateRequest,
 } from "@/types/dashboard";
+import type { FileRunResult } from "@/types/quickDrawer";
 import type {
   BoardCard,
   BoardColumn,
@@ -204,7 +206,8 @@ const api = axios.create({
   withCredentials: true,
 });
 
-function getErrorDetail(error: unknown, fallback: string): string {
+/** The server's `detail` for a failed request, else the error's message, else `fallback`. */
+export function getErrorDetail(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === "string" && detail.trim()) {
@@ -1754,6 +1757,12 @@ export const dashboardApi = {
     return response.data;
   },
 
+  /** A single-use upload link for one drop on a file-run widget. */
+  createFileRunSlot: async (id: string): Promise<FileRunSlot> => {
+    const response = await api.post<FileRunSlot>(`/dashboards/widgets/${id}/file-slot`);
+    return response.data;
+  },
+
   toggleMarkdownTask: async (id: string, lineIndex: number): Promise<WidgetDataResponse> => {
     const response = await api.patch<WidgetDataResponse>(
       `/dashboards/widgets/${id}/markdown-task-toggle`,
@@ -2127,25 +2136,17 @@ export interface WorkflowWithInputs {
   updated_at: string;
 }
 
-/** What the file intake returns for an upload: the run it started, and its outputs. */
-export interface FileIntakeRunResult {
-  run_id: string;
-  status: string;
-  file: { id: string; name: string; mime: string; size: number; download_url: string };
-  output: Record<string, unknown>;
-}
-
 export const fileIntakeApi = {
   /**
    * Upload a file to a single-use slot from a mint (`upload_url`). The run happens
    * during the request and the response carries its result. Only the path of the
    * link is used, so the request stays on this origin behind any proxy.
    */
-  upload: async (uploadUrl: string, file: File): Promise<FileIntakeRunResult> => {
+  upload: async (uploadUrl: string, file: File): Promise<FileRunResult> => {
     const path = new URL(uploadUrl, window.location.origin).pathname.replace(/^\/api/, "");
     const form = new FormData();
     form.append("file", file, file.name);
-    const response = await api.post<FileIntakeRunResult>(path, form, {
+    const response = await api.post<FileRunResult>(path, form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return response.data;

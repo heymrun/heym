@@ -61,6 +61,26 @@ export interface ChartPayload {
   items?: HitlWidgetItem[];
 }
 
+/** A file-run widget before any drop: the file its workflow's File Upload trigger takes. */
+export interface FileRunPayload {
+  type: "fileRun";
+  file_label: string;
+  max_size_mb: number;
+  allowed_types: string[];
+}
+
+/** Every widget is a chart, except the file-run widget that runs a workflow on a file. */
+export type WidgetType = ChartPayload["type"] | "fileRun";
+
+/** A single-use upload link for one drop on a file-run widget. */
+export interface FileRunSlot {
+  upload_url: string;
+  expires_at: string;
+  max_size_mb: number;
+  allowed_types: string[];
+  slot_id: string;
+}
+
 export interface WidgetLayout {
   x: number;
   y: number;
@@ -73,7 +93,7 @@ export interface DashboardWidget {
   workflow_id: string;
   title: string;
   description: string | null;
-  chart_type: ChartPayload["type"];
+  chart_type: WidgetType;
   layout: WidgetLayout;
   cache_ttl_seconds: number;
   position: number;
@@ -127,7 +147,7 @@ export interface DashboardTeamShare {
 
 export interface WidgetDataResponse {
   widget_id: string;
-  payload: ChartPayload | null;
+  payload: ChartPayload | FileRunPayload | null;
   cached: boolean;
   computed_at: string | null;
   error?: string | null;
@@ -137,9 +157,11 @@ export interface WidgetDataResponse {
 export interface WidgetCreateRequest {
   title: string;
   description?: string | null;
-  chart_type: ChartPayload["type"];
+  chart_type: WidgetType;
   layout: WidgetLayout;
   cache_ttl_seconds: number;
+  /** For a file-run widget: the workflow with a File Upload trigger it runs. */
+  workflow_id?: string;
 }
 
 export interface WidgetUpdateRequest {

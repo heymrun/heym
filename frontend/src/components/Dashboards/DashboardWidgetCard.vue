@@ -12,8 +12,9 @@ import {
   Trash2,
 } from "lucide-vue-next";
 
-import type { ChartPayload, DashboardWidget } from "@/types/dashboard";
+import type { ChartPayload, DashboardWidget, FileRunPayload } from "@/types/dashboard";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
+import FileRunWidget from "@/components/Dashboards/FileRunWidget.vue";
 import WidgetActionsMenu from "@/components/Dashboards/WidgetActionsMenu.vue";
 import {
   openHitlHistoryKey,
@@ -56,6 +57,14 @@ const {
   () => props.record ?? null,
 );
 
+const chartPayload = computed<ChartPayload | null>(() =>
+  payload.value?.type === "fileRun" ? null : payload.value,
+);
+const fileRunPayload = computed<FileRunPayload | null>(() =>
+  payload.value?.type === "fileRun" ? payload.value : null,
+);
+const isFileRun = computed<boolean>(() => props.widget.chart_type === "fileRun");
+
 // Rows open the linked detail page only for viewers who can open it.
 const rowLink = computed<TableRowLink | null>(() => {
   const { link_dashboard_id, link_record_field, link_accessible } = props.widget;
@@ -70,7 +79,7 @@ function onRowOpen(record: TableRecord): void {
 // Only surface http(s) links. The url can come from a dynamic expression over upstream
 // data, so reject javascript:/data:/relative values to avoid an injected-link XSS.
 const externalUrl = computed<string | null>(() => {
-  const raw = payload.value?.url;
+  const raw = chartPayload.value?.url;
   if (!raw) return null;
   try {
     const parsed = new URL(raw);
@@ -130,10 +139,12 @@ function openWidgetHistory(): void {
   openHitlHistory(target.workflowId, target.executionId);
 }
 
-// A read-only share keeps only Refresh; every other action changes the widget.
+// A read-only share keeps only Refresh; every other action changes the widget. A
+// file-run widget runs an existing workflow, so there is no widget graph to fine-tune.
 // History stays first so it shares the same gap as the widget icons.
 const visibleActions = computed<WidgetAction[]>(() => {
-  const base = props.canWrite ? actions : actions.filter((action) => action.key === "refresh");
+  const writable = isFileRun.value ? actions.filter((action) => action.key !== "refine") : actions;
+  const base = props.canWrite ? writable : actions.filter((action) => action.key === "refresh");
   if (!hitlTarget.value) return base;
   return [
     {
@@ -148,7 +159,9 @@ const visibleActions = computed<WidgetAction[]>(() => {
 
 // Read-only viewers see task lists as plain checkboxes they cannot tick.
 const displayPayload = computed<ChartPayload | null>(() =>
-  props.canWrite || !payload.value ? payload.value : { ...payload.value, text_interactive: false },
+  props.canWrite || !chartPayload.value
+    ? chartPayload.value
+    : { ...chartPayload.value, text_interactive: false },
 );
 
 function commitTitle(): void {
@@ -162,7 +175,8 @@ function commitTitle(): void {
 }
 
 function onBodyDoubleClick(): void {
-  if (props.canWrite) emit("edit", props.widget.workflow_id);
+  // A file-run widget's body is a drop zone; its workflow opens from the Edit action.
+  if (props.canWrite && !isFileRun.value) emit("edit", props.widget.workflow_id);
 }
 
 // Reload when the widget's workflow changes (AI refine, settings) — updated_at bumps.
@@ -236,6 +250,11 @@ onMounted(() => {
       >
         {{ error }}
       </div>
+      <FileRunWidget
+        v-else-if="fileRunPayload"
+        :widget-id="widget.id"
+        :payload="fileRunPayload"
+      />
       <ChartRenderer
         v-else
         :payload="displayPayload"

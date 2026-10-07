@@ -62,7 +62,8 @@ async function handleCreate(body: WidgetCreateRequest): Promise<void> {
   if (!dashboard) return;
   const widget = await dashboardApi.createWidget(dashboard.id, body);
   dashboardStore.addWidget(widget);
-  openEditor(widget.workflow_id);
+  // A file-run widget runs an existing workflow; there is no new graph to build.
+  if (widget.chart_type !== "fileRun") openEditor(widget.workflow_id);
 }
 
 async function handleGenerate(payload: {

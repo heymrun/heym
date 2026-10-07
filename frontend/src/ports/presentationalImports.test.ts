@@ -15,6 +15,7 @@ const PRESENTATIONAL = [
   "components/Chat/InteractiveVoiceMode.vue",
   "components/Credentials/CredentialDialog.vue",
   "components/Dashboards/ChartView.vue",
+  "components/Dashboards/FileRunWidgetView.vue",
   "components/Dashboards/HitlCarousel.vue",
   "components/Dashboards/HitlReviewActions.vue",
   "components/Layout/QuickWorkflowRunView.vue",

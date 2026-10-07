@@ -9,6 +9,8 @@ vi.mock("@/services/api", () => ({
     get: vi.fn(),
   },
   fileIntakeApi: { upload: vi.fn() },
+  getErrorDetail: (error: unknown, fallback: string): string =>
+    error instanceof Error ? error.message : fallback,
 }));
 
 import { fileIntakeApi, workflowApi } from "@/services/api";

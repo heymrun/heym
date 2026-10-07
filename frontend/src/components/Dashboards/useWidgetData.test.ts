@@ -9,6 +9,8 @@ vi.mock("@/services/api", () => ({
     toggleMarkdownTask: vi.fn(),
     updateMarkdownTask: vi.fn(),
   },
+  getErrorDetail: (error: { response?: { data?: { detail?: string } } }, fallback: string) =>
+    error.response?.data?.detail ?? fallback,
 }));
 
 const api = vi.mocked(dashboardApi);
@@ -44,6 +46,20 @@ describe("useWidgetData", () => {
     await data.loadData();
 
     expect(api.getWidgetData).toHaveBeenCalledWith("w-1", false, "ACME-1");
+  });
+
+  it("shows the server's reason when the chart cannot load", async () => {
+    api.getWidgetData.mockRejectedValue({
+      response: { data: { detail: "This page does not accept that record" } },
+    });
+    const data = useWidgetData(
+      () => "w-1",
+      () => "a b",
+    );
+
+    await data.loadData();
+
+    expect(data.error.value).toBe("This page does not accept that record");
   });
 
   it("puts a checklist back when the toggle fails", async () => {

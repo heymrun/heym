@@ -36,6 +36,14 @@ export interface QuickDrawerWorkflowViewModel {
   searchableText: string;
 }
 
+/** What the file intake returns for an upload: the run it started, and its outputs. */
+export interface FileRunResult {
+  run_id: string;
+  status: string;
+  file: { id: string; name: string; mime: string; size: number; download_url: string };
+  output: Record<string, unknown>;
+}
+
 export interface QuickDrawerRunState {
   status: "idle" | "running" | "success" | "error" | "pending";
   executionId: string | null;

@@ -1,9 +1,14 @@
 import { computed, ref } from "vue";
-import axios from "axios";
 import { defineStore } from "pinia";
 
+import { extractErrorMessage, fileRunState } from "@/components/Layout/quickWorkflowRun";
 import { useToast } from "@/composables/useToast";
-import { fileIntakeApi, workflowApi, type WorkflowWithInputs } from "@/services/api";
+import {
+  fileIntakeApi,
+  getErrorDetail,
+  workflowApi,
+  type WorkflowWithInputs,
+} from "@/services/api";
 import type {
   QuickDrawerPreferences,
   QuickDrawerRunState,
@@ -79,35 +84,6 @@ function normalizeWorkflow(workflow: WorkflowWithInputs): QuickDrawerWorkflowVie
     pinned: false,
     searchableText: `${workflow.name} ${workflow.description ?? ""}`.toLowerCase(),
   };
-}
-
-function extractErrorMessage(outputs: Record<string, unknown> | null): string | null {
-  if (!outputs) return null;
-
-  const detail = outputs.detail;
-  if (typeof detail === "string" && detail.trim()) {
-    return detail.trim();
-  }
-
-  const error = outputs.error;
-  if (typeof error === "string" && error.trim()) {
-    return error.trim();
-  }
-
-  const message = outputs.message;
-  if (typeof message === "string" && message.trim()) {
-    return message.trim();
-  }
-
-  return null;
-}
-
-/** The server's reason for a refused request (an upload past its limits), else the error. */
-function requestErrorMessage(error: unknown): string {
-  if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") {
-    return error.response.data.detail;
-  }
-  return error instanceof Error ? error.message : "Workflow execution failed";
 }
 
 function buildNodeLabelMap(workflow: Workflow): Record<string, string> {
@@ -527,26 +503,14 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
       }
       const result = await fileIntakeApi.upload(uploadUrl, file);
       if (abortController !== controller) return;
-      const status: QuickDrawerRunState["status"] =
-        result.status === "success" || result.status === "pending" ? result.status : "error";
-      runState.value = {
-        status,
-        executionId: null,
-        outputs: result.output,
-        executionTimeMs: Date.now() - startedAt,
-        executionHistoryId: result.run_id,
-        errorMessage:
-          status === "error"
-            ? extractErrorMessage(result.output) ?? "Workflow execution failed"
-            : null,
-        nodeResults: [],
-        startedAt,
-      };
+      runState.value = fileRunState(result, startedAt);
       selectedFile.value = null;
-      if (status === "success") showToast(`Workflow "${workflow.name}" completed`, "success");
+      if (runState.value.status === "success") {
+        showToast(`Workflow "${workflow.name}" completed`, "success");
+      }
     } catch (error) {
       if (abortController !== controller) return;
-      const errorMessage = requestErrorMessage(error);
+      const errorMessage = getErrorDetail(error, "Workflow execution failed");
       runState.value = { ...runState.value, status: "error", errorMessage };
       showToast(errorMessage, "error");
     } finally {
