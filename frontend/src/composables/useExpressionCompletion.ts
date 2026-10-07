@@ -844,6 +844,20 @@ export function useExpressionCompletion(
       });
     }
 
+    // Dashboard widget workflows end in chartOutput; on a detail page they read its record.
+    if (
+      "page".startsWith(prefix.toLowerCase()) &&
+      options.nodes.some((node) => node.type === "chartOutput")
+    ) {
+      suggestions.push({
+        label: `${labelPrefix}page.record`,
+        insertText: "page.record",
+        type: "node",
+        detail: "dashboard page",
+        description: "Record of the detail page (?record=); null on the dashboard itself",
+      });
+    }
+
     // Don't show date builtins or other $functions inside function args
     if (!isInsideFunctionArg) {
       const matchingDateBuiltins = DATE_BUILTINS.filter((f) =>

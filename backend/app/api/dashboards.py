@@ -93,7 +93,8 @@ _AI_WIDGET_SUFFIX = (
     "to count down and join lines before chartOutput valueField. "
     "When the user wants pending human reviews on the dashboard, use chartType hitl and no "
     "upstream data nodes. Do not include trigger, "
-    "input, error-handler, or RabbitMQ nodes in dashboard widget workflows."
+    "input, error-handler, or RabbitMQ nodes in dashboard widget workflows. "
+    "On a detail dashboard, read the record the page is about from $page.record."
 )
 
 

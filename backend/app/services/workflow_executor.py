@@ -66,7 +66,9 @@ from app.services.model_router import ModelRouterConfigError, build_router_for_c
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
 from app.services.node_execution.extra_body import resolve_extra_body
 from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
+from app.services.page_params import PAGE_CONTEXT_NAME, page_params_from_inputs
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
+from app.services.trigger_inputs import receives_initial_inputs
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
 )
@@ -2088,6 +2090,8 @@ class WorkflowExecutor:
         }
         self.loop_states: dict[str, dict] = {}
         self.vars: dict[str, object] = {}
+        # `$page`: set from the run's inputs on a dashboard page (see page_params).
+        self.page_params: dict[str, object] | None = None
         self._wrapped_vars_cache: DotDict | None = None
         self._wrapped_global_cache: DotDict | None = None
         self._merged_global_context_cache: dict[str, object] | None = None
@@ -6154,6 +6158,9 @@ class WorkflowExecutor:
         combined["workflowPath"] = DotStr(workflow_path)
         combined["workflowUrl"] = DotStr(self._build_workflow_url(workflow_path))
         combined["executionId"] = DotStr(self.execution_id or "")
+        if self.page_params is not None and PAGE_CONTEXT_NAME not in combined:
+            # A node labelled `page` keeps its name; $page is only a fallback.
+            combined[PAGE_CONTEXT_NAME] = self._wrap_value(dict(self.page_params))
 
         if self.credentials_context:
             credentials_dict = DotDict()
@@ -7702,6 +7709,7 @@ class WorkflowExecutor:
 
     def _execute_inner(self, workflow_id: uuid.UUID, initial_inputs: dict) -> ExecutionResult:
         start_time = time.time()
+        self.page_params = page_params_from_inputs(initial_inputs)
         self.execution_start_time = start_time
         self._arm_deadline()
         self.check_cancelled()
@@ -7734,28 +7742,7 @@ class WorkflowExecutor:
                     node["data"]["value"] = body["text"]
                 elif isinstance(initial_inputs, dict) and "text" in initial_inputs:
                     node["data"]["value"] = initial_inputs["text"]
-            elif (
-                node.get("type") == "rabbitmq"
-                and node.get("data", {}).get("rabbitmqOperation") == "receive"
-            ):
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "imapTrigger":
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "websocketTrigger":
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "slackTrigger":
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "discordTrigger":
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "telegramTrigger":
-                node["data"] = node.get("data", {})
-                node["data"]["_initial_inputs"] = initial_inputs
-            elif node.get("type") == "heymTrigger":
+            elif receives_initial_inputs(node):
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
 
@@ -8436,6 +8423,7 @@ def resume_workflow_execution(
     )
     wf_executor.label_to_output = copy.deepcopy(snapshot.get("label_to_output") or {})
     wf_executor._rebuild_wrapped_label_output_cache()
+    wf_executor.page_params = page_params_from_inputs(snapshot.get("initial_inputs"))
     wf_executor.skipped_nodes = set(snapshot.get("skipped_nodes") or [])
     wf_executor.inactive_nodes = set(snapshot.get("inactive_nodes") or [])
     wf_executor.loop_states = copy.deepcopy(snapshot.get("loop_states") or {})
@@ -8927,6 +8915,7 @@ def execute_llm_batch_notification_branch(
     )
     wf_executor.label_to_output = copy.deepcopy(snapshot.get("label_to_output") or {})
     wf_executor._rebuild_wrapped_label_output_cache()
+    wf_executor.page_params = page_params_from_inputs(snapshot.get("initial_inputs"))
     wf_executor.skipped_nodes = set(snapshot.get("skipped_nodes") or [])
     wf_executor.inactive_nodes = set(snapshot.get("inactive_nodes") or [])
     wf_executor.loop_states = copy.deepcopy(snapshot.get("loop_states") or {})
@@ -9168,6 +9157,7 @@ def execute_hitl_notification_branch(
     )
     wf_executor.label_to_output = copy.deepcopy(snapshot.get("label_to_output") or {})
     wf_executor._rebuild_wrapped_label_output_cache()
+    wf_executor.page_params = page_params_from_inputs(snapshot.get("initial_inputs"))
     wf_executor.skipped_nodes = set(snapshot.get("skipped_nodes") or [])
     wf_executor.inactive_nodes = set(snapshot.get("inactive_nodes") or [])
     wf_executor.loop_states = copy.deepcopy(snapshot.get("loop_states") or {})
@@ -9564,6 +9554,7 @@ def _execute_workflow_streaming_impl(
     )
     wf_executor._ensure_execution_id()
     wf_executor._arm_deadline()
+    wf_executor.page_params = page_params_from_inputs(inputs)
     if executor_holder is not None:
         executor_holder["executor"] = wf_executor
     # Re-attach the streaming root span context so node spans (run in worker
@@ -9600,28 +9591,7 @@ def _execute_workflow_streaming_impl(
             node["data"]["_initial_inputs"] = inputs
             if "text" in inputs:
                 node["data"]["value"] = inputs["text"]
-        elif (
-            node.get("type") == "rabbitmq"
-            and node.get("data", {}).get("rabbitmqOperation") == "receive"
-        ):
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "imapTrigger":
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "websocketTrigger":
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "slackTrigger":
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "discordTrigger":
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "telegramTrigger":
-            node["data"] = node.get("data", {})
-            node["data"]["_initial_inputs"] = inputs
-        elif node.get("type") == "heymTrigger":
+        elif receives_initial_inputs(node):
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
 

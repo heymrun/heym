@@ -3775,6 +3775,15 @@ node using `$array(dict(...), dict(...))`.
 `set` node keys: `dict(...)` uses `key=value` keyword args (identifier keys, no quotes on the key).
 String values use double quotes: `dict(status="success", count=150)`.
 
+#### Detail pages: `$page.record`
+
+A dashboard opened with `?record=<value>` (a row link from another dashboard's table opens one)
+runs every widget workflow with that value as `$page.record`; on a dashboard opened without it,
+`$page.record` is null. Use it to fetch the one record the page is about, for example an `http`
+node URL `https://crm.example.com/api/customers/$page.record`. The value comes from a URL: pass it
+as a value the node escapes (an HTTP query parameter, a `dataTable` or ClickHouse filter value),
+never build query text from it. Widget workflows still have no trigger or input node.
+
 **Full example — Bar chart with example data (set → chartOutput):**
 ```json
 {
