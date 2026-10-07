@@ -22,6 +22,7 @@ const PRESENTATIONAL = [
   "composables/clarifyDataTables.ts",
   "composables/interactiveVoice.ts",
   "composables/textToSpeechPlayer.ts",
+  "composables/useDictation.ts",
   "composables/useFileAttachment.ts",
   "features/assistant-yolo/components/YoloStepList.vue",
   "ports/index.ts",

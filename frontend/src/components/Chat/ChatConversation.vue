@@ -41,6 +41,7 @@ import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi } from "@/services/api";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
+import { useDictation } from "@/composables/useDictation";
 import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
@@ -100,10 +101,22 @@ const copiedMessageId = ref<string | null>(null);
 const queueEditingId = ref<string | null>(null);
 const queueEditingValue = ref("");
 const queueBusyIds = reactive<Set<string>>(new Set());
-const speechRecognition = ref<SpeechRecognition | null>(null);
-const isSpeechSupported = ref(false);
-const isListening = ref(false);
 const isFixingTranscription = ref(false);
+// Dictation fills the message box; stopping it asks the model to clean the text up.
+const dictation = useDictation({
+  lang: "tr-TR",
+  onStart: () => {
+    input.value = "";
+  },
+  onTranscript: (text) => {
+    input.value = text;
+    nextTick(resizeChatInput);
+  },
+  onStop: fixTranscriptionIfNeeded,
+});
+const isSpeechSupported = dictation.supported;
+const isListening = dictation.listening;
+const toggleSpeechInput = dictation.toggle;
 const imageLightboxSrc = ref<string | null>(null);
 const imageLightboxSrcs = ref<string[]>([]);
 
@@ -128,40 +141,6 @@ let copiedMessageIdTimeout: ReturnType<typeof setTimeout> | null = null;
 let messagesResizeObserver: ResizeObserver | null = null;
 let chatScrollbarDragStartY = 0;
 let chatScrollbarDragStartScrollTop = 0;
-
-interface SpeechRecognitionResultAlternative {
-  transcript: string;
-}
-
-interface SpeechRecognitionResultItem {
-  isFinal: boolean;
-  0: SpeechRecognitionResultAlternative;
-}
-
-interface SpeechRecognitionResultList {
-  length: number;
-  [index: number]: SpeechRecognitionResultItem;
-}
-
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognition extends EventTarget {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-}
-
-interface SpeechRecognitionWindow extends Window {
-  webkitSpeechRecognition?: new () => SpeechRecognition;
-  SpeechRecognition?: new () => SpeechRecognition;
-}
 
 const { attachedFile, attachmentError, attachmentLoading, processFile, clearAttachment } =
   useFileAttachment();
@@ -499,7 +478,6 @@ async function loadConversationForRoute(id: string): Promise<void> {
 }
 
 onMounted(() => {
-  setupSpeechRecognition();
   void loadConversationForRoute(props.conversationId);
   void loadCredentials();
   void chatStore.loadQuickPrompts();
@@ -669,40 +647,6 @@ async function handleFileInputChange(event: Event): Promise<void> {
   target.value = "";
 }
 
-function setupSpeechRecognition(): void {
-  const recognitionWindow = window as SpeechRecognitionWindow;
-  const SpeechRecognitionConstructor =
-    recognitionWindow.SpeechRecognition || recognitionWindow.webkitSpeechRecognition;
-  if (!SpeechRecognitionConstructor) {
-    isSpeechSupported.value = false;
-    return;
-  }
-  isSpeechSupported.value = true;
-  const recognition = new SpeechRecognitionConstructor();
-  recognition.lang = "tr-TR";
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.onresult = (event: SpeechRecognitionEvent) => {
-    const transcripts = Array.from(event.results).map((result) => result[0]?.transcript ?? "");
-    const transcript = transcripts.join("").trim();
-    if (transcript) {
-      input.value = transcript;
-      nextTick(resizeChatInput);
-    }
-  };
-  recognition.onerror = () => {
-    isListening.value = false;
-  };
-  recognition.onend = () => {
-    if (isListening.value && speechRecognition.value) {
-      speechRecognition.value.start();
-    } else {
-      isListening.value = false;
-    }
-  };
-  speechRecognition.value = recognition;
-}
-
 async function fixTranscriptionIfNeeded(): Promise<void> {
   const text = input.value.trim();
   if (!text || !selectedCredentialId.value || !selectedModel.value) return;
@@ -721,19 +665,6 @@ async function fixTranscriptionIfNeeded(): Promise<void> {
   } finally {
     isFixingTranscription.value = false;
   }
-}
-
-function toggleSpeechInput(): void {
-  if (!speechRecognition.value) return;
-  if (isListening.value) {
-    isListening.value = false;
-    speechRecognition.value.stop();
-    fixTranscriptionIfNeeded();
-    return;
-  }
-  input.value = "";
-  isListening.value = true;
-  speechRecognition.value.start();
 }
 
 function _applyConversationSession(): void {
@@ -828,7 +759,6 @@ onUnmounted(() => {
   window.removeEventListener("pointerup", handleChatScrollbarPointerUp);
   messagesResizeObserver?.disconnect();
   if (copiedMessageIdTimeout) clearTimeout(copiedMessageIdTimeout);
-  speechRecognition.value?.stop();
 });
 </script>
 
