@@ -3747,6 +3747,12 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `valueField`: row key used as the single-series numeric value (pie/bar/line/numeric/gauge)
   - `series`: optional array `[{"name": "Sent", "field": "sent"}, ...]` for multi-series bar/line (overrides `valueField`)
   - `columns`: optional array of column names for `table` (default: keys of the first row)
+  - `statusColumn`: optional column of a `table` rendered as colored status chips (it must be one
+    of the shown columns)
+  - `statusTones`: optional map from a status value to a tone, `"success"` | `"attention"` |
+    `"failure"` | `"waiting"` | `"neutral"`, for values the defaults do not cover. Common words
+    already have a tone (paid, done, approved: success; overdue, needs review: attention; failed,
+    rejected: failure; pending, running, queued: waiting); anything else is neutral
   - `xField` / `yField`: row keys for the X and Y numeric axes (scatter)
   - `min` / `max`: numeric range for `gauge` (default `0` / `100`)
   - `unit`: optional unit string for `numeric`/`gauge`
@@ -3806,6 +3812,12 @@ Pie (upstream rows `[{status, count}]`; build with `$array(dict(status="success"
 Table (upstream rows `[{name, total}]`):
 ```json
 {"type": "chartOutput", "data": {"label": "topCustomers", "chartType": "table", "dataPath": "rows", "columns": ["name", "total"]}}
+```
+
+Table with status chips (upstream rows `[{invoice, customer, state}]`; `Disputed` is not a default
+word, so it gets a tone in `statusTones`):
+```json
+{"type": "chartOutput", "data": {"label": "invoices", "chartType": "table", "dataPath": "rows", "columns": ["invoice", "customer", "state"], "statusColumn": "state", "statusTones": {"Disputed": "failure"}}}
 ```
 
 Numeric / KPI (upstream rows `[{total}]`, first row used):
