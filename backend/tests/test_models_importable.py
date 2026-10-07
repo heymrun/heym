@@ -17,6 +17,7 @@ _MODULES = (
     "app.services.vector_store_access",
     "app.services.drive_file_access",
     "app.services.global_variable_access",
+    "app.services.analytics_metrics",
 )
 _PROBE = (
     "import importlib, sys\n"

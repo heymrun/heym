@@ -29,6 +29,9 @@ class _ExecuteResult:
     def scalars(self) -> _ScalarSequenceResult:
         return _ScalarSequenceResult(self._rows)
 
+    def all(self) -> list[object]:
+        return self._rows
+
 
 class AnalyticsTimeWindowTests(unittest.TestCase):
     def test_resolve_time_window_normalizes_explicit_bounds_to_utc(self) -> None:
