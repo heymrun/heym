@@ -28,7 +28,8 @@ const emit = defineEmits<{
 }>();
 
 const quickDrawerStore = useQuickDrawerStore();
-const { currentInputValues, runState, selectedWorkflow } = storeToRefs(quickDrawerStore);
+const { currentInputValues, runState, selectedFile, selectedWorkflow } =
+  storeToRefs(quickDrawerStore);
 </script>
 
 <template>
@@ -37,6 +38,7 @@ const { currentInputValues, runState, selectedWorkflow } = storeToRefs(quickDraw
     :workflow="selectedWorkflow"
     :input-values="currentInputValues"
     :run-state="runState"
+    :selected-file="selectedFile"
     :show-close="showClose"
     :show-pin="showPin"
     :show-eyebrow="showEyebrow"
@@ -47,6 +49,7 @@ const { currentInputValues, runState, selectedWorkflow } = storeToRefs(quickDraw
     @go-to-workflow="(event) => emit('goToWorkflow', event)"
     @toggle-pin="quickDrawerStore.togglePin(selectedWorkflow.id)"
     @update-input="(key, value) => quickDrawerStore.updateInputValue(key, value)"
+    @select-file="(file) => quickDrawerStore.selectFile(file)"
     @run="quickDrawerStore.runSelectedWorkflow()"
     @stop="quickDrawerStore.stopSelectedWorkflowExecution()"
   />

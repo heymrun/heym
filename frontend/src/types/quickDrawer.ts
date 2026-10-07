@@ -16,11 +16,19 @@ export interface QuickDrawerInputField {
   defaultValue?: string;
 }
 
+/** The file a workflow's File Upload trigger takes; the run form shows a drop zone for it. */
+export interface QuickDrawerFileInput {
+  label: string;
+  maxSizeMb: number;
+  allowedTypes: string[];
+}
+
 export interface QuickDrawerWorkflowViewModel {
   id: string;
   name: string;
   description: string | null;
   inputFields: QuickDrawerInputField[];
+  fileInput: QuickDrawerFileInput | null;
   outputNode: QuickDrawerOutputNode | null;
   createdAt: string;
   updatedAt: string;

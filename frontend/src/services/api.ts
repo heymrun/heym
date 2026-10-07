@@ -2109,15 +2109,48 @@ export interface OutputNodeInfo {
   output_expression: string | null;
 }
 
+/** The file a workflow's File Upload trigger takes. */
+export interface WorkflowFileInput {
+  label: string;
+  max_size_mb: number;
+  allowed_types: string[];
+}
+
 export interface WorkflowWithInputs {
   id: string;
   name: string;
   description: string | null;
   input_fields: WorkflowInputField[];
+  file_input?: WorkflowFileInput | null;
   output_node: OutputNodeInfo | null;
   created_at: string;
   updated_at: string;
 }
+
+/** What the file intake returns for an upload: the run it started, and its outputs. */
+export interface FileIntakeRunResult {
+  run_id: string;
+  status: string;
+  file: { id: string; name: string; mime: string; size: number; download_url: string };
+  output: Record<string, unknown>;
+}
+
+export const fileIntakeApi = {
+  /**
+   * Upload a file to a single-use slot from a mint (`upload_url`). The run happens
+   * during the request and the response carries its result. Only the path of the
+   * link is used, so the request stays on this origin behind any proxy.
+   */
+  upload: async (uploadUrl: string, file: File): Promise<FileIntakeRunResult> => {
+    const path = new URL(uploadUrl, window.location.origin).pathname.replace(/^\/api/, "");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await api.post<FileIntakeRunResult>(path, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
+};
 
 export interface AnalysisNoteEditor {
   id: string;

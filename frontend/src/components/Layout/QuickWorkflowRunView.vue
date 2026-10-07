@@ -8,6 +8,8 @@ interface Props {
   workflow: QuickDrawerWorkflowViewModel;
   inputValues: Record<string, string>;
   runState: QuickDrawerRunState;
+  /** The file chosen for a workflow with a File Upload trigger. */
+  selectedFile?: File | null;
   showClose?: boolean;
   showPin?: boolean;
   showEyebrow?: boolean;
@@ -17,6 +19,7 @@ interface Props {
 }
 
 withDefaults(defineProps<Props>(), {
+  selectedFile: null,
   showClose: true,
   showPin: true,
   showEyebrow: true,
@@ -30,6 +33,7 @@ const emit = defineEmits<{
   goToWorkflow: [event: MouseEvent];
   togglePin: [];
   updateInput: [key: string, value: string];
+  selectFile: [file: File | null];
   run: [];
   stop: [];
 }>();
@@ -59,7 +63,10 @@ const emit = defineEmits<{
           :fields="workflow.inputFields"
           :values="inputValues"
           :running="runState.status === 'running'"
+          :file-input="workflow.fileInput"
+          :file="selectedFile"
           @update-input="(key, value) => emit('updateInput', key, value)"
+          @select-file="(file) => emit('selectFile', file)"
           @run="emit('run')"
           @stop="emit('stop')"
         />

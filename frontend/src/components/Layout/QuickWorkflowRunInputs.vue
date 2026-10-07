@@ -1,18 +1,26 @@
 <script setup lang="ts">
 import { Play, Square } from "lucide-vue-next";
 
-import type { QuickDrawerInputField } from "@/types/quickDrawer";
+import type { QuickDrawerFileInput, QuickDrawerInputField } from "@/types/quickDrawer";
 import Button from "@/components/ui/Button.vue";
+import FileDropInput from "@/components/ui/FileDropInput.vue";
 import Input from "@/components/ui/Input.vue";
 
-defineProps<{
-  fields: QuickDrawerInputField[];
-  values: Record<string, string>;
-  running: boolean;
-}>();
+withDefaults(
+  defineProps<{
+    fields: QuickDrawerInputField[];
+    values: Record<string, string>;
+    running: boolean;
+    /** Set for a workflow with a File Upload trigger: the run needs a file. */
+    fileInput?: QuickDrawerFileInput | null;
+    file?: File | null;
+  }>(),
+  { fileInput: null, file: null },
+);
 
 const emit = defineEmits<{
   updateInput: [key: string, value: string];
+  selectFile: [file: File | null];
   run: [];
   stop: [];
 }>();
@@ -25,6 +33,15 @@ const emit = defineEmits<{
     </div>
 
     <div class="mt-4 space-y-3">
+      <FileDropInput
+        v-if="fileInput"
+        :label="fileInput.label"
+        :file="file"
+        :allowed-types="fileInput.allowedTypes"
+        :max-size-mb="fileInput.maxSizeMb"
+        :disabled="running"
+        @select="(selected) => emit('selectFile', selected)"
+      />
       <template v-if="fields.length > 0">
         <div
           v-for="field in fields"
@@ -46,7 +63,7 @@ const emit = defineEmits<{
         </div>
       </template>
       <div
-        v-else
+        v-else-if="!fileInput"
         class="rounded-2xl border border-dashed border-border/60 px-4 py-3 text-sm text-muted-foreground"
       >
         This workflow does not require any input fields.
@@ -59,6 +76,7 @@ const emit = defineEmits<{
         variant="gradient"
         class="flex-1"
         data-testid="quick-workflow-run-start"
+        :disabled="Boolean(fileInput) && !file"
         @click="emit('run')"
       >
         <Play class="h-4 w-4" />
