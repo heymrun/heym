@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import unittest
 from threading import Event
 from unittest.mock import MagicMock
@@ -68,6 +69,76 @@ class TestRequestChatCancelTask(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertTrue(task.cancelled())
+
+    async def test_double_cancel_does_not_cancel_task_twice(self) -> None:
+        conv_id = "conv-double-cancel"
+        started = asyncio.Event()
+
+        async def worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task: asyncio.Task[None] = asyncio.create_task(worker())
+        chats._chat_tasks[conv_id] = task
+        await started.wait()
+
+        self.assertEqual(task.cancelling(), 0)
+
+        result1 = chats.request_chat_cancel(conv_id)
+        self.assertTrue(result1)
+        self.assertEqual(task.cancelling(), 1)
+
+        # Second cancel call while task is cancelling
+        result2 = chats.request_chat_cancel(conv_id)
+        self.assertTrue(result2)
+        # Cancelling count remains 1, proving task.cancel() was not invoked a second time
+        self.assertEqual(task.cancelling(), 1)
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+    async def test_cancel_with_matching_run_id_cancels_task(self) -> None:
+        conv_id = "conv-matching-run"
+        run_id = "run-1234"
+        started = asyncio.Event()
+
+        async def worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task: asyncio.Task[None] = asyncio.create_task(worker())
+        setattr(task, "active_run_id", run_id)
+        chats._chat_tasks[conv_id] = task
+        await started.wait()
+
+        result = chats.request_chat_cancel(conv_id, run_id=run_id)
+        self.assertTrue(result)
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(task.cancelled())
+
+    async def test_cancel_with_stale_run_id_does_not_cancel_task(self) -> None:
+        conv_id = "conv-stale-run"
+        newer_run_id = "run-newer"
+        stale_run_id = "run-stale"
+        started = asyncio.Event()
+
+        async def worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task: asyncio.Task[None] = asyncio.create_task(worker())
+        setattr(task, "active_run_id", newer_run_id)
+        chats._chat_tasks[conv_id] = task
+        await started.wait()
+
+        result = chats.request_chat_cancel(conv_id, run_id=stale_run_id)
+        self.assertFalse(result)
+        self.assertFalse(task.cancelled())
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 class TestAwaitChatCompletions(unittest.IsolatedAsyncioTestCase):

@@ -81,7 +81,12 @@ class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
         captured: dict[str, chats.ChatTurn] = {}
 
         async def fake_run_chat_turn(
-            _conv_id: str, _user_id: uuid.UUID, turn: chats.ChatTurn, _base_url: str
+            _conv_id: str,
+            _user_id: uuid.UUID,
+            turn: chats.ChatTurn,
+            _base_url: str,
+            *args: object,
+            **kwargs: object,
         ) -> chats.ChatTurnResult:
             captured["turn"] = turn
             return chats.ChatTurnResult(False, uuid.uuid4())
