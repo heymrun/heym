@@ -11,12 +11,10 @@ class TestRequestChatCancel(unittest.TestCase):
     def setUp(self) -> None:
         chats._cancel_events.clear()
         chats._chat_tasks.clear()
-        chats._chat_task_run_ids.clear()
 
     def tearDown(self) -> None:
         chats._cancel_events.clear()
         chats._chat_tasks.clear()
-        chats._chat_task_run_ids.clear()
 
     def test_returns_false_when_no_task_registered(self) -> None:
         self.assertFalse(chats.request_chat_cancel("missing-conv"))
@@ -42,38 +40,15 @@ class TestRequestChatCancel(unittest.TestCase):
         self.assertTrue(chats.request_chat_cancel(conv_id))
         self.assertTrue(event.is_set())
 
-    def test_cancel_with_matching_run_id_succeeds(self) -> None:
-        conv_id = "conv-run-match"
-        event = Event()
-        run_id = chats.uuid.uuid4()
-        chats._cancel_events[conv_id] = event
-        chats._chat_task_run_ids[conv_id] = run_id
-
-        self.assertTrue(chats.request_chat_cancel(conv_id, run_id=run_id))
-        self.assertTrue(event.is_set())
-
-    def test_cancel_with_mismatched_run_id_is_ignored(self) -> None:
-        conv_id = "conv-run-mismatch"
-        event = Event()
-        run_id = chats.uuid.uuid4()
-        other_run_id = chats.uuid.uuid4()
-        chats._cancel_events[conv_id] = event
-        chats._chat_task_run_ids[conv_id] = run_id
-
-        self.assertFalse(chats.request_chat_cancel(conv_id, run_id=other_run_id))
-        self.assertFalse(event.is_set())
-
 
 class TestRequestChatCancelTask(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         chats._cancel_events.clear()
         chats._chat_tasks.clear()
-        chats._chat_task_run_ids.clear()
 
     async def asyncTearDown(self) -> None:
         chats._cancel_events.clear()
         chats._chat_tasks.clear()
-        chats._chat_task_run_ids.clear()
 
     async def test_cancels_the_running_asyncio_task(self) -> None:
         conv_id = "conv-task"

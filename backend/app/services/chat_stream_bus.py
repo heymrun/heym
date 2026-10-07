@@ -43,12 +43,15 @@ def _key(conv_id: str) -> str:
     return str(conv_id).strip().lower()
 
 
+CancelHandler = Callable[[uuid.UUID, uuid.UUID | None], Any]
+
+
 class ChatStreamBus:
     """Fans a conversation-id notification out to the subscribers in this process."""
 
     def __init__(self) -> None:
         self._waiters: dict[str, set[asyncio.Event]] = {}
-        self._cancel_handlers: list[Callable[..., Any]] = []
+        self._cancel_handlers: list[CancelHandler] = []
         self._task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ready: asyncio.Event | None = None
@@ -75,12 +78,12 @@ class ChatStreamBus:
         if not events:
             self._waiters.pop(key, None)
 
-    def register_cancel_handler(self, handler: Callable[..., Any]) -> None:
+    def register_cancel_handler(self, handler: CancelHandler) -> None:
         """Register a callback for cross-worker cancellation notifications."""
         if handler not in self._cancel_handlers:
             self._cancel_handlers.append(handler)
 
-    def unregister_cancel_handler(self, handler: Callable[..., Any]) -> None:
+    def unregister_cancel_handler(self, handler: CancelHandler) -> None:
         """Unregister a previously registered cancellation callback."""
         if handler in self._cancel_handlers:
             self._cancel_handlers.remove(handler)
@@ -125,10 +128,7 @@ class ChatStreamBus:
 
             for handler in list(self._cancel_handlers):
                 try:
-                    try:
-                        handler(conv_uuid, run_uuid)
-                    except TypeError:
-                        handler(conv_uuid)
+                    handler(conv_uuid, run_uuid)
                 except Exception:
                     logger.exception("Chat cancel handler failed for payload %r", payload)
 

@@ -19,7 +19,6 @@ from app.api.chats import (
     ChatTurn,
     ChatTurnResult,
     _cancel_events,
-    _chat_task_run_ids,
     _chat_tasks,
     _dequeue_next_turn,
     _finish_worker_state,
@@ -60,7 +59,6 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
         await engine.dispose()
         _chat_tasks.clear()
         _cancel_events.clear()
-        _chat_task_run_ids.clear()
         self.user_id = uuid.uuid4()
         self.cred_id = uuid.uuid4()
         self.conv_id = uuid.uuid4()
@@ -96,7 +94,6 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         _chat_tasks.clear()
         _cancel_events.clear()
-        _chat_task_run_ids.clear()
         await chat_stream_bus.stop()
         async with async_session_maker() as session:
             await session.execute(
@@ -582,7 +579,6 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
 
         task: asyncio.Task[None] = asyncio.create_task(worker_job())
         _chat_tasks[conv_id_str] = task
-        _chat_task_run_ids[conv_id_str] = run_id
         await started.wait()
 
         # Another DB session (worker 2) calls cancel_conversation_stream
@@ -621,13 +617,12 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
 
         task: asyncio.Task[None] = asyncio.create_task(worker_job())
         _chat_tasks[conv_id_str] = task
-        _chat_task_run_ids[conv_id_str] = run_id
         await started.wait()
 
         self.assertEqual(task.cancelling(), 0)
 
         # 1. Local cancel path
-        found = request_chat_cancel(conv_id_str, run_id=run_id)
+        found = request_chat_cancel(conv_id_str)
         self.assertTrue(found)
         self.assertEqual(task.cancelling(), 1)
 
@@ -671,8 +666,6 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             chunk_yielded.set()
             await asyncio.sleep(60)
 
-        _chat_task_run_ids[conv_id_str] = run_id
-
         with (
             patch("app.api.chats.stream_dashboard_chat", fake_stream),
             patch("app.api.chats.decrypt_config", return_value={}),
@@ -687,13 +680,14 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                     user_id=self.user_id,
                     turn=turn,
                     public_base_url="http://localhost:10105",
+                    run_id=run_id,
                 )
             )
             _chat_tasks[conv_id_str] = turn_task
 
             await chunk_yielded.wait()
             # Trigger cancellation
-            request_chat_cancel(conv_id_str, run_id=run_id)
+            request_chat_cancel(conv_id_str)
 
             with self.assertRaises(asyncio.CancelledError):
                 await turn_task
