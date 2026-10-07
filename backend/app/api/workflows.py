@@ -12,11 +12,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import String, case, cast, func, literal, null, or_, select, text, union_all
+from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import InstrumentedAttribute, flag_modified
-from sqlalchemy.sql import ColumnElement, Select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
@@ -118,6 +117,12 @@ from app.services.html_response import build_html_response, find_sole_html_termi
 from app.services.instance_admin import is_instance_admin
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
+from app.services.run_history_list import (
+    apply_instance_filter,
+    history_status_clause,
+    run_history_rows,
+)
+from app.services.run_history_list import filters_to_workflow_runs as filters_to_workflow_runs
 from app.services.workflow_access import (
     PERMISSION_WRITE,
     disable_alerts_without_access,
@@ -1172,84 +1177,14 @@ async def list_all_execution_history(
     instance_id: str | None = Query(default=None),
 ) -> HistoryListResponse:
     """List execution history (lightweight, paginated)."""
-    exec_subq = (
-        select(
-            ExecutionHistory.id,
-            ExecutionHistory.workflow_id,
-            Workflow.name.label("workflow_name"),
-            literal("workflow").label("run_type"),
-            ExecutionHistory.started_at,
-            ExecutionHistory.status,
-            ExecutionHistory.execution_time_ms,
-            ExecutionHistory.trigger_source,
-            ExecutionHistory.recovered,
-            ExecutionHistory.executed_by_instance_id,
-            ExecutionHistory.executed_by_instance_name,
-        )
-        .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(workflow_access_clause(current_user.id))
+    combined = run_history_rows(
+        current_user.id,
+        search=search,
+        execution_status=execution_status,
+        trigger_source=trigger_source,
+        workflow_id=workflow_id,
+        instance_id=instance_id,
     )
-    if workflow_id:
-        exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)
-    if trigger_source:
-        exec_subq = exec_subq.where(ExecutionHistory.trigger_source == trigger_source)
-    exec_subq = apply_instance_filter(exec_subq, instance_id)
-    exec_status_clause = history_status_clause(ExecutionHistory.status, execution_status)
-    if exec_status_clause is not None:
-        exec_subq = exec_subq.where(exec_status_clause)
-    if search:
-        pattern = f"%{search}%"
-        exec_subq = exec_subq.where(
-            or_(
-                Workflow.name.ilike(pattern),
-                ExecutionHistory.status.ilike(pattern),
-                ExecutionHistory.trigger_source.ilike(pattern),
-                cast(ExecutionHistory.inputs, String).ilike(pattern),
-                cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
-            )
-        )
-
-    if workflow_id or filters_to_workflow_runs(instance_id):
-        combined = exec_subq.subquery()
-    else:
-        run_display_name = case(
-            (RunHistory.run_type == "dashboard_chat", "Dashboard Chat"),
-            (RunHistory.run_type == "workflow_assistant", "Workflow Assistant"),
-            else_=RunHistory.run_type,
-        )
-        run_subq = select(
-            RunHistory.id,
-            RunHistory.workflow_id,
-            run_display_name.label("workflow_name"),
-            RunHistory.run_type.label("run_type"),
-            RunHistory.started_at,
-            RunHistory.status,
-            RunHistory.execution_time_ms,
-            RunHistory.trigger_source,
-            literal(False).label("recovered"),
-            # Chat/assistant runs are not workflow executions and have no
-            # instance of their own; the union needs matching columns.
-            cast(null(), String).label("executed_by_instance_id"),
-            cast(null(), String).label("executed_by_instance_name"),
-        ).where(RunHistory.user_id == current_user.id)
-        if trigger_source:
-            run_subq = run_subq.where(RunHistory.trigger_source == trigger_source)
-        run_status_clause = history_status_clause(RunHistory.status, execution_status)
-        if run_status_clause is not None:
-            run_subq = run_subq.where(run_status_clause)
-        if search:
-            pattern = f"%{search}%"
-            run_subq = run_subq.where(
-                or_(
-                    RunHistory.status.ilike(pattern),
-                    RunHistory.trigger_source.ilike(pattern),
-                    RunHistory.run_type.ilike(pattern),
-                    cast(RunHistory.inputs, String).ilike(pattern),
-                    cast(RunHistory.outputs, String).ilike(pattern),
-                )
-            )
-        combined = union_all(exec_subq, run_subq).subquery()
 
     count_result = await db.execute(select(func.count()).select_from(combined))
     total: int = count_result.scalar_one()
@@ -3826,53 +3761,6 @@ async def stream_workflow_execution_history_entry(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-# A recovery that could not re-run a run after a restart stores "failed". To a reader that
-# is the same outcome as "error", so the Error filter returns both.
-_HISTORY_STATUS_GROUPS: dict[str, tuple[str, ...]] = {"error": ("error", "failed")}
-
-
-def history_status_clause(
-    column: InstrumentedAttribute, execution_status: object
-) -> ColumnElement | None:
-    """Build the WHERE clause for a history status filter, or None for "no filter".
-
-    Anything that is not a non-blank string means "no filter": tests call the endpoint
-    functions directly, where FastAPI has not resolved ``Query(default=None)``.
-    """
-    if not isinstance(execution_status, str):
-        return None
-    cleaned = execution_status.strip()
-    if not cleaned:
-        return None
-    statuses = _HISTORY_STATUS_GROUPS.get(cleaned, (cleaned,))
-    if len(statuses) == 1:
-        return column == statuses[0]
-    return column.in_(statuses)
-
-
-def filters_to_workflow_runs(instance_id: str | None) -> bool:
-    """Whether an instance filter is set, which excludes non-workflow runs."""
-    return isinstance(instance_id, str) and bool(instance_id.strip())
-
-
-def apply_instance_filter(query: Select, instance_id: str | None) -> Select:
-    """Narrow a history query to one executing instance.
-
-    Filters on the id rather than the stored name: the name is a snapshot taken
-    when the run finished, so two rows can carry different names for the same
-    instance after a rename, and different instances can share a name.
-    """
-    # Tests call this endpoint function directly, where FastAPI has not resolved
-    # Query(default=None) into a value, so anything that is not a string is
-    # treated as "no filter".
-    if not isinstance(instance_id, str):
-        return query
-    cleaned = instance_id.strip()
-    if not cleaned:
-        return query
-    return query.where(ExecutionHistory.executed_by_instance_id == cleaned)
 
 
 @router.get("/{workflow_id}/history", response_model=HistoryListResponse)

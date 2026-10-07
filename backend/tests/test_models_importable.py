@@ -20,6 +20,7 @@ _MODULES = (
     "app.services.analytics_metrics",
     "app.services.trace_metrics",
     "app.services.schedule_events",
+    "app.services.run_history_list",
 )
 _PROBE = (
     "import importlib, sys\n"
