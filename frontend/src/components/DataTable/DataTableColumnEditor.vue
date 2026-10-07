@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ChevronDown } from "lucide-vue-next";
 
 import type { DataTableColumn } from "@/types/dataTable";
@@ -16,6 +16,12 @@ const type = ref(props.column?.type ?? "string");
 const required = ref(props.column?.required ?? false);
 const defaultValue = ref(props.column?.defaultValue != null ? String(props.column.defaultValue) : "");
 const unique = ref(props.column?.unique ?? false);
+
+watch(type, (newType) => {
+  if (newType === "boolean") {
+    unique.value = false;
+  }
+});
 
 function handleEscape(event: KeyboardEvent): void {
   if (event.key === "Escape") {
@@ -34,7 +40,7 @@ function handleSave() {
     type: type.value as DataTableColumn["type"],
     required: required.value,
     defaultValue: defaultValue.value || null,
-    unique: unique.value,
+    unique: type.value === "boolean" ? false : unique.value,
     order: props.column?.order ?? 0,
   });
 }
@@ -93,7 +99,10 @@ function handleSave() {
           >
           Required
         </label>
-        <label class="flex items-center gap-2 text-sm">
+        <label
+          v-if="type !== 'boolean'"
+          class="flex items-center gap-2 text-sm"
+        >
           <input
             v-model="unique"
             type="checkbox"

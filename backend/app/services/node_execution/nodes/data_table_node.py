@@ -70,11 +70,33 @@ def _build_data_table_sort_clauses(sort_str: str, columns: list) -> list:
     return clauses
 
 
+def _check_unique_sync(
+    table_id: str | uuid.UUID,
+    data: dict,
+    columns: list,
+    db: object,
+    exclude_row_id: str | None = None,
+) -> None:
+    """Check unique constraints using sync session. Raises ValueError on conflict."""
+    from app.api.data_tables import _check_unique_constraints_sync
+
+    errors = _check_unique_constraints_sync(
+        table_id=table_id,
+        data=data,
+        columns=columns,
+        db=db,
+        exclude_row_id=exclude_row_id,
+    )
+    if errors:
+        raise ValueError(errors[0])
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the dataTable node."""
     _workflow_executor = import_module("app.services.workflow_executor")
     _build_data_table_filter_clauses = _workflow_executor._build_data_table_filter_clauses
     _coerce_row_data = _workflow_executor._coerce_row_data
+    _check_unique_constraints_sync = _workflow_executor._check_unique_constraints_sync
     self = ctx.executor
     node_id = ctx.node_id
     inputs = ctx.inputs
@@ -124,37 +146,15 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         def _check_unique_sync(data: dict, exclude_row_id: str | None = None) -> None:
             """Check unique constraints using sync session. Raises ValueError on conflict."""
-            from sqlalchemy import text as sa_text
-
-            unique_checks = []
-            for col in columns:
-                if not col.get("unique"):
-                    continue
-                name = col["name"]
-                if name not in data:
-                    continue
-                value = data[name]
-                if value is None or value == "":
-                    continue
-                unique_checks.append((name, str(value)))
-            if not unique_checks:
-                return
-            conditions = []
-            params: dict = {"table_id": str(data_table_id)}
-            for i, (cn, cv) in enumerate(unique_checks):
-                conditions.append(f"data ->> :cn{i} = :cv{i}")
-                params[f"cn{i}"] = cn
-                params[f"cv{i}"] = cv
-            sql = f"SELECT data FROM data_table_rows WHERE table_id = :table_id AND ({' OR '.join(conditions)})"
-            if exclude_row_id:
-                sql += " AND id != :exclude_id"
-                params["exclude_id"] = exclude_row_id
-            rows = db.execute(sa_text(sql), params).fetchall()
-            for cn, cv in unique_checks:
-                for r in rows:
-                    rd = r[0] if isinstance(r[0], dict) else {}
-                    if str(rd.get(cn, "")) == cv:
-                        raise ValueError(f"Duplicate value for unique column '{cn}': {cv}")
+            errors = _check_unique_constraints_sync(
+                table_id=data_table_id,
+                data=data,
+                columns=columns,
+                db=db,
+                exclude_row_id=exclude_row_id,
+            )
+            if errors:
+                raise ValueError(errors[0])
 
         if operation == "find":
             filter_template = node_data.get("dataTableFilter", "{}")

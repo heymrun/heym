@@ -315,45 +315,53 @@ async def _prune_rows_to_columns(
             row.updated_by = updated_by
 
 
-async def _check_unique_constraints(
-    table_id: uuid.UUID,
+def _normalize_unique_value(value: Any, col_type: str = "string") -> str:
+    """Normalize unique column value for comparison with PostgreSQL JSONB text."""
+    if isinstance(value, bool) or col_type == "boolean":
+        return "true" if (value is True or str(value).lower() in ("true", "1", "yes")) else "false"
+    return str(value)
+
+
+def _prepare_unique_checks(
     data: dict,
     columns: list[dict],
-    db: AsyncSession,
-    exclude_row_id: uuid.UUID | None = None,
-) -> list[str]:
-    """Check unique constraints for columns marked as unique. Uses a single query."""
-    from sqlalchemy import text
+) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """Extract (col_name, normalized_value) checks for unique columns.
 
+    Boolean columns are skipped because a unique boolean column allows at most
+    two rows (True and False), making normal tables with >2 rows unusable.
+    """
     col_type_map = {
         col.get("name"): col.get("type", "string")
         for col in columns
         if isinstance(col, dict) and col.get("name")
     }
 
-    unique_checks = []
+    unique_checks: list[tuple[str, str]] = []
     for col in columns:
-        if not col.get("unique"):
+        if not isinstance(col, dict) or not col.get("unique"):
             continue
-        name = col["name"]
-        if name not in data:
+        col_type = str(col_type_map.get(col.get("name", ""), col.get("type", "string"))).lower()
+        if col_type == "boolean":
+            continue
+        name = col.get("name")
+        if not name or name not in data:
             continue
         value = data[name]
         if value is None or value == "":
             continue
-        col_type = col_type_map.get(name, "string")
-        if isinstance(value, bool) or col_type == "boolean":
-            val_str = (
-                "true" if (value is True or str(value).lower() in ("true", "1", "yes")) else "false"
-            )
-        else:
-            val_str = str(value)
+        val_str = _normalize_unique_value(value, col_type)
         unique_checks.append((name, val_str))
 
-    if not unique_checks:
-        return []
+    return unique_checks, col_type_map
 
-    # Build a single query that checks all unique columns at once using OR
+
+def _build_unique_query(
+    table_id: str | uuid.UUID,
+    unique_checks: list[tuple[str, str]],
+    exclude_row_id: str | uuid.UUID | None = None,
+) -> tuple[str, dict]:
+    """Build the SQL query and parameter dict for checking unique constraints."""
     conditions = []
     params: dict = {"table_id": str(table_id)}
     for i, (col_name, col_value) in enumerate(unique_checks):
@@ -365,10 +373,15 @@ async def _check_unique_constraints(
     if exclude_row_id is not None:
         sql += " AND id != :exclude_id"
         params["exclude_id"] = str(exclude_row_id)
+    return sql, params
 
-    result = await db.execute(text(sql), params)
-    existing_rows = result.fetchall()
 
+def _find_unique_violations(
+    unique_checks: list[tuple[str, str]],
+    existing_rows: list,
+    col_type_map: dict[str, str],
+) -> list[str]:
+    """Check fetched database rows against unique_checks and return conflict error messages."""
     errors: list[str] = []
     for col_name, col_value in unique_checks:
         col_type = col_type_map.get(col_name, "string")
@@ -377,18 +390,53 @@ async def _check_unique_constraints(
             row_val = row_data.get(col_name)
             if row_val is None or row_val == "":
                 continue
-            if isinstance(row_val, bool) or col_type == "boolean":
-                row_str = (
-                    "true"
-                    if (row_val is True or str(row_val).lower() in ("true", "1", "yes"))
-                    else "false"
-                )
-            else:
-                row_str = str(row_val)
+            row_str = _normalize_unique_value(row_val, col_type)
             if row_str == col_value:
                 errors.append(f"Duplicate value for unique column '{col_name}': {col_value}")
                 break
     return errors
+
+
+async def _check_unique_constraints(
+    table_id: uuid.UUID | str,
+    data: dict,
+    columns: list[dict],
+    db: AsyncSession,
+    exclude_row_id: uuid.UUID | str | None = None,
+) -> list[str]:
+    """Check unique constraints for columns marked as unique. Uses a single query."""
+    from sqlalchemy import text
+
+    unique_checks, col_type_map = _prepare_unique_checks(data, columns)
+    if not unique_checks:
+        return []
+
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    result = await db.execute(text(sql), params)
+    existing_rows = result.fetchall()
+
+    return _find_unique_violations(unique_checks, existing_rows, col_type_map)
+
+
+def _check_unique_constraints_sync(
+    table_id: uuid.UUID | str,
+    data: dict,
+    columns: list[dict],
+    db: Any,
+    exclude_row_id: uuid.UUID | str | None = None,
+) -> list[str]:
+    """Check unique constraints synchronously for node execution."""
+    from sqlalchemy import text
+
+    unique_checks, col_type_map = _prepare_unique_checks(data, columns)
+    if not unique_checks:
+        return []
+
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    result = db.execute(text(sql), params)
+    existing_rows = result.fetchall()
+
+    return _find_unique_violations(unique_checks, existing_rows, col_type_map)
 
 
 # ── DataTable CRUD ───────────────────────────────────────────────────────────

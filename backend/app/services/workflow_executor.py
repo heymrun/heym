@@ -31,6 +31,7 @@ import httpx
 from simpleeval import DEFAULT_FUNCTIONS, EvalWithCompoundTypes, FeatureNotAvailable, SimpleEval
 
 from app.api.data_tables import (
+    _check_unique_constraints_sync,  # noqa: F401 - public patch alias for node handlers
     _coerce_row_data,  # noqa: F401 - public patch alias for node handlers
 )
 from app.http_identity import HEYM_USER_AGENT
