@@ -1,6 +1,8 @@
 import { inject, type InjectionKey } from "vue";
 
 import type { HITLDecisionPayload, HITLInbox } from "@/types/workflow";
+import type { InteractiveVoice } from "@/composables/interactiveVoice";
+import type { TextToSpeechPlayer } from "@/composables/textToSpeechPlayer";
 
 /*
  * Ports: what a presentational component needs from the app that hosts it.
@@ -29,6 +31,17 @@ export interface HitlPort {
 }
 
 export const hitlPortKey: InjectionKey<HitlPort> = Symbol("hitlPort");
+
+/**
+ * Voice mode's speech out and speech in. Heym provides its composables; a host builds the same
+ * pair over its own API with `createTextToSpeechPlayer` and `createInteractiveVoice`.
+ */
+export interface VoicePort {
+  useTextToSpeech: () => TextToSpeechPlayer;
+  useInteractiveVoice: (onUtterance: (text: string) => void) => InteractiveVoice;
+}
+
+export const voicePortKey: InjectionKey<VoicePort> = Symbol("voicePort");
 
 /** Returns the host's implementation of a port; throws when the host did not provide one. */
 export function usePort<T>(key: InjectionKey<T>): T {

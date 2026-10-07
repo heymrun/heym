@@ -12,9 +12,12 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  */
 const PRESENTATIONAL = [
   "components/Chat/ChatToolCall.vue",
+  "components/Chat/InteractiveVoiceMode.vue",
   "components/Dashboards/ChartView.vue",
   "components/Dashboards/HitlCarousel.vue",
   "components/Dashboards/HitlReviewActions.vue",
+  "composables/interactiveVoice.ts",
+  "composables/textToSpeechPlayer.ts",
   "composables/useFileAttachment.ts",
   "features/assistant-yolo/components/YoloStepList.vue",
   "ports/index.ts",

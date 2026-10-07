@@ -3,9 +3,9 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Mic, MicOff, X } from "lucide-vue-next";
 
 import type { Message } from "@/types/chat";
+import type { VoiceState } from "@/composables/interactiveVoice";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
-import { useInteractiveVoice, type VoiceState } from "@/composables/useInteractiveVoice";
-import { useTextToSpeech } from "@/composables/useTextToSpeech";
+import { usePort, voicePortKey } from "@/ports";
 
 const props = defineProps<{
   open: boolean;
@@ -16,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>();
 
+const { useTextToSpeech, useInteractiveVoice } = usePort(voicePortKey);
 const tts = useTextToSpeech();
 const lastUserText = ref("");
 const lastAssistantText = ref("");

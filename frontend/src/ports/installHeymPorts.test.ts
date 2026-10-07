@@ -2,7 +2,9 @@ import { createApp, type App } from "vue";
 import type { Router } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 
-import { hitlPortKey, usePort } from "@/ports";
+import { useInteractiveVoice } from "@/composables/useInteractiveVoice";
+import { useTextToSpeech } from "@/composables/useTextToSpeech";
+import { hitlPortKey, usePort, voicePortKey } from "@/ports";
 import { installHeymPorts } from "@/ports/installHeymPorts";
 import { hitlApi } from "@/services/api";
 
@@ -47,5 +49,14 @@ describe("installHeymPorts", () => {
       params: { id: "wf-1", executionId: "ex-1" },
     });
     expect(push).toHaveBeenNthCalledWith(2, { name: "editor", params: { id: "wf-2" } });
+  });
+
+  it("gives voice mode Heym's voice composables", () => {
+    const { app } = heymApp();
+
+    expect(app.runWithContext(() => usePort(voicePortKey))).toEqual({
+      useTextToSpeech,
+      useInteractiveVoice,
+    });
   });
 });
