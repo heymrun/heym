@@ -164,6 +164,8 @@ import type {
   ColumnUpdatePayload,
 } from "@/types/board";
 import type {
+  AssistantToolEndEvent,
+  AssistantToolStartEvent,
   Conversation,
   ConversationCreate,
   ConversationDetail,
@@ -2165,19 +2167,8 @@ export interface AIAssistantRequest {
   } | null;
 }
 
-export interface AssistantToolStartEvent {
-  id: string;
-  name: string;
-  label: string;
-  args: Record<string, unknown>;
-}
-
-export interface AssistantToolEndEvent {
-  id: string;
-  response_summary: string;
-  elapsed_ms: number;
-  status: ToolCallTerminalStatus;
-}
+// Defined with the chat types, so components can use them without this module.
+export type { AssistantToolEndEvent, AssistantToolStartEvent } from "@/types/chat";
 
 /** Handlers for the tool steps a YOLO-mode assistant turn streams. */
 export interface AssistantStreamHandlers {
