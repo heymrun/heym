@@ -8,6 +8,7 @@ import { polyfill } from "mobile-drag-drop";
 import { scrollBehaviourDragImageTranslateOverride } from "mobile-drag-drop/scroll-behaviour";
 
 import App from "./App.vue";
+import { installHeymPorts } from "./ports/installHeymPorts";
 import router from "./router";
 import "./styles/globals.css";
 import "mobile-drag-drop/default.css";
@@ -29,6 +30,7 @@ const pinia = createPinia();
 
 app.use(pinia);
 app.use(router);
+installHeymPorts(app, router);
 app.use(VueApexCharts);
 
 import { useThemeStore } from "./stores/theme";

@@ -1,5 +1,7 @@
 import { inject, type InjectionKey } from "vue";
 
+import type { HITLDecisionPayload, HITLInbox } from "@/types/workflow";
+
 /*
  * Ports: what a presentational component needs from the app that hosts it.
  *
@@ -12,6 +14,21 @@ import { inject, type InjectionKey } from "vue";
  * Each port is the thing the component used to import, so the code below the injection line
  * reads as before.
  */
+
+/** The run a pending review came from. */
+export interface HitlRunTarget {
+  workflowId: string;
+  executionId?: string;
+}
+
+/** The HITL carousel's pending reviews: Heym's `hitlApi` calls, and opening the run in the editor. */
+export interface HitlPort {
+  inbox: () => Promise<HITLInbox>;
+  inboxDecide: (requestId: string, payload: HITLDecisionPayload) => Promise<unknown>;
+  openRun: (target: HitlRunTarget) => void;
+}
+
+export const hitlPortKey: InjectionKey<HitlPort> = Symbol("hitlPort");
 
 /** Returns the host's implementation of a port; throws when the host did not provide one. */
 export function usePort<T>(key: InjectionKey<T>): T {
