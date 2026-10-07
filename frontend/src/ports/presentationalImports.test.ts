@@ -16,6 +16,7 @@ const PRESENTATIONAL = [
   "components/Dashboards/ChartView.vue",
   "components/Dashboards/HitlCarousel.vue",
   "components/Dashboards/HitlReviewActions.vue",
+  "composables/clarifyDataTables.ts",
   "composables/interactiveVoice.ts",
   "composables/textToSpeechPlayer.ts",
   "composables/useFileAttachment.ts",

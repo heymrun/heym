@@ -2,9 +2,10 @@ import { createApp, type App } from "vue";
 import type { Router } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 
+import { useClarifyDataTables } from "@/composables/useClarifyDataTables";
 import { useInteractiveVoice } from "@/composables/useInteractiveVoice";
 import { useTextToSpeech } from "@/composables/useTextToSpeech";
-import { hitlPortKey, usePort, voicePortKey } from "@/ports";
+import { clarifyPortKey, hitlPortKey, usePort, voicePortKey } from "@/ports";
 import { installHeymPorts } from "@/ports/installHeymPorts";
 import { hitlApi } from "@/services/api";
 
@@ -58,5 +59,11 @@ describe("installHeymPorts", () => {
       useTextToSpeech,
       useInteractiveVoice,
     });
+  });
+
+  it("gives clarify cards Heym's data table composable", () => {
+    const { app } = heymApp();
+
+    expect(app.runWithContext(() => usePort(clarifyPortKey))).toEqual({ useClarifyDataTables });
   });
 });

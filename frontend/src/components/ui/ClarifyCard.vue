@@ -7,7 +7,8 @@ import type { DataTable } from "@/types/dataTable";
 
 import CredentialFormButton from "@/components/Credentials/CredentialFormButton.vue";
 import DataTableOptionDetails from "@/components/DataTable/DataTableOptionDetails.vue";
-import { selectedTableOption, useClarifyDataTables } from "@/composables/useClarifyDataTables";
+import { selectedTableOption } from "@/composables/clarifyDataTables";
+import { clarifyPortKey, usePort } from "@/ports";
 
 const props = defineProps<{
   questions: ClarifyQuestion[];
@@ -21,7 +22,7 @@ const emit = defineEmits<{
 }>();
 
 const state = reactive<Record<string, ClarifyAnswer>>({});
-const tables = useClarifyDataTables();
+const tables = usePort(clarifyPortKey).useClarifyDataTables();
 // Top-level aliases, so the template unwraps the ref.
 const creatingTables = tables.creating;
 const tableErrors = tables.errors;

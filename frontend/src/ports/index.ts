@@ -1,6 +1,7 @@
 import { inject, type InjectionKey } from "vue";
 
 import type { HITLDecisionPayload, HITLInbox } from "@/types/workflow";
+import type { ClarifyDataTables } from "@/composables/clarifyDataTables";
 import type { InteractiveVoice } from "@/composables/interactiveVoice";
 import type { TextToSpeechPlayer } from "@/composables/textToSpeechPlayer";
 
@@ -42,6 +43,16 @@ export interface VoicePort {
 }
 
 export const voicePortKey: InjectionKey<VoicePort> = Symbol("voicePort");
+
+/**
+ * The data tables a clarify card shows and creates. Heym provides its composable; a host builds
+ * the same state over its own API with `createClarifyDataTables`.
+ */
+export interface ClarifyPort {
+  useClarifyDataTables: () => ClarifyDataTables;
+}
+
+export const clarifyPortKey: InjectionKey<ClarifyPort> = Symbol("clarifyPort");
 
 /** Returns the host's implementation of a port; throws when the host did not provide one. */
 export function usePort<T>(key: InjectionKey<T>): T {
