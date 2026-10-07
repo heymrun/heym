@@ -33,7 +33,6 @@
 [![PR checks](https://img.shields.io/github/actions/workflow/status/heymrun/heym/pr-checks.yml?style=flat-square&event=pull_request&label=PR%20checks&logo=githubactions&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml)
 [![Release image](https://img.shields.io/github/actions/workflow/status/heymrun/heym/publish-release-image.yml?style=flat-square&label=release%20image&logo=docker&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/publish-release-image.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
-[![MCP status](https://mcpvitals.com/badge/46f18385ee.svg?theme=flat-square)](https://mcpvitals.com/status/46f18385ee)
 [![Commons Clause](https://img.shields.io/badge/Condition-Commons%20Clause-orange.svg?style=flat-square)](COMMONS-CLAUSE.md)
 [![Heym Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheymrun%2Fheym%2Fmain%2Ffrontend%2Fpackage.json&query=%24.version&label=Heym&prefix=v&color=blueviolet&style=flat-square)](https://github.com/heymrun/heym/releases)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
