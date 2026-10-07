@@ -1,22 +1,28 @@
-from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any
+from dataclasses import asdict
+from datetime import datetime
+from typing import Annotated
 
-from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import get_current_user
-from app.db.models import TeamMember, User, Workflow, WorkflowTeamShare
+from app.db.models import User, Workflow
 from app.db.session import get_db
 from app.models.schemas import ScheduleEvent, ScheduleListResponse
 from app.services.instance_admin import is_instance_admin
+from app.services.schedule_events import (
+    MAX_RANGE_DAYS,
+    cron_occurrences,
+    schedule_workflows_clause,
+)
 from app.services.timezone_utils import get_configured_timezone
-from app.services.workflow_access import explicit_workflow_share_ids, workflow_access_clause
+from app.services.workflow_access import workflow_access_clause
 
 router = APIRouter()
 
-_MAX_RANGE_DAYS = 62
+_MAX_RANGE_DAYS = MAX_RANGE_DAYS
 
 
 async def _get_schedule_events(
@@ -25,58 +31,17 @@ async def _get_schedule_events(
     end: datetime,
 ) -> list[ScheduleEvent]:
     """Generate future ScheduleEvent occurrences for all active cron nodes."""
-    tz = get_configured_timezone()
-    start_tz = start.astimezone(tz)
-    end_tz = end.astimezone(tz)
-    events: list[ScheduleEvent] = []
-
-    for workflow in workflows:
-        for node in workflow.nodes:
-            if node.get("type") != "cron":
-                continue
-            data = node.get("data", {})
-            if data.get("active", True) is False:
-                continue
-            expr = data.get("cronExpression", "")
-            if not expr:
-                continue
-            try:
-                cron = croniter(expr, start_tz - timedelta(seconds=1))
-                while True:
-                    next_dt = cron.get_next(datetime)
-                    if next_dt > end_tz:
-                        break
-                    events.append(
-                        ScheduleEvent(
-                            workflow_id=workflow.id,
-                            workflow_name=workflow.name,
-                            description=getattr(workflow, "description", None),
-                            scheduled_at=next_dt.astimezone(timezone.utc),
-                        )
-                    )
-            except Exception:
-                continue
-
-    events.sort(key=lambda e: e.scheduled_at)
-    return events
+    return [
+        ScheduleEvent(**asdict(occurrence))
+        for occurrence in cron_occurrences(workflows, start, end, get_configured_timezone())
+    ]
 
 
-def _workflows_where_clause(current_user: User, include_shared: bool) -> Any:
+def _workflows_where_clause(current_user: User, include_shared: bool) -> ColumnElement[bool]:
+    # Instance administrators see every workflow's schedule when shared ones are included.
     if include_shared and is_instance_admin(current_user):
         return workflow_access_clause(current_user.id)
-    if include_shared:
-        return or_(
-            Workflow.owner_id == current_user.id,
-            Workflow.id.in_(explicit_workflow_share_ids(current_user.id)),
-            Workflow.id.in_(
-                select(WorkflowTeamShare.workflow_id).where(
-                    WorkflowTeamShare.team_id.in_(
-                        select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-                    )
-                )
-            ),
-        )
-    return Workflow.owner_id == current_user.id
+    return schedule_workflows_clause(current_user.id, include_shared)
 
 
 async def fetch_schedule_events_for_user(

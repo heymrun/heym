@@ -19,6 +19,7 @@ _MODULES = (
     "app.services.global_variable_access",
     "app.services.analytics_metrics",
     "app.services.trace_metrics",
+    "app.services.schedule_events",
 )
 _PROBE = (
     "import importlib, sys\n"
