@@ -102,6 +102,9 @@ def _widget(**attrs: object) -> MagicMock:
         "layout": {"x": 0, "y": 0, "w": 4, "h": 4},
         "cache_ttl_seconds": 300,
         "position": 0,
+        "link_dashboard_id": None,
+        "link_record_field": None,
+        "link_label_field": None,
     }
     defaults.update(attrs)
     return MagicMock(**defaults)

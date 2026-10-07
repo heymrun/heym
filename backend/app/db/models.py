@@ -476,7 +476,10 @@ class Dashboard(Base):
     )
 
     widgets: Mapped[list["DashboardWidget"]] = relationship(
-        "DashboardWidget", back_populates="dashboard", cascade="all, delete-orphan"
+        "DashboardWidget",
+        back_populates="dashboard",
+        cascade="all, delete-orphan",
+        foreign_keys="DashboardWidget.dashboard_id",
     )
     shares: Mapped[list["DashboardShare"]] = relationship(
         "DashboardShare", back_populates="dashboard", cascade="all, delete-orphan"
@@ -553,12 +556,21 @@ class DashboardWidget(Base):
     cached_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cached_workflow_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Row link of a table widget: clicking a row opens this dashboard with
+    # ?record=<the row's link_record_field value>; link_label_field names the breadcrumb.
+    link_dashboard_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("dashboards.id", ondelete="SET NULL"), nullable=True
+    )
+    link_record_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    link_label_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="widgets")
+    dashboard: Mapped["Dashboard"] = relationship(
+        "Dashboard", back_populates="widgets", foreign_keys=[dashboard_id]
+    )
     workflow: Mapped["Workflow"] = relationship("Workflow")
 
 

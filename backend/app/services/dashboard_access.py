@@ -91,6 +91,22 @@ async def shared_dashboard_permissions(
     }
 
 
+async def reachable_dashboard_ids(
+    db: AsyncSession, dashboard_ids: set[uuid.UUID], user_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """The ids among ``dashboard_ids`` that ``user_id`` owns or has been shared."""
+    if not dashboard_ids:
+        return set()
+    owned = await db.execute(
+        select(Dashboard.id).where(Dashboard.id.in_(dashboard_ids), Dashboard.owner_id == user_id)
+    )
+    grants = _grants(user_id).subquery()
+    shared = await db.execute(
+        select(grants.c.dashboard_id).where(grants.c.dashboard_id.in_(dashboard_ids))
+    )
+    return set(owned.scalars().all()) | set(shared.scalars().all())
+
+
 async def dashboard_permission(
     db: AsyncSession, dashboard: Dashboard, user_id: uuid.UUID
 ) -> str | None:

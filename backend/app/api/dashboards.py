@@ -56,6 +56,7 @@ from app.services.dashboard_access import (
     PERMISSION_READ,
     PERMISSION_WRITE,
     dashboard_permission,
+    reachable_dashboard_ids,
     shared_dashboard_permissions,
 )
 from app.services.dashboard_data import compute_widget_data
@@ -303,7 +304,9 @@ def _clone_workflow_graph(
     return cloned_nodes, cloned_edges
 
 
-def _widget_to_response(widget: DashboardWidget) -> DashboardWidgetResponse:
+def _widget_to_response(
+    widget: DashboardWidget, reachable_links: set[uuid.UUID] | None = None
+) -> DashboardWidgetResponse:
     return DashboardWidgetResponse(
         id=widget.id,
         workflow_id=widget.workflow_id,
@@ -313,8 +316,50 @@ def _widget_to_response(widget: DashboardWidget) -> DashboardWidgetResponse:
         layout=widget.layout,
         cache_ttl_seconds=widget.cache_ttl_seconds,
         position=widget.position,
+        link_dashboard_id=widget.link_dashboard_id,
+        link_record_field=widget.link_record_field,
+        link_label_field=widget.link_label_field,
+        link_accessible=widget.link_dashboard_id is not None
+        and widget.link_dashboard_id in (reachable_links or set()),
         updated_at=widget.updated_at,
     )
+
+
+async def _reachable_links(
+    db: AsyncSession, widgets: list[DashboardWidget], user: User
+) -> set[uuid.UUID]:
+    """The row-link targets among ``widgets`` the caller can open."""
+    targets = {w.link_dashboard_id for w in widgets if w.link_dashboard_id is not None}
+    return await reachable_dashboard_ids(db, targets, user.id)
+
+
+async def _apply_row_link(
+    db: AsyncSession, widget: DashboardWidget, body: WidgetUpdateRequest, user: User
+) -> None:
+    """Set or clear a widget's row link; the editor must be able to open the target."""
+    if "link_dashboard_id" not in body.model_fields_set:
+        return
+    if body.link_dashboard_id is None:
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
+        return
+    record_field = (body.link_record_field or "").strip()
+    if not record_field:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A row link needs the column that holds the record",
+        )
+    target = (
+        await db.execute(select(Dashboard).where(Dashboard.id == body.link_dashboard_id))
+    ).scalar_one_or_none()
+    if target is None or await dashboard_permission(db, target, user.id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Linked dashboard not found"
+        )
+    widget.link_dashboard_id = target.id
+    widget.link_record_field = record_field
+    widget.link_label_field = (body.link_label_field or "").strip() or None
 
 
 async def _load_widget_for_user(
@@ -491,11 +536,12 @@ async def get_dashboard(
         .where(DashboardWidget.dashboard_id == dashboard.id)
         .order_by(DashboardWidget.position)
     )
-    widgets = result.scalars().all()
+    widgets = list(result.scalars().all())
     summary = _dashboard_summary(dashboard, owner, permission)
+    reachable = await _reachable_links(db, widgets, current_user)
     return DashboardResponse(
         **summary.model_dump(),
-        widgets=[_widget_to_response(w) for w in widgets],
+        widgets=[_widget_to_response(w, reachable) for w in widgets],
     )
 
 
@@ -656,6 +702,9 @@ async def clone_widget(
         layout=layout,
         cache_ttl_seconds=widget.cache_ttl_seconds,
         position=widget.position + 1,
+        link_dashboard_id=widget.link_dashboard_id,
+        link_record_field=widget.link_record_field,
+        link_label_field=widget.link_label_field,
     )
     db.add(cloned_widget)
     await db.commit()
@@ -670,7 +719,9 @@ async def clone_widget(
         widget_title=cloned_widget.title,
         cloned_from=widget.id,
     )
-    return _widget_to_response(cloned_widget)
+    return _widget_to_response(
+        cloned_widget, await _reachable_links(db, [cloned_widget], current_user)
+    )
 
 
 @router.patch("/widgets/{widget_id}", response_model=DashboardWidgetResponse)
@@ -693,6 +744,7 @@ async def update_widget(
         widget.layout = body.layout.model_dump()
     if body.cache_ttl_seconds is not None:
         widget.cache_ttl_seconds = body.cache_ttl_seconds
+    await _apply_row_link(db, widget, body, current_user)
 
     # Propagate title/description onto the widget's hidden workflow so the canvas reflects them.
     if sync_title or sync_description:
@@ -706,7 +758,7 @@ async def update_widget(
 
     await db.commit()
     await db.refresh(widget)
-    return _widget_to_response(widget)
+    return _widget_to_response(widget, await _reachable_links(db, [widget], current_user))
 
 
 @router.delete("/widgets/{widget_id}", status_code=status.HTTP_204_NO_CONTENT)

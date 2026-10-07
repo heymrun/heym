@@ -36,6 +36,12 @@ class DashboardWidgetResponse(BaseModel):
     layout: WidgetLayout
     cache_ttl_seconds: int
     position: int
+    # Row link (table widgets): rows open link_dashboard_id with ?record=<link_record_field>.
+    link_dashboard_id: uuid.UUID | None = None
+    link_record_field: str | None = None
+    link_label_field: str | None = None
+    # Whether the caller can open the linked dashboard; rows are clickable only then.
+    link_accessible: bool = False
     updated_at: datetime
 
 
@@ -106,6 +112,15 @@ class WidgetUpdateRequest(BaseModel):
     chart_type: str | None = None
     layout: WidgetLayout | None = None
     cache_ttl_seconds: int | None = None
+    link_dashboard_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Row link target. Send it with link_record_field (and optionally link_label_field) "
+            "to set the link, or as null to remove it; leave it out to keep the link as it is."
+        ),
+    )
+    link_record_field: str | None = Field(default=None, max_length=255)
+    link_label_field: str | None = Field(default=None, max_length=255)
 
 
 class MarkdownTaskToggleRequest(BaseModel):

@@ -238,6 +238,9 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
             layout={"x": 2, "y": 3, "w": 4, "h": 5},
             cache_ttl_seconds=120,
             position=2,
+            link_dashboard_id=None,
+            link_record_field=None,
+            link_label_field=None,
         )
         workflow = MagicMock(
             description="Quarterly sales",
@@ -412,6 +415,9 @@ class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):
         widget.position = 0
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.chart_type = "bar"
         workflow = MagicMock()
 
@@ -454,6 +460,9 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         widget.description = None
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.cached_payload = {"old": True}
         widget.cached_at = datetime.datetime.now()
         widget.cached_workflow_version = "v"
@@ -572,6 +581,9 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         widget.description = None
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.cached_payload = None
         widget.cached_at = None
         workflow = MagicMock()
