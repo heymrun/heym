@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import unittest
 from threading import Event
 from unittest.mock import MagicMock
@@ -94,6 +95,49 @@ class TestRequestChatCancelTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.cancelling(), 1)
 
         with self.assertRaises(asyncio.CancelledError):
+            await task
+
+    async def test_cancel_with_matching_run_id_cancels_task(self) -> None:
+        conv_id = "conv-matching-run"
+        run_id = "run-1234"
+        started = asyncio.Event()
+
+        async def worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task: asyncio.Task[None] = asyncio.create_task(worker())
+        setattr(task, "active_run_id", run_id)
+        chats._chat_tasks[conv_id] = task
+        await started.wait()
+
+        result = chats.request_chat_cancel(conv_id, run_id=run_id)
+        self.assertTrue(result)
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(task.cancelled())
+
+    async def test_cancel_with_stale_run_id_does_not_cancel_task(self) -> None:
+        conv_id = "conv-stale-run"
+        newer_run_id = "run-newer"
+        stale_run_id = "run-stale"
+        started = asyncio.Event()
+
+        async def worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task: asyncio.Task[None] = asyncio.create_task(worker())
+        setattr(task, "active_run_id", newer_run_id)
+        chats._chat_tasks[conv_id] = task
+        await started.wait()
+
+        result = chats.request_chat_cancel(conv_id, run_id=stale_run_id)
+        self.assertFalse(result)
+        self.assertFalse(task.cancelled())
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
             await task
 
 

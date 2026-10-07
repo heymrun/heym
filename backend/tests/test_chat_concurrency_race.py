@@ -7,25 +7,28 @@ preventing duplicate background chat tasks or duplicate run starts.
 """
 
 import asyncio
+import contextlib
 import unittest
 import uuid
 from datetime import datetime, timezone
 from threading import Event
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.api.chats import (
     ChatTurn,
     ChatTurnResult,
     _cancel_events,
     _chat_tasks,
+    _cleanup_failed_worker_state,
     _dequeue_next_turn,
     _finish_worker_state,
     _handle_chat_cancel_notification,
     _poll_cancel_fallback,
     _process_chat,
     _run_chat_turn,
+    _worker_can_finish_stream,
     cancel_conversation_stream,
     chat_stream_bus,
     request_chat_cancel,
@@ -197,7 +200,14 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
         """
         assistant_msg_id = uuid.uuid4()
 
-        async def _dummy_run_chat_turn(conv_id, user_id, turn, public_base_url):
+        async def _dummy_run_chat_turn(
+            conv_id: str,
+            user_id: uuid.UUID,
+            turn: ChatTurn,
+            public_base_url: str,
+            *args: object,
+            **kwargs: object,
+        ) -> ChatTurnResult:
             # Record dummy assistant reply in database
             async with async_session_maker() as db:
                 db.add(
@@ -266,7 +276,14 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
 
         call_count = 0
 
-        async def _dummy_run_chat_turn(conv_id, user_id, turn, public_base_url):
+        async def _dummy_run_chat_turn(
+            conv_id: str,
+            user_id: uuid.UUID,
+            turn: ChatTurn,
+            public_base_url: str,
+            *args: object,
+            **kwargs: object,
+        ) -> ChatTurnResult:
             nonlocal call_count
             call_count += 1
             msg_id = assistant_msg_id1 if call_count == 1 else assistant_msg_id2
@@ -886,3 +903,257 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
         # Dequeue attempts for this run return None
         next_turn = await _dequeue_next_turn(str(self.conv_id), run_id=run_id)
         self.assertIsNone(next_turn)
+
+    async def test_cross_worker_cancel_with_payload_run_id_cancels_active_worker_task(self) -> None:
+        """Requirement 1 & 2: Prove that when Worker A runs the full _process_chat worker path
+        with run_id, Worker B's cancel_conversation_stream with that run_id cancels
+        Worker A's task and preserves the partial reply in PostgreSQL.
+        """
+        run_id = uuid.uuid4()
+        conv_id_str = str(self.conv_id)
+
+        async with async_session_maker() as session:
+            c = (
+                await session.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            c.is_running = True
+            c.active_run_id = run_id
+            await session.commit()
+
+        await chat_stream_bus.start()
+        self.assertTrue(await chat_stream_bus.wait_until_listening(5.0))
+
+        chunk_yielded = asyncio.Event()
+
+        async def fake_stream(*args: object, **kwargs: object):
+            yield 'data: {"type": "content", "text": "Worker A partial reply"}\n\n'
+            chunk_yielded.set()
+            await asyncio.sleep(60)
+
+        with (
+            patch("app.api.chats.stream_dashboard_chat", fake_stream),
+            patch("app.api.chats.decrypt_config", return_value={}),
+            patch(
+                "app.api.chats.resolve_model_binding",
+                return_value=(MagicMock(), MagicMock(), "gpt-4o", MagicMock()),
+            ),
+            patch("app.api.chats.registry.has_task", new_callable=AsyncMock, return_value=True),
+            patch("app.api.chats.registry.finish", new_callable=AsyncMock),
+        ):
+            worker_a_task = asyncio.create_task(
+                _process_chat(
+                    conv_id=conv_id_str,
+                    user_id=self.user_id,
+                    content="Hello Worker A",
+                    credential_id=self.cred_id,
+                    model="gpt-4o",
+                    attachment_data=None,
+                    public_base_url="http://localhost:10105",
+                    should_generate_title=False,
+                    run_id=run_id,
+                )
+            )
+            setattr(worker_a_task, "active_run_id", run_id)
+            _chat_tasks[conv_id_str] = worker_a_task
+
+            await chunk_yielded.wait()
+
+            # Worker B issues cancel with DB session
+            async with async_session_maker() as worker_b_db:
+                await cancel_conversation_stream(
+                    conversation_id=self.conv_id,
+                    current_user=self.user,
+                    db=worker_b_db,
+                )
+
+            # Worker A task completes (was cancelled)
+            await asyncio.wait_for(worker_a_task, timeout=5.0)
+
+        # Invariant on real PostgreSQL: partial reply was saved
+        async with async_session_maker() as session:
+            msgs = (
+                (
+                    await session.execute(
+                        select(DashboardMessage).where(
+                            DashboardMessage.conversation_id == self.conv_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(msgs), 1)
+            self.assertEqual(msgs[0].role, "assistant")
+            self.assertEqual(msgs[0].content, "Worker A partial reply")
+
+            c = (
+                await session.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            self.assertFalse(c.is_running)
+            self.assertIsNone(c.active_run_id)
+
+    async def test_stale_run_id_cancel_notification_does_not_cancel_newer_run(self) -> None:
+        """Requirement 2: Prove that a delayed cancel notification for an older run_id
+        does not cancel the active task running a newer run.
+        """
+        newer_run_id = uuid.uuid4()
+        stale_run_id = uuid.uuid4()
+        conv_id_str = str(self.conv_id)
+
+        started = asyncio.Event()
+
+        async def active_worker() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task = asyncio.create_task(active_worker())
+        setattr(task, "active_run_id", newer_run_id)
+        _chat_tasks[conv_id_str] = task
+        await started.wait()
+
+        # Stale cancel notification arrives
+        _handle_chat_cancel_notification(self.conv_id, run_id=stale_run_id)
+
+        # Task was NOT cancelled
+        self.assertEqual(task.cancelling(), 0)
+        self.assertFalse(task.cancelled())
+
+        # Cleanup
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_stale_worker_cleanup_and_stream_completion_does_not_affect_newer_run(
+        self,
+    ) -> None:
+        """Requirement 3: Prove that an old worker executing with a stale run_id
+        cannot clear queued messages, cannot reset DB state, and cannot finalize
+        the registry stream for a newer run.
+        """
+        newer_run_id = uuid.uuid4()
+        stale_run_id = uuid.uuid4()
+        queue_item_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        conv_id_str = str(self.conv_id)
+
+        async with async_session_maker() as session:
+            c = (
+                await session.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            c.is_running = True
+            c.active_run_id = newer_run_id
+            queue_item = DashboardChatQueueItem(
+                id=queue_item_id,
+                conversation_id=self.conv_id,
+                content="Newer queue item",
+                credential_id=self.cred_id,
+                model="gpt-4o",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(queue_item)
+            await session.commit()
+
+        # Stale worker attempts cleanup with stale_run_id
+        cleaned = await _cleanup_failed_worker_state(conv_id_str, stale_run_id)
+        self.assertFalse(cleaned)
+
+        # Stale worker attempts to verify stream completion permission
+        can_finish = await _worker_can_finish_stream(conv_id_str, stale_run_id)
+        self.assertFalse(can_finish)
+
+        # Verify PostgreSQL state: queue item and newer run are completely intact
+        async with async_session_maker() as session:
+            c = (
+                await session.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            self.assertTrue(c.is_running)
+            self.assertEqual(c.active_run_id, newer_run_id)
+
+            q_item = (
+                await session.execute(
+                    select(DashboardChatQueueItem).where(DashboardChatQueueItem.id == queue_item_id)
+                )
+            ).scalar_one_or_none()
+            self.assertIsNotNone(q_item)
+
+    async def test_startup_is_running_reset_does_not_trigger_watchdog_cancellation(self) -> None:
+        """Requirement 4: Prove that when another worker starts up and resets
+        is_running = false in PostgreSQL (as main.py does on startup), the
+        in-turn watchdog does NOT falsely cancel the running worker task,
+        and only cancels when active_run_id is cleared or changed.
+        """
+        run_id = uuid.uuid4()
+        cancel_event = Event()
+        started = asyncio.Event()
+
+        async def worker_job() -> None:
+            started.set()
+            await asyncio.sleep(60)
+
+        task = asyncio.create_task(worker_job())
+        await started.wait()
+
+        # In PostgreSQL: conversation is running with this run_id
+        async with async_session_maker() as session:
+            c = (
+                await session.execute(
+                    select(DashboardConversation).where(DashboardConversation.id == self.conv_id)
+                )
+            ).scalar_one()
+            c.is_running = True
+            c.active_run_id = run_id
+            await session.commit()
+
+        with patch("app.api.chats.CHAT_CANCEL_POLL_INTERVAL_SECONDS", 0.05):
+            watchdog = asyncio.create_task(
+                _poll_cancel_fallback(
+                    conv_uuid=self.conv_id,
+                    run_id=run_id,
+                    cancel_event=cancel_event,
+                    target_task=task,
+                )
+            )
+
+            # Simulate another worker starting up: main.py resets is_running = false
+            async with async_session_maker() as session:
+                await session.execute(
+                    text(
+                        "UPDATE dashboard_conversations SET is_running = false WHERE is_running = true"
+                    )
+                )
+                await session.commit()
+
+            # Wait long enough for watchdog to poll multiple times
+            await asyncio.sleep(0.2)
+
+            # Invariant: Watchdog did NOT cancel the task!
+            self.assertFalse(cancel_event.is_set())
+            self.assertFalse(task.cancelled())
+
+            # Now simulate Stop being clicked: active_run_id is cleared in PostgreSQL
+            async with async_session_maker() as session:
+                await session.execute(
+                    text("UPDATE dashboard_conversations SET active_run_id = NULL WHERE id = :id"),
+                    {"id": str(self.conv_id)},
+                )
+                await session.commit()
+
+            # Now watchdog MUST detect active_run_id is None and cancel the task
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=3.0)
+
+            self.assertTrue(cancel_event.is_set())
+            self.assertTrue(task.cancelled())
+
+            watchdog.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watchdog
