@@ -8,7 +8,7 @@ import copy
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -19,7 +19,8 @@ from app.api.ai_assistant import (
     _record_chat_workflow_edit_version,
     get_credential_for_user,
 )
-from app.api.deps import get_current_user
+from app.api.deps import get_client_ip, get_current_user
+from app.api.workflows import get_workflow_for_user
 from app.db.models import (
     LLM_CREDENTIAL_TYPES,
     Dashboard,
@@ -44,12 +45,14 @@ from app.models.dashboard_schemas import (
     DashboardTeamShareResponse,
     DashboardUpdateRequest,
     DashboardWidgetResponse,
+    FileRunSlotResponse,
     MarkdownTaskToggleRequest,
     MarkdownTaskUpdateRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
     WidgetUpdateRequest,
 )
+from app.services import file_intake_service
 from app.services.audit_log import audit
 from app.services.dashboard_access import (
     PERMISSION_OWNER,
@@ -62,6 +65,8 @@ from app.services.dashboard_access import (
 from app.services.dashboard_data import compute_widget_data
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
+from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, file_run_payload
+from app.services.hitl_service import build_public_base_url
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
@@ -458,6 +463,49 @@ async def _apply_markdown_text_to_widget(
     return await compute_widget_data(db, widget, run_as_user_id, force=True)
 
 
+async def _file_run_workflow(
+    db: AsyncSession, workflow_id: uuid.UUID | None, dashboard: Dashboard, user: User
+) -> Workflow:
+    """The workflow a new file-run widget runs: one the creator and the owner can both run."""
+    if workflow_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A file-run widget needs a workflow",
+        )
+    workflow = await get_workflow_for_user(db, workflow_id, user.id)
+    if workflow is None or workflow.kind != "workflow":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="This workflow has no File Upload trigger",
+        )
+    # Drops are minted for the dashboard owner's access, so the owner must reach it too.
+    if dashboard.owner_id != user.id and (
+        await get_workflow_for_user(db, workflow_id, dashboard.owner_id) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The dashboard owner cannot run this workflow",
+        )
+    return workflow
+
+
+async def _file_run_widget_data(
+    db: AsyncSession, widget: DashboardWidget, dashboard: Dashboard
+) -> WidgetDataResponse:
+    """A file-run widget never runs on load: it describes the file it takes."""
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    payload = file_run_payload(workflow.nodes) if workflow is not None else None
+    return WidgetDataResponse(
+        widget_id=widget.id,
+        payload=payload,
+        cached=False,
+        computed_at=None,
+        error=None if payload is not None else "This workflow no longer takes a file",
+    )
+
+
 def _widget_data_for(response: WidgetDataResponse, permission: str) -> WidgetDataResponse:
     # Highlights carry every node's raw output; a viewer was shared the chart, not those.
     if permission == PERMISSION_READ and response.highlight is not None:
@@ -628,17 +676,20 @@ async def create_widget(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
     dashboard, _ = await _get_dashboard_for_user(db, dashboard_id, current_user, write=True)
-    nodes, edges = _seed_widget_nodes(body.chart_type)
-    workflow = Workflow(
-        name=body.title,
-        description=body.description,
-        owner_id=dashboard.owner_id,
-        kind="dashboard_widget",
-        nodes=nodes,
-        edges=edges,
-    )
-    db.add(workflow)
-    await db.flush()
+    if body.chart_type == FILE_RUN_WIDGET_TYPE:
+        workflow = await _file_run_workflow(db, body.workflow_id, dashboard, current_user)
+    else:
+        nodes, edges = _seed_widget_nodes(body.chart_type)
+        workflow = Workflow(
+            name=body.title,
+            description=body.description,
+            owner_id=dashboard.owner_id,
+            kind="dashboard_widget",
+            nodes=nodes,
+            edges=edges,
+        )
+        db.add(workflow)
+        await db.flush()
     widget = DashboardWidget(
         dashboard_id=dashboard.id,
         workflow_id=workflow.id,
@@ -676,20 +727,24 @@ async def clone_widget(
     """Clone a dashboard widget and its private workflow graph."""
     widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
     workflow = await _load_widget_workflow(db, widget)
-    cloned_nodes, cloned_edges = _clone_workflow_graph(
-        list(workflow.nodes or []), list(workflow.edges or [])
-    )
     clone_title = f"{widget.title[:248]} (Copy)"
-    cloned_workflow = Workflow(
-        name=clone_title,
-        description=workflow.description,
-        owner_id=dashboard.owner_id,
-        kind="dashboard_widget",
-        nodes=cloned_nodes,
-        edges=cloned_edges,
-    )
-    db.add(cloned_workflow)
-    await db.flush()
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        # The copy runs the same workflow; there is no widget graph to copy.
+        cloned_workflow = workflow
+    else:
+        cloned_nodes, cloned_edges = _clone_workflow_graph(
+            list(workflow.nodes or []), list(workflow.edges or [])
+        )
+        cloned_workflow = Workflow(
+            name=clone_title,
+            description=workflow.description,
+            owner_id=dashboard.owner_id,
+            kind="dashboard_widget",
+            nodes=cloned_nodes,
+            edges=cloned_edges,
+        )
+        db.add(cloned_workflow)
+        await db.flush()
 
     layout = copy.deepcopy(widget.layout or {"x": 0, "y": 0, "w": 4, "h": 4})
     layout["y"] = int(layout.get("y", 0)) + int(layout.get("h", 4))
@@ -798,6 +853,8 @@ async def get_widget_data(
     widget, dashboard, permission = await _load_widget_for_user(
         db, widget_id, current_user, write=False
     )
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        return await _file_run_widget_data(db, widget, dashboard)
     # The record comes from a URL: check it before any workflow sees it.
     if record is not None and not is_valid_record(record, dashboard.record_format):
         raise HTTPException(
@@ -806,6 +863,67 @@ async def get_widget_data(
         )
     response = await compute_widget_data(db, widget, dashboard.owner_id, force=force, record=record)
     return _widget_data_for(response, permission)
+
+
+@router.post("/widgets/{widget_id}/file-slot", response_model=FileRunSlotResponse)
+async def create_file_run_slot(
+    widget_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileRunSlotResponse:
+    """Mint a single-use upload link for one drop on a file-run widget.
+
+    Anyone who can open the dashboard may drop a file, as anyone may refresh a chart:
+    access to the workflow is the dashboard owner's. The upload itself goes to the
+    file intake path in the link, which runs the workflow on the main instance.
+    """
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
+    if widget.chart_type != FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget does not take files"
+        )
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    node = (
+        file_intake_service.find_file_upload_trigger(workflow.nodes or [])
+        if workflow is not None
+        else None
+    )
+    if workflow is None or node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This workflow no longer takes a file"
+        )
+    slot, token = await file_intake_service.mint_slot(
+        db,
+        workflow_id=workflow.id,
+        node=node,
+        created_by_user_id=current_user.id,
+        mint_source="dashboard",
+    )
+    await file_intake_service.write_audit(
+        db,
+        event="minted",
+        slot_id=slot.id,
+        workflow_id=workflow.id,
+        client_ip=get_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await db.commit()
+    payload = file_intake_service.build_mint_payload(
+        base_url=build_public_base_url(request),
+        token=token,
+        expires_at_iso=slot.expires_at.isoformat(),
+        max_size_bytes=slot.max_size_bytes,
+        allowed_mime=slot.allowed_mime,
+        slot_id=str(slot.id),
+    )
+    return FileRunSlotResponse(
+        upload_url=payload["upload_url"],
+        expires_at=payload["expires_at"],
+        max_size_mb=payload["max_size_mb"],
+        allowed_types=payload["allowed_types"],
+        slot_id=payload["slot_id"],
+    )
 
 
 @router.patch("/widgets/{widget_id}/markdown-task-toggle", response_model=WidgetDataResponse)
@@ -943,6 +1061,11 @@ async def ai_refine_widget(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
     widget, _, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A file-run widget runs an existing workflow; change it in the editor",
+        )
     credential = await get_credential_for_user(body.credential_id, current_user, db)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")

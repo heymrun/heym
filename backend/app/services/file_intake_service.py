@@ -21,7 +21,7 @@ DEFAULT_MAX_SIZE_MB = 100
 QUICK_DRAWER_TRIGGER_SOURCE = "Quick Drawer"
 # The run an upload starts is recorded under its slot's origin, so a file run from the
 # Quick Drawer is listed as a Quick Drawer run, like that drawer's other runs.
-_UPLOAD_TRIGGER_SOURCES = {"quick_drawer": QUICK_DRAWER_TRIGGER_SOURCE}
+_UPLOAD_TRIGGER_SOURCES = {"quick_drawer": QUICK_DRAWER_TRIGGER_SOURCE, "dashboard": "dashboard"}
 
 
 @dataclass

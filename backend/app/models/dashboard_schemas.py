@@ -104,6 +104,10 @@ class WidgetCreateRequest(BaseModel):
     chart_type: str = "bar"
     layout: WidgetLayout = Field(default_factory=WidgetLayout)
     cache_ttl_seconds: int = 300
+    workflow_id: uuid.UUID | None = Field(
+        default=None,
+        description="For a fileRun widget: the workflow with a File Upload trigger it runs.",
+    )
 
 
 class WidgetUpdateRequest(BaseModel):
@@ -121,6 +125,16 @@ class WidgetUpdateRequest(BaseModel):
     )
     link_record_field: str | None = Field(default=None, max_length=255)
     link_label_field: str | None = Field(default=None, max_length=255)
+
+
+class FileRunSlotResponse(BaseModel):
+    """A single-use upload link for one drop on a file-run widget."""
+
+    upload_url: str
+    expires_at: str
+    max_size_mb: int
+    allowed_types: list[str] = []
+    slot_id: str
 
 
 class MarkdownTaskToggleRequest(BaseModel):
