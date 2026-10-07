@@ -264,6 +264,19 @@ class ChatBuildSession:
     def handles(self, name: str) -> bool:
         return name in BUILD_TOOL_NAMES
 
+    def display_args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Arguments for the step row, the stored message and the trace, without the whole DSL."""
+        if name != SAVE_WORKFLOW_TOOL:
+            return args
+        workflow = args.get("workflow") if isinstance(args.get("workflow"), dict) else {}
+        nodes = workflow.get("nodes")
+        edges = workflow.get("edges")
+        return {
+            "name": workflow.get("name"),
+            "nodes": len(nodes) if isinstance(nodes, list) else 0,
+            "edges": len(edges) if isinstance(edges, list) else 0,
+        }
+
     def step_label(self, name: str) -> str:
         if name == SAVE_WORKFLOW_TOOL:
             return "Saving the workflow..."

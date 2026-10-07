@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any, AsyncGenerator, Literal
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -144,6 +144,9 @@ from app.services.workflow_executor import (
 )
 from app.services.workflow_run_history_tool import get_workflow_run_history
 from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
+
+if TYPE_CHECKING:
+    from app.api.chat_build import ChatBuildSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -3568,8 +3571,12 @@ async def stream_dashboard_chat(
     *,
     system_prompt_parts: Any | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
+    build: "ChatBuildSession | None" = None,
 ) -> AsyncGenerator[str, None]:
-    """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content."""
+    """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content.
+
+    With `build`, the turn may save, test-run and finish workflows (chat build mode).
+    """
     user_id = user.id
     is_reasoning = is_reasoning_model(model)
     base_kwargs: dict[str, Any] = {
@@ -3656,6 +3663,15 @@ async def stream_dashboard_chat(
 
     def _offset_ms(moment: float) -> float:
         return round(trace_offset_ms + (moment - start_time) * 1000, 2)
+
+    def _call_kwargs() -> dict[str, Any]:
+        # Build mode's tools change during the turn: the test budget can run out.
+        tools = build.tools(DASHBOARD_CHAT_TOOLS) if build is not None else DASHBOARD_CHAT_TOOLS
+        return {
+            **base_kwargs,
+            "tools": tools,
+            "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
+        }
 
     def _record_llm_turn(
         started: float,
@@ -3757,6 +3773,7 @@ async def stream_dashboard_chat(
             steps=run_steps,
         )
 
+    finished_summary: str | None = None
     try:
         while rounds < MAX_DASHBOARD_CHAT_TOOL_ROUNDS:
             if cancel_event is not None and cancel_event.is_set():
@@ -3792,10 +3809,7 @@ async def stream_dashboard_chat(
                     messages_to_use = [m for m in compressed if m.get("role") != "system"]
                     yield _emit_compressed(comp_info)
 
-            kwargs = {
-                **base_kwargs,
-                "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
-            }
+            kwargs = _call_kwargs()
             round_start = time.time()
             llm_call_started = round_start
             try:
@@ -3821,10 +3835,7 @@ async def stream_dashboard_chat(
                     raise
                 messages_to_use = [m for m in compressed if m.get("role") != "system"]
                 yield _emit_compressed(comp_info)
-                kwargs = {
-                    **base_kwargs,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
-                }
+                kwargs = _call_kwargs()
                 round_start = time.time()
                 llm_call_started = round_start
                 response = await _await_chat_completions(client, cancel_event, **kwargs)
@@ -3914,7 +3925,60 @@ async def stream_dashboard_chat(
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except json.JSONDecodeError:
                     args = {}
-                if name == "list_workflows":
+                if build is not None and build.handles(name):
+                    step_label = build.step_label(name)
+                    display_args = build.display_args(name, args)
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": display_args,
+                            },
+                            default=str,
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    outcome = await build.call(name, args)
+                    result = outcome.result
+                    args = display_args
+                    if cancel_event is not None and cancel_event.is_set():
+                        yield _cancelled_tool_end_yield(
+                            tc.id,
+                            name=name,
+                            step_label=step_label,
+                            request=args,
+                            result=result,
+                            step_start=step_start,
+                            run_steps=run_steps,
+                        )
+                        elapsed_ms = (time.time() - start_time) * 1000
+                        _record_dashboard_run("cancelled", round(elapsed_ms, 2))
+                        return
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": outcome.summary,
+                            "execution_time_ms": round((time.time() - step_start) * 1000, 2),
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        outcome.summary,
+                        run_steps[-1]["execution_time_ms"],
+                        status=outcome.status,
+                    )
+                    for event in outcome.events:
+                        yield "data: " + json.dumps(event, default=str) + "\n\n"
+                    if outcome.finished_summary is not None:
+                        finished_summary = outcome.finished_summary
+                elif name == "list_workflows":
                     step_label = "Listing workflows..."
                     yield (
                         "data: "
@@ -5239,6 +5303,14 @@ async def stream_dashboard_chat(
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )
+            if finished_summary is not None:
+                # finish ends the turn: its summary is the reply, the Verified card shows it.
+                response_parts.append(finished_summary)
+                yield f"data: {json.dumps({'type': 'content', 'text': finished_summary})}\n\n"
+                elapsed_ms = (time.time() - start_time) * 1000
+                _record_dashboard_run("success", round(elapsed_ms, 2))
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
 
         elapsed_ms = (time.time() - start_time) * 1000
         _record_dashboard_run("error", round(elapsed_ms, 2), trace_error="Too many tool rounds")
