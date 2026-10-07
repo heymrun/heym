@@ -14,8 +14,14 @@ export interface WidgetData {
   updateMarkdownTask: (update: { lineIndex: number; text: string }) => Promise<void>;
 }
 
-/** A widget's chart and its markdown checklist edits, loaded through the dashboards API. */
-export function useWidgetData(widgetId: () => string): WidgetData {
+/**
+ * A widget's chart and its markdown checklist edits, loaded through the dashboards API.
+ * `record` is the detail page's ?record= value, or null on the dashboard itself.
+ */
+export function useWidgetData(
+  widgetId: () => string,
+  record: () => string | null = () => null,
+): WidgetData {
   const payload = ref<ChartPayload | null>(null);
   const loading = ref(true);
   const error = ref<string | null>(null);
@@ -25,7 +31,7 @@ export function useWidgetData(widgetId: () => string): WidgetData {
     loading.value = true;
     error.value = null;
     try {
-      const response = await dashboardApi.getWidgetData(widgetId(), force);
+      const response = await dashboardApi.getWidgetData(widgetId(), force, record());
       payload.value = response.payload;
       error.value = response.error ?? null;
     } catch (e) {

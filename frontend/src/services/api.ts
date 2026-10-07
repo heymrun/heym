@@ -143,6 +143,7 @@ import type {
   DashboardSummary,
   DashboardTeamShare,
   DashboardWidget,
+  RecordFormat,
   WidgetCreateRequest,
   WidgetDataResponse,
   WidgetUpdateRequest,
@@ -1705,6 +1706,16 @@ export const dashboardApi = {
     return response.data;
   },
 
+  setRecordFormat: async (
+    dashboardId: string,
+    recordFormat: RecordFormat,
+  ): Promise<DashboardSummary> => {
+    const response = await api.patch<DashboardSummary>(`/dashboards/${dashboardId}`, {
+      record_format: recordFormat,
+    });
+    return response.data;
+  },
+
   remove: async (dashboardId: string): Promise<void> => {
     await api.delete(`/dashboards/${dashboardId}`);
   },
@@ -1731,9 +1742,14 @@ export const dashboardApi = {
     await api.delete(`/dashboards/widgets/${id}`);
   },
 
-  getWidgetData: async (id: string, force = false): Promise<WidgetDataResponse> => {
+  /** `record` is the detail page's ?record= value; the server checks it. */
+  getWidgetData: async (
+    id: string,
+    force = false,
+    record: string | null = null,
+  ): Promise<WidgetDataResponse> => {
     const response = await api.get<WidgetDataResponse>(`/dashboards/widgets/${id}/data`, {
-      params: { force },
+      params: record === null ? { force } : { force, record },
     });
     return response.data;
   },

@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { GridItem, GridLayout } from "grid-layout-plus";
 
 import DashboardWidgetCard from "@/components/Dashboards/DashboardWidgetCard.vue";
+import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
 import type { DashboardWidget, WidgetLayout } from "@/types/dashboard";
 
 interface GridLayoutItem extends WidgetLayout {
@@ -14,6 +15,8 @@ const props = defineProps<{
   editMode: boolean;
   cloningWidgetId: string | null;
   canWrite: boolean;
+  /** The detail page's record, passed to every widget. */
+  record: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +27,7 @@ const emit = defineEmits<{
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
   (e: "layout-change", payload: { id: string; layout: WidgetLayout }): void;
+  (e: "open-record", dashboardId: string, page: DashboardPage): void;
 }>();
 
 const layout = ref<GridLayoutItem[]>([]);
@@ -75,6 +79,7 @@ function emitItemLayout(id: string): void {
         :edit-mode="editMode"
         :cloning="cloningWidgetId === item.i"
         :can-write="canWrite"
+        :record="record"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"
         @edit="emit('edit', $event)"
         @delete="emit('delete', $event)"
@@ -82,6 +87,7 @@ function emitItemLayout(id: string): void {
         @refine="emit('refine', $event)"
         @settings="emit('settings', $event)"
         @title-change="emit('title-change', $event)"
+        @open-record="(dashboardId, page) => emit('open-record', dashboardId, page)"
       />
     </GridItem>
   </GridLayout>

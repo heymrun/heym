@@ -5,6 +5,7 @@ import type {
   DashboardData,
   DashboardSummary,
   DashboardWidget,
+  RecordFormat,
   WidgetLayout,
 } from "@/types/dashboard";
 import { dashboardApi } from "@/services/api";
@@ -96,6 +97,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
+  async function setRecordFormat(dashboardId: string, recordFormat: RecordFormat): Promise<void> {
+    const updated = await dashboardApi.setRecordFormat(dashboardId, recordFormat);
+    dashboards.value = dashboards.value.map((dashboard) =>
+      dashboard.id === dashboardId
+        ? { ...dashboard, record_format: updated.record_format }
+        : dashboard,
+    );
+    if (activeDashboard.value?.id === dashboardId) {
+      activeDashboard.value = { ...activeDashboard.value, record_format: updated.record_format };
+    }
+  }
+
   async function deleteDashboard(dashboardId: string): Promise<void> {
     await dashboardApi.remove(dashboardId);
     dashboards.value = dashboards.value.filter((dashboard) => dashboard.id !== dashboardId);
@@ -145,6 +158,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     reloadActiveDashboard,
     createDashboard,
     renameDashboard,
+    setRecordFormat,
     deleteDashboard,
     addWidget,
     replaceWidget,

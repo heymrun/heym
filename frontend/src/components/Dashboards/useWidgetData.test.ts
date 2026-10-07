@@ -28,10 +28,22 @@ describe("useWidgetData", () => {
 
     await data.loadData(true);
 
-    expect(api.getWidgetData).toHaveBeenCalledWith("w-1", true);
+    expect(api.getWidgetData).toHaveBeenCalledWith("w-1", true, null);
     expect(data.payload.value).toEqual({ type: "numeric", value: 3 });
     expect(data.error.value).toBe("Stale");
     expect(data.loading.value).toBe(false);
+  });
+
+  it("asks for the detail page's record", async () => {
+    api.getWidgetData.mockResolvedValue(response({ type: "numeric", value: 1 }));
+    const data = useWidgetData(
+      () => "w-1",
+      () => "ACME-1",
+    );
+
+    await data.loadData();
+
+    expect(api.getWidgetData).toHaveBeenCalledWith("w-1", false, "ACME-1");
   });
 
   it("puts a checklist back when the toggle fails", async () => {

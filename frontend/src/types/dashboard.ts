@@ -77,8 +77,17 @@ export interface DashboardWidget {
   layout: WidgetLayout;
   cache_ttl_seconds: number;
   position: number;
+  /** Row link of a table widget: rows open this dashboard with ?record=<record field>. */
+  link_dashboard_id: string | null;
+  link_record_field: string | null;
+  link_label_field: string | null;
+  /** Whether the viewer can open the linked dashboard; rows are clickable only then. */
+  link_accessible: boolean;
   updated_at: string;
 }
+
+/** Which `?record=` values a dashboard accepts as a detail page. */
+export type RecordFormat = "id" | "number" | "uuid" | "email";
 
 /** The caller's access to a dashboard. */
 export type DashboardPermission = "owner" | "write" | "read";
@@ -91,6 +100,7 @@ export interface DashboardSummary {
   /** Set only on dashboards shared with the caller. */
   owner_name: string | null;
   shared_by: string | null;
+  record_format: RecordFormat;
   updated_at: string;
 }
 
@@ -138,4 +148,8 @@ export interface WidgetUpdateRequest {
   chart_type?: ChartPayload["type"];
   layout?: WidgetLayout;
   cache_ttl_seconds?: number;
+  /** Send with link_record_field to set the row link, or as null to remove it. */
+  link_dashboard_id?: string | null;
+  link_record_field?: string | null;
+  link_label_field?: string | null;
 }

@@ -20,6 +20,8 @@ import {
   setHitlHistoryTargetKey,
   type HitlHistoryTarget,
 } from "@/components/Dashboards/hitlHistory";
+import type { TableRecord, TableRowLink } from "@/components/Dashboards/chartTable";
+import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
 import { useWidgetData } from "@/components/Dashboards/useWidgetData";
 import type { WidgetAction } from "@/components/Dashboards/widgetActions";
 
@@ -28,6 +30,7 @@ const props = defineProps<{
   editMode: boolean;
   cloning: boolean;
   canWrite: boolean;
+  record?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -37,6 +40,7 @@ const emit = defineEmits<{
   (e: "refine", widget: DashboardWidget): void;
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
+  (e: "open-record", dashboardId: string, page: DashboardPage): void;
 }>();
 
 const {
@@ -47,7 +51,21 @@ const {
   loadData,
   toggleMarkdownTask,
   updateMarkdownTask,
-} = useWidgetData(() => props.widget.id);
+} = useWidgetData(
+  () => props.widget.id,
+  () => props.record ?? null,
+);
+
+// Rows open the linked detail page only for viewers who can open it.
+const rowLink = computed<TableRowLink | null>(() => {
+  const { link_dashboard_id, link_record_field, link_accessible } = props.widget;
+  if (!link_dashboard_id || !link_record_field || !link_accessible) return null;
+  return { recordField: link_record_field, labelField: props.widget.link_label_field };
+});
+
+function onRowOpen(record: TableRecord): void {
+  if (props.widget.link_dashboard_id) emit("open-record", props.widget.link_dashboard_id, record);
+}
 
 // Only surface http(s) links. The url can come from a dynamic expression over upstream
 // data, so reject javascript:/data:/relative values to avoid an injected-link XSS.
@@ -222,6 +240,8 @@ onMounted(() => {
         v-else
         :payload="displayPayload"
         :markdown-task-saving="markdownTaskSaving"
+        :row-link="rowLink"
+        @row-open="onRowOpen"
         @markdown-task-toggle="toggleMarkdownTask"
         @markdown-task-update="updateMarkdownTask"
       />

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import axios from "axios";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter } from "vue-router";
 import { Loader2, Plus, Sparkles } from "lucide-vue-next";
 
 import AddWidgetDialog from "@/components/Dashboards/AddWidgetDialog.vue";
@@ -9,8 +9,11 @@ import AiWidgetDialog from "@/components/Dashboards/AiWidgetDialog.vue";
 import DashboardCreateDialog from "@/components/Dashboards/DashboardCreateDialog.vue";
 import DashboardGrid from "@/components/Dashboards/DashboardGrid.vue";
 import DashboardHeader from "@/components/Dashboards/DashboardHeader.vue";
+import DashboardRecordBar from "@/components/Dashboards/DashboardRecordBar.vue";
 import DashboardSettingsDialog from "@/components/Dashboards/DashboardSettingsDialog.vue";
 import WidgetSettingsDialog from "@/components/Dashboards/WidgetSettingsDialog.vue";
+import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
+import { useDashboardRoute } from "@/components/Dashboards/useDashboardRoute";
 import Button from "@/components/ui/Button.vue";
 import { tidyLayouts } from "@/lib/dashboardTidy";
 import { dashboardApi } from "@/services/api";
@@ -23,9 +26,10 @@ import type {
 } from "@/types/dashboard";
 import { playSuccessSound } from "@/utils/audio";
 
-const route = useRoute();
 const router = useRouter();
 const dashboardStore = useDashboardStore();
+const { page, loadError, loadDashboards, openDashboard, openRecord, clearRecord } =
+  useDashboardRoute();
 
 const editMode = ref(false);
 const showAdd = ref(false);
@@ -37,32 +41,15 @@ const settingsWidget = ref<DashboardWidget | null>(null);
 const reloadKey = ref(0);
 const cloningWidgetId = ref<string | null>(null);
 const cloneError = ref<string | null>(null);
-const loadError = ref<string | null>(null);
 
 async function openDashboardWithUrl(dashboardId: string): Promise<void> {
   editMode.value = false;
-  loadError.value = null;
-  try {
-    await dashboardStore.openDashboard(dashboardId);
-  } catch {
-    loadError.value = "Failed to load the dashboard";
-    return;
-  }
-  if (route.query.dashboard !== dashboardId) {
-    await router.replace({ query: { ...route.query, tab: "dashboard", dashboard: dashboardId } });
-  }
+  await openDashboard(dashboardId);
 }
 
-async function loadDashboards(): Promise<void> {
-  try {
-    await dashboardStore.fetchDashboards();
-  } catch {
-    loadError.value = "Failed to load dashboards";
-    return;
-  }
-  const requested = typeof route.query.dashboard === "string" ? route.query.dashboard : null;
-  const target = dashboardStore.defaultDashboardId(requested);
-  if (target) await openDashboardWithUrl(target);
+async function onOpenRecord(dashboardId: string, nextPage: DashboardPage): Promise<void> {
+  editMode.value = false;
+  await openRecord(dashboardId, nextPage);
 }
 
 function openEditor(workflowId: string): void {
@@ -206,6 +193,12 @@ onMounted(() => {
       >
         {{ cloneError }}
       </div>
+      <DashboardRecordBar
+        v-if="page && dashboardStore.activeDashboard"
+        :dashboard-name="dashboardStore.activeDashboard.name"
+        :label="page.label"
+        @clear="clearRecord"
+      />
       <div
         v-if="loadError"
         class="flex h-full items-center justify-center text-sm text-destructive"
@@ -245,11 +238,13 @@ onMounted(() => {
       </div>
       <DashboardGrid
         v-else
-        :key="`${dashboardStore.activeDashboard.id}-${reloadKey}`"
+        :key="`${dashboardStore.activeDashboard.id}-${reloadKey}-${page?.record ?? ''}`"
         :widgets="dashboardStore.widgets"
         :edit-mode="editMode"
         :cloning-widget-id="cloningWidgetId"
         :can-write="dashboardStore.canWrite"
+        :record="page?.record ?? null"
+        @open-record="onOpenRecord"
         @edit="openEditor"
         @delete="handleDelete"
         @clone="handleClone"
@@ -281,6 +276,7 @@ onMounted(() => {
     <WidgetSettingsDialog
       v-if="settingsWidget"
       :widget="settingsWidget"
+      :dashboards="dashboardStore.dashboards"
       @close="settingsWidget = null"
       @save="handleSettingsSave"
     />
