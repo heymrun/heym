@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["131_add_work_integration"])
+        self.assertEqual(self.script.get_heads(), ["132_add_chat_build_queue_fields"])
+
+    def test_chat_build_queue_fields_follow_work_integration(self) -> None:
+        revision = self.script.get_revision("132_add_chat_build_queue_fields")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "131_add_work_integration")
 
     def test_work_integration_revision_follows_cron_cleanup_claims(self) -> None:
         revision = self.script.get_revision("131_add_work_integration")

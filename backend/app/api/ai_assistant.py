@@ -3626,7 +3626,8 @@ async def stream_dashboard_chat(
         else:
             breakdown = _context_breakdown(
                 base_system_prompt=system_prompt_parts.base_system_prompt
-                + getattr(system_prompt_parts, "credentials_block", ""),
+                + getattr(system_prompt_parts, "credentials_block", "")
+                + getattr(system_prompt_parts, "build_block", ""),
                 agents_md=system_prompt_parts.agents_md,
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,

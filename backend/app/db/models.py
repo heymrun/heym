@@ -2048,6 +2048,13 @@ class DashboardChatQueueItem(Base):
     )
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # A queued build turn keeps its build mode and AI edit target until it runs.
+    allow_build: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    build_target_workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -107,6 +107,10 @@ class MessageCreate(BaseModel):
     credential_id: str
     model: str
     attachment: ChatFileAttachment | None = None
+    # Chat build mode: the turn may save, test-run and finish workflows (Heym Work, MCP).
+    allow_build: bool = False
+    # The workflow an AI edit changes; needs allow_build and write access.
+    target_workflow_id: uuid.UUID | None = None
 
 
 class ConversationTitleGenerate(BaseModel):
