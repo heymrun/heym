@@ -145,10 +145,29 @@ describe("Dialog visibility and structure", () => {
 });
 
 describe("Dialog title, subtitle, and slots", () => {
+  it("is a modal dialog named by its title, with named window buttons", async () => {
+    const html = await renderDialog({ open: true, title: "New credential", allowFullscreen: true });
+    const titleId = html.match(/<h2[^>]* id="([^"]+)"/)?.[1];
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(titleId).toBeTruthy();
+    expect(html).toContain(`aria-labelledby="${titleId}"`);
+    expect(html).toContain('aria-label="Close"');
+    expect(html).toContain('aria-label="Full screen"');
+  });
+
+  it("leaves aria-labelledby out when there is no title", async () => {
+    const html = await renderDialog({ open: true });
+
+    expect(html).toContain('role="dialog"');
+    expect(html).not.toContain("aria-labelledby");
+  });
+
   it("renders title text and tooltip attribute on h2", async () => {
     const html = await renderDialog({ open: true, title: "Export Workflow" });
 
-    expect(html).toContain('<h2 title="Export Workflow"');
+    expect(html).toMatch(/<h2[^>]* title="Export Workflow"/);
     expect(html).toContain("Export Workflow</h2>");
     expect(html).toContain("text-sm sm:text-base md:text-lg");
   });

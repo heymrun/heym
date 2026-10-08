@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, useSlots, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, useId, useSlots, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
 
 import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
@@ -41,6 +41,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const isFullscreen = ref(props.defaultFullscreen);
+// Screen readers announce the panel as a dialog named by its title.
+const titleId = useId();
 const dialogId = Symbol("dialog");
 const isTopmost = computed(() => props.open && isTopmostDialog(dialogId));
 const isNestedBackdrop = computed(() => props.open && !isBottommostDialog(dialogId));
@@ -161,6 +163,9 @@ function toggleFullscreen(): void {
             sizeClasses,
             contentClass
           ]"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="title ? titleId : undefined"
           @click.stop
         >
           <div
@@ -178,6 +183,7 @@ function toggleFullscreen(): void {
               >
                 <h2
                   v-if="title"
+                  :id="titleId"
                   :title="title"
                   :class="[
                     'font-semibold tracking-tight line-clamp-1',
@@ -221,6 +227,7 @@ function toggleFullscreen(): void {
                   'dialog-btn items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200',
                   hideFullscreenToggleOnMobile ? 'hidden sm:flex' : 'flex',
                 ]"
+                :aria-label="isFullscreen ? 'Exit full screen' : 'Full screen'"
                 @click="toggleFullscreen"
               >
                 <Minimize2
@@ -234,6 +241,7 @@ function toggleFullscreen(): void {
               </button>
               <button
                 class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
+                aria-label="Close"
                 @click="emit('close')"
               >
                 <X class="h-3.5 w-3.5" />
