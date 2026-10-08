@@ -1,6 +1,6 @@
 # MCP Tab
 
-The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI clients (Claude, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
+The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI clients (Claude, ChatGPT, Gemini, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
 
 Heym supports two modes: a **default server** that exposes all MCP-enabled workflows under a single endpoint, and **named servers** that give each logical group of workflows its own dedicated URL and API key.
 
@@ -24,6 +24,8 @@ The default server is always available at `{origin}/api/mcp/sse`. All workflows 
 
 - **API Key** – Use the MCP API key for programmatic connections. The tab can copy a ready-to-use JSON config and includes an **Add to Cursor** button for one-click Cursor setup.
 - **Claude** – The tab shows the MCP server URL and setup steps for Claude. Leave OAuth Client ID and Secret blank; Claude registers automatically and authenticates via Heym OAuth.
+- **ChatGPT** – The tab shows the MCP server URL and setup steps for a ChatGPT app. Turn on Developer mode, create an app with the URL and choose OAuth; ChatGPT registers automatically.
+- **Gemini** – The tab shows the MCP server URL and setup steps for a Gemini custom app: in gemini.google.com, **Settings → Connected Apps → Add a custom app**, paste the URL and leave **Advanced features** closed; Gemini registers automatically and authenticates via Heym OAuth. Gemini connects custom apps in its web app, for personal Google Accounts in the US (18 or over) with Keep Activity on; the app then also works in the Gemini mobile app.
 
 ### Workflow MCP Toggle
 
@@ -120,7 +122,7 @@ Toggling a workflow moves it to the top of the assigned list, so the row you jus
 Named servers support the same authentication methods as the default server:
 
 - **X-MCP-Key header** – Pass the server's API key directly (API clients, Cursor). Header only: keys are not accepted as a `?key=` query parameter, because URLs end up in access logs, proxy logs and browser history.
-- **Claude OAuth** – Add the server URL to Claude integrations; leave credentials blank and Claude registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
+- **Claude, ChatGPT and Gemini OAuth** – Add the server URL to the client's connectors or custom apps; leave credentials blank and the client registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
 - **Session token** – Issued during the SSE handshake; scoped to the specific server so tokens from one named server cannot access another. This short-lived `?session=` parameter is unaffected.
 
 ### Deleting a Named Server
@@ -134,7 +136,7 @@ Click the **X** icon on a server card header. Deletion removes the server and al
 | Default | `{origin}/api/mcp/sse` |
 | Named | `{origin}/api/mcp/servers/{server-uuid}/sse` |
 
-Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamable HTTP transport (POST, MCP spec 2025-03-26). Claude uses OAuth 2.1 / PKCE for secure sign-in on both.
+Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamable HTTP transport (POST, MCP spec 2025-03-26). Claude, ChatGPT and Gemini use OAuth 2.1 / PKCE for secure sign-in on both.
 
 ## Related
 
