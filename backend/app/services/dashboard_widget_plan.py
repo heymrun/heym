@@ -56,10 +56,12 @@ Answer with JSON only, no prose:
   at most {MAX_EXAMPLE_POINTS} labels and one number per label (one label and one value for
   numeric). Omit it for table, text and hitl.
 
-When data tables are given, every widget uses them: work from their real columns and values
-(group by a column such as a source or a status, count rows, sum a number column), name the
-table and its dataTableId in each prompt so the builder reads it with a dataTable node, never
-propose sample data, and draw each example from the values and counts you were shown.
+When data tables are given, every widget reads one or more of them, and together the widgets
+cover the tables that matter for the description: work from their real columns and values
+(group by a column such as a source or a status, count rows, sum a number column, compare or
+join tables on a shared column), name each table a widget reads with its dataTableId in its
+prompt so the builder reads it with a dataTable node, never propose sample data, and draw each
+example from the values and counts you were shown.
 
 Write the titles and prompts in the language of the description."""
 

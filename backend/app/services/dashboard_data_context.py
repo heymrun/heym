@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import DataTableRow
 from app.services.data_table_access import get_data_table_with_permission
 
-MAX_TABLES = 3
+MAX_TABLES = 8
 PROFILE_ROWS = 300
 EXAMPLE_ROWS = 5
 TOP_VALUES = 8

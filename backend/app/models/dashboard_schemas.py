@@ -178,7 +178,7 @@ class AiWidgetRequest(BaseModel):
     # The conversation the widget is built in (OpenCode session); a page plan passes its own.
     session_id: uuid.UUID | None = None
     # Data tables the widget reads; the dashboard's owner must be able to read them too.
-    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
+    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)
 
 
 class AiPlanRequest(BaseModel):
@@ -187,7 +187,7 @@ class AiPlanRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     session_id: uuid.UUID | None = None
     # Data tables the page is about; the plan works from their columns and values.
-    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
+    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)
 
 
 class WidgetExampleResponse(BaseModel):
