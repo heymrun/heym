@@ -12,7 +12,6 @@ import io
 import json
 import sys
 import traceback
-from collections.abc import Iterator, KeysView
 from typing import Any
 
 _MAX_LOG_CHARS = 65536
@@ -25,6 +24,8 @@ _MAIN_REQUIRED = (
 
 def _wrap(value: Any) -> Any:
     """Wrap dicts (and dicts inside lists) so they support attribute access."""
+    if isinstance(value, DotDict):
+        return value
     if isinstance(value, dict):
         return DotDict(value)
     if isinstance(value, list):
@@ -34,65 +35,57 @@ def _wrap(value: Any) -> Any:
 
 def unwrap(value: Any) -> Any:
     """Return a plain, JSON-friendly copy of a possibly wrapped value."""
-    if isinstance(value, DotDict):
-        return {key: unwrap(item) for key, item in value.to_dict().items()}
     if isinstance(value, dict):
-        return {key: unwrap(item) for key, item in value.items()}
+        return {key: unwrap(item) for key, item in dict.items(value)}
     if isinstance(value, (list, tuple)):
         return [unwrap(item) for item in value]
     return value
 
 
-class DotDict:
-    """Read-only mapping that also supports ``params.key`` attribute access."""
+# Methods that stay methods even when a key has the same name, as before DotDict was a dict.
+_METHODS_FIRST = frozenset({"get", "keys", "to_dict"})
 
-    __slots__ = ("_data",)
 
-    def __init__(self, data: dict) -> None:
-        object.__setattr__(self, "_data", data)
+class DotDict(dict):
+    """A dict whose keys are also attributes: ``params.rows[0].id``.
+
+    It is a real dict, so code that checks ``isinstance(row, dict)`` (as models often write)
+    sees one. A key wins over a dict method of the same name, so ``row.items`` is an ``items``
+    column; ``get``, ``keys`` and ``to_dict`` stay methods.
+    """
+
+    __slots__ = ()
+
+    def __getattribute__(self, name: str) -> Any:
+        if (
+            not name.startswith("_")
+            and name not in _METHODS_FIRST
+            and dict.__contains__(self, name)
+        ):
+            return _wrap(dict.__getitem__(self, name))
+        return super().__getattribute__(name)
 
     def __getattr__(self, name: str) -> Any:
-        try:
-            return _wrap(self._data[name])
-        except KeyError:
-            available = ", ".join(sorted(str(key) for key in self._data)) or "none"
-            raise AttributeError(
-                f"Parameter {name!r} was not provided. Available parameters: {available}."
-            ) from None
+        available = ", ".join(sorted(str(key) for key in dict.keys(self))) or "none"
+        raise AttributeError(
+            f"Parameter {name!r} was not provided. Available parameters: {available}."
+        )
 
     def __getitem__(self, key: str) -> Any:
-        return _wrap(self._data[key])
-
-    def __contains__(self, key: object) -> bool:
-        return key in self._data
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
+        return _wrap(dict.__getitem__(self, key))
 
     def __repr__(self) -> str:
-        return f"DotDict({self._data!r})"
+        return f"DotDict({dict.__repr__(self)})"
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, DotDict):
-            return self._data == other._data
-        return self._data == other
-
-    def keys(self) -> KeysView[str]:
-        """Return the parameter names."""
-        return self._data.keys()
-
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
         """Return a parameter by name, or ``default`` when it is absent."""
-        if key in self._data:
-            return _wrap(self._data[key])
+        if dict.__contains__(self, key):
+            return _wrap(dict.__getitem__(self, key))
         return default
 
     def to_dict(self) -> dict:
-        """Return the underlying plain dict."""
-        return self._data
+        """Return a plain dict copy of the data."""
+        return dict(self)
 
 
 def _truncate(text: str, limit: int = _MAX_LOG_CHARS) -> str:

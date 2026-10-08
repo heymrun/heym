@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Iterator, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -1780,15 +1780,36 @@ def _fallback_generated_workflow_name(goal: str) -> str:
     return cleaned.rstrip(".,:;!?") or "Generated Workflow"
 
 
+_MAX_EMBEDDED_JSON_ATTEMPTS = 200
+
+
+def _embedded_json_objects(content: str) -> Iterator[dict[str, Any]]:
+    """JSON objects inside prose, for answers that explain around an unfenced workflow."""
+    decoder = json.JSONDecoder()
+    start = content.find("{")
+    attempts = 0
+    while start != -1 and attempts < _MAX_EMBEDDED_JSON_ATTEMPTS:
+        attempts += 1
+        try:
+            parsed, end = decoder.raw_decode(content, start)
+        except json.JSONDecodeError:
+            start = content.find("{", start + 1)
+            continue
+        if isinstance(parsed, dict):
+            yield parsed
+        start = content.find("{", end)
+
+
 def _extract_generated_workflow_config(content: str, goal: str) -> dict[str, Any]:
     """Extract a generated workflow JSON object with name, description, nodes, and edges."""
-    candidates = [
+    candidates: list[str | dict[str, Any]] = [
         match.group(1).strip() for match in _WORKFLOW_JSON_BLOCK_PATTERN.finditer(content)
     ]
     candidates.append(content.strip())
+    candidates.extend(_embedded_json_objects(content))
 
     for candidate in candidates:
-        parsed = _parse_json_object(candidate)
+        parsed = candidate if isinstance(candidate, dict) else _parse_json_object(candidate)
         if parsed is None:
             continue
         workflow_obj = (

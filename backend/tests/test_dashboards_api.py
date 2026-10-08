@@ -515,6 +515,55 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generate_dsl.await_args.kwargs["workflow_id"], widget.workflow_id)
         self.assertEqual(generate_dsl.await_args.kwargs["node_label"], "AI Widget Fine-tune")
 
+    async def test_a_fix_sees_the_columns_and_values_of_the_widgets_tables(self):
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiRefineRequest
+        from app.services.dashboard_data_context import ColumnProfile, TableContext
+
+        user = _User()
+        widget = MagicMock(id=uuid.uuid4(), workflow_id=uuid.uuid4(), chart_type="bar")
+        db = MagicMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _widget_row(widget, user.id),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=MagicMock())),
+            ]
+        )
+        table = TableContext(
+            uuid.UUID(int=7),
+            "Vendors",
+            2,
+            [ColumnProfile("security_review_status", "string", [("required", 2)], 1)],
+            [],
+        )
+        loader = AsyncMock(return_value=[table])
+        generate_dsl = AsyncMock(side_effect=RuntimeError("stop after the prompt"))
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate_dsl),
+            patch.object(
+                dash_api,
+                "get_credential_for_user",
+                AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
+            ),
+            patch.object(dash_api, "load_table_contexts", loader),
+        ):
+            with self.assertRaises(RuntimeError):
+                await dash_api.ai_refine_widget(
+                    widget_id=widget.id,
+                    body=AiRefineRequest(
+                        prompt="It shows no data. Fix it.",
+                        credential_id=uuid.uuid4(),
+                        model="m",
+                        data_table_ids=[table.id],
+                    ),
+                    current_user=user,
+                    db=db,
+                )
+
+        prompt = generate_dsl.await_args.args[0]
+        self.assertTrue(prompt.startswith("It shows no data. Fix it."))
+        self.assertIn("security_review_status (string): required (2)", prompt)
+
     async def test_refine_rejects_trigger_nodes(self):
         user = _User()
         widget = MagicMock()

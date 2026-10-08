@@ -374,6 +374,43 @@ class AiGenerateSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(generate.await_args.kwargs["session_id"], session_id)
 
+    async def test_an_answer_without_json_is_asked_again_for_json_only(self) -> None:
+        execute_llm = AsyncMock(
+            side_effect=[
+                {"text": "First I will look at the table, then build the chart."},
+                {
+                    "text": '{"nodes": [{"id": "c", "type": "chartOutput", "data": {}}], "edges": []}'
+                },
+            ]
+        )
+
+        with (
+            patch.object(dash_api, "decrypt_config", return_value={"api_key": "x"}),
+            patch.object(dash_api, "execute_llm", execute_llm),
+        ):
+            dsl = await dash_api.generate_widget_dsl(
+                "show", credential=_credential(), model="m", user=_user()
+            )
+
+        self.assertEqual(dsl["nodes"][0]["type"], "chartOutput")
+        retry = execute_llm.await_args_list[1].kwargs["user_message"]
+        self.assertIn("workflow JSON object only", retry)
+        self.assertIn("JSON object only", dash_api._AI_WIDGET_SUFFIX)
+
+    async def test_two_answers_without_json_are_a_422(self) -> None:
+        execute_llm = AsyncMock(return_value={"text": "I cannot build that."})
+
+        with (
+            patch.object(dash_api, "decrypt_config", return_value={"api_key": "x"}),
+            patch.object(dash_api, "execute_llm", execute_llm),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dash_api.generate_widget_dsl(
+                    "show", credential=_credential(), model="m", user=_user()
+                )
+
+        self.assertEqual((ctx.exception.status_code, execute_llm.await_count), (422, 2))
+
     async def test_generate_widget_dsl_puts_the_session_on_the_trace(self) -> None:
         session_id = uuid.uuid4()
         execute_llm = AsyncMock(

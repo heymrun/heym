@@ -212,3 +212,5 @@ class AiRefineRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     credential_id: uuid.UUID
     model: str = Field(min_length=1, max_length=200)
+    # Data tables the widget reads, so a fix sees their real columns and values.
+    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)

@@ -119,7 +119,15 @@ _AI_WIDGET_SUFFIX = (
     "When the user wants pending human reviews on the dashboard, use chartType hitl and no "
     "upstream data nodes. Do not include trigger, "
     "input, error-handler, or RabbitMQ nodes in dashboard widget workflows. "
-    "On a detail dashboard, read the record the page is about from $page.record."
+    "On a detail dashboard, read the record the page is about from $page.record. "
+    "A dataTable node returns {rows, count}; each row is {id, data, created_at} with the "
+    "columns under data, so group and sum row.data values, not the row itself. "
+    "Answer with the workflow JSON object only, from its opening { to its closing }: no "
+    "explanation, no plan, no questions and no markdown fences before or after it."
+)
+_JSON_ONLY_RETRY = (
+    "\n\nYour previous answer had no workflow JSON object in it. Answer again with the "
+    "workflow JSON object only: nothing before or after it."
 )
 
 
@@ -159,19 +167,28 @@ async def generate_widget_dsl(
         or ("AI Widget Fine-tune" if current_workflow else "AI Widget Create"),
         session_id=str(session_id) if session_id else None,
     )
-    result = await execute_llm(
-        credential_type=credential.type.value,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        system_instruction=system_prompt,
-        user_message=prompt + _AI_WIDGET_SUFFIX,
-        temperature=None if is_reasoning_model(model) else WORKFLOW_BUILDER_TEMPERATURE,
-        trace_context=trace_context,
-        router=router,
+    user_message = prompt + _AI_WIDGET_SUFFIX
+    # Some models explain around the JSON or answer with prose only; one retry asks for JSON alone.
+    for attempt in range(2):
+        result = await execute_llm(
+            credential_type=credential.type.value,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            system_instruction=system_prompt,
+            user_message=user_message + (_JSON_ONLY_RETRY if attempt else ""),
+            temperature=None if is_reasoning_model(model) else WORKFLOW_BUILDER_TEMPERATURE,
+            trace_context=trace_context,
+            router=router,
+        )
+        try:
+            return _extract_generated_workflow_config(str(result.get("text") or ""), prompt)
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="The model did not answer with a widget workflow. Try again or pick another model.",
     )
-    content = str(result.get("text") or "")
-    return _extract_generated_workflow_config(content, prompt)
 
 
 async def _ensure_own_dashboard(db: AsyncSession, user: User) -> None:
@@ -1185,7 +1202,7 @@ async def ai_refine_widget(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
-    widget, _, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
     if widget.chart_type == FILE_RUN_WIDGET_TYPE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1213,8 +1230,12 @@ async def ai_refine_widget(
         "nodes": workflow.nodes,
         "edges": workflow.edges,
     }
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
+    if dashboard.owner_id != current_user.id:
+        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=True)
     dsl = await generate_widget_dsl(
-        body.prompt,
+        f"{body.prompt}\n\n{context}" if context else body.prompt,
         credential=credential,
         model=body.model,
         user=current_user,
