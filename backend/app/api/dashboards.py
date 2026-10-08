@@ -47,6 +47,7 @@ from app.models.dashboard_schemas import (
     DashboardTeamShareResponse,
     DashboardUpdateRequest,
     DashboardWidgetResponse,
+    DetailPageProposalResponse,
     FileRunSlotResponse,
     MarkdownTaskToggleRequest,
     MarkdownTaskUpdateRequest,
@@ -75,7 +76,7 @@ from app.services.dashboard_data_context import (
     describe_tables,
     load_table_contexts,
 )
-from app.services.dashboard_widget_plan import plan_dashboard_widgets
+from app.services.dashboard_widget_plan import WidgetProposal, plan_dashboard_widgets
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
@@ -1093,20 +1094,30 @@ async def ai_plan_widgets(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The model proposed no widgets. Describe the page in other words.",
         )
-    return AiPlanResponse(
-        widgets=[
-            WidgetProposalResponse(
-                title=p.title,
-                chart_type=p.chart_type,
-                prompt=p.prompt,
-                example=(
-                    WidgetExampleResponse(labels=p.example.labels, values=p.example.values)
-                    if p.example
-                    else None
-                ),
+    return AiPlanResponse(widgets=[_proposal_response(p) for p in proposals])
+
+
+def _proposal_response(proposal: WidgetProposal) -> WidgetProposalResponse:
+    """A planned widget as the API returns it, with its detail page's widgets."""
+    example = proposal.example
+    detail = proposal.detail
+    return WidgetProposalResponse(
+        title=proposal.title,
+        chart_type=proposal.chart_type,
+        prompt=proposal.prompt,
+        example=(
+            WidgetExampleResponse(labels=example.labels, values=example.values) if example else None
+        ),
+        detail=(
+            DetailPageProposalResponse(
+                title=detail.title,
+                record_field=detail.record_field,
+                label_field=detail.label_field,
+                widgets=[_proposal_response(widget) for widget in detail.widgets],
             )
-            for p in proposals
-        ]
+            if detail
+            else None
+        ),
     )
 
 

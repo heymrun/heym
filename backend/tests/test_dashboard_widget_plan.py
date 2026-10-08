@@ -12,7 +12,14 @@ from app.db.models import CredentialType
 from app.models.dashboard_schemas import AiPlanRequest, AiWidgetRequest
 from app.services import dashboard_widget_plan as plan
 from app.services.dashboard_data_context import TableContext, TableUnavailableError
-from app.services.dashboard_widget_plan import WidgetExample, WidgetProposal, parse_widget_plan
+from app.services.dashboard_widget_plan import (
+    MAX_PROMPT_LENGTH,
+    PLAN_SYSTEM_PROMPT,
+    DetailPagePlan,
+    WidgetExample,
+    WidgetProposal,
+    parse_widget_plan,
+)
 
 
 def _user() -> MagicMock:
@@ -73,6 +80,114 @@ class ParseWidgetPlanTests(unittest.TestCase):
         proposals = parse_widget_plan(_answer([{"title": "t" * 200, "prompt": "p" * 3000}]))
 
         self.assertEqual((len(proposals[0].title), len(proposals[0].prompt)), (80, 2000))
+
+
+def _detail(**overrides: object) -> dict:
+    detail = {
+        "title": "Invoice details",
+        "recordField": "invoice_id",
+        "labelField": "vendor",
+        "widgets": [
+            {
+                "title": "Invoice lines",
+                "chartType": "table",
+                "prompt": "Lines of the invoice whose invoice_id is $page.record.",
+            },
+            {"title": "Amount", "chartType": "numeric", "prompt": "The invoice's total."},
+        ],
+    }
+    return {**detail, **overrides}
+
+
+def _linked_table(**detail: object) -> dict:
+    return {
+        "title": "Recent invoices",
+        "chartType": "bar",
+        "prompt": "The latest invoices.",
+        "example": {"labels": ["a"], "values": [1]},
+        "detail": _detail(**detail),
+    }
+
+
+class DetailPagePlanTests(unittest.TestCase):
+    def test_the_prompt_asks_for_one_table_that_opens_a_detail_page(self) -> None:
+        self.assertIn("Always propose exactly one table", PLAN_SYSTEM_PROMPT)
+        self.assertIn("$page.record", PLAN_SYSTEM_PROMPT)
+
+    def test_a_table_carries_its_detail_page_and_names_the_record_column(self) -> None:
+        proposals = parse_widget_plan(
+            _answer([{"title": "Spend", "chartType": "bar", "prompt": "p"}, _linked_table()])
+        )
+
+        table = proposals[1]
+        self.assertEqual((table.chart_type, table.example), ("table", None))
+        self.assertTrue(table.prompt.startswith("The latest invoices. Show the invoice_id"))
+        self.assertIn("the vendor column", table.prompt)
+        self.assertEqual(
+            table.detail,
+            DetailPagePlan(
+                title="Invoice details",
+                record_field="invoice_id",
+                label_field="vendor",
+                widgets=[
+                    WidgetProposal(
+                        "Invoice lines",
+                        "table",
+                        "Lines of the invoice whose invoice_id is $page.record.",
+                    ),
+                    WidgetProposal(
+                        "Amount",
+                        "numeric",
+                        "The invoice's total. On this detail page, read the record's invoice_id "
+                        "from $page.record and show only that record's data.",
+                    ),
+                ],
+            ),
+        )
+        self.assertIsNone(proposals[0].detail)
+
+    def test_only_the_first_detail_page_is_kept(self) -> None:
+        second = {**_linked_table(), "title": "Vendors"}
+
+        proposals = parse_widget_plan(_answer([_linked_table(), second]))
+
+        self.assertIsNotNone(proposals[0].detail)
+        self.assertEqual((proposals[1].detail, proposals[1].chart_type), (None, "bar"))
+
+    def test_a_detail_page_needs_a_record_column_and_a_widget(self) -> None:
+        for detail in ({"recordField": ""}, {"widgets": []}, {"widgets": [{"title": "x"}]}):
+            proposals = parse_widget_plan(_answer([_linked_table(**detail)]))
+
+            self.assertIsNone(proposals[0].detail, detail)
+            self.assertEqual(proposals[0].prompt, "The latest invoices.")
+
+    def test_a_detail_page_without_a_title_or_label_is_named_after_its_table(self) -> None:
+        proposals = parse_widget_plan(_answer([_linked_table(title="", labelField=None)]))
+
+        detail = proposals[0].detail
+        self.assertEqual((detail.title, detail.label_field), ("Recent invoices details", None))
+        self.assertNotIn("column and the", proposals[0].prompt)
+
+    def test_the_detail_table_stays_among_six_and_has_at_most_four_widgets(self) -> None:
+        widgets = [{"title": f"W{i}", "chartType": "bar", "prompt": "p"} for i in range(7)]
+        many = [{"title": f"D{i}", "chartType": "bar", "prompt": "p"} for i in range(6)]
+
+        proposals = parse_widget_plan(_answer([*widgets, _linked_table(widgets=many)]))
+
+        self.assertEqual([p.title for p in proposals][-2:], ["W4", "Recent invoices"])
+        self.assertEqual(len(proposals), 6)
+        self.assertEqual(len(proposals[-1].detail.widgets), 4)
+
+    def test_long_prompts_still_fit_what_ai_generate_takes(self) -> None:
+        long_table = {**_linked_table(), "prompt": "t" * 3000}
+        long_detail = _detail(widgets=[{"title": "x", "chartType": "bar", "prompt": "d" * 3000}])
+
+        table = parse_widget_plan(_answer([{**long_table, "detail": long_detail}]))[0]
+
+        self.assertLessEqual(len(table.prompt), MAX_PROMPT_LENGTH)
+        self.assertIn("invoice_id", table.prompt)
+        self.assertLessEqual(len(table.detail.widgets[0].prompt), MAX_PROMPT_LENGTH)
+        self.assertIn("$page.record", table.detail.widgets[0].prompt)
 
 
 class WidgetExampleTests(unittest.TestCase):
@@ -179,11 +294,46 @@ class AiPlanEndpointTests(unittest.IsolatedAsyncioTestCase):
                         "chart_type": "numeric",
                         "prompt": "Count them.",
                         "example": None,
+                        "detail": None,
                     }
                 ]
             },
         )
         self.assertEqual(planner.await_args.kwargs["session_id"], session_id)
+
+    async def test_returns_the_detail_page_of_the_linked_table(self) -> None:
+        detail = DetailPagePlan(
+            "Case details", "case_id", None, [WidgetProposal("Timeline", "line", "p")]
+        )
+        planner = AsyncMock(return_value=[WidgetProposal("Cases", "table", "t", None, detail)])
+
+        with (
+            patch.object(
+                dash_api, "get_credential_for_user", AsyncMock(return_value=_credential())
+            ),
+            patch.object(dash_api, "plan_dashboard_widgets", planner),
+        ):
+            response = await dash_api.ai_plan_widgets(
+                body=self._body(), current_user=_user(), db=MagicMock()
+            )
+
+        self.assertEqual(
+            response.widgets[0].detail.model_dump(),
+            {
+                "title": "Case details",
+                "record_field": "case_id",
+                "label_field": None,
+                "widgets": [
+                    {
+                        "title": "Timeline",
+                        "chart_type": "line",
+                        "prompt": "p",
+                        "example": None,
+                        "detail": None,
+                    }
+                ],
+            },
+        )
 
     async def test_a_page_about_a_table_is_planned_from_its_data(self) -> None:
         table_id = uuid.uuid4()

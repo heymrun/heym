@@ -202,6 +202,20 @@ class WidgetProposalResponse(BaseModel):
     chart_type: str
     prompt: str
     example: WidgetExampleResponse | None = None
+    # Set on the one table whose rows open a detail page.
+    detail: "DetailPageProposalResponse | None" = None
+
+
+class DetailPageProposalResponse(BaseModel):
+    """The detail page a proposed table's rows open, and the widgets to build on it."""
+
+    title: str
+    record_field: str
+    label_field: str | None = None
+    widgets: list[WidgetProposalResponse]
+
+
+WidgetProposalResponse.model_rebuild()
 
 
 class AiPlanResponse(BaseModel):
