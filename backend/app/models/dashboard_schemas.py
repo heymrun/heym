@@ -175,6 +175,25 @@ class AiWidgetRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     credential_id: uuid.UUID
     model: str = Field(min_length=1, max_length=200)
+    # The conversation the widget is built in (OpenCode session); a page plan passes its own.
+    session_id: uuid.UUID | None = None
+
+
+class AiPlanRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=2000)
+    credential_id: uuid.UUID
+    model: str = Field(min_length=1, max_length=200)
+    session_id: uuid.UUID | None = None
+
+
+class WidgetProposalResponse(BaseModel):
+    title: str
+    chart_type: str
+    prompt: str
+
+
+class AiPlanResponse(BaseModel):
+    widgets: list[WidgetProposalResponse]
 
 
 class AiRefineRequest(BaseModel):

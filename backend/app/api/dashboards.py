@@ -34,6 +34,8 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.models.dashboard_schemas import (
+    AiPlanRequest,
+    AiPlanResponse,
     AiRefineRequest,
     AiWidgetRequest,
     DashboardCreateRequest,
@@ -50,6 +52,7 @@ from app.models.dashboard_schemas import (
     MarkdownTaskUpdateRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
+    WidgetProposalResponse,
     WidgetRunRequest,
     WidgetRunResponse,
     WidgetUpdateRequest,
@@ -65,6 +68,7 @@ from app.services.dashboard_access import (
     shared_dashboard_permissions,
 )
 from app.services.dashboard_data import compute_widget_data, run_widget_workflow
+from app.services.dashboard_widget_plan import plan_dashboard_widgets
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
@@ -121,6 +125,7 @@ async def generate_widget_dsl(
     current_workflow: dict[str, Any] | None = None,
     workflow_id: uuid.UUID | None = None,
     node_label: str | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Generate a widget workflow DSL (nodes + edges) ending in a chartOutput node.
 
@@ -145,6 +150,7 @@ async def generate_widget_dsl(
         source="dashboard_widget_ai",
         node_label=node_label
         or ("AI Widget Fine-tune" if current_workflow else "AI Widget Create"),
+        session_id=str(session_id) if session_id else None,
     )
     result = await execute_llm(
         credential_type=credential.type.value,
@@ -1011,6 +1017,45 @@ async def update_markdown_task(
     )
 
 
+@router.post("/ai-plan", response_model=AiPlanResponse)
+async def ai_plan_widgets(
+    body: AiPlanRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AiPlanResponse:
+    """Propose the widgets for a page described in a sentence or two.
+
+    Nothing is saved: the client shows the proposals, and builds the chosen ones with
+    ``ai-generate``, passing the same ``session_id``.
+    """
+    credential = await get_credential_for_user(body.credential_id, current_user, db)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    if credential.type not in LLM_CREDENTIAL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
+        )
+    proposals = await plan_dashboard_widgets(
+        body.description,
+        credential=credential,
+        model=body.model,
+        user=current_user,
+        session_id=body.session_id,
+    )
+    if not proposals:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The model proposed no widgets. Describe the page in other words.",
+        )
+    return AiPlanResponse(
+        widgets=[
+            WidgetProposalResponse(title=p.title, chart_type=p.chart_type, prompt=p.prompt)
+            for p in proposals
+        ]
+    )
+
+
 @router.post(
     "/{dashboard_id}/widgets/ai-generate",
     response_model=DashboardWidgetResponse,
@@ -1038,6 +1083,7 @@ async def ai_generate_widget(
         model=body.model,
         user=current_user,
         node_label="AI Widget Create",
+        session_id=body.session_id,
     )
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
