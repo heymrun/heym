@@ -468,3 +468,59 @@ async def compute_widget_data(
         error=None if payload is not None else "Workflow produced no chartOutput",
         highlight=build_highlight_payload(_highlight_rows(result), nodes, None),
     )
+
+
+async def run_widget_workflow(
+    db: AsyncSession,
+    workflow: Workflow,
+    run_as_user_id: uuid.UUID,
+    inputs: dict[str, Any],
+) -> tuple[Any, ExecutionHistory | None]:
+    """Run an ordinary workflow from a run widget, as the dashboard owner, and record the run.
+
+    ``inputs`` are the execute endpoint's shape (``headers``, ``query``, ``body``); a start
+    node reads the run widget's field values from ``body``.
+    """
+    nodes = workflow.nodes or []
+    (
+        workflow_cache,
+        credentials_context,
+        global_variables_context,
+    ) = await _load_widget_execution_context(db, workflow, run_as_user_id)
+    result = await dispatch_workflow(
+        workflow_id=workflow.id,
+        nodes=nodes,
+        edges=workflow.edges or [],
+        inputs=inputs,
+        workflow_cache=workflow_cache,
+        test_run=False,
+        trigger_source="dashboard",
+        credentials_owner_id=run_as_user_id,
+        run_in_thread=True,
+        credentials_context=credentials_context,
+        global_variables_context=global_variables_context,
+        trace_user_id=run_as_user_id,
+        actor_user_id=run_as_user_id,
+    )
+    history_entry = (
+        None
+        if getattr(result, "history_written", False) is True
+        else await _record_widget_execution(db, workflow, result, inputs)
+    )
+    background_finalize = bool(getattr(result, "allow_downstream_pending", False))
+    if not background_finalize and result.status != "pending":
+        await _persist_widget_global_variables(db, run_as_user_id, nodes, workflow_cache, result)
+    await db.commit()
+    if background_finalize:
+        asyncio.create_task(
+            _finalize_widget_allow_downstream(
+                history_entry_id=history_entry.id if history_entry is not None else None,
+                workflow_id=workflow.id,
+                workflow_name=workflow.name,
+                owner_id=run_as_user_id,
+                workflow_nodes=copy.deepcopy(nodes),
+                workflow_cache=copy.deepcopy(workflow_cache),
+                result=result,
+            )
+        )
+    return result, history_entry

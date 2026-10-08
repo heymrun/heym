@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, StringConstraints
 
 from app.models.schemas import HighlightPayloadSchema
 from app.services.page_params import RecordFormat
@@ -135,6 +135,22 @@ class FileRunSlotResponse(BaseModel):
     max_size_mb: int
     allowed_types: list[str] = []
     slot_id: str
+
+
+class WidgetRunRequest(BaseModel):
+    """The values of a run widget's start fields. Fields the workflow does not have are dropped."""
+
+    inputs: dict[str, Annotated[str, StringConstraints(max_length=20_000)]] = Field(
+        default_factory=dict, max_length=50
+    )
+
+
+class WidgetRunResponse(BaseModel):
+    """A finished run widget run, shaped like a file drop's result so both show alike."""
+
+    run_id: uuid.UUID | None
+    status: str
+    output: dict[str, Any]
 
 
 class MarkdownTaskToggleRequest(BaseModel):

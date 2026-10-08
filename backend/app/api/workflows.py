@@ -143,6 +143,7 @@ from app.services.workflow_executor import (
     execute_workflow_streaming,
     mask_sensitive_output,
 )
+from app.services.workflow_inputs import start_input_fields
 from app.services.workflow_last_trigger import (
     fetch_last_trigger_source,
     fetch_last_trigger_sources,
@@ -728,31 +729,10 @@ async def require_workflow_write(db: AsyncSession, workflow: Workflow, user_id: 
 
 
 def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSchema]:
-    nodes = workflow.nodes or []
-    edges = workflow.edges or []
-
-    target_node_ids = {edge.get("target") for edge in edges if edge.get("target")}
-    start_nodes = [
-        node
-        for node in nodes
-        if node.get("id") not in target_node_ids
-        and node.get("type") == "textInput"
-        and node.get("data", {}).get("active") is not False
+    return [
+        InputFieldSchema(key=field["key"], default_value=field["defaultValue"])
+        for field in start_input_fields(workflow.nodes, workflow.edges)
     ]
-
-    input_fields: list[InputFieldSchema] = []
-    for node in start_nodes:
-        node_data = node.get("data", {})
-        node_fields = node_data.get("inputFields") or [{"key": "text"}]
-        for field in node_fields:
-            input_fields.append(
-                InputFieldSchema(
-                    key=field.get("key", "text"),
-                    default_value=field.get("defaultValue"),
-                )
-            )
-
-    return input_fields
 
 
 def extract_file_input_from_workflow(workflow: Workflow) -> FileInputSchema | None:

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { X } from "lucide-vue-next";
 
+import { runWidgetOption } from "@/components/Dashboards/runWidget";
 import ChartRenderer from "@/components/Dashboards/ChartRenderer.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
@@ -33,26 +34,26 @@ const chartType = ref<WidgetType>("bar");
 
 const chartTypeOptions: { value: WidgetType; label: string }[] = [
   ...CHART_TYPE_EXAMPLES.map(({ value, label }) => ({ value, label })),
-  { value: "fileRun", label: "File drop" },
+  { value: "fileRun", label: "Run a workflow" },
 ];
 const isFileRun = computed<boolean>(() => chartType.value === "fileRun");
 const example = computed(() =>
   isFileRun.value ? null : chartTypeExample(chartType.value as ChartPayload["type"]),
 );
 
-// A file-run widget runs one of the user's workflows that takes a file.
+// A run widget runs one of the user's workflows: on a dropped file, with its fields, or as is.
 const fileWorkflows = ref<WorkflowWithInputs[]>([]);
 const workflowsLoaded = ref(false);
 const workflowId = ref<string | undefined>(undefined);
 const workflowOptions = computed(() =>
-  fileWorkflows.value.map((workflow) => ({ value: workflow.id, label: workflow.name })),
+  fileWorkflows.value.map(runWidgetOption),
 );
 const canSubmit = computed<boolean>(() => !isFileRun.value || Boolean(workflowId.value));
 
 watch(isFileRun, async (fileRun) => {
   if (!fileRun || workflowsLoaded.value) return;
   try {
-    fileWorkflows.value = (await workflowApi.listWithInputs()).filter((w) => w.file_input);
+    fileWorkflows.value = await workflowApi.listWithInputs();
   } catch {
     fileWorkflows.value = [];
   } finally {
@@ -123,13 +124,14 @@ function submit(): void {
               <Select
                 v-model="workflowId"
                 :options="workflowOptions"
-                placeholder="Choose a workflow with a File Upload trigger"
+                placeholder="Choose a workflow"
                 data-testid="add-widget-file-workflow"
               />
               <p class="pt-1 text-xs text-muted-foreground">
-                Dropping a file on the widget runs this workflow on it and shows the result.
+                A workflow that takes a file gets a drop zone, one with input fields gets those
+                fields, and one without inputs gets a Run button. Each run shows its result.
                 <template v-if="workflowsLoaded && fileWorkflows.length === 0">
-                  None of your workflows has a File Upload trigger yet.
+                  You have no workflows yet.
                 </template>
               </p>
             </div>

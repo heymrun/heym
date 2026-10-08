@@ -145,6 +145,7 @@ import type {
   DashboardWidget,
   FileRunSlot,
   RecordFormat,
+  WidgetRunResult,
   WidgetCreateRequest,
   WidgetDataResponse,
   WidgetUpdateRequest,
@@ -1760,6 +1761,12 @@ export const dashboardApi = {
   /** A single-use upload link for one drop on a file-run widget. */
   createFileRunSlot: async (id: string): Promise<FileRunSlot> => {
     const response = await api.post<FileRunSlot>(`/dashboards/widgets/${id}/file-slot`);
+    return response.data;
+  },
+
+  /** Runs a run widget's workflow with its start fields, as the dashboard owner. */
+  runWidget: async (id: string, inputs: Record<string, string>): Promise<WidgetRunResult> => {
+    const response = await api.post<WidgetRunResult>(`/dashboards/widgets/${id}/run`, { inputs });
     return response.data;
   },
 

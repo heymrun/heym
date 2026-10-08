@@ -29,6 +29,21 @@ const file = ref<File | null>(null);
 // The last result stays in this page view; other viewers do not see it.
 const runState = ref<QuickDrawerRunState>(idle());
 
+async function onRun(values: Record<string, string>): Promise<void> {
+  file.value = null;
+  const startedAt = Date.now();
+  runState.value = { ...idle(), status: "running", startedAt };
+  try {
+    runState.value = fileRunState(await dashboardApi.runWidget(props.widgetId, values), startedAt);
+  } catch (error) {
+    runState.value = {
+      ...runState.value,
+      status: "error",
+      errorMessage: getErrorDetail(error, "The workflow could not be run"),
+    };
+  }
+}
+
 async function onDrop(dropped: File): Promise<void> {
   file.value = dropped;
   const startedAt = Date.now();
@@ -53,5 +68,6 @@ async function onDrop(dropped: File): Promise<void> {
     :file="file"
     :run-state="runState"
     @drop="onDrop"
+    @run="onRun"
   />
 </template>

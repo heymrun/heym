@@ -125,7 +125,8 @@ export function extractErrorMessage(outputs: Record<string, unknown> | null): st
 
 /** The run state for a finished file upload run (the upload response has no step list). */
 export function fileRunState(
-  result: FileRunResult,
+  // A run widget run has no file and may have no history row.
+  result: Pick<FileRunResult, "status" | "output"> & { run_id: string | null; file?: FileRunResult["file"] },
   startedAt: number,
   finishedAt: number = Date.now(),
 ): QuickDrawerRunState {

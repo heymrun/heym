@@ -27,7 +27,7 @@ A widget is a single chart on the grid. Supported chart types:
 - **Text** (a markdown message, e.g. a status note like "Last execution at 19:47"; supports [interactive checkboxes](../nodes/chart-output-node.md#interactive-task-lists) when the markdown is static, and [explicit numbered lists](../nodes/chart-output-node.md#numbered-lists) for custom or descending numbering)
 - **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue)
 
-Besides charts, a **File drop** widget runs one of your workflows on a file dropped on it; see [File drop widgets](#file-drop-widgets).
+Besides charts, a **Run a workflow** widget runs one of your workflows from the dashboard: on a dropped file, with its input fields, or with a Run button; see [Run widgets](#run-widgets).
 
 Each widget loads its data asynchronously when you open the tab, so the page stays responsive while charts populate.
 
@@ -38,7 +38,7 @@ Each widget loads its data asynchronously when you open the tab, so the page sta
 3. Build the workflow so the node feeding **Chart Output** produces an array of rows, then configure the Chart Output node's field mapping (label field, value field, etc.).
 4. Save, return to the Dashboard tab, and the widget renders.
 
-For a **File drop** widget, pick the workflow it runs instead. The widget is added to the grid directly; there is no new workflow to build.
+For a **Run a workflow** widget, pick the workflow it runs instead; the picker says how the widget will run each one. The widget is added to the grid directly; there is no new workflow to build.
 
 Double-click a widget (or use its edit button) to reopen its workflow at any time. Use **Clone
 widget** in the widget header to duplicate both the widget and its complete workflow. The copy is
@@ -59,12 +59,16 @@ On the detail dashboard, every widget workflow reads the value as `$page.record`
 - **Still the owner's run.** Widgets run as the dashboard owner on a detail page too. Builders should pass `$page.record` only where a node escapes it, never into query text.
 - **Caching.** Each widget caches its chart per record, for the same time-to-live as the widget, and keeps the 50 most recently used records.
 
-## File drop widgets
+## Run widgets
 
-A **File drop** widget runs a workflow that starts with a [File Upload Trigger](../nodes/file-upload-trigger-node.md). Drop a file on it (or click to pick one) and the widget uploads it through the trigger's single-use upload link, runs the workflow, and shows the result: status, run time, and outputs. The widget shows the file types and size the trigger accepts and refuses others before uploading.
+A **Run a workflow** widget runs one of your workflows and shows the result: status, run time, and outputs. What it shows depends on what the workflow takes:
 
-- Anyone who can open the dashboard can drop a file, as anyone can refresh a chart. Access to the workflow is the dashboard owner's: adding the widget needs a workflow that both you and the owner can run, and the run itself uses the workflow owner's credentials, like any upload link.
-- The result stays on your screen until you leave the page; other viewers do not see your files or results. The run appears in execution history with the trigger `dashboard`.
+- **A file.** For a workflow that starts with a [File Upload Trigger](../nodes/file-upload-trigger-node.md), drop a file on it (or click to pick one) and the widget uploads it through the trigger's single-use upload link. The widget shows the file types and size the trigger accepts and refuses others before uploading.
+- **Input fields.** For a workflow that starts with a Text Input node, the widget shows its fields with their defaults; **Run** runs the workflow with your values. Values for fields the workflow does not have are dropped.
+- **Nothing.** A workflow without inputs gets a **Run** button.
+
+- Anyone who can open the dashboard can run the widget, as anyone can refresh a chart. Access to the workflow is the dashboard owner's: adding the widget needs a workflow that both you and the owner can run, and the run itself uses the workflow owner's credentials, like any upload link.
+- The result stays on your screen until you leave the page; other viewers do not see your files, values or results. The run appears in execution history with the trigger `dashboard`.
 - A dashboard share never grants access to the workflow itself. **Edit workflow** opens it for people who already have access, and **Fine-tune with AI** is not offered.
 - File runs execute on the main instance, where uploaded files are stored, as every File Upload Trigger run does.
 
@@ -91,7 +95,7 @@ Owners share a dashboard from its settings, with individual users (by email) or 
 | Action | Owner | Write | Read |
 |--------|:-----:|:-----:|:----:|
 | View widgets, refresh them, use auto-refresh | ✓ | ✓ | ✓ |
-| Open detail pages, drop files on file drop widgets | ✓ | ✓ | ✓ |
+| Open detail pages, run run widgets | ✓ | ✓ | ✓ |
 | Add, clone, delete, rename and resize widgets; AI generate and fine-tune; tick checklist items | ✓ | ✓ | |
 | Open a widget's workflow in the editor | ✓ | ✓ | |
 | Rename or delete the dashboard, set its record format, manage sharing | ✓ | | |

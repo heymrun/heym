@@ -38,7 +38,7 @@ On the canvas, **Run Workflow** shows the minted `curl` in the debug panel with 
 Two places run such a workflow on a file directly, through the same mint and upload:
 
 - The [Quick Drawer](../reference/quick-drawer.md) shows a drop zone for the file. Those runs are tagged `Quick Drawer` in history.
-- A [File drop widget](../tabs/dashboard-tab.md#file-drop-widgets) on a dashboard runs the workflow on each dropped file. Those runs are tagged `dashboard`.
+- A [Run widget](../tabs/dashboard-tab.md#run-widgets) on a dashboard runs the workflow on each dropped file. Those runs are tagged `dashboard`.
 
 ## Parameters
 

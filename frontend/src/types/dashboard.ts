@@ -62,11 +62,30 @@ export interface ChartPayload {
 }
 
 /** A file-run widget before any drop: the file its workflow's File Upload trigger takes. */
+/** A start field of the workflow a run widget runs. */
+export interface RunWidgetField {
+  key: string;
+  defaultValue: string | null;
+}
+
+/**
+ * The run widget (chart type fileRun). `mode` says what its workflow takes: a dropped file,
+ * its start fields, or nothing. A payload without a mode takes a file.
+ */
 export interface FileRunPayload {
   type: "fileRun";
-  file_label: string;
-  max_size_mb: number;
-  allowed_types: string[];
+  mode?: "file" | "form" | "run";
+  file_label?: string;
+  max_size_mb?: number;
+  allowed_types?: string[];
+  input_fields?: RunWidgetField[];
+}
+
+/** A finished run widget run, shaped like a file drop's result. */
+export interface WidgetRunResult {
+  run_id: string | null;
+  status: string;
+  output: Record<string, unknown>;
 }
 
 /** Every widget is a chart, except the file-run widget that runs a workflow on a file. */

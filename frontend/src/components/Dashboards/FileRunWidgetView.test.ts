@@ -26,8 +26,12 @@ const idle: QuickDrawerRunState = {
 };
 
 // No Pinia and no API: the host passes the file, the run and its result.
-async function render(runState: QuickDrawerRunState, file: File | null = null): Promise<string> {
-  const app = createSSRApp({ render: () => h(FileRunWidgetView, { payload, file, runState }) });
+async function render(
+  runState: QuickDrawerRunState,
+  file: File | null = null,
+  shown: FileRunPayload = payload,
+): Promise<string> {
+  const app = createSSRApp({ render: () => h(FileRunWidgetView, { payload: shown, file, runState }) });
   return renderToString(app);
 }
 
@@ -57,5 +61,28 @@ describe("FileRunWidgetView", () => {
     expect(html).toContain("march.pdf");
     expect(html).toContain("No total on the invoice");
     expect(html).toContain("1.50 s");
+  });
+
+  it("asks for a workflow's start fields, with their defaults", async () => {
+    const html = await render(idle, null, {
+      type: "fileRun",
+      mode: "form",
+      input_fields: [
+        { key: "vendor", defaultValue: null },
+        { key: "amount", defaultValue: "10" },
+      ],
+    });
+
+    expect(html).toContain("vendor");
+    expect(html).toContain('value="10"');
+    expect(html).toContain("Run");
+    expect(html).not.toContain("up to");
+  });
+
+  it("offers a Run button for a workflow without inputs", async () => {
+    const html = await render(idle, null, { type: "fileRun", mode: "run", input_fields: [] });
+
+    expect(html).toContain("Run");
+    expect(html).not.toContain("<input");
   });
 });

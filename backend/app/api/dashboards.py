@@ -50,6 +50,8 @@ from app.models.dashboard_schemas import (
     MarkdownTaskUpdateRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
+    WidgetRunRequest,
+    WidgetRunResponse,
     WidgetUpdateRequest,
 )
 from app.services import file_intake_service
@@ -62,10 +64,10 @@ from app.services.dashboard_access import (
     reachable_dashboard_ids,
     shared_dashboard_permissions,
 )
-from app.services.dashboard_data import compute_widget_data
+from app.services.dashboard_data import compute_widget_data, run_widget_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
-from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, file_run_payload
+from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -83,6 +85,7 @@ from app.services.page_params import (
 )
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
+from app.services.workflow_inputs import start_input_fields
 
 router = APIRouter()
 
@@ -466,21 +469,16 @@ async def _apply_markdown_text_to_widget(
 async def _file_run_workflow(
     db: AsyncSession, workflow_id: uuid.UUID | None, dashboard: Dashboard, user: User
 ) -> Workflow:
-    """The workflow a new file-run widget runs: one the creator and the owner can both run."""
+    """The workflow a new run widget runs: one the creator and the owner can both run."""
     if workflow_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="A file-run widget needs a workflow",
+            detail="A run widget needs a workflow",
         )
     workflow = await get_workflow_for_user(db, workflow_id, user.id)
     if workflow is None or workflow.kind != "workflow":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
-    if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="This workflow has no File Upload trigger",
-        )
-    # Drops are minted for the dashboard owner's access, so the owner must reach it too.
+    # Runs and drops happen with the dashboard owner's access, so the owner must reach it too.
     if dashboard.owner_id != user.id and (
         await get_workflow_for_user(db, workflow_id, dashboard.owner_id) is None
     ):
@@ -494,15 +492,15 @@ async def _file_run_workflow(
 async def _file_run_widget_data(
     db: AsyncSession, widget: DashboardWidget, dashboard: Dashboard
 ) -> WidgetDataResponse:
-    """A file-run widget never runs on load: it describes the file it takes."""
+    """A run widget never runs on load: it describes what the workflow takes."""
     workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
-    payload = file_run_payload(workflow.nodes) if workflow is not None else None
+    payload = run_widget_payload(workflow.nodes, workflow.edges) if workflow is not None else None
     return WidgetDataResponse(
         widget_id=widget.id,
         payload=payload,
         cached=False,
         computed_at=None,
-        error=None if payload is not None else "This workflow no longer takes a file",
+        error=None if payload is not None else "This workflow is no longer available",
     )
 
 
@@ -863,6 +861,45 @@ async def get_widget_data(
         )
     response = await compute_widget_data(db, widget, dashboard.owner_id, force=force, record=record)
     return _widget_data_for(response, permission)
+
+
+@router.post("/widgets/{widget_id}/run", response_model=WidgetRunResponse)
+async def run_widget(
+    widget_id: uuid.UUID,
+    body: WidgetRunRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WidgetRunResponse:
+    """Run a run widget's workflow with the values of its start fields, or with none.
+
+    Anyone who can open the dashboard may run it, as anyone may drop a file on a file
+    widget: access to the workflow is the dashboard owner's, and the run is the owner's.
+    Values for fields the workflow does not have are dropped.
+    """
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
+    if widget.chart_type != FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget does not run a workflow"
+        )
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This workflow is no longer available"
+        )
+    if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget takes a file"
+        )
+    fields = {field["key"] for field in start_input_fields(workflow.nodes, workflow.edges)}
+    values = {key: value for key, value in body.inputs.items() if key in fields}
+    result, history_entry = await run_widget_workflow(
+        db, workflow, dashboard.owner_id, {"headers": {}, "query": {}, "body": values}
+    )
+    return WidgetRunResponse(
+        run_id=history_entry.id if history_entry is not None else None,
+        status=str(result.status),
+        output=result.outputs if isinstance(result.outputs, dict) else {"result": result.outputs},
+    )
 
 
 @router.post("/widgets/{widget_id}/file-slot", response_model=FileRunSlotResponse)
