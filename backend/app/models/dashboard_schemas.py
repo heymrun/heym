@@ -177,6 +177,8 @@ class AiWidgetRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     # The conversation the widget is built in (OpenCode session); a page plan passes its own.
     session_id: uuid.UUID | None = None
+    # Data tables the widget reads; the dashboard's owner must be able to read them too.
+    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
 
 
 class AiPlanRequest(BaseModel):
@@ -184,12 +186,22 @@ class AiPlanRequest(BaseModel):
     credential_id: uuid.UUID
     model: str = Field(min_length=1, max_length=200)
     session_id: uuid.UUID | None = None
+    # Data tables the page is about; the plan works from their columns and values.
+    data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
+
+
+class WidgetExampleResponse(BaseModel):
+    """A proposal's preview: one value per label."""
+
+    labels: list[str]
+    values: list[float]
 
 
 class WidgetProposalResponse(BaseModel):
     title: str
     chart_type: str
     prompt: str
+    example: WidgetExampleResponse | None = None
 
 
 class AiPlanResponse(BaseModel):

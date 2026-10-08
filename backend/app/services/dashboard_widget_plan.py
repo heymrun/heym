@@ -19,6 +19,7 @@ from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import build_router_for_credential
 
 MAX_PROPOSALS = 6
+MAX_EXAMPLE_POINTS = 8
 PLAN_TEMPERATURE = 0.4
 WIDGET_CHART_TYPES = (
     "pie",
@@ -43,7 +44,7 @@ Propose between 3 and {MAX_PROPOSALS} widgets that together answer the page desc
 propose two widgets that show the same thing.
 
 Answer with JSON only, no prose:
-{{"widgets": [{{"title": "...", "chartType": "...", "prompt": "..."}}]}}
+{{"widgets": [{{"title": "...", "chartType": "...", "prompt": "...", "example": {{...}}}}]}}
 
 - title: at most six words, sentence case.
 - chartType: one of {", ".join(WIDGET_CHART_TYPES)}. Use numeric for one headline number,
@@ -51,6 +52,14 @@ Answer with JSON only, no prose:
 - prompt: one or two sentences for the builder: what the widget shows, which data it uses,
   how it is grouped or filtered, and the chart type. When the description names no data
   source, say the widget uses sample data.
+- example: a preview of what the widget will show, {{"labels": [...], "values": [...]}} with
+  at most {MAX_EXAMPLE_POINTS} labels and one number per label (one label and one value for
+  numeric). Omit it for table, text and hitl.
+
+When data tables are given, every widget uses them: work from their real columns and values
+(group by a column such as a source or a status, count rows, sum a number column), name the
+table and its dataTableId in each prompt so the builder reads it with a dataTable node, never
+propose sample data, and draw each example from the values and counts you were shown.
 
 Write the titles and prompts in the language of the description."""
 
@@ -58,12 +67,21 @@ _FENCED = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 @dataclass(frozen=True)
+class WidgetExample:
+    """A widget's preview: one value per label."""
+
+    labels: list[str]
+    values: list[float]
+
+
+@dataclass(frozen=True)
 class WidgetProposal:
-    """One widget the page could have."""
+    """One widget the page could have, with a preview when the model sketched one."""
 
     title: str
     chart_type: str
     prompt: str
+    example: WidgetExample | None = None
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
@@ -74,6 +92,23 @@ def _json_object(text: str) -> dict[str, Any] | None:
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def parse_widget_example(value: Any) -> WidgetExample | None:
+    """A preview with as many numbers as labels, at most eight, or None."""
+    if not isinstance(value, dict):
+        return None
+    labels, values = value.get("labels"), value.get("values")
+    if not isinstance(labels, list) or not isinstance(values, list) or not labels:
+        return None
+    if len(labels) != len(values) or len(labels) > MAX_EXAMPLE_POINTS:
+        return None
+    numbers = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if len(numbers) != len(values):
+        return None
+    return WidgetExample(
+        labels=[str(label)[:40] for label in labels], values=[float(n) for n in numbers]
+    )
 
 
 def parse_widget_plan(text: str) -> list[WidgetProposal]:
@@ -94,6 +129,7 @@ def parse_widget_plan(text: str) -> list[WidgetProposal]:
                 title=title,
                 chart_type=chart_type if chart_type in WIDGET_CHART_TYPES else "bar",
                 prompt=prompt,
+                example=parse_widget_example(item.get("example")),
             )
         )
     return proposals[:MAX_PROPOSALS]
@@ -106,10 +142,12 @@ async def plan_dashboard_widgets(
     model: str,
     user: User,
     session_id: uuid.UUID | None = None,
+    data_context: str = "",
 ) -> list[WidgetProposal]:
     """Ask the model for the widgets a page described as `description` should have.
 
     `session_id` keeps the plan and the widgets built from it in one OpenCode session.
+    `data_context` describes the data tables the page uses (`describe_tables`).
     """
     config = decrypt_config(credential.encrypted_config)
     router = build_router_for_credential(
@@ -125,7 +163,8 @@ async def plan_dashboard_widgets(
         base_url=str(raw_base_url) if raw_base_url else None,
         model=model,
         system_instruction=PLAN_SYSTEM_PROMPT,
-        user_message=f"Page description:\n{description}",
+        user_message=f"Page description:\n{description}"
+        + (f"\n\n{data_context}" if data_context else ""),
         temperature=None if is_reasoning_model(model) else PLAN_TEMPERATURE,
         trace_context=LLMTraceContext(
             user_id=user.id,

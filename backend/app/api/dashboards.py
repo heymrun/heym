@@ -52,6 +52,7 @@ from app.models.dashboard_schemas import (
     MarkdownTaskUpdateRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
+    WidgetExampleResponse,
     WidgetProposalResponse,
     WidgetRunRequest,
     WidgetRunResponse,
@@ -68,6 +69,12 @@ from app.services.dashboard_access import (
     shared_dashboard_permissions,
 )
 from app.services.dashboard_data import compute_widget_data, run_widget_workflow
+from app.services.dashboard_data_context import (
+    TableContext,
+    TableUnavailableError,
+    describe_tables,
+    load_table_contexts,
+)
 from app.services.dashboard_widget_plan import plan_dashboard_widgets
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
@@ -1017,6 +1024,25 @@ async def update_markdown_task(
     )
 
 
+async def _table_contexts(
+    db: AsyncSession, table_ids: list[uuid.UUID], user_id: uuid.UUID, *, for_owner: bool = False
+) -> list[TableContext]:
+    """The data tables an AI widget request names, as `user_id` reads them."""
+    if not table_ids:
+        return []
+    try:
+        return await load_table_contexts(db, table_ids, user_id)
+    except TableUnavailableError as exc:
+        if for_owner:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The dashboard's owner cannot read this data table. Share it with them first.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found"
+        ) from exc
+
+
 @router.post("/ai-plan", response_model=AiPlanResponse)
 async def ai_plan_widgets(
     body: AiPlanRequest,
@@ -1036,12 +1062,14 @@ async def ai_plan_widgets(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
     proposals = await plan_dashboard_widgets(
         body.description,
         credential=credential,
         model=body.model,
         user=current_user,
         session_id=body.session_id,
+        data_context=describe_tables(tables, with_data=True),
     )
     if not proposals:
         raise HTTPException(
@@ -1050,7 +1078,16 @@ async def ai_plan_widgets(
         )
     return AiPlanResponse(
         widgets=[
-            WidgetProposalResponse(title=p.title, chart_type=p.chart_type, prompt=p.prompt)
+            WidgetProposalResponse(
+                title=p.title,
+                chart_type=p.chart_type,
+                prompt=p.prompt,
+                example=(
+                    WidgetExampleResponse(labels=p.example.labels, values=p.example.values)
+                    if p.example
+                    else None
+                ),
+            )
             for p in proposals
         ]
     )
@@ -1077,8 +1114,13 @@ async def ai_generate_widget(
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
+    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
+    if dashboard.owner_id != current_user.id:
+        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=False)
     dsl = await generate_widget_dsl(
-        body.prompt,
+        f"{body.prompt}\n\n{context}" if context else body.prompt,
         credential=credential,
         model=body.model,
         user=current_user,

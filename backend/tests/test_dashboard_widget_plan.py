@@ -11,7 +11,8 @@ from app.api import dashboards as dash_api
 from app.db.models import CredentialType
 from app.models.dashboard_schemas import AiPlanRequest, AiWidgetRequest
 from app.services import dashboard_widget_plan as plan
-from app.services.dashboard_widget_plan import WidgetProposal, parse_widget_plan
+from app.services.dashboard_data_context import TableContext, TableUnavailableError
+from app.services.dashboard_widget_plan import WidgetExample, WidgetProposal, parse_widget_plan
 
 
 def _user() -> MagicMock:
@@ -72,6 +73,36 @@ class ParseWidgetPlanTests(unittest.TestCase):
         proposals = parse_widget_plan(_answer([{"title": "t" * 200, "prompt": "p" * 3000}]))
 
         self.assertEqual((len(proposals[0].title), len(proposals[0].prompt)), (80, 2000))
+
+
+class WidgetExampleTests(unittest.TestCase):
+    def test_a_proposal_keeps_a_preview_with_one_number_per_label(self) -> None:
+        text = _answer(
+            [
+                {
+                    "title": "Spend by source",
+                    "chartType": "pie",
+                    "prompt": "Sum amount by vendor_source.",
+                    "example": {"labels": ["Google", "Meta"], "values": [160, 80.5]},
+                }
+            ]
+        )
+
+        self.assertEqual(
+            parse_widget_plan(text)[0].example, WidgetExample(["Google", "Meta"], [160.0, 80.5])
+        )
+
+    def test_a_preview_that_does_not_add_up_is_dropped(self) -> None:
+        for example in [
+            {"labels": ["a", "b"], "values": [1]},
+            {"labels": ["a"], "values": ["many"]},
+            {"labels": ["a"], "values": [True]},
+            {"labels": [], "values": []},
+            {"labels": [str(i) for i in range(9)], "values": list(range(9))},
+            "a chart",
+        ]:
+            text = _answer([{"title": "T", "chartType": "bar", "prompt": "p", "example": example}])
+            self.assertIsNone(parse_widget_plan(text)[0].example, example)
 
 
 class PlanDashboardWidgetsTests(unittest.IsolatedAsyncioTestCase):
@@ -143,11 +174,58 @@ class AiPlanEndpointTests(unittest.IsolatedAsyncioTestCase):
             response.model_dump(),
             {
                 "widgets": [
-                    {"title": "Open cases", "chart_type": "numeric", "prompt": "Count them."}
+                    {
+                        "title": "Open cases",
+                        "chart_type": "numeric",
+                        "prompt": "Count them.",
+                        "example": None,
+                    }
                 ]
             },
         )
         self.assertEqual(planner.await_args.kwargs["session_id"], session_id)
+
+    async def test_a_page_about_a_table_is_planned_from_its_data(self) -> None:
+        table_id = uuid.uuid4()
+        table = TableContext(table_id, "Invoices", 2, [], [])
+        loader = AsyncMock(return_value=[table])
+        proposal = WidgetProposal("By source", "pie", "p", WidgetExample(["Google"], [3.0]))
+        planner = AsyncMock(return_value=[proposal])
+        body = self._body()
+        body.data_table_ids = [table_id]
+
+        with (
+            patch.object(
+                dash_api, "get_credential_for_user", AsyncMock(return_value=_credential())
+            ),
+            patch.object(dash_api, "load_table_contexts", loader),
+            patch.object(dash_api, "plan_dashboard_widgets", planner),
+        ):
+            response = await dash_api.ai_plan_widgets(
+                body=body, current_user=_user(), db=MagicMock()
+            )
+
+        self.assertEqual(loader.await_args.args[1], [table_id])
+        self.assertIn('"Invoices"', planner.await_args.kwargs["data_context"])
+        self.assertEqual(
+            response.widgets[0].example.model_dump(), {"labels": ["Google"], "values": [3.0]}
+        )
+
+    async def test_a_table_the_user_cannot_read_is_a_404(self) -> None:
+        body = self._body()
+        body.data_table_ids = [uuid.uuid4()]
+        loader = AsyncMock(side_effect=TableUnavailableError(body.data_table_ids[0]))
+
+        with (
+            patch.object(
+                dash_api, "get_credential_for_user", AsyncMock(return_value=_credential())
+            ),
+            patch.object(dash_api, "load_table_contexts", loader),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dash_api.ai_plan_widgets(body=body, current_user=_user(), db=MagicMock())
+
+        self.assertEqual(ctx.exception.status_code, 404)
 
     async def test_refuses_a_missing_or_non_llm_credential(self) -> None:
         for credential, code in [(None, 404), (_credential(CredentialType.slack), 400)]:
@@ -173,6 +251,87 @@ class AiPlanEndpointTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(ctx.exception.status_code, 422)
+
+
+def _dashboard_db(dashboard: MagicMock) -> MagicMock:
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+    )
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
+_DSL = {"nodes": [{"id": "c", "type": "chartOutput", "data": {"chartType": "bar"}}], "edges": []}
+
+
+class AiGenerateTableTests(unittest.IsolatedAsyncioTestCase):
+    def _body(self) -> AiWidgetRequest:
+        return AiWidgetRequest(
+            prompt="Spend by vendor_source",
+            credential_id=uuid.uuid4(),
+            model="gpt-4o",
+            data_table_ids=[uuid.UUID(int=7)],
+        )
+
+    async def test_the_builder_gets_the_tables_id_and_columns(self) -> None:
+        user = _user()
+        dashboard = MagicMock(id=uuid.uuid4(), owner_id=user.id, name="Spend")
+        table = TableContext(uuid.UUID(int=7), "Invoices", 2, [], [])
+        generate = AsyncMock(return_value=_DSL)
+
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate),
+            patch.object(
+                dash_api, "get_credential_for_user", AsyncMock(return_value=_credential())
+            ),
+            patch.object(dash_api, "load_table_contexts", AsyncMock(return_value=[table])),
+            patch.object(dash_api, "_widget_to_response", MagicMock()),
+        ):
+            await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
+                body=self._body(),
+                current_user=user,
+                db=_dashboard_db(dashboard),
+            )
+
+        prompt = generate.await_args.args[0]
+        self.assertTrue(prompt.startswith("Spend by vendor_source"))
+        self.assertIn(f"dataTableId: {uuid.UUID(int=7)}", prompt)
+
+    async def test_a_table_the_pages_owner_cannot_read_is_refused(self) -> None:
+        user = _user()
+        dashboard = MagicMock(id=uuid.uuid4(), owner_id=uuid.uuid4(), name="Spend")
+        table = TableContext(uuid.UUID(int=7), "Invoices", 2, [], [])
+        loader = AsyncMock(side_effect=[[table], TableUnavailableError(table.id)])
+        generate = AsyncMock(return_value=_DSL)
+
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate),
+            patch.object(
+                dash_api, "get_credential_for_user", AsyncMock(return_value=_credential())
+            ),
+            patch.object(dash_api, "load_table_contexts", loader),
+            patch.object(
+                dash_api,
+                "dashboard_permission",
+                AsyncMock(return_value=dash_api.PERMISSION_WRITE),
+            ),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await dash_api.ai_generate_widget(
+                    dashboard_id=dashboard.id,
+                    body=self._body(),
+                    current_user=user,
+                    db=_dashboard_db(dashboard),
+                )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(loader.await_args.args[2], dashboard.owner_id)
+        generate.assert_not_awaited()
 
 
 class AiGenerateSessionTests(unittest.IsolatedAsyncioTestCase):
