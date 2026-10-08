@@ -25,7 +25,7 @@ The default server is always available at `{origin}/api/mcp/sse`. All workflows 
 - **API Key** – Use the MCP API key for programmatic connections. The tab can copy a ready-to-use JSON config and includes an **Add to Cursor** button for one-click Cursor setup.
 - **Claude** – The tab shows the MCP server URL and setup steps for Claude. Leave OAuth Client ID and Secret blank; Claude registers automatically and authenticates via Heym OAuth.
 - **ChatGPT** – The tab shows the MCP server URL and setup steps for a ChatGPT app. Turn on Developer mode, create an app with the URL and choose OAuth; ChatGPT registers automatically.
-- **Gemini** – The tab shows the MCP server URL and setup steps for a Gemini custom app: in gemini.google.com, **Settings → Connected Apps → Add a custom app**, paste the URL and leave **Advanced features** closed; Gemini registers automatically and authenticates via Heym OAuth. Gemini connects custom apps in its web app, for personal Google Accounts in the US (18 or over) with Keep Activity on; the app then also works in the Gemini mobile app.
+- **Gemini** – The tab shows the MCP server URL and setup steps for a Gemini custom app: in gemini.google.com, **Settings → Connected Apps → Add a custom app**, paste the URL and leave **Advanced features** closed; Gemini registers automatically and authenticates via Heym OAuth. Once connected, Heym also works in the Gemini mobile app.
 
 ### Workflow MCP Toggle
 

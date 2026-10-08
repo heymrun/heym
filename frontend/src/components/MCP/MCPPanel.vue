@@ -694,7 +694,7 @@ function addToCursor(): void {
 
               <div class="flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 text-sm">
                 <Info class="w-4 h-4 shrink-0 mt-0.5" />
-                <span>Gemini uses OAuth to securely authenticate. Your Heym credentials are used to authorize access and are never shared with Gemini. Custom apps need a personal Google Account in the US, age 18 or over, with Keep Activity on. Once connected, Heym also works in the Gemini mobile app.</span>
+                <span>Gemini uses OAuth to securely authenticate. Your Heym credentials are used to authorize access and are never shared with Gemini. Once connected, Heym also works in the Gemini mobile app.</span>
               </div>
             </div>
           </div>
