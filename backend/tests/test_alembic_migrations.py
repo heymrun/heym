@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["134_add_dashboard_widget_links"])
+        self.assertEqual(self.script.get_heads(), ["135_add_file_upload_slot_inputs"])
+
+    def test_file_upload_slot_inputs_follow_dashboard_widget_links(self) -> None:
+        revision = self.script.get_revision("135_add_file_upload_slot_inputs")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "134_add_dashboard_widget_links")
 
     def test_dashboard_widget_links_follow_dashboard_record_pages(self) -> None:
         revision = self.script.get_revision("134_add_dashboard_widget_links")

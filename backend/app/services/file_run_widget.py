@@ -3,7 +3,8 @@
 Chart widgets render a hidden ``dashboard_widget`` workflow. A run widget has none: it
 points at an ordinary workflow and runs it one of three ways, by what the workflow takes.
 A workflow with a File Upload trigger takes a dropped file through Heym's file intake
-(mint a slot, upload the file to it), like any upload link. Otherwise the widget asks for
+(mint a slot, upload the file to it), like any upload link, together with the fields of
+its text inputs, which the slot carries. Otherwise the widget asks for
 the workflow's start fields, or for nothing, and runs it as the dashboard owner. A
 dashboard share never grants access to the workflow itself: ``workflow_access_clause`` only
 extends dashboard write access to ``dashboard_widget`` workflows.
@@ -28,6 +29,7 @@ def run_widget_payload(nodes: list[dict] | None, edges: list[dict] | None) -> di
             "file_label": str((node.get("data") or {}).get("label") or "file"),
             "max_size_mb": config.max_size_bytes // (1024 * 1024),
             "allowed_types": config.allowed_mime or [],
+            "input_fields": start_input_fields(nodes, edges),
         }
     fields = start_input_fields(nodes, edges)
     return {

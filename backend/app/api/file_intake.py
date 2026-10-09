@@ -207,7 +207,7 @@ async def upload_to_slot(
         workflow_id=workflow.id,
         nodes=nodes,
         edges=workflow.edges,
-        inputs={"headers": {}, "query": {}, "body": {}},
+        inputs={"headers": {}, "query": {}, "body": dict(slot.initial_inputs or {})},
         workflow_cache=workflow_cache,
         test_run=False,
         credentials_context=credentials_context,
@@ -219,7 +219,10 @@ async def upload_to_slot(
 
     history = ExecutionHistory(
         workflow_id=workflow.id,
-        inputs={"file": file_payload},
+        inputs={
+            "file": file_payload,
+            **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
+        },
         outputs=execution_result.outputs,
         node_results=execution_result.node_results,
         status=execution_result.status,

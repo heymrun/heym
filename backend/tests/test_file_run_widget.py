@@ -18,7 +18,12 @@ from sqlalchemy.pool import NullPool
 from app.api import dashboards as dash_api
 from app.config import settings
 from app.db.models import Dashboard, DashboardShare, DashboardWidget, User, Workflow
-from app.models.dashboard_schemas import AiRefineRequest, WidgetCreateRequest, WidgetRunRequest
+from app.models.dashboard_schemas import (
+    AiRefineRequest,
+    FileRunSlotRequest,
+    WidgetCreateRequest,
+    WidgetRunRequest,
+)
 from app.services import dashboard_data, file_intake_service
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
 from app.services.workflow_access import workflow_access_clause
@@ -101,7 +106,17 @@ class RunWidgetPayloadTests(unittest.TestCase):
                 "file_label": "invoice",
                 "max_size_mb": 5,
                 "allowed_types": ["application/pdf"],
+                "input_fields": [],
             },
+        )
+
+    def test_a_file_workflow_with_a_text_input_asks_for_its_fields_too(self) -> None:
+        payload = run_widget_payload([UPLOAD_NODE, FORM_NODE], [])
+
+        self.assertEqual(payload["mode"], "file")
+        self.assertEqual(
+            payload["input_fields"],
+            [{"key": "vendor", "defaultValue": None}, {"key": "amount", "defaultValue": "10"}],
         )
 
     def test_a_workflow_with_start_fields_asks_for_them(self) -> None:
@@ -268,7 +283,9 @@ class FileRunSlotTests(unittest.IsolatedAsyncioTestCase):
             allowed_mime=["application/pdf"],
         )
 
-    async def _mint(self, workflow: object) -> tuple[object, AsyncMock]:
+    async def _mint(
+        self, workflow: object, body: FileRunSlotRequest | None = None
+    ) -> tuple[object, AsyncMock]:
         db = _db_with(_widget_row(self.widget, self.dashboard))
         mint = AsyncMock(return_value=(self.slot, "secret-token"))
         request = MagicMock(headers={"user-agent": "test"})
@@ -281,7 +298,11 @@ class FileRunSlotTests(unittest.IsolatedAsyncioTestCase):
             patch.object(dash_api, "build_public_base_url", return_value="http://heym"),
         ):
             response = await dash_api.create_file_run_slot(
-                widget_id=self.widget.id, request=request, current_user=self.viewer, db=db
+                widget_id=self.widget.id,
+                request=request,
+                body=body,
+                current_user=self.viewer,
+                db=db,
             )
         return response, mint
 
@@ -295,6 +316,15 @@ class FileRunSlotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mint.await_args.kwargs["mint_source"], "dashboard")
         self.assertEqual(mint.await_args.kwargs["created_by_user_id"], self.viewer.id)
         self.assertEqual(mint.await_args.kwargs["workflow_id"], workflow.id)
+        self.assertEqual(mint.await_args.kwargs["initial_inputs"], {})
+
+    async def test_the_text_input_fields_travel_on_the_slot(self) -> None:
+        workflow = _workflow([UPLOAD_NODE, FORM_NODE])
+        body = FileRunSlotRequest(inputs={"vendor": "Acme", "secret": "not a field"})
+
+        _response, mint = await self._mint(workflow, body)
+
+        self.assertEqual(mint.await_args.kwargs["initial_inputs"], {"vendor": "Acme"})
 
     async def test_no_link_when_the_owner_lost_the_workflow(self) -> None:
         with self.assertRaises(HTTPException) as caught:

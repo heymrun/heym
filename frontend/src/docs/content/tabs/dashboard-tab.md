@@ -63,9 +63,11 @@ On the detail dashboard, every widget workflow reads the value as `$page.record`
 
 A **Run a workflow** widget runs one of your workflows and shows the result: status, run time, and outputs. What it shows depends on what the workflow takes:
 
-- **A file.** For a workflow that starts with a [File Upload Trigger](../nodes/file-upload-trigger-node.md), drop a file on it (or click to pick one) and the widget uploads it through the trigger's single-use upload link. The widget shows the file types and size the trigger accepts and refuses others before uploading.
+- **A file.** For a workflow that starts with a [File Upload Trigger](../nodes/file-upload-trigger-node.md), drop a file on it (or click to pick one) and the widget uploads it through the trigger's single-use upload link. The widget shows the file types and size the trigger accepts and refuses others before uploading. When the workflow also starts with a Text Input node, the widget shows its fields next to the drop zone: choose a file, fill the fields, and **Run** sends both. The values travel with the upload link the widget mints, so a shared upload link cannot set them.
 - **Input fields.** For a workflow that starts with a Text Input node, the widget shows its fields with their defaults; **Run** runs the workflow with your values. Values for fields the workflow does not have are dropped.
 - **Nothing.** A workflow without inputs gets a **Run** button.
+
+The result's **Wrap** button wraps long output lines inside the box; turn it off to read the output's JSON layout.
 
 - Anyone who can open the dashboard can run the widget, as anyone can refresh a chart. Access to the workflow is the dashboard owner's: adding the widget needs a workflow that both you and the owner can run, and the run itself uses the workflow owner's credentials, like any upload link.
 - The result stays on your screen until you leave the page; other viewers do not see your files, values or results. The run appears in execution history with the trigger `dashboard`.

@@ -6,9 +6,9 @@ dashboard owner, and always runs as that owner, whoever is looking.
 
 import copy
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -48,6 +48,7 @@ from app.models.dashboard_schemas import (
     DashboardUpdateRequest,
     DashboardWidgetResponse,
     DetailPageProposalResponse,
+    FileRunSlotRequest,
     FileRunSlotResponse,
     MarkdownTaskToggleRequest,
     MarkdownTaskUpdateRequest,
@@ -122,7 +123,10 @@ _AI_WIDGET_SUFFIX = (
     "input, error-handler, or RabbitMQ nodes in dashboard widget workflows. "
     "On a detail dashboard, read the record the page is about from $page.record. "
     "A dataTable node returns {rows, count}; each row is {id, data, created_at} with the "
-    "columns under data, so group and sum row.data values, not the row itself. "
+    "columns under data, so in a set node group and sum row.data values, not the row itself. "
+    "A chartOutput reading those rows directly sees each row's columns at the top level next "
+    "to its id: for a table of the rows, connect the dataTable node to a table chartOutput "
+    "with dataPath rows and columns set to the table's column names. "
     "Answer with the workflow JSON object only, from its opening { to its closing }: no "
     "explanation, no plan, no questions and no markdown fences before or after it."
 )
@@ -937,6 +941,7 @@ async def run_widget(
 async def create_file_run_slot(
     widget_id: uuid.UUID,
     request: Request,
+    body: Annotated[FileRunSlotRequest | None, Body()] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FileRunSlotResponse:
@@ -944,7 +949,8 @@ async def create_file_run_slot(
 
     Anyone who can open the dashboard may drop a file, as anyone may refresh a chart:
     access to the workflow is the dashboard owner's. The upload itself goes to the
-    file intake path in the link, which runs the workflow on the main instance.
+    file intake path in the link, which runs the workflow on the main instance. Values for
+    the workflow's text input fields travel on the slot, so the public upload cannot set them.
     """
     widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
     if widget.chart_type != FILE_RUN_WIDGET_TYPE:
@@ -961,12 +967,15 @@ async def create_file_run_slot(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="This workflow no longer takes a file"
         )
+    fields = {field["key"] for field in start_input_fields(workflow.nodes, workflow.edges)}
+    values = {key: value for key, value in (body.inputs if body else {}).items() if key in fields}
     slot, token = await file_intake_service.mint_slot(
         db,
         workflow_id=workflow.id,
         node=node,
         created_by_user_id=current_user.id,
         mint_source="dashboard",
+        initial_inputs=values,
     )
     await file_intake_service.write_audit(
         db,

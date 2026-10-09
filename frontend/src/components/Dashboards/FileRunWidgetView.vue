@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { Play } from "lucide-vue-next";
 
 import type { FileRunPayload } from "@/types/dashboard";
@@ -17,22 +17,48 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  drop: [file: File];
+  /** A file to run, with the values of the workflow's text input fields (none without any). */
+  drop: [file: File, values: Record<string, string>];
   /** The values of the workflow's start fields; empty for a workflow without inputs. */
   run: [values: Record<string, string>];
 }>();
 
+// The `run` slot replaces the Run button; it gets `disabled` and must submit the form.
+defineSlots<{ run?: (props: { disabled: boolean }) => unknown }>();
+
 const values = reactive<Record<string, string>>({});
+// A file waiting for Run, when the workflow also has text input fields to fill first.
+const chosen = ref<File | null>(null);
+
+const mode = computed(() => props.payload.mode ?? "file");
+const fields = computed(() => props.payload.input_fields ?? []);
+const fileWithFields = computed(() => mode.value === "file" && fields.value.length > 0);
+const running = computed(() => props.runState.status === "running");
+const canRun = computed(
+  () => !running.value && (mode.value !== "file" || chosen.value !== null),
+);
 
 // Each field starts from its default; a new payload starts the form again.
 watch(
-  () => props.payload.input_fields,
-  (fields) => {
+  fields,
+  (next) => {
     for (const key of Object.keys(values)) delete values[key];
-    for (const field of fields ?? []) values[field.key] = field.defaultValue ?? "";
+    for (const field of next) values[field.key] = field.defaultValue ?? "";
+    chosen.value = null;
   },
   { immediate: true },
 );
+
+function select(selected: File | null): void {
+  if (fileWithFields.value) chosen.value = selected;
+  else if (selected) emit("drop", selected, {});
+}
+
+function submit(): void {
+  if (!canRun.value) return;
+  if (mode.value !== "file") emit("run", { ...values });
+  else if (chosen.value) emit("drop", chosen.value, { ...values });
+}
 </script>
 
 <template>
@@ -41,21 +67,30 @@ watch(
     data-testid="file-run-widget"
   >
     <FileDropInput
-      v-if="(payload.mode ?? 'file') === 'file'"
+      v-if="mode === 'file' && !fileWithFields"
       :label="payload.file_label ?? 'file'"
       :file="file"
       :allowed-types="payload.allowed_types ?? []"
       :max-size-mb="payload.max_size_mb ?? 0"
-      :disabled="runState.status === 'running'"
-      @select="(selected) => selected && emit('drop', selected)"
+      :disabled="running"
+      @select="select"
     />
     <form
       v-else
       class="space-y-2"
-      @submit.prevent="emit('run', { ...values })"
+      @submit.prevent="submit"
     >
+      <FileDropInput
+        v-if="fileWithFields"
+        :label="payload.file_label ?? 'file'"
+        :file="chosen ?? file"
+        :allowed-types="payload.allowed_types ?? []"
+        :max-size-mb="payload.max_size_mb ?? 0"
+        :disabled="running"
+        @select="select"
+      />
       <label
-        v-for="field in payload.input_fields ?? []"
+        v-for="field in fields"
         :key="field.key"
         class="block text-xs font-medium text-muted-foreground"
       >
@@ -63,17 +98,22 @@ watch(
         <Input
           v-model="values[field.key]"
           class="mt-1"
-          :disabled="runState.status === 'running'"
+          :disabled="running"
         />
       </label>
-      <Button
-        type="submit"
-        size="sm"
-        :disabled="runState.status === 'running'"
+      <slot
+        name="run"
+        :disabled="!canRun"
       >
-        <Play class="h-3.5 w-3.5 fill-current" />
-        Run
-      </Button>
+        <Button
+          type="submit"
+          size="sm"
+          :disabled="!canRun"
+        >
+          <Play class="h-3.5 w-3.5 fill-current" />
+          Run
+        </Button>
+      </slot>
     </form>
     <QuickWorkflowRunResult
       v-if="runState.status !== 'idle'"

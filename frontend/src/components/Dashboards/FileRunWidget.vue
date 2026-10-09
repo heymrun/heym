@@ -44,12 +44,12 @@ async function onRun(values: Record<string, string>): Promise<void> {
   }
 }
 
-async function onDrop(dropped: File): Promise<void> {
+async function onDrop(dropped: File, values: Record<string, string>): Promise<void> {
   file.value = dropped;
   const startedAt = Date.now();
   runState.value = { ...idle(), status: "running", startedAt };
   try {
-    const slot = await dashboardApi.createFileRunSlot(props.widgetId);
+    const slot = await dashboardApi.createFileRunSlot(props.widgetId, values);
     runState.value = fileRunState(await fileIntakeApi.upload(slot.upload_url, dropped), startedAt);
   } catch (error) {
     runState.value = {

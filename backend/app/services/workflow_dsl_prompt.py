@@ -3743,6 +3743,10 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"text"` | `"hitl"` (required)
   - `orientation`: `"horizontal"` | `"vertical"` (bar only, default `"vertical"`)
   - `dataPath`: optional dot path to the rows array inside the upstream output (e.g. `"data"` or `"result.items"`)
+  - Rows straight from a `dataTable` node (`{id, data, created_at}`) are read with their columns at
+    the top level next to `id`, so `labelField`, `valueField` and `columns` name the table's own
+    columns (e.g. a `dataTable` node into a `table` chart with `"dataPath": "rows"` and
+    `"columns": ["vendor", "amount"]`). In a `set` node the columns are still under `row.data`.
   - `labelField`: row key used as the category label (pie/bar/line)
   - `valueField`: row key used as the single-series numeric value (pie/bar/line/numeric/gauge)
   - `series`: optional array `[{"name": "Sent", "field": "sent"}, ...]` for multi-series bar/line (overrides `valueField`)

@@ -1776,6 +1776,9 @@ class FileUploadSlot(Base):
     allowed_mime: Mapped[list | None] = mapped_column(JSON, nullable=True)
     trigger_node_id: Mapped[str] = mapped_column(String(64), nullable=False)
     trigger_node_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Start field values a signed-in minter (a dashboard run widget) sends with the file;
+    # the public upload cannot set them.
+    initial_inputs: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

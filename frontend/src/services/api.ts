@@ -1758,9 +1758,17 @@ export const dashboardApi = {
     return response.data;
   },
 
-  /** A single-use upload link for one drop on a file-run widget. */
-  createFileRunSlot: async (id: string): Promise<FileRunSlot> => {
-    const response = await api.post<FileRunSlot>(`/dashboards/widgets/${id}/file-slot`);
+  /**
+   * A single-use upload link for one drop on a file-run widget. `inputs` are the values of
+   * the workflow's text input fields; the link carries them to the run.
+   */
+  createFileRunSlot: async (
+    id: string,
+    inputs: Record<string, string> = {},
+  ): Promise<FileRunSlot> => {
+    const response = await api.post<FileRunSlot>(`/dashboards/widgets/${id}/file-slot`, {
+      inputs,
+    });
     return response.data;
   },
 

@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Workflow,
+  WrapText,
 } from "lucide-vue-next";
 
 import type { QuickDrawerRunState } from "@/types/quickDrawer";
@@ -26,6 +27,8 @@ const props = defineProps<{ runState: QuickDrawerRunState }>();
 
 const { showToast } = useToast();
 const selectedImageSrc = ref<string | null>(null);
+// Long lines wrap inside the box unless the reader turns it off to see the JSON's shape.
+const wrapOutput = ref(true);
 
 const resultTone = computed(() => resultToneClasses(props.runState.status));
 const outputImages = computed(() =>
@@ -190,20 +193,37 @@ async function copyFinalOutput(): Promise<void> {
         v-if="runState.outputs"
         class="space-y-2"
       >
-        <div class="flex items-center justify-between gap-3">
-          <div class="text-sm font-medium text-foreground">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="whitespace-nowrap text-sm font-medium text-foreground">
             Final Output
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            @click="copyFinalOutput"
-          >
-            <Copy class="h-4 w-4" />
-            Copy
-          </Button>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :aria-pressed="wrapOutput"
+              title="Wrap long lines"
+              data-testid="output-wrap-toggle"
+              @click="wrapOutput = !wrapOutput"
+            >
+              <WrapText class="h-4 w-4" />
+              Wrap
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="copyFinalOutput"
+            >
+              <Copy class="h-4 w-4" />
+              Copy
+            </Button>
+          </div>
         </div>
-        <pre class="max-h-64 overflow-auto rounded-2xl border border-border/60 bg-slate-950 px-4 py-3 text-xs text-slate-100">{{ formatJson(runState.outputs) }}</pre>
+        <pre
+          class="max-h-64 overflow-auto rounded-2xl border border-border/60 bg-slate-950 px-4 py-3 text-xs text-slate-100"
+          :class="wrapOutput ? 'whitespace-pre-wrap break-words' : ''"
+          data-testid="final-output"
+        >{{ formatJson(runState.outputs) }}</pre>
       </div>
     </div>
 

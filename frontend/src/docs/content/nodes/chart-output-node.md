@@ -152,10 +152,11 @@ The value comes from a URL that anyone can edit. The dashboard only accepts valu
 
 1. If `dataPath` is set, the node follows that dot path into the upstream output.
 2. Otherwise it looks for an array: a top-level list, a `data` array, or the first list-valued field.
-3. For `table`, each row becomes a table row using `columns` (or the first row's keys). With `statusColumn`, the payload also carries the tone of each value in that column.
-4. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
-5. For `scatter`, each row becomes an `[xField, yField]` point.
-6. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
+3. Rows straight from a [Data Table](./datatable-node.md) node (`{id, data, created_at}`) are read with their columns at the top level next to `id`, so `labelField`, `valueField` and `columns` name the table's own columns.
+4. For `table`, each row becomes a table row using `columns` (or the first row's keys). With `statusColumn`, the payload also carries the tone of each value in that column.
+5. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
+6. For `scatter`, each row becomes an `[xField, yField]` point.
+7. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
 
 ## Example
 

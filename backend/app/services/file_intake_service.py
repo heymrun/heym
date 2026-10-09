@@ -104,8 +104,13 @@ async def mint_slot(
     node: dict,
     created_by_user_id: uuid.UUID,
     mint_source: str,
+    initial_inputs: dict[str, str] | None = None,
 ) -> tuple[FileUploadSlot, str]:
-    """Create a pending slot. Returns (slot, raw_token). Only the hash is stored."""
+    """Create a pending slot. Returns (slot, raw_token). Only the hash is stored.
+
+    ``initial_inputs`` are start field values the run gets with the file, set by the
+    signed-in minter only.
+    """
     cfg = resolve_slot_config(node)
     token = generate_token()
     slot = FileUploadSlot(
@@ -119,6 +124,7 @@ async def mint_slot(
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=cfg.ttl_minutes),
         created_by_user_id=created_by_user_id,
         mint_source=mint_source,
+        initial_inputs=initial_inputs or None,
     )
     db.add(slot)
     await db.flush()

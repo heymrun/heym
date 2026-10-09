@@ -145,6 +145,15 @@ class WidgetRunRequest(BaseModel):
     )
 
 
+class FileRunSlotRequest(BaseModel):
+    """Start field values a file run sends with its file. Fields the workflow does not have are
+    dropped."""
+
+    inputs: dict[str, Annotated[str, StringConstraints(max_length=20_000)]] = Field(
+        default_factory=dict, max_length=50
+    )
+
+
 class WidgetRunResponse(BaseModel):
     """A finished run widget run, shaped like a file drop's result so both show alike."""
 

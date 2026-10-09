@@ -30,8 +30,11 @@ async function render(
   runState: QuickDrawerRunState,
   file: File | null = null,
   shown: FileRunPayload = payload,
+  slots: Record<string, (props: { disabled: boolean }) => unknown> = {},
 ): Promise<string> {
-  const app = createSSRApp({ render: () => h(FileRunWidgetView, { payload: shown, file, runState }) });
+  const app = createSSRApp({
+    render: () => h(FileRunWidgetView, { payload: shown, file, runState }, slots),
+  });
   return renderToString(app);
 }
 
@@ -61,6 +64,30 @@ describe("FileRunWidgetView", () => {
     expect(html).toContain("march.pdf");
     expect(html).toContain("No total on the invoice");
     expect(html).toContain("1.50 s");
+    // Long output lines wrap until the reader turns wrapping off.
+    expect(html).toMatch(/<button(?=[^>]*data-testid="output-wrap-toggle")(?=[^>]*aria-pressed="true")[^>]*>/);
+    expect(html).toContain("whitespace-pre-wrap");
+  });
+
+  it("asks for a file workflow's text input fields too, and runs with Run once a file is chosen", async () => {
+    const html = await render(idle, null, {
+      ...payload,
+      mode: "file",
+      input_fields: [{ key: "text", defaultValue: null }],
+    });
+
+    expect(html).toContain("application/pdf, up to 5 MB");
+    expect(html).toContain("text");
+    expect(html).toMatch(/<button(?=[^>]*type="submit")(?=[^>]*disabled)[^>]*>/);
+  });
+
+  it("lets the host draw its own Run button", async () => {
+    const html = await render(idle, null, { type: "fileRun", mode: "run", input_fields: [] }, {
+      run: ({ disabled }) => h("button", { class: "host-run", disabled }, "Go"),
+    });
+
+    expect(html).toContain("host-run");
+    expect(html).not.toContain(">Run<");
   });
 
   it("asks for a workflow's start fields, with their defaults", async () => {
