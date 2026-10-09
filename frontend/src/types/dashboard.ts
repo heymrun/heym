@@ -184,6 +184,8 @@ export interface WidgetCreateRequest {
   /** For a table widget: the data table whose rows it shows, in `columns`, without AI. */
   data_table_id?: string;
   columns?: string[];
+  /** With `data_table_id`: only the rows whose column equals the detail page's `$page.record`. */
+  page_record_column?: string;
 }
 
 export interface WidgetUpdateRequest {

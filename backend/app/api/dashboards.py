@@ -5,6 +5,7 @@ dashboard owner, and always runs as that owner, whoever is looking.
 """
 
 import copy
+import json
 import uuid
 from typing import Annotated, Any
 
@@ -351,22 +352,32 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
     return nodes, edges
 
 
-def _data_table_widget_nodes(table_id: uuid.UUID, columns: list[str]) -> tuple[list, list]:
-    """A table widget's graph: a data table's rows, oldest first, shown in ``columns``."""
+def _data_table_widget_nodes(
+    table_id: uuid.UUID, columns: list[str], page_record_column: str | None = None
+) -> tuple[list, list]:
+    """A table widget's graph: a data table's rows, oldest first, shown in ``columns``.
+
+    With ``page_record_column`` it keeps only the rows whose column equals the detail page's
+    ``$page.record``.
+    """
     src_id = str(uuid.uuid4())
     chart_id = str(uuid.uuid4())
+    source: dict[str, Any] = {
+        "label": "tableRows",
+        "dataTableId": str(table_id),
+        "dataTableOperation": "getAll",
+        "dataTableSort": "created_at",
+        "dataTableLimit": TABLE_WIDGET_ROW_LIMIT,
+    }
+    if page_record_column:
+        source["dataTableOperation"] = "find"
+        source["dataTableFilter"] = json.dumps({page_record_column: "$page.record"})
     nodes = [
         {
             "id": src_id,
             "type": "dataTable",
             "position": {"x": 0, "y": 0},
-            "data": {
-                "label": "tableRows",
-                "dataTableId": str(table_id),
-                "dataTableOperation": "getAll",
-                "dataTableSort": "created_at",
-                "dataTableLimit": TABLE_WIDGET_ROW_LIMIT,
-            },
+            "data": source,
         },
         {
             "id": chart_id,
@@ -418,13 +429,14 @@ async def _table_widget_graph(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Choose at least one column for the table",
         )
-    unknown = [name for name in columns if name not in known]
+    record_column = body.page_record_column or None
+    unknown = [name for name in [*columns, record_column] if name and name not in known]
     if unknown:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"The data table has no column named {', '.join(unknown)}",
         )
-    return _data_table_widget_nodes(table.id, columns)
+    return _data_table_widget_nodes(table.id, columns, record_column)
 
 
 def _clone_workflow_graph(

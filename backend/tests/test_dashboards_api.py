@@ -268,6 +268,26 @@ class TestDataTableWidgetNodes(unittest.TestCase):
         self.assertEqual(payload["rows"], [["V-1001", "Acme"]])
 
 
+class TestDetailPageRecordWidgetNodes(unittest.TestCase):
+    def test_keeps_only_the_row_of_the_page_record(self):
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_name"], "vendor_id")
+
+        source = nodes[0]["data"]
+        self.assertEqual(source["dataTableOperation"], "find")
+        self.assertEqual(source["dataTableFilter"], '{"vendor_id": "$page.record"}')
+
+    def test_the_filter_reads_the_record_of_the_page_in_a_run(self):
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_name"], "vendor_id")
+        executor = WorkflowExecutor(nodes=[], edges=[], test_mode=True)
+        executor.page_params = {"record": "V-1002"}
+
+        resolved = executor.evaluate_message_template(nodes[0]["data"]["dataTableFilter"], {})
+
+        self.assertEqual(resolved, '{"vendor_id": "V-1002"}')
+
+
 class TestCreateTableWidgetOnDataTable(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.user = _User()
@@ -321,6 +341,25 @@ class TestCreateTableWidgetOnDataTable(unittest.IsolatedAsyncioTestCase):
 
         workflow = self.db.add.call_args_list[0].args[0]
         self.assertEqual(workflow.nodes[1]["data"]["columns"], ["id", "vendor_name"])
+
+    async def test_a_detail_page_widget_filters_by_the_page_record(self):
+        await self._create(
+            [(self.table, "owner")], columns=["vendor_name"], page_record_column="vendor_id"
+        )
+
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.nodes[0]["data"]["dataTableOperation"], "find")
+        self.assertEqual(
+            workflow.nodes[0]["data"]["dataTableFilter"], '{"vendor_id": "$page.record"}'
+        )
+
+    async def test_an_unknown_page_record_column_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create(
+                [(self.table, "owner")], columns=["vendor_id"], page_record_column="missing"
+            )
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
 
     async def test_an_unknown_column_is_refused(self):
         with self.assertRaises(HTTPException) as ctx:

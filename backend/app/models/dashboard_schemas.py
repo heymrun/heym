@@ -117,6 +117,15 @@ class WidgetCreateRequest(BaseModel):
         max_length=50,
         description="With data_table_id: the columns the table shows, in order.",
     )
+    page_record_column: (
+        Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None
+    ) = Field(
+        default=None,
+        description=(
+            "With data_table_id: show only the rows whose column equals the detail page's "
+            "$page.record."
+        ),
+    )
 
 
 class WidgetUpdateRequest(BaseModel):
