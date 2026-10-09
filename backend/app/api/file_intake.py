@@ -177,6 +177,9 @@ async def upload_to_slot(
         source_node_id=slot.trigger_node_id,
         source_node_label=slot.trigger_node_label,
     )
+    # The run reads the file on its own connection (a thread): a Converter or Drive node only
+    # finds it once its row is committed. The slot is already consumed, so this keeps it used.
+    await db.commit()
 
     base = build_public_base_url(request)
     file_payload = {

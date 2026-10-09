@@ -246,6 +246,53 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(history.inputs["body"], {"vendor": "Acme"})
 
+    async def test_the_file_is_committed_before_the_workflow_reads_it(self) -> None:
+        # The run executes on its own database connection (a thread), so a Converter or Drive
+        # node that reads the uploaded file only finds it once the file's row is committed.
+        slot = _make_slot()
+        workflow = SimpleNamespace(
+            id=slot.workflow_id,
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "fileUploadTrigger", "data": {"label": "audio"}}],
+            edges=[],
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [_select_result(slot), _update_result(1), _select_result(workflow)]
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), filename="rec.mp3", mime_type="audio/mpeg", size_bytes=3
+        )
+        commits_at_run: list[int] = []
+
+        def execute(**_kwargs: object) -> SimpleNamespace:
+            commits_at_run.append(db.commit.await_count)
+            return SimpleNamespace(
+                outputs={}, node_results=[], status="success", execution_time_ms=1.0
+            )
+
+        with (
+            patch(
+                "app.api.file_intake.file_storage.store_file",
+                new=AsyncMock(return_value=stored),
+            ),
+            patch("app.api.file_intake.execute_workflow", execute),
+            patch("app.api.mcp.get_credentials_context_for_user", new=AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+        ):
+            await upload_to_slot(
+                token="t",
+                request=_make_request(),
+                file=_make_upload(b"abc", "rec.mp3", "audio/mpeg"),
+                db=db,
+            )
+
+        self.assertEqual(len(commits_at_run), 1)
+        self.assertGreaterEqual(commits_at_run[0], 1)
+
     async def test_concurrent_loser_rejected_when_consume_returns_zero(self) -> None:
         slot = _make_slot()
         db = AsyncMock()
