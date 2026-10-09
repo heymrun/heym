@@ -51,15 +51,15 @@ const review = computed(() =>
         {{ review.body }}
       </p>
       <div class="mt-auto flex flex-nowrap items-center gap-1.5 pt-2">
-        <span class="relative overflow-hidden rounded-full bg-primary px-2 py-0.5 text-[9px] text-primary-foreground">
+        <span class="relative overflow-hidden rounded-full bg-primary px-2 py-0.5 text-[9px] text-primary-foreground dark:bg-primary-solid dark:text-primary-solid-foreground">
           <span :class="sheenClass(0)" />
           <span class="relative">Approve</span>
         </span>
-        <span class="relative overflow-hidden rounded-full border border-border bg-background px-2 py-0.5 text-[9px] text-foreground">
+        <span class="relative overflow-hidden rounded-full border border-border bg-card px-2 py-0.5 text-[9px] text-foreground">
           <span :class="sheenClass(1)" />
           <span class="relative">Request changes</span>
         </span>
-        <span class="relative overflow-hidden rounded-full bg-destructive/10 px-2 py-0.5 text-[9px] text-destructive">
+        <span class="relative overflow-hidden rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[9px] text-destructive">
           <span :class="sheenClass(2)" />
           <span class="relative">Reject</span>
         </span>

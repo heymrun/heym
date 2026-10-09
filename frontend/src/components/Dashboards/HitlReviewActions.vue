@@ -17,6 +17,14 @@ const emit = defineEmits<{
 
 const actionClass =
   "inline-flex h-8 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium leading-none whitespace-nowrap disabled:pointer-events-none disabled:opacity-50";
+// Work's dark `primary` is violet text, and its page background sits below the card.
+const filledClass = [
+  "bg-primary text-primary-foreground hover:bg-primary/90",
+  "dark:bg-primary-solid dark:text-primary-solid-foreground dark:hover:bg-primary-solid/90",
+].join(" ");
+const outlineClass = "border border-border bg-card text-foreground hover:bg-accent";
+const dangerClass =
+  "border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15";
 </script>
 
 <template>
@@ -24,7 +32,7 @@ const actionClass =
     <template v-if="editing">
       <button
         type="button"
-        :class="[actionClass, 'border border-border bg-background text-foreground hover:bg-accent']"
+        :class="[actionClass, outlineClass]"
         :disabled="submitting || preview"
         @click="emit('cancel')"
       >
@@ -32,7 +40,7 @@ const actionClass =
       </button>
       <button
         type="button"
-        :class="[actionClass, 'bg-primary text-primary-foreground hover:bg-primary/90']"
+        :class="[actionClass, filledClass]"
         :disabled="submitting || preview"
         @click="emit('save')"
       >
@@ -46,7 +54,7 @@ const actionClass =
     <template v-else>
       <button
         type="button"
-        :class="[actionClass, 'bg-primary text-primary-foreground hover:bg-primary/90']"
+        :class="[actionClass, filledClass]"
         :disabled="submitting || preview"
         @click="emit('accept')"
       >
@@ -58,7 +66,7 @@ const actionClass =
       </button>
       <button
         type="button"
-        :class="[actionClass, 'border border-border bg-background text-foreground hover:bg-accent']"
+        :class="[actionClass, outlineClass]"
         :disabled="submitting || preview"
         @click="emit('edit')"
       >
@@ -66,7 +74,7 @@ const actionClass =
       </button>
       <button
         type="button"
-        :class="[actionClass, 'bg-destructive/10 text-destructive hover:bg-destructive/15']"
+        :class="[actionClass, dangerClass]"
         :disabled="submitting || preview"
         @click="emit('refuse')"
       >
