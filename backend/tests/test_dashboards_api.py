@@ -224,6 +224,150 @@ class TestCreateWidget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(widget_workflow.owner_id, user.id)
 
 
+class TestDataTableWidgetNodes(unittest.TestCase):
+    def test_reads_the_table_and_shows_the_chosen_columns(self):
+        table_id = uuid.uuid4()
+        nodes, edges = dash_api._data_table_widget_nodes(table_id, ["vendor_id", "vendor_name"])
+
+        source, chart = nodes
+        self.assertEqual(source["type"], "dataTable")
+        self.assertEqual(source["data"]["dataTableId"], str(table_id))
+        self.assertEqual(source["data"]["dataTableOperation"], "getAll")
+        self.assertEqual(source["data"]["dataTableSort"], "created_at")
+        self.assertEqual(source["data"]["dataTableLimit"], dash_api.TABLE_WIDGET_ROW_LIMIT)
+        self.assertEqual(chart["type"], "chartOutput")
+        self.assertEqual(chart["data"]["chartType"], "table")
+        self.assertEqual(chart["data"]["dataPath"], "rows")
+        self.assertEqual(chart["data"]["columns"], ["vendor_id", "vendor_name"])
+        self.assertEqual(
+            edges, [{"id": edges[0]["id"], "source": source["id"], "target": chart["id"]}]
+        )
+        for blocked in DASHBOARD_WIDGET_BLOCKED_NODE_TYPES:
+            self.assertNotIn(blocked, [n["type"] for n in nodes])
+
+    def test_the_chart_shows_the_columns_of_the_rows_the_table_returns(self):
+        from app.services.chart_payload import build_chart_payload
+
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_id", "vendor_name"])
+        get_all = {
+            "success": True,
+            "operation": "getAll",
+            "rows": [
+                {
+                    "id": "r1",
+                    "data": {"vendor_id": "V-1001", "vendor_name": "Acme", "country": "TR"},
+                    "created_at": "2026-10-09 10:00:00",
+                }
+            ],
+            "count": 1,
+        }
+
+        payload = build_chart_payload(nodes[1]["data"], get_all)
+
+        self.assertEqual(payload["columns"], ["vendor_id", "vendor_name"])
+        self.assertEqual(payload["rows"], [["V-1001", "Acme"]])
+
+
+class TestCreateTableWidgetOnDataTable(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.user = _User()
+        self.dashboard = _dashboard(self.user.id)
+        self.table = MagicMock(
+            id=uuid.uuid4(),
+            columns=[{"name": "vendor_id"}, {"name": "vendor_name"}, {"name": "country"}],
+        )
+        self.db = MagicMock()
+        self.db.add = MagicMock()
+        self.db.commit = AsyncMock()
+        _wire_db_inserts(self.db)
+
+    async def _create(self, permission_side_effect, **fields):
+        body = WidgetCreateRequest(
+            title="Vendors",
+            chart_type=fields.pop("chart_type", "table"),
+            data_table_id=self.table.id,
+            **fields,
+        )
+        with (
+            patch.object(
+                dash_api,
+                "_get_dashboard_for_user",
+                AsyncMock(return_value=(self.dashboard, "write")),
+            ),
+            patch.object(
+                dash_api,
+                "get_data_table_with_permission",
+                AsyncMock(side_effect=permission_side_effect),
+            ) as permission,
+        ):
+            resp = await dash_api.create_widget(
+                dashboard_id=self.dashboard.id, body=body, current_user=self.user, db=self.db
+            )
+        return resp, permission
+
+    async def test_builds_the_table_from_the_chosen_columns(self):
+        resp, _ = await self._create(
+            [(self.table, "owner")], columns=[" vendor_id ", "vendor_name", "vendor_id"]
+        )
+
+        self.assertEqual(resp.chart_type, "table")
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.kind, "dashboard_widget")
+        self.assertEqual(workflow.nodes[0]["data"]["dataTableId"], str(self.table.id))
+        self.assertEqual(workflow.nodes[1]["data"]["columns"], ["vendor_id", "vendor_name"])
+
+    async def test_the_row_id_is_a_column(self):
+        await self._create([(self.table, "read")], columns=["id", "vendor_name"])
+
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.nodes[1]["data"]["columns"], ["id", "vendor_name"])
+
+    async def test_an_unknown_column_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["vendor_id", "missing"])
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("missing", ctx.exception.detail)
+        self.db.add.assert_not_called()
+
+    async def test_no_columns_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["  "])
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_only_a_table_reads_a_data_table(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["vendor_id"], chart_type="bar")
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_a_table_the_user_cannot_read_is_not_found(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([None], columns=["vendor_id"])
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.db.add.assert_not_called()
+
+    async def test_the_dashboard_owner_must_read_the_table(self):
+        self.dashboard.owner_id = uuid.uuid4()
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "read"), None], columns=["vendor_id"])
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.db.add.assert_not_called()
+
+    async def test_a_shared_editor_builds_it_when_the_owner_reads_the_table(self):
+        self.dashboard.owner_id = uuid.uuid4()
+        _, permission = await self._create(
+            [(self.table, "read"), (self.table, "owner")], columns=["vendor_id"]
+        )
+
+        self.assertEqual(
+            [call.args[2] for call in permission.await_args_list],
+            [self.user.id, self.dashboard.owner_id],
+        )
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.owner_id, self.dashboard.owner_id)
+
+
 class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
     async def test_clone_widget_creates_widget_and_remapped_workflow(self):
         user = _User()

@@ -181,6 +181,9 @@ export interface WidgetCreateRequest {
   cache_ttl_seconds: number;
   /** For a file-run widget: the workflow with a File Upload trigger it runs. */
   workflow_id?: string;
+  /** For a table widget: the data table whose rows it shows, in `columns`, without AI. */
+  data_table_id?: string;
+  columns?: string[];
 }
 
 export interface WidgetUpdateRequest {

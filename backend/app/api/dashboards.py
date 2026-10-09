@@ -79,6 +79,7 @@ from app.services.dashboard_data_context import (
 )
 from app.services.dashboard_widget_plan import WidgetProposal, plan_dashboard_widgets
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.data_table_access import get_data_table_with_permission
 from app.services.encryption import decrypt_config
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
 from app.services.hitl_service import build_public_base_url
@@ -103,6 +104,7 @@ from app.services.workflow_inputs import start_input_fields
 router = APIRouter()
 
 DEFAULT_DASHBOARD_NAME = "Dashboard"
+TABLE_WIDGET_ROW_LIMIT = 500
 
 _AI_WIDGET_SUFFIX = (
     " The workflow MUST end with a single chartOutput node that produces the chart. "
@@ -313,6 +315,82 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
     ]
     edges = [{"id": str(uuid.uuid4()), "source": src_id, "target": chart_id}]
     return nodes, edges
+
+
+def _data_table_widget_nodes(table_id: uuid.UUID, columns: list[str]) -> tuple[list, list]:
+    """A table widget's graph: a data table's rows, oldest first, shown in ``columns``."""
+    src_id = str(uuid.uuid4())
+    chart_id = str(uuid.uuid4())
+    nodes = [
+        {
+            "id": src_id,
+            "type": "dataTable",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "label": "tableRows",
+                "dataTableId": str(table_id),
+                "dataTableOperation": "getAll",
+                "dataTableSort": "created_at",
+                "dataTableLimit": TABLE_WIDGET_ROW_LIMIT,
+            },
+        },
+        {
+            "id": chart_id,
+            "type": "chartOutput",
+            "position": {"x": 320, "y": 0},
+            "data": {
+                "label": "chart",
+                "chartType": "table",
+                "dataPath": "rows",
+                "columns": columns,
+            },
+        },
+    ]
+    edges = [{"id": str(uuid.uuid4()), "source": src_id, "target": chart_id}]
+    return nodes, edges
+
+
+async def _table_widget_graph(
+    db: AsyncSession,
+    table_id: uuid.UUID,
+    body: WidgetCreateRequest,
+    dashboard: Dashboard,
+    user: User,
+) -> tuple[list, list]:
+    """The graph of a table on a data table's rows, once the table and its columns check out."""
+    if body.chart_type != "table":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only a table widget can show a data table's rows directly",
+        )
+    found = await get_data_table_with_permission(db, table_id, user.id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
+    if dashboard.owner_id != user.id and (
+        await get_data_table_with_permission(db, table_id, dashboard.owner_id) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The dashboard's owner cannot read this data table. Share it with them first.",
+        )
+    table, _ = found
+    known = {"id"} | {
+        str(column.get("name")) for column in table.columns or [] if isinstance(column, dict)
+    }
+    columns = list(dict.fromkeys(name for name in body.columns if name))
+    if not columns:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose at least one column for the table",
+        )
+    unknown = [name for name in columns if name not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"The data table has no column named {', '.join(unknown)}",
+        )
+    return _data_table_widget_nodes(table.id, columns)
 
 
 def _clone_workflow_graph(
@@ -712,7 +790,12 @@ async def create_widget(
     if body.chart_type == FILE_RUN_WIDGET_TYPE:
         workflow = await _file_run_workflow(db, body.workflow_id, dashboard, current_user)
     else:
-        nodes, edges = _seed_widget_nodes(body.chart_type)
+        if body.data_table_id is not None:
+            nodes, edges = await _table_widget_graph(
+                db, body.data_table_id, body, dashboard, current_user
+            )
+        else:
+            nodes, edges = _seed_widget_nodes(body.chart_type)
         workflow = Workflow(
             name=body.title,
             description=body.description,

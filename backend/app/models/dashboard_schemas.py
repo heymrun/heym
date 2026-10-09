@@ -108,6 +108,15 @@ class WidgetCreateRequest(BaseModel):
         default=None,
         description="For a fileRun widget: the workflow with a File Upload trigger it runs.",
     )
+    data_table_id: uuid.UUID | None = Field(
+        default=None,
+        description="For a table widget: the data table whose rows it shows, without AI.",
+    )
+    columns: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]] = Field(
+        default_factory=list,
+        max_length=50,
+        description="With data_table_id: the columns the table shows, in order.",
+    )
 
 
 class WidgetUpdateRequest(BaseModel):
