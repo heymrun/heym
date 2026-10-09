@@ -146,6 +146,8 @@ Use it to fetch the one record the page is about, for example in an [HTTP](./htt
 https://crm.example.com/api/customers?id=$page.record
 ```
 
+`$page.record` is the clicked row's value itself, such as `V-1002`, not an object with fields. To find that record in a [DataTable](./datatable-node.md), filter its record column by the value: operation `find` with the filter `{"vendor_id": "$page.record"}`. A path such as `$page.record.id` resolves to nothing, so a widget the AI builds or fine-tunes has those fields dropped and reads `$page.record` instead.
+
 The value comes from a URL that anyone can edit. The dashboard only accepts values in its record format (letters, digits, `-`, `_` and `.` by default), but treat it as untrusted input all the same: pass it where the node escapes values, such as an HTTP query parameter or a [DataTable](./datatable-node.md) or ClickHouse filter value, and never build query text by joining strings with it. Widgets still run as the dashboard owner, whoever opens the page.
 
 ## How data is resolved

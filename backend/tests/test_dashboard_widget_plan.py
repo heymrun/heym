@@ -138,8 +138,8 @@ class DetailPagePlanTests(unittest.TestCase):
                     WidgetProposal(
                         "Amount",
                         "numeric",
-                        "The invoice's total. On this detail page, read the record's invoice_id "
-                        "from $page.record and show only that record's data.",
+                        "The invoice's total. On this detail page, show only the data whose "
+                        "invoice_id equals $page.record, the clicked row's invoice_id value itself.",
                     ),
                 ],
             ),

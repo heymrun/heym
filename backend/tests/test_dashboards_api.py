@@ -427,6 +427,108 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.exception.status_code, 404)
 
 
+class TestGeneratedWidgetsReadThePageRecord(unittest.IsolatedAsyncioTestCase):
+    async def test_a_record_field_the_model_wrote_is_dropped(self):
+        credential = MagicMock(id=uuid.uuid4(), encrypted_config="enc")
+        from app.db.models import CredentialType
+
+        credential.type = CredentialType.openai
+        content = (
+            '{"nodes": [{"id": "find", "type": "dataTable", "data": {"dataTableFilter": '
+            '"{\\"vendor_id\\": \\"$page.record.id\\"}"}}, {"id": "chart", '
+            '"type": "chartOutput", "data": {"chartType": "table"}}], "edges": []}'
+        )
+
+        with (
+            patch.object(dash_api, "decrypt_config", return_value={"api_key": "x"}),
+            patch.object(dash_api, "execute_llm", AsyncMock(return_value={"text": content})),
+        ):
+            dsl = await dash_api.generate_widget_dsl(
+                "the vendor", credential=credential, model="gpt-4o-mini", user=_User()
+            )
+
+        self.assertEqual(
+            dsl["nodes"][0]["data"]["dataTableFilter"], '{"vendor_id": "$page.record"}'
+        )
+
+    async def test_the_model_learns_how_rows_open_a_detail_page(self):
+        user = _User()
+        dashboard = _dashboard(user.id)
+        dashboard.record_format = "id"
+        source_page = uuid.uuid4()
+        hidden_page = uuid.uuid4()
+        rows = [
+            MagicMock(
+                dashboard_id=hidden_page,
+                link_record_field="secret_code",
+                cached_payload={"type": "table", "columns": ["secret_code"], "rows": [["S-1"]]},
+            ),
+            MagicMock(
+                dashboard_id=source_page,
+                link_record_field="vendor_id",
+                cached_payload={
+                    "type": "table",
+                    "columns": ["vendor_id", "vendor_name"],
+                    "rows": [[None, "Nobody"], ["V-1001", "Acme"]],
+                },
+            ),
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+
+        with patch.object(
+            dash_api, "reachable_dashboard_ids", AsyncMock(return_value={source_page})
+        ) as reachable:
+            context = await dash_api._detail_page_context(db, dashboard, user)
+
+        self.assertEqual(reachable.await_args.args[1], {source_page, hidden_page})
+        self.assertIn("row's vendor_id value as $page.record", context)
+        self.assertIn('such as "V-1001"', context)
+        self.assertIn('{"vendor_id": "$page.record"}', context)
+        self.assertNotIn("secret_code", context)
+
+    async def test_a_page_no_table_opens_adds_nothing(self):
+        user = _User()
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        self.assertEqual(await dash_api._detail_page_context(db, _dashboard(user.id), user), "")
+
+    async def test_generate_tells_the_model_about_the_detail_page(self):
+        user = _User()
+        dashboard = _dashboard(user.id)
+        db = MagicMock()
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        _wire_db_inserts(db)
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiWidgetRequest
+
+        generate = AsyncMock(
+            return_value={"nodes": [{"id": "c", "type": "chartOutput", "data": {}}], "edges": []}
+        )
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate),
+            patch.object(
+                dash_api,
+                "get_credential_for_user",
+                AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
+            ),
+            patch.object(dash_api, "_detail_page_context", AsyncMock(return_value="DETAIL PAGE")),
+        ):
+            await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
+                body=AiWidgetRequest(prompt="the vendor", credential_id=uuid.uuid4(), model="m"),
+                current_user=user,
+                db=db,
+            )
+
+        self.assertEqual(generate.await_args.args[0], "the vendor\n\nDETAIL PAGE")
+
+
 class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
     async def test_ai_generate_extracts_chart_type(self):
         user = _User()
@@ -593,6 +695,12 @@ class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # These tests script every database call; the detail page lookup has its own tests.
+        self.enterContext(
+            patch.object(dash_api, "_detail_page_context", AsyncMock(return_value=""))
+        )
+
     async def test_refine_updates_workflow_and_invalidates_cache(self):
         user = _User()
         widget = MagicMock()

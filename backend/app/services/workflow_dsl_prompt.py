@@ -3788,6 +3788,12 @@ node URL `https://crm.example.com/api/customers/$page.record`. The value comes f
 as a value the node escapes (an HTTP query parameter, a `dataTable` or ClickHouse filter value),
 never build query text from it. Widget workflows still have no trigger or input node.
 
+`$page.record` is the clicked row's value itself, one plain string such as `V-1002`, never an
+object: it has no fields, so `$page.record.id` or `$page.record.vendor_id` resolve to nothing and
+the widget shows no rows. Compare the column that holds the record with `$page.record` itself, for
+example a `dataTable` node with `dataTableOperation` `find` and `dataTableFilter`
+`{"vendor_id": "$page.record"}`.
+
 **Full example — Bar chart with example data (set → chartOutput):**
 ```json
 {

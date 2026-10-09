@@ -97,6 +97,11 @@ from app.services.page_params import (
     MAX_RECORD_LENGTH,
     is_valid_record,
 )
+from app.services.widget_page_record import (
+    detail_page_context,
+    example_record,
+    repair_page_record_paths,
+)
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 from app.services.workflow_inputs import start_input_fields
@@ -123,7 +128,9 @@ _AI_WIDGET_SUFFIX = (
     "When the user wants pending human reviews on the dashboard, use chartType hitl and no "
     "upstream data nodes. Do not include trigger, "
     "input, error-handler, or RabbitMQ nodes in dashboard widget workflows. "
-    "On a detail dashboard, read the record the page is about from $page.record. "
+    "On a detail dashboard, $page.record is the record the page is about: one plain text "
+    "value such as V-1002, never an object, so compare a column with $page.record itself "
+    "(never $page.record.id). "
     "A dataTable node returns {rows, count}; each row is {id, data, created_at} with the "
     "columns under data, so in a set node group and sum row.data values, not the row itself. "
     "A chartOutput reading those rows directly sees each row's columns at the top level next "
@@ -189,13 +196,40 @@ async def generate_widget_dsl(
             router=router,
         )
         try:
-            return _extract_generated_workflow_config(str(result.get("text") or ""), prompt)
+            dsl = _extract_generated_workflow_config(str(result.get("text") or ""), prompt)
         except ValueError:
             continue
+        if isinstance(dsl.get("nodes"), list):
+            dsl["nodes"] = repair_page_record_paths(dsl["nodes"])
+        return dsl
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail="The model did not answer with a widget workflow. Try again or pick another model.",
     )
+
+
+async def _detail_page_context(db: AsyncSession, dashboard: Dashboard, user: User) -> str:
+    """How table rows open ``dashboard`` as a detail page, told to the model; empty if none do."""
+    rows = (
+        await db.execute(
+            select(
+                DashboardWidget.dashboard_id,
+                DashboardWidget.link_record_field,
+                DashboardWidget.cached_payload,
+            ).where(
+                DashboardWidget.link_dashboard_id == dashboard.id,
+                DashboardWidget.link_record_field.is_not(None),
+            )
+        )
+    ).all()
+    readable = await reachable_dashboard_ids(db, {row.dashboard_id for row in rows}, user.id)
+    links = [row for row in rows if row.dashboard_id in readable]
+    examples = (example_record(row.cached_payload, row.link_record_field) for row in links)
+    example = next(
+        (value for value in examples if value and is_valid_record(value, dashboard.record_format)),
+        None,
+    )
+    return detail_page_context(list(dict.fromkeys(row.link_record_field for row in links)), example)
 
 
 async def _ensure_own_dashboard(db: AsyncSession, user: User) -> None:
@@ -1239,8 +1273,9 @@ async def ai_generate_widget(
     if dashboard.owner_id != current_user.id:
         await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
     context = describe_tables(tables, with_data=False)
+    detail = await _detail_page_context(db, dashboard, current_user)
     dsl = await generate_widget_dsl(
-        f"{body.prompt}\n\n{context}" if context else body.prompt,
+        "\n\n".join(part for part in (body.prompt, detail, context) if part),
         credential=credential,
         model=body.model,
         user=current_user,
@@ -1337,8 +1372,9 @@ async def ai_refine_widget(
     if dashboard.owner_id != current_user.id:
         await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
     context = describe_tables(tables, with_data=True)
+    detail = await _detail_page_context(db, dashboard, current_user)
     dsl = await generate_widget_dsl(
-        f"{body.prompt}\n\n{context}" if context else body.prompt,
+        "\n\n".join(part for part in (body.prompt, detail, context) if part),
         credential=credential,
         model=body.model,
         user=current_user,

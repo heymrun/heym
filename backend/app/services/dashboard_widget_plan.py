@@ -75,8 +75,8 @@ invoice, a case, a customer, an order).
   null when the record field says enough.
 - detail.widgets: 2 to {MAX_DETAIL_WIDGETS} widgets for the detail page, shaped like the page's
   widgets but without detail. Each one shows the one record the page is about: its prompt says
-  the widget reads the record's value from $page.record and keeps only the data whose
-  recordField equals it.
+  the widget keeps only the data whose recordField equals $page.record, which is the clicked
+  row's recordField value itself (plain text such as INV-001, never an object with fields).
 - With sample data, list the same sample records (for example ids INV-001 to INV-005) in the
   table's prompt and in every detail widget's prompt, so a clicked row finds its record.
 
@@ -198,8 +198,8 @@ def parse_detail_page(value: Any, table_title: str) -> DetailPagePlan | None:
             continue
         if "$page.record" not in proposal.prompt:
             sentence = (
-                f"On this detail page, read the record's {record_field} from $page.record and "
-                "show only that record's data."
+                f"On this detail page, show only the data whose {record_field} equals "
+                f"$page.record, the clicked row's {record_field} value itself."
             )
             proposal = replace(proposal, prompt=_with_sentence(proposal.prompt, sentence))
         widgets.append(proposal)
