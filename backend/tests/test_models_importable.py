@@ -11,6 +11,7 @@ _MODULES = (
     "app.db.models",
     "app.services.workflow_access",
     "app.services.credential_access",
+    "app.services.credential_catalog",
     "app.services.dashboard_access",
     "app.services.alert_access",
     "app.services.data_table_access",
