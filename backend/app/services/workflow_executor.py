@@ -54,6 +54,7 @@ from app.services.execution_cancellation import (
     register_execution as _register_sub_execution,
 )
 from app.services.expression_evaluator import (
+    _fallback_find_expressions,
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
@@ -6985,55 +6986,7 @@ class WorkflowExecutor:
 
     def _find_expressions(self, text: str) -> list[tuple[int, int, str]]:
         """Find all $ expressions with proper nested parentheses handling."""
-        expressions = []
-        i = 0
-        while i < len(text):
-            if text[i] == "$" and (i + 1 < len(text)) and text[i + 1].isalpha():
-                start = i
-                i += 1
-                while i < len(text) and (
-                    text[i].isalnum()
-                    or text[i] == "_"
-                    or (
-                        text[i] == "."
-                        and i + 1 < len(text)
-                        and (text[i + 1].isalnum() or text[i + 1] == "_")
-                    )
-                ):
-                    i += 1
-                while i < len(text):
-                    while i < len(text) and text[i] in "([":
-                        bracket = text[i]
-                        close_bracket = ")" if bracket == "(" else "]"
-                        depth = 1
-                        i += 1
-                        while i < len(text) and depth > 0:
-                            if text[i] == bracket:
-                                depth += 1
-                            elif text[i] == close_bracket:
-                                depth -= 1
-                            elif text[i] == '"' or text[i] == "'":
-                                quote = text[i]
-                                i += 1
-                                while i < len(text) and text[i] != quote:
-                                    if text[i] == "\\":
-                                        i += 1
-                                    i += 1
-                            i += 1
-                    if (
-                        i + 1 < len(text)
-                        and text[i] == "."
-                        and (text[i + 1].isalnum() or text[i + 1] == "_")
-                    ):
-                        i += 1
-                        while i < len(text) and (text[i].isalnum() or text[i] == "_"):
-                            i += 1
-                        continue
-                    break
-                expressions.append((start, i, text[start:i]))
-            else:
-                i += 1
-        return expressions
+        return _fallback_find_expressions(text)
 
     def _is_single_dollar_expression(self, template: str) -> bool:
         """True when the whole trimmed string is a single expression, not a text template."""

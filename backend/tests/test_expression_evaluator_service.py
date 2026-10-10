@@ -12,7 +12,6 @@ from app.services.expression_evaluator import (
     ExpressionEvaluateResponse,
     ExpressionEvaluatorService,
     ExpressionTooLongError,
-    _fallback_find_expressions,
     build_eval_context,
     build_vars_context,
     classify_type,
@@ -960,9 +959,6 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
                 self.assertEqual(self._service().evaluate(template, context).result, expected)
                 self.assertEqual(
                     executor.evaluate_message_template(template, context, "n"), expected
-                )
-                self.assertEqual(
-                    _fallback_find_expressions(template), executor._find_expressions(template)
                 )
 
     def test_single_expr_array_preserved(self) -> None:
