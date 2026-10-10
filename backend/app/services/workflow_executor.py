@@ -6192,7 +6192,7 @@ class WorkflowExecutor:
         if "$" not in expression:
             return False
         arithmetic_pattern = (
-            r"\$[a-zA-Z_][a-zA-Z0-9_.]*(?:\([^)]*\)|\[[^\]]*\])*"
+            r"\$[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*(?:\([^)]*\)|\[[^\]]*\])*"
             r"(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\([^)]*\)|\[[^\]]*\])*)*\s*[+\-*/%]"
         )
         return bool(re.search(arithmetic_pattern, expression))
