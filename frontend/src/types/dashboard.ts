@@ -18,6 +18,9 @@ export interface HitlWidgetItem {
   created_at?: string;
 }
 
+/** Tone of a status chip in a table widget's status column. */
+export type StatusTone = "success" | "attention" | "failure" | "waiting" | "neutral";
+
 export interface ChartPayload {
   type:
     | "pie"
@@ -37,6 +40,9 @@ export interface ChartPayload {
   series?: ChartSeries[];
   columns?: string[];
   rows?: unknown[][];
+  // Table column rendered as status chips, and the tone of each value in it.
+  statusColumn?: string;
+  statusTones?: Record<string, StatusTone>;
   value?: number | string | null;
   // Markdown content for the `text` chart type.
   text?: string;
@@ -55,6 +61,45 @@ export interface ChartPayload {
   items?: HitlWidgetItem[];
 }
 
+/** A file-run widget before any drop: the file its workflow's File Upload trigger takes. */
+/** A start field of the workflow a run widget runs. */
+export interface RunWidgetField {
+  key: string;
+  defaultValue: string | null;
+}
+
+/**
+ * The run widget (chart type fileRun). `mode` says what its workflow takes: a dropped file,
+ * its start fields, or nothing. A payload without a mode takes a file.
+ */
+export interface FileRunPayload {
+  type: "fileRun";
+  mode?: "file" | "form" | "run";
+  file_label?: string;
+  max_size_mb?: number;
+  allowed_types?: string[];
+  input_fields?: RunWidgetField[];
+}
+
+/** A finished run widget run, shaped like a file drop's result. */
+export interface WidgetRunResult {
+  run_id: string | null;
+  status: string;
+  output: Record<string, unknown>;
+}
+
+/** Every widget is a chart, except the file-run widget that runs a workflow on a file. */
+export type WidgetType = ChartPayload["type"] | "fileRun";
+
+/** A single-use upload link for one drop on a file-run widget. */
+export interface FileRunSlot {
+  upload_url: string;
+  expires_at: string;
+  max_size_mb: number;
+  allowed_types: string[];
+  slot_id: string;
+}
+
 export interface WidgetLayout {
   x: number;
   y: number;
@@ -67,12 +112,21 @@ export interface DashboardWidget {
   workflow_id: string;
   title: string;
   description: string | null;
-  chart_type: ChartPayload["type"];
+  chart_type: WidgetType;
   layout: WidgetLayout;
   cache_ttl_seconds: number;
   position: number;
+  /** Row link of a table widget: rows open this dashboard with ?record=<record field>. */
+  link_dashboard_id: string | null;
+  link_record_field: string | null;
+  link_label_field: string | null;
+  /** Whether the viewer can open the linked dashboard; rows are clickable only then. */
+  link_accessible: boolean;
   updated_at: string;
 }
+
+/** Which `?record=` values a dashboard accepts as a detail page. */
+export type RecordFormat = "id" | "number" | "uuid" | "email";
 
 /** The caller's access to a dashboard. */
 export type DashboardPermission = "owner" | "write" | "read";
@@ -85,6 +139,7 @@ export interface DashboardSummary {
   /** Set only on dashboards shared with the caller. */
   owner_name: string | null;
   shared_by: string | null;
+  record_format: RecordFormat;
   updated_at: string;
 }
 
@@ -111,7 +166,7 @@ export interface DashboardTeamShare {
 
 export interface WidgetDataResponse {
   widget_id: string;
-  payload: ChartPayload | null;
+  payload: ChartPayload | FileRunPayload | null;
   cached: boolean;
   computed_at: string | null;
   error?: string | null;
@@ -121,9 +176,16 @@ export interface WidgetDataResponse {
 export interface WidgetCreateRequest {
   title: string;
   description?: string | null;
-  chart_type: ChartPayload["type"];
+  chart_type: WidgetType;
   layout: WidgetLayout;
   cache_ttl_seconds: number;
+  /** For a file-run widget: the workflow with a File Upload trigger it runs. */
+  workflow_id?: string;
+  /** For a table widget: the data table whose rows it shows, in `columns`, without AI. */
+  data_table_id?: string;
+  columns?: string[];
+  /** With `data_table_id`: only the rows whose column equals the detail page's `$page.record`. */
+  page_record_column?: string;
 }
 
 export interface WidgetUpdateRequest {
@@ -132,4 +194,8 @@ export interface WidgetUpdateRequest {
   chart_type?: ChartPayload["type"];
   layout?: WidgetLayout;
   cache_ttl_seconds?: number;
+  /** Send with link_record_field to set the row link, or as null to remove it. */
+  link_dashboard_id?: string | null;
+  link_record_field?: string | null;
+  link_label_field?: string | null;
 }

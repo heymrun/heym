@@ -466,13 +466,20 @@ class Dashboard(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Dashboard")
+    # Which `?record=` values this dashboard accepts as a detail page (app/services/page_params).
+    record_format: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="id", server_default="id"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     widgets: Mapped[list["DashboardWidget"]] = relationship(
-        "DashboardWidget", back_populates="dashboard", cascade="all, delete-orphan"
+        "DashboardWidget",
+        back_populates="dashboard",
+        cascade="all, delete-orphan",
+        foreign_keys="DashboardWidget.dashboard_id",
     )
     shares: Mapped[list["DashboardShare"]] = relationship(
         "DashboardShare", back_populates="dashboard", cascade="all, delete-orphan"
@@ -549,13 +556,47 @@ class DashboardWidget(Base):
     cached_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cached_workflow_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Row link of a table widget: clicking a row opens this dashboard with
+    # ?record=<the row's link_record_field value>; link_label_field names the breadcrumb.
+    link_dashboard_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("dashboards.id", ondelete="SET NULL"), nullable=True
+    )
+    link_record_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    link_label_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="widgets")
+    dashboard: Mapped["Dashboard"] = relationship(
+        "Dashboard", back_populates="widgets", foreign_keys=[dashboard_id]
+    )
     workflow: Mapped["Workflow"] = relationship("Workflow")
+
+
+class DashboardWidgetRecordCache(Base):
+    """A widget's chart for one detail-page record.
+
+    The widget's own cached_* columns hold the dashboard opened without a record; this
+    table holds the newest records per widget (see app/services/dashboard_data).
+    """
+
+    __tablename__ = "dashboard_widget_record_cache"
+    __table_args__ = (
+        UniqueConstraint("widget_id", "record", name="uq_dashboard_widget_record_cache"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    widget_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_widgets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    record: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cached_workflow_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class WorkflowShare(Base):
@@ -1735,6 +1776,9 @@ class FileUploadSlot(Base):
     allowed_mime: Mapped[list | None] = mapped_column(JSON, nullable=True)
     trigger_node_id: Mapped[str] = mapped_column(String(64), nullable=False)
     trigger_node_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Start field values a signed-in minter (a dashboard run widget) sends with the file;
+    # the public upload cannot set them.
+    initial_inputs: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -2048,6 +2092,17 @@ class DashboardChatQueueItem(Base):
     )
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # A queued build turn keeps its build mode and AI edit target until it runs.
+    allow_build: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # A queued skill turn can write an agent skill without the rest of build mode.
+    allow_skill_write: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    build_target_workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

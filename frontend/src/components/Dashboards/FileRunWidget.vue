@@ -1,0 +1,73 @@
+<script setup lang="ts">
+import { ref } from "vue";
+
+import type { FileRunPayload } from "@/types/dashboard";
+import type { QuickDrawerRunState } from "@/types/quickDrawer";
+import FileRunWidgetView from "@/components/Dashboards/FileRunWidgetView.vue";
+import { fileRunState } from "@/components/Layout/quickWorkflowRun";
+import { dashboardApi, fileIntakeApi, getErrorDetail } from "@/services/api";
+
+const props = defineProps<{
+  widgetId: string;
+  payload: FileRunPayload;
+}>();
+
+function idle(): QuickDrawerRunState {
+  return {
+    status: "idle",
+    executionId: null,
+    outputs: null,
+    executionTimeMs: null,
+    executionHistoryId: null,
+    errorMessage: null,
+    nodeResults: [],
+    startedAt: null,
+  };
+}
+
+const file = ref<File | null>(null);
+// The last result stays in this page view; other viewers do not see it.
+const runState = ref<QuickDrawerRunState>(idle());
+
+async function onRun(values: Record<string, string>): Promise<void> {
+  file.value = null;
+  const startedAt = Date.now();
+  runState.value = { ...idle(), status: "running", startedAt };
+  try {
+    runState.value = fileRunState(await dashboardApi.runWidget(props.widgetId, values), startedAt);
+  } catch (error) {
+    runState.value = {
+      ...runState.value,
+      status: "error",
+      errorMessage: getErrorDetail(error, "The workflow could not be run"),
+    };
+  }
+}
+
+async function onDrop(dropped: File, values: Record<string, string>): Promise<void> {
+  file.value = dropped;
+  const startedAt = Date.now();
+  runState.value = { ...idle(), status: "running", startedAt };
+  try {
+    const slot = await dashboardApi.createFileRunSlot(props.widgetId, values);
+    runState.value = fileRunState(await fileIntakeApi.upload(slot.upload_url, dropped), startedAt);
+  } catch (error) {
+    runState.value = {
+      ...runState.value,
+      status: "error",
+      errorMessage: getErrorDetail(error, "The file could not be run"),
+    };
+  }
+}
+
+</script>
+
+<template>
+  <FileRunWidgetView
+    :payload="payload"
+    :file="file"
+    :run-state="runState"
+    @drop="onDrop"
+    @run="onRun"
+  />
+</template>

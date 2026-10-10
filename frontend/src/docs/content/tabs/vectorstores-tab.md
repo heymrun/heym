@@ -30,6 +30,9 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 - **Delete sources** – Remove specific files or source groups from a store, including
   everything one workflow added
 - **Edit store** – Change name, description, or credential
+- **Search** – `POST /api/vector-stores/{id}/search` with a `query` (and a `limit` from 1 to 20,
+  default 5) returns the chunks a RAG node's search would return, best match first, each with its
+  score and source. Heym Work's RAG screen uses it to test retrieval
 
 ## Sharing
 

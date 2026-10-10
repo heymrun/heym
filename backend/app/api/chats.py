@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import Event
 
@@ -29,7 +29,9 @@ from app.api.ai_assistant import (
     resolve_model_binding,
     stream_dashboard_chat,
 )
+from app.api.chat_build import ChatBuildSession
 from app.api.deps import get_current_user, get_current_user_id, get_db
+from app.api.workflows import get_workflow_for_user
 from app.db.models import (
     LLM_CREDENTIAL_TYPES,
     DashboardChatQueueItem,
@@ -56,12 +58,14 @@ from app.models.chat_schemas import (
     SendMessageResponse,
 )
 from app.services import chat_task_registry as registry
+from app.services.chat_build_mode import BuildRequest
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext
 from app.services.mcp_chat_service import MCPChatError, MCPChatResult
+from app.services.workflow_access import user_can_write_workflow
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -91,6 +95,8 @@ class ChatTurn:
     should_generate_title: bool
     # MCP turns never list, pick or create credentials; turns typed in the UI do.
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE
+    # Set when the turn may build (chat build mode); None keeps the classic chat.
+    build: BuildRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +210,7 @@ class SystemPromptParts:
     workflows_block: str
     user_rules: str
     credentials_block: str = ""
+    build_block: str = ""
 
 
 async def _assemble_system_prompt_parts(
@@ -374,6 +381,27 @@ async def _run_chat_turn(
                 _cancel_events[conv_id] = cancel_event
             workflow_note_ids: set[str] = set()
 
+            build: ChatBuildSession | None = None
+            if turn.build is not None:
+                build = ChatBuildSession(
+                    db=db,
+                    user=user,
+                    request=turn.build,
+                    selected_credential=credential,
+                    model=turn.model,
+                    credential_mode=turn.credential_mode,
+                    public_base_url=public_base_url,
+                    cancel_event=cancel_event,
+                    llm_session_id=conv_id,
+                    attachment=attachment,
+                )
+                build_block = await build.prompt()
+                parts = replace(
+                    parts,
+                    full_system_prompt=parts.full_system_prompt + build_block,
+                    build_block=build_block,
+                )
+
             client, provider, model, trace_context = resolve_model_binding(
                 credential,
                 config,
@@ -399,6 +427,7 @@ async def _run_chat_turn(
                 credential,
                 system_prompt_parts=parts,
                 credential_mode=turn.credential_mode,
+                build=build,
             ):
                 if chunk.startswith("data: "):
                     try:
@@ -553,12 +582,23 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
         )
         db.add(user_message)
         await db.flush()
+        if item.allow_build:
+            queued_build: BuildRequest | None = BuildRequest(
+                target_workflow_id=item.build_target_workflow_id
+            )
+        elif item.allow_skill_write:
+            queued_build = BuildRequest(
+                target_workflow_id=item.build_target_workflow_id, skill_only=True
+            )
+        else:
+            queued_build = None
         turn = ChatTurn(
             content=item.content,
             credential_id=item.credential_id,
             model=item.model,
             attachment_data=dict(item.attachment) if isinstance(item.attachment, dict) else None,
             should_generate_title=False,
+            build=queued_build,
         )
         queued_item_id = item.id
         await db.delete(item)
@@ -610,6 +650,7 @@ async def _process_chat(
     attachment_data: dict | None,
     public_base_url: str,
     should_generate_title: bool,
+    build: BuildRequest | None = None,
 ) -> None:
     """Background coroutine: streams assistant replies and drains queued messages."""
     if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id):
@@ -623,6 +664,7 @@ async def _process_chat(
         model=model,
         attachment_data=attachment_data,
         should_generate_title=should_generate_title,
+        build=build,
     )
 
     try:
@@ -812,6 +854,8 @@ async def run_mcp_chat_turn(
         attachment_data=None,
         should_generate_title=should_generate_title,
         credential_mode=CredentialPromptMode.OFF,
+        # heym_chat exists only when MCP chat is enabled, and it always builds.
+        build=BuildRequest(),
     )
     await registry.create_task(conv_id)
     try:
@@ -832,11 +876,15 @@ async def run_mcp_chat_turn(
 
     tool_calls = assistant_message.tool_calls or []
     tool_names = [str(call.get("name") or "") for call in tool_calls if call.get("name")]
+    verified = any(
+        call.get("name") == "finish" and call.get("status") == "success" for call in tool_calls
+    )
     return MCPChatResult(
         conversation_id=conv_uuid,
         text=_strip_hidden_markers(assistant_message.content),
         tool_names=tool_names,
         awaiting_clarification=result.paused_for_clarification,
+        verified=verified,
     )
 
 
@@ -1076,6 +1124,30 @@ async def cancel_conversation_stream(
     await registry.publish(str(conversation_id), {"type": "queue_cleared"})
 
 
+async def _resolve_build_request(
+    db: AsyncSession, user_id: uuid.UUID, body: MessageCreate
+) -> BuildRequest | None:
+    """The turn's build mode, after checking that an AI edit target is writable."""
+    skill_only = body.allow_skill_write and not body.allow_build
+    if body.target_workflow_id is not None and not body.allow_build and not body.allow_skill_write:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target_workflow_id needs allow_build or allow_skill_write",
+        )
+    if not body.allow_build and not body.allow_skill_write:
+        return None
+    if body.target_workflow_id is not None:
+        workflow = await get_workflow_for_user(db, body.target_workflow_id, user_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+        if not await user_can_write_workflow(db, workflow, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You have read-only access to this workflow",
+            )
+    return BuildRequest(target_workflow_id=body.target_workflow_id, skill_only=skill_only)
+
+
 @router.post(
     "/{conversation_id}/messages",
     response_model=SendMessageResponse,
@@ -1109,6 +1181,7 @@ async def send_message(
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
+    build = await _resolve_build_request(db, current_user.id, body)
     attachment_data = body.attachment.model_dump() if body.attachment else None
     conv_id_str = str(conversation_id)
     if conversation.is_running:
@@ -1120,6 +1193,9 @@ async def send_message(
             credential_id=credential.id,
             model=body.model,
             attachment=attachment_data,
+            allow_build=build is not None and not build.skill_only,
+            allow_skill_write=build is not None and build.skill_only,
+            build_target_workflow_id=build.target_workflow_id if build is not None else None,
             created_at=queued_at,
             updated_at=queued_at,
         )
@@ -1210,6 +1286,7 @@ async def send_message(
             attachment_data=attachment_data,
             public_base_url=public_base_url,
             should_generate_title=should_generate_title,
+            build=build,
         )
     )
     _chat_tasks[conv_id_str] = task

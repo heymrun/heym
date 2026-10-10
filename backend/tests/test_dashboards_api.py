@@ -224,6 +224,189 @@ class TestCreateWidget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(widget_workflow.owner_id, user.id)
 
 
+class TestDataTableWidgetNodes(unittest.TestCase):
+    def test_reads_the_table_and_shows_the_chosen_columns(self):
+        table_id = uuid.uuid4()
+        nodes, edges = dash_api._data_table_widget_nodes(table_id, ["vendor_id", "vendor_name"])
+
+        source, chart = nodes
+        self.assertEqual(source["type"], "dataTable")
+        self.assertEqual(source["data"]["dataTableId"], str(table_id))
+        self.assertEqual(source["data"]["dataTableOperation"], "getAll")
+        self.assertEqual(source["data"]["dataTableSort"], "created_at")
+        self.assertEqual(source["data"]["dataTableLimit"], dash_api.TABLE_WIDGET_ROW_LIMIT)
+        self.assertEqual(chart["type"], "chartOutput")
+        self.assertEqual(chart["data"]["chartType"], "table")
+        self.assertEqual(chart["data"]["dataPath"], "rows")
+        self.assertEqual(chart["data"]["columns"], ["vendor_id", "vendor_name"])
+        self.assertEqual(
+            edges, [{"id": edges[0]["id"], "source": source["id"], "target": chart["id"]}]
+        )
+        for blocked in DASHBOARD_WIDGET_BLOCKED_NODE_TYPES:
+            self.assertNotIn(blocked, [n["type"] for n in nodes])
+
+    def test_the_chart_shows_the_columns_of_the_rows_the_table_returns(self):
+        from app.services.chart_payload import build_chart_payload
+
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_id", "vendor_name"])
+        get_all = {
+            "success": True,
+            "operation": "getAll",
+            "rows": [
+                {
+                    "id": "r1",
+                    "data": {"vendor_id": "V-1001", "vendor_name": "Acme", "country": "TR"},
+                    "created_at": "2026-10-09 10:00:00",
+                }
+            ],
+            "count": 1,
+        }
+
+        payload = build_chart_payload(nodes[1]["data"], get_all)
+
+        self.assertEqual(payload["columns"], ["vendor_id", "vendor_name"])
+        self.assertEqual(payload["rows"], [["V-1001", "Acme"]])
+
+
+class TestDetailPageRecordWidgetNodes(unittest.TestCase):
+    def test_keeps_only_the_row_of_the_page_record(self):
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_name"], "vendor_id")
+
+        source = nodes[0]["data"]
+        self.assertEqual(source["dataTableOperation"], "find")
+        self.assertEqual(source["dataTableFilter"], '{"vendor_id": "$page.record"}')
+
+    def test_the_filter_reads_the_record_of_the_page_in_a_run(self):
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, _ = dash_api._data_table_widget_nodes(uuid.uuid4(), ["vendor_name"], "vendor_id")
+        executor = WorkflowExecutor(nodes=[], edges=[], test_mode=True)
+        executor.page_params = {"record": "V-1002"}
+
+        resolved = executor.evaluate_message_template(nodes[0]["data"]["dataTableFilter"], {})
+
+        self.assertEqual(resolved, '{"vendor_id": "V-1002"}')
+
+
+class TestCreateTableWidgetOnDataTable(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.user = _User()
+        self.dashboard = _dashboard(self.user.id)
+        self.table = MagicMock(
+            id=uuid.uuid4(),
+            columns=[{"name": "vendor_id"}, {"name": "vendor_name"}, {"name": "country"}],
+        )
+        self.db = MagicMock()
+        self.db.add = MagicMock()
+        self.db.commit = AsyncMock()
+        _wire_db_inserts(self.db)
+
+    async def _create(self, permission_side_effect, **fields):
+        body = WidgetCreateRequest(
+            title="Vendors",
+            chart_type=fields.pop("chart_type", "table"),
+            data_table_id=self.table.id,
+            **fields,
+        )
+        with (
+            patch.object(
+                dash_api,
+                "_get_dashboard_for_user",
+                AsyncMock(return_value=(self.dashboard, "write")),
+            ),
+            patch.object(
+                dash_api,
+                "get_data_table_with_permission",
+                AsyncMock(side_effect=permission_side_effect),
+            ) as permission,
+        ):
+            resp = await dash_api.create_widget(
+                dashboard_id=self.dashboard.id, body=body, current_user=self.user, db=self.db
+            )
+        return resp, permission
+
+    async def test_builds_the_table_from_the_chosen_columns(self):
+        resp, _ = await self._create(
+            [(self.table, "owner")], columns=[" vendor_id ", "vendor_name", "vendor_id"]
+        )
+
+        self.assertEqual(resp.chart_type, "table")
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.kind, "dashboard_widget")
+        self.assertEqual(workflow.nodes[0]["data"]["dataTableId"], str(self.table.id))
+        self.assertEqual(workflow.nodes[1]["data"]["columns"], ["vendor_id", "vendor_name"])
+
+    async def test_the_row_id_is_a_column(self):
+        await self._create([(self.table, "read")], columns=["id", "vendor_name"])
+
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.nodes[1]["data"]["columns"], ["id", "vendor_name"])
+
+    async def test_a_detail_page_widget_filters_by_the_page_record(self):
+        await self._create(
+            [(self.table, "owner")], columns=["vendor_name"], page_record_column="vendor_id"
+        )
+
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.nodes[0]["data"]["dataTableOperation"], "find")
+        self.assertEqual(
+            workflow.nodes[0]["data"]["dataTableFilter"], '{"vendor_id": "$page.record"}'
+        )
+
+    async def test_an_unknown_page_record_column_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create(
+                [(self.table, "owner")], columns=["vendor_id"], page_record_column="missing"
+            )
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_an_unknown_column_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["vendor_id", "missing"])
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("missing", ctx.exception.detail)
+        self.db.add.assert_not_called()
+
+    async def test_no_columns_is_refused(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["  "])
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_only_a_table_reads_a_data_table(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], columns=["vendor_id"], chart_type="bar")
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_a_table_the_user_cannot_read_is_not_found(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([None], columns=["vendor_id"])
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.db.add.assert_not_called()
+
+    async def test_the_dashboard_owner_must_read_the_table(self):
+        self.dashboard.owner_id = uuid.uuid4()
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "read"), None], columns=["vendor_id"])
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.db.add.assert_not_called()
+
+    async def test_a_shared_editor_builds_it_when_the_owner_reads_the_table(self):
+        self.dashboard.owner_id = uuid.uuid4()
+        _, permission = await self._create(
+            [(self.table, "read"), (self.table, "owner")], columns=["vendor_id"]
+        )
+
+        self.assertEqual(
+            [call.args[2] for call in permission.await_args_list],
+            [self.user.id, self.dashboard.owner_id],
+        )
+        workflow = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(workflow.owner_id, self.dashboard.owner_id)
+
+
 class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
     async def test_clone_widget_creates_widget_and_remapped_workflow(self):
         user = _User()
@@ -238,6 +421,9 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
             layout={"x": 2, "y": 3, "w": 4, "h": 5},
             cache_ttl_seconds=120,
             position=2,
+            link_dashboard_id=None,
+            link_record_field=None,
+            link_label_field=None,
         )
         workflow = MagicMock(
             description="Quarterly sales",
@@ -278,6 +464,108 @@ class TestCloneWidget(unittest.IsolatedAsyncioTestCase):
             await dash_api.clone_widget(uuid.uuid4(), current_user=_User(), db=db)
 
         self.assertEqual(context.exception.status_code, 404)
+
+
+class TestGeneratedWidgetsReadThePageRecord(unittest.IsolatedAsyncioTestCase):
+    async def test_a_record_field_the_model_wrote_is_dropped(self):
+        credential = MagicMock(id=uuid.uuid4(), encrypted_config="enc")
+        from app.db.models import CredentialType
+
+        credential.type = CredentialType.openai
+        content = (
+            '{"nodes": [{"id": "find", "type": "dataTable", "data": {"dataTableFilter": '
+            '"{\\"vendor_id\\": \\"$page.record.id\\"}"}}, {"id": "chart", '
+            '"type": "chartOutput", "data": {"chartType": "table"}}], "edges": []}'
+        )
+
+        with (
+            patch.object(dash_api, "decrypt_config", return_value={"api_key": "x"}),
+            patch.object(dash_api, "execute_llm", AsyncMock(return_value={"text": content})),
+        ):
+            dsl = await dash_api.generate_widget_dsl(
+                "the vendor", credential=credential, model="gpt-4o-mini", user=_User()
+            )
+
+        self.assertEqual(
+            dsl["nodes"][0]["data"]["dataTableFilter"], '{"vendor_id": "$page.record"}'
+        )
+
+    async def test_the_model_learns_how_rows_open_a_detail_page(self):
+        user = _User()
+        dashboard = _dashboard(user.id)
+        dashboard.record_format = "id"
+        source_page = uuid.uuid4()
+        hidden_page = uuid.uuid4()
+        rows = [
+            MagicMock(
+                dashboard_id=hidden_page,
+                link_record_field="secret_code",
+                cached_payload={"type": "table", "columns": ["secret_code"], "rows": [["S-1"]]},
+            ),
+            MagicMock(
+                dashboard_id=source_page,
+                link_record_field="vendor_id",
+                cached_payload={
+                    "type": "table",
+                    "columns": ["vendor_id", "vendor_name"],
+                    "rows": [[None, "Nobody"], ["V-1001", "Acme"]],
+                },
+            ),
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+
+        with patch.object(
+            dash_api, "reachable_dashboard_ids", AsyncMock(return_value={source_page})
+        ) as reachable:
+            context = await dash_api._detail_page_context(db, dashboard, user)
+
+        self.assertEqual(reachable.await_args.args[1], {source_page, hidden_page})
+        self.assertIn("row's vendor_id value as $page.record", context)
+        self.assertIn('such as "V-1001"', context)
+        self.assertIn('{"vendor_id": "$page.record"}', context)
+        self.assertNotIn("secret_code", context)
+
+    async def test_a_page_no_table_opens_adds_nothing(self):
+        user = _User()
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        self.assertEqual(await dash_api._detail_page_context(db, _dashboard(user.id), user), "")
+
+    async def test_generate_tells_the_model_about_the_detail_page(self):
+        user = _User()
+        dashboard = _dashboard(user.id)
+        db = MagicMock()
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        _wire_db_inserts(db)
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiWidgetRequest
+
+        generate = AsyncMock(
+            return_value={"nodes": [{"id": "c", "type": "chartOutput", "data": {}}], "edges": []}
+        )
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate),
+            patch.object(
+                dash_api,
+                "get_credential_for_user",
+                AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
+            ),
+            patch.object(dash_api, "_detail_page_context", AsyncMock(return_value="DETAIL PAGE")),
+        ):
+            await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
+                body=AiWidgetRequest(prompt="the vendor", credential_id=uuid.uuid4(), model="m"),
+                current_user=user,
+                db=db,
+            )
+
+        self.assertEqual(generate.await_args.args[0], "the vendor\n\nDETAIL PAGE")
 
 
 class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
@@ -412,6 +700,9 @@ class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):
         widget.position = 0
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.chart_type = "bar"
         workflow = MagicMock()
 
@@ -443,6 +734,12 @@ class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # These tests script every database call; the detail page lookup has its own tests.
+        self.enterContext(
+            patch.object(dash_api, "_detail_page_context", AsyncMock(return_value=""))
+        )
+
     async def test_refine_updates_workflow_and_invalidates_cache(self):
         user = _User()
         widget = MagicMock()
@@ -454,6 +751,9 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         widget.description = None
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.cached_payload = {"old": True}
         widget.cached_at = datetime.datetime.now()
         widget.cached_workflow_version = "v"
@@ -505,6 +805,55 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         record_version.assert_awaited_once()
         self.assertEqual(generate_dsl.await_args.kwargs["workflow_id"], widget.workflow_id)
         self.assertEqual(generate_dsl.await_args.kwargs["node_label"], "AI Widget Fine-tune")
+
+    async def test_a_fix_sees_the_columns_and_values_of_the_widgets_tables(self):
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiRefineRequest
+        from app.services.dashboard_data_context import ColumnProfile, TableContext
+
+        user = _User()
+        widget = MagicMock(id=uuid.uuid4(), workflow_id=uuid.uuid4(), chart_type="bar")
+        db = MagicMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _widget_row(widget, user.id),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=MagicMock())),
+            ]
+        )
+        table = TableContext(
+            uuid.UUID(int=7),
+            "Vendors",
+            2,
+            [ColumnProfile("security_review_status", "string", [("required", 2)], 1)],
+            [],
+        )
+        loader = AsyncMock(return_value=[table])
+        generate_dsl = AsyncMock(side_effect=RuntimeError("stop after the prompt"))
+        with (
+            patch.object(dash_api, "generate_widget_dsl", generate_dsl),
+            patch.object(
+                dash_api,
+                "get_credential_for_user",
+                AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
+            ),
+            patch.object(dash_api, "load_table_contexts", loader),
+        ):
+            with self.assertRaises(RuntimeError):
+                await dash_api.ai_refine_widget(
+                    widget_id=widget.id,
+                    body=AiRefineRequest(
+                        prompt="It shows no data. Fix it.",
+                        credential_id=uuid.uuid4(),
+                        model="m",
+                        data_table_ids=[table.id],
+                    ),
+                    current_user=user,
+                    db=db,
+                )
+
+        prompt = generate_dsl.await_args.args[0]
+        self.assertTrue(prompt.startswith("It shows no data. Fix it."))
+        self.assertIn("security_review_status (string): required (2)", prompt)
 
     async def test_refine_rejects_trigger_nodes(self):
         user = _User()
@@ -572,6 +921,9 @@ class TestAiRefineWidget(unittest.IsolatedAsyncioTestCase):
         widget.description = None
         widget.layout = {"x": 0, "y": 0, "w": 4, "h": 4}
         widget.cache_ttl_seconds = 300
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
         widget.cached_payload = None
         widget.cached_at = None
         workflow = MagicMock()

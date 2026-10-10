@@ -670,6 +670,23 @@ Here is the workflow:
         self.assertEqual(config["nodes"][0]["id"], "input")
         self.assertEqual(config["edges"], [])
 
+    def test_extract_generated_workflow_config_from_prose_around_bare_json(self) -> None:
+        content = (
+            "I will read the vendors table and group spend by category {roughly}.\n"
+            '{"name": "Spend by category", "nodes": [{"id": "c", "type": "chartOutput", '
+            '"data": {"chartType": "bar"}}], "edges": []}\n'
+            "The chart then shows each category's total."
+        )
+
+        config = _extract_generated_workflow_config(content, "Spend by category")
+
+        self.assertEqual(config["name"], "Spend by category")
+        self.assertEqual(config["nodes"][0]["type"], "chartOutput")
+
+    def test_extract_generated_workflow_config_refuses_prose_only(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_generated_workflow_config("I would use a {dataTable} node.", "x")
+
     async def test_create_generated_workflow_saves_without_running(self) -> None:
         user = MagicMock()
         user.id = uuid.uuid4()

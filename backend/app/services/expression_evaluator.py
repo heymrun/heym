@@ -1128,6 +1128,7 @@ class ExpressionEvaluatorService:
         workflow_name: str = "",
         workflow_description: str = "",
         public_base_url: str = "",
+        page_params: dict[str, Any] | None = None,
     ) -> None:
         self.workflow_nodes = workflow_nodes or []
         self.workflow_edges = workflow_edges or []
@@ -1138,6 +1139,7 @@ class ExpressionEvaluatorService:
         self.workflow_name = workflow_name
         self.workflow_description = workflow_description
         self.public_base_url = public_base_url
+        self.page_params = page_params
 
     def evaluate(
         self,
@@ -1173,6 +1175,7 @@ class ExpressionEvaluatorService:
             public_base_url=self.public_base_url,
         )
         executor.vars = dict(self.vars_context)
+        executor.page_params = dict(self.page_params) if self.page_params is not None else None
         raw_trimmed = expression.strip()
         if "\n" in raw_trimmed or "\r" in raw_trimmed:
             trimmed = raw_trimmed

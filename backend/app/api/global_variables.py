@@ -29,6 +29,10 @@ from app.models.schemas import (
     TeamShareResponse,
 )
 from app.services.audit_log import audit
+from app.services.global_variable_access import (
+    get_global_variable_with_grant,
+    team_shared_variable_clause,
+)
 
 router = APIRouter()
 
@@ -274,7 +278,7 @@ async def get_global_variable(
         team_result = await db.execute(
             select(GlobalVariable).where(
                 GlobalVariable.id == variable_id,
-                _team_shared_variable_clause(current_user.id),
+                team_shared_variable_clause(current_user.id),
             )
         )
         variable = team_result.scalar_one_or_none()
@@ -293,54 +297,12 @@ async def get_global_variable(
     )
 
 
-def _team_shared_variable_clause(user_id: uuid.UUID):
-    """WHERE clause for variables shared with any team the user belongs to.
-
-    IN subqueries rather than a join to ``TeamMember``, so a user who is in two teams that
-    both hold the share still matches a single row.
-    """
-    return GlobalVariable.id.in_(
-        select(GlobalVariableTeamShare.global_variable_id).where(
-            GlobalVariableTeamShare.team_id.in_(
-                select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-            )
-        )
-    )
-
-
 async def _get_editable_variable(
     db: AsyncSession, variable_id: uuid.UUID, user_id: uuid.UUID
 ) -> GlobalVariable | None:
     """Return variable if user can edit it (owner, user share, or team share)."""
-    result = await db.execute(
-        select(GlobalVariable).where(
-            GlobalVariable.id == variable_id,
-            GlobalVariable.owner_id == user_id,
-        )
-    )
-    variable = result.scalar_one_or_none()
-    if variable is not None:
-        return variable
-
-    shared_result = await db.execute(
-        select(GlobalVariable)
-        .join(GlobalVariableShare, GlobalVariableShare.global_variable_id == GlobalVariable.id)
-        .where(
-            GlobalVariable.id == variable_id,
-            GlobalVariableShare.user_id == user_id,
-        )
-    )
-    variable = shared_result.scalar_one_or_none()
-    if variable is not None:
-        return variable
-
-    team_result = await db.execute(
-        select(GlobalVariable).where(
-            GlobalVariable.id == variable_id,
-            _team_shared_variable_clause(user_id),
-        )
-    )
-    return team_result.scalar_one_or_none()
+    reached = await get_global_variable_with_grant(db, variable_id, user_id)
+    return reached[0] if reached is not None else None
 
 
 @router.patch("/{variable_id}", response_model=GlobalVariableResponse)

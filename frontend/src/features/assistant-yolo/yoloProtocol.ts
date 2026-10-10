@@ -1,7 +1,11 @@
 import { jsonrepair } from "jsonrepair";
 
-import type { AssistantToolEndEvent, AssistantToolStartEvent } from "@/services/api";
-import type { ToolCall, ToolCallStatus } from "@/types/chat";
+import type {
+  AssistantToolEndEvent,
+  AssistantToolStartEvent,
+  ToolCall,
+  ToolCallStatus,
+} from "@/types/chat";
 import type { ExecutionResult, NodeResult } from "@/types/workflow";
 
 import { parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";

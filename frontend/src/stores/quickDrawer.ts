@@ -1,8 +1,14 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
+import { extractErrorMessage, fileRunState } from "@/components/Layout/quickWorkflowRun";
 import { useToast } from "@/composables/useToast";
-import { workflowApi, type WorkflowWithInputs } from "@/services/api";
+import {
+  fileIntakeApi,
+  getErrorDetail,
+  workflowApi,
+  type WorkflowWithInputs,
+} from "@/services/api";
 import type {
   QuickDrawerPreferences,
   QuickDrawerRunState,
@@ -11,6 +17,7 @@ import type {
 import type { NodeResult, Workflow } from "@/types/workflow";
 
 const PREFERENCES_STORAGE_KEY = "heym-quick-drawer-preferences";
+const QUICK_DRAWER_TRIGGER_SOURCE = "Quick Drawer";
 const WORKFLOW_CACHE_TTL_MS = 60_000;
 
 function readStoredPreferences(): Partial<QuickDrawerPreferences> | null {
@@ -58,6 +65,13 @@ function normalizeWorkflow(workflow: WorkflowWithInputs): QuickDrawerWorkflowVie
       key: field.key,
       defaultValue: field.defaultValue,
     })),
+    fileInput: workflow.file_input
+      ? {
+          label: workflow.file_input.label,
+          maxSizeMb: workflow.file_input.max_size_mb,
+          allowedTypes: workflow.file_input.allowed_types,
+        }
+      : null,
     outputNode: workflow.output_node
       ? {
           label: workflow.output_node.label,
@@ -70,27 +84,6 @@ function normalizeWorkflow(workflow: WorkflowWithInputs): QuickDrawerWorkflowVie
     pinned: false,
     searchableText: `${workflow.name} ${workflow.description ?? ""}`.toLowerCase(),
   };
-}
-
-function extractErrorMessage(outputs: Record<string, unknown> | null): string | null {
-  if (!outputs) return null;
-
-  const detail = outputs.detail;
-  if (typeof detail === "string" && detail.trim()) {
-    return detail.trim();
-  }
-
-  const error = outputs.error;
-  if (typeof error === "string" && error.trim()) {
-    return error.trim();
-  }
-
-  const message = outputs.message;
-  if (typeof message === "string" && message.trim()) {
-    return message.trim();
-  }
-
-  return null;
 }
 
 function buildNodeLabelMap(workflow: Workflow): Record<string, string> {
@@ -166,6 +159,8 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
   const inputValuesByWorkflowId = ref<Record<string, Record<string, string>>>({});
   const isDetailPanelOpen = ref(false);
   const runState = ref<QuickDrawerRunState>(createEmptyRunState());
+  // The file for a workflow with a File Upload trigger; an upload link takes it once.
+  const selectedFile = ref<File | null>(null);
 
   let loadPromise: Promise<void> | null = null;
   let abortController: AbortController | null = null;
@@ -415,6 +410,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     ensureInputValues(workflowId);
     savePreferences();
     clearRunState();
+    selectedFile.value = null;
     isDetailPanelOpen.value = openDetail;
   }
 
@@ -453,6 +449,10 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     };
   }
 
+  function selectFile(file: File | null): void {
+    selectedFile.value = file;
+  }
+
   function buildSelectedInputs(): Record<string, string> {
     if (!selectedWorkflow.value) return {};
 
@@ -477,8 +477,57 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     };
   }
 
+  /**
+   * A workflow with a File Upload trigger: executing it as a Quick Drawer run mints a
+   * single-use upload link, and uploading the file to that link runs the workflow.
+   */
+  async function runSelectedWorkflowWithFile(
+    workflow: QuickDrawerWorkflowViewModel,
+    file: File,
+  ): Promise<void> {
+    clearRunState();
+    const controller = new AbortController();
+    abortController = controller;
+    const startedAt = Date.now();
+    runState.value = { ...createEmptyRunState(), status: "running", startedAt };
+
+    try {
+      const minted = await workflowApi.execute(
+        workflow.id,
+        {},
+        { triggerSource: QUICK_DRAWER_TRIGGER_SOURCE, simpleResponse: false },
+      );
+      const uploadUrl = minted.outputs?.upload_url;
+      if (minted.status !== "awaiting_file_upload" || typeof uploadUrl !== "string") {
+        throw new Error("This workflow did not ask for a file");
+      }
+      const result = await fileIntakeApi.upload(uploadUrl, file);
+      if (abortController !== controller) return;
+      runState.value = fileRunState(result, startedAt);
+      selectedFile.value = null;
+      if (runState.value.status === "success") {
+        showToast(`Workflow "${workflow.name}" completed`, "success");
+      }
+    } catch (error) {
+      if (abortController !== controller) return;
+      const errorMessage = getErrorDetail(error, "Workflow execution failed");
+      runState.value = { ...runState.value, status: "error", errorMessage };
+      showToast(errorMessage, "error");
+    } finally {
+      if (abortController === controller) abortController = null;
+    }
+  }
+
   async function runSelectedWorkflow(): Promise<void> {
     if (!selectedWorkflow.value) return;
+    if (selectedWorkflow.value.fileInput) {
+      if (!selectedFile.value) {
+        showToast("Choose a file to run this workflow", "error");
+        return;
+      }
+      await runSelectedWorkflowWithFile(selectedWorkflow.value, selectedFile.value);
+      return;
+    }
 
     clearRunState();
     const controller = new AbortController();
@@ -612,6 +661,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     filteredPinnedWorkflows,
     filteredOtherWorkflows,
     runState,
+    selectedFile,
     ensureWorkflows,
     ensureWorkflowsIfStale,
     hydratePreferences,
@@ -624,6 +674,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
     togglePin,
     updateFilter,
     updateInputValue,
+    selectFile,
     runSelectedWorkflow,
     stopSelectedWorkflowExecution,
     clearRunState,

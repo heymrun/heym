@@ -13,9 +13,9 @@ import uuid
 
 from sqlalchemy import select
 
-from app.api.analytics import calculate_percentile
 from app.db.models import ExecutionHistory
 from app.services.alerts.context import AlertEvaluationContext, AlertObservation
+from app.services.analytics_metrics import calculate_percentile
 
 
 async def evaluate(ctx: AlertEvaluationContext) -> AlertObservation:

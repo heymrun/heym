@@ -177,6 +177,9 @@ async def upload_to_slot(
         source_node_id=slot.trigger_node_id,
         source_node_label=slot.trigger_node_label,
     )
+    # The run reads the file on its own connection (a thread): a Converter or Drive node only
+    # finds it once its row is committed. The slot is already consumed, so this keeps it used.
+    await db.commit()
 
     base = build_public_base_url(request)
     file_payload = {
@@ -207,7 +210,7 @@ async def upload_to_slot(
         workflow_id=workflow.id,
         nodes=nodes,
         edges=workflow.edges,
-        inputs={"headers": {}, "query": {}, "body": {}},
+        inputs={"headers": {}, "query": {}, "body": dict(slot.initial_inputs or {})},
         workflow_cache=workflow_cache,
         test_run=False,
         credentials_context=credentials_context,
@@ -219,12 +222,15 @@ async def upload_to_slot(
 
     history = ExecutionHistory(
         workflow_id=workflow.id,
-        inputs={"file": file_payload},
+        inputs={
+            "file": file_payload,
+            **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
+        },
         outputs=execution_result.outputs,
         node_results=execution_result.node_results,
         status=execution_result.status,
         execution_time_ms=execution_result.execution_time_ms,
-        trigger_source="file_upload",
+        trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
     )
     db.add(history)
     await db.flush()

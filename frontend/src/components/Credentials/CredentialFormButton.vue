@@ -6,7 +6,7 @@ import type { ClarifyCredentialRef } from "@/types/clarify";
 import type { Credential } from "@/types/credential";
 
 import Button from "@/components/ui/Button.vue";
-import { credentialsApi } from "@/services/api";
+import { credentialsPortKey, usePort } from "@/ports";
 import { CREDENTIAL_TYPE_LABELS } from "@/types/credential";
 
 const props = defineProps<{
@@ -18,6 +18,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ (e: "saved", credential: Credential): void }>();
+
+const credentialsApi = usePort(credentialsPortKey);
 
 const dialogOpen = ref(false);
 // Loaded on demand so the chat and editor bundles do not carry the credential dialog. It is

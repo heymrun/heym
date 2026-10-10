@@ -41,6 +41,10 @@ from app.models.schemas import (
     DataTableUpdate,
 )
 from app.services.audit_log import audit
+from app.services.data_table_access import (
+    PERMISSION_READ,
+    get_data_table_with_permission,
+)
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -141,13 +145,6 @@ def _build_schema_user_prompt(prompt: str, existing_cols: list[DataTableColumnDe
     return prompt
 
 
-def _highest_permission(permissions: list[str]) -> str | None:
-    """Return "write" if any share grants it, else "read", else None when unshared."""
-    if not permissions:
-        return None
-    return "write" if "write" in permissions else "read"
-
-
 async def _get_data_table_with_access(
     table_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -158,49 +155,13 @@ async def _get_data_table_with_access(
 
     The highest permission across the user's direct share and every team share wins.
     """
-    # 1. Owner always has full access
-    result = await db.execute(
-        select(DataTable).where(DataTable.id == table_id, DataTable.owner_id == user_id)
-    )
-    table = result.scalar_one_or_none()
-    if table is not None:
-        return table
-
-    # 2. Direct and team shares: collect every permission the user holds
-    user_permissions = (
-        (
-            await db.execute(
-                select(DataTableShare.permission).where(
-                    DataTableShare.table_id == table_id, DataTableShare.user_id == user_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    team_permissions = (
-        (
-            await db.execute(
-                select(DataTableTeamShare.permission)
-                .join(TeamMember, TeamMember.team_id == DataTableTeamShare.team_id)
-                .where(DataTableTeamShare.table_id == table_id, TeamMember.user_id == user_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    permission = _highest_permission([*user_permissions, *team_permissions])
-    if permission is None:
+    reached = await get_data_table_with_permission(db, table_id, user_id)
+    if reached is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
-    if require_write and permission != "write":
+    table, permission = reached
+    if require_write and permission == PERMISSION_READ:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Write access required")
-
-    shared = (
-        await db.execute(select(DataTable).where(DataTable.id == table_id))
-    ).scalar_one_or_none()
-    if shared is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
-    return shared
+    return table
 
 
 async def _row_count(table_id: uuid.UUID, db: AsyncSession) -> int:

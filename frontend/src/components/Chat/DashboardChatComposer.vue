@@ -15,7 +15,7 @@ const emit = defineEmits<{
 }>();
 
 const ATTACHMENT_ACCEPT =
-  ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf";
+  ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf,.zip";
 const MAX_INPUT_HEIGHT_PX = 180;
 const PLACEHOLDER_ROTATION_MS = 5000;
 const PROMPT_SUGGESTIONS: string[] = [

@@ -12,11 +12,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import String, case, cast, func, literal, null, or_, select, text, union_all
+from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import InstrumentedAttribute, flag_modified
-from sqlalchemy.sql import ColumnElement, Select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
@@ -50,10 +49,13 @@ from app.models.schemas import (
     ExecutionTokenCreate,
     ExecutionTokenListItem,
     ExecutionTokenResponse,
+    FileInputSchema,
     HighlightPayloadSchema,
     HistoryListResponse,
     InputFieldSchema,
     OutputNodeSchema,
+    PendingReviewSeedRequest,
+    PendingReviewSeedResponse,
     RevertVersionRequest,
     WorkflowCreate,
     WorkflowExecuteResponse,
@@ -105,7 +107,6 @@ from app.services.global_variables_service import (
 from app.services.heym_event_service import (
     EVENT_WORKFLOW_CREATED,
     EVENT_WORKFLOW_DELETED,
-    EVENT_WORKFLOW_UPDATED,
     publish_event,
     workflow_event_payload,
 )
@@ -113,11 +114,18 @@ from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
+    seed_pending_workflow_review,
 )
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
+from app.services.run_history_list import (
+    apply_instance_filter,
+    history_status_clause,
+    run_history_rows,
+)
+from app.services.run_history_list import filters_to_workflow_runs as filters_to_workflow_runs
 from app.services.workflow_access import (
     PERMISSION_WRITE,
     disable_alerts_without_access,
@@ -138,6 +146,7 @@ from app.services.workflow_executor import (
     execute_workflow_streaming,
     mask_sensitive_output,
 )
+from app.services.workflow_inputs import start_input_fields
 from app.services.workflow_last_trigger import (
     fetch_last_trigger_source,
     fetch_last_trigger_sources,
@@ -147,6 +156,11 @@ from app.services.workflow_lifecycle import (
     set_automatic_triggers_paused,
 )
 from app.services.workflow_run_scope import scope_workflow_run
+from app.services.workflow_save import (
+    WorkflowSnapshot,
+    add_workflow_version,
+    announce_workflow_saved,
+)
 from app.services.workflow_status import (
     compute_trigger_status,
     refine_manual_status,
@@ -718,31 +732,23 @@ async def require_workflow_write(db: AsyncSession, workflow: Workflow, user_id: 
 
 
 def extract_input_fields_from_workflow(workflow: Workflow) -> list[InputFieldSchema]:
-    nodes = workflow.nodes or []
-    edges = workflow.edges or []
-
-    target_node_ids = {edge.get("target") for edge in edges if edge.get("target")}
-    start_nodes = [
-        node
-        for node in nodes
-        if node.get("id") not in target_node_ids
-        and node.get("type") == "textInput"
-        and node.get("data", {}).get("active") is not False
+    return [
+        InputFieldSchema(key=field["key"], default_value=field["defaultValue"])
+        for field in start_input_fields(workflow.nodes, workflow.edges)
     ]
 
-    input_fields: list[InputFieldSchema] = []
-    for node in start_nodes:
-        node_data = node.get("data", {})
-        node_fields = node_data.get("inputFields") or [{"key": "text"}]
-        for field in node_fields:
-            input_fields.append(
-                InputFieldSchema(
-                    key=field.get("key", "text"),
-                    default_value=field.get("defaultValue"),
-                )
-            )
 
-    return input_fields
+def extract_file_input_from_workflow(workflow: Workflow) -> FileInputSchema | None:
+    """The file a File Upload trigger asks for, so a run form can offer a drop zone."""
+    node = file_intake_service.find_file_upload_trigger(workflow.nodes or [])
+    if node is None:
+        return None
+    config = file_intake_service.resolve_slot_config(node)
+    return FileInputSchema(
+        label=str((node.get("data") or {}).get("label") or "file"),
+        max_size_mb=config.max_size_bytes // (1024 * 1024),
+        allowed_types=config.allowed_mime or [],
+    )
 
 
 def get_node_output_expression(node: dict) -> str | None:
@@ -960,6 +966,7 @@ async def list_workflows_with_inputs(
             name=w.name,
             description=w.description,
             input_fields=extract_input_fields_from_workflow(w),
+            file_input=extract_file_input_from_workflow(w),
             output_node=extract_output_node_from_workflow(w),
             created_at=w.created_at,
             updated_at=w.updated_at,
@@ -1172,84 +1179,14 @@ async def list_all_execution_history(
     instance_id: str | None = Query(default=None),
 ) -> HistoryListResponse:
     """List execution history (lightweight, paginated)."""
-    exec_subq = (
-        select(
-            ExecutionHistory.id,
-            ExecutionHistory.workflow_id,
-            Workflow.name.label("workflow_name"),
-            literal("workflow").label("run_type"),
-            ExecutionHistory.started_at,
-            ExecutionHistory.status,
-            ExecutionHistory.execution_time_ms,
-            ExecutionHistory.trigger_source,
-            ExecutionHistory.recovered,
-            ExecutionHistory.executed_by_instance_id,
-            ExecutionHistory.executed_by_instance_name,
-        )
-        .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(workflow_access_clause(current_user.id))
+    combined = run_history_rows(
+        current_user.id,
+        search=search,
+        execution_status=execution_status,
+        trigger_source=trigger_source,
+        workflow_id=workflow_id,
+        instance_id=instance_id,
     )
-    if workflow_id:
-        exec_subq = exec_subq.where(ExecutionHistory.workflow_id == workflow_id)
-    if trigger_source:
-        exec_subq = exec_subq.where(ExecutionHistory.trigger_source == trigger_source)
-    exec_subq = apply_instance_filter(exec_subq, instance_id)
-    exec_status_clause = history_status_clause(ExecutionHistory.status, execution_status)
-    if exec_status_clause is not None:
-        exec_subq = exec_subq.where(exec_status_clause)
-    if search:
-        pattern = f"%{search}%"
-        exec_subq = exec_subq.where(
-            or_(
-                Workflow.name.ilike(pattern),
-                ExecutionHistory.status.ilike(pattern),
-                ExecutionHistory.trigger_source.ilike(pattern),
-                cast(ExecutionHistory.inputs, String).ilike(pattern),
-                cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
-            )
-        )
-
-    if workflow_id or filters_to_workflow_runs(instance_id):
-        combined = exec_subq.subquery()
-    else:
-        run_display_name = case(
-            (RunHistory.run_type == "dashboard_chat", "Dashboard Chat"),
-            (RunHistory.run_type == "workflow_assistant", "Workflow Assistant"),
-            else_=RunHistory.run_type,
-        )
-        run_subq = select(
-            RunHistory.id,
-            RunHistory.workflow_id,
-            run_display_name.label("workflow_name"),
-            RunHistory.run_type.label("run_type"),
-            RunHistory.started_at,
-            RunHistory.status,
-            RunHistory.execution_time_ms,
-            RunHistory.trigger_source,
-            literal(False).label("recovered"),
-            # Chat/assistant runs are not workflow executions and have no
-            # instance of their own; the union needs matching columns.
-            cast(null(), String).label("executed_by_instance_id"),
-            cast(null(), String).label("executed_by_instance_name"),
-        ).where(RunHistory.user_id == current_user.id)
-        if trigger_source:
-            run_subq = run_subq.where(RunHistory.trigger_source == trigger_source)
-        run_status_clause = history_status_clause(RunHistory.status, execution_status)
-        if run_status_clause is not None:
-            run_subq = run_subq.where(run_status_clause)
-        if search:
-            pattern = f"%{search}%"
-            run_subq = run_subq.where(
-                or_(
-                    RunHistory.status.ilike(pattern),
-                    RunHistory.trigger_source.ilike(pattern),
-                    RunHistory.run_type.ilike(pattern),
-                    cast(RunHistory.inputs, String).ilike(pattern),
-                    cast(RunHistory.outputs, String).ilike(pattern),
-                )
-            )
-        combined = union_all(exec_subq, run_subq).subquery()
 
     count_result = await db.execute(select(func.count()).select_from(combined))
     total: int = count_result.scalar_one()
@@ -1881,51 +1818,27 @@ async def update_workflow(
                 widget.cached_workflow_version = None
 
     if should_create_version:
-        max_version_result = await db.execute(
-            select(func.max(WorkflowVersion.version_number)).where(
-                WorkflowVersion.workflow_id == workflow_id
-            )
+        await add_workflow_version(
+            db,
+            workflow,
+            WorkflowSnapshot(
+                nodes=old_nodes,
+                edges=old_edges,
+                auth_type=old_auth_type,
+                auth_header_key=old_auth_header_key,
+                auth_header_value=old_auth_header_value,
+                webhook_body_mode=old_webhook_body_mode,
+                cache_ttl_seconds=old_cache_ttl_seconds,
+                rate_limit_requests=old_rate_limit_requests,
+                rate_limit_window_seconds=old_rate_limit_window_seconds,
+            ),
+            current_user.id,
         )
-        max_version = max_version_result.scalar() or 0
-        new_version_number = max_version + 1
-
-        workflow_version = WorkflowVersion(
-            workflow_id=workflow_id,
-            version_number=new_version_number,
-            name=workflow.name,
-            description=workflow.description,
-            nodes=old_nodes,
-            edges=old_edges,
-            auth_type=old_auth_type,
-            auth_header_key=old_auth_header_key,
-            auth_header_value=old_auth_header_value,
-            webhook_body_mode=old_webhook_body_mode,
-            cache_ttl_seconds=old_cache_ttl_seconds,
-            rate_limit_requests=old_rate_limit_requests,
-            rate_limit_window_seconds=old_rate_limit_window_seconds,
-            created_by_id=current_user.id,
-        )
-        db.add(workflow_version)
 
     await db.flush()
     await db.commit()
     await db.refresh(workflow)
-    from app.services.websocket_trigger_service import websocket_trigger_manager
-
-    websocket_trigger_manager.request_sync()
-    # Dashboard widgets are Workflow rows too, but they are not workflows a user
-    # subscribes to - only real workflows produce platform events.
-    if getattr(workflow, "kind", "workflow") == "workflow":
-        updated_payload = workflow_event_payload(workflow, actor_user_id=current_user.id)
-        # Key on the saved revision so a retried or duplicated save collapses onto
-        # one event instead of waking every subscriber twice.
-        await publish_event(
-            name=EVENT_WORKFLOW_UPDATED,
-            payload=updated_payload,
-            owner_id=workflow.owner_id,
-            workflow_id=workflow.id,
-            dedupe_key=f"{EVENT_WORKFLOW_UPDATED}:{workflow.id}:{updated_payload['updated_at']}",
-        )
+    await announce_workflow_saved(workflow, current_user.id, publish=publish_event)
     audit(
         action="workflow.update",
         actor=current_user,
@@ -3386,7 +3299,7 @@ async def execute_workflow_endpoint(
             workflow_id=workflow.id,
             node=upload_node,
             created_by_user_id=minter_id,
-            mint_source="http",
+            mint_source=file_intake_service.mint_source_for(trigger_source, "http"),
         )
         await file_intake_service.write_audit(
             db,
@@ -3828,53 +3741,6 @@ async def stream_workflow_execution_history_entry(
     )
 
 
-# A recovery that could not re-run a run after a restart stores "failed". To a reader that
-# is the same outcome as "error", so the Error filter returns both.
-_HISTORY_STATUS_GROUPS: dict[str, tuple[str, ...]] = {"error": ("error", "failed")}
-
-
-def history_status_clause(
-    column: InstrumentedAttribute, execution_status: object
-) -> ColumnElement | None:
-    """Build the WHERE clause for a history status filter, or None for "no filter".
-
-    Anything that is not a non-blank string means "no filter": tests call the endpoint
-    functions directly, where FastAPI has not resolved ``Query(default=None)``.
-    """
-    if not isinstance(execution_status, str):
-        return None
-    cleaned = execution_status.strip()
-    if not cleaned:
-        return None
-    statuses = _HISTORY_STATUS_GROUPS.get(cleaned, (cleaned,))
-    if len(statuses) == 1:
-        return column == statuses[0]
-    return column.in_(statuses)
-
-
-def filters_to_workflow_runs(instance_id: str | None) -> bool:
-    """Whether an instance filter is set, which excludes non-workflow runs."""
-    return isinstance(instance_id, str) and bool(instance_id.strip())
-
-
-def apply_instance_filter(query: Select, instance_id: str | None) -> Select:
-    """Narrow a history query to one executing instance.
-
-    Filters on the id rather than the stored name: the name is a snapshot taken
-    when the run finished, so two rows can carry different names for the same
-    instance after a rename, and different instances can share a name.
-    """
-    # Tests call this endpoint function directly, where FastAPI has not resolved
-    # Query(default=None) into a value, so anything that is not a string is
-    # treated as "no filter".
-    if not isinstance(instance_id, str):
-        return query
-    cleaned = instance_id.strip()
-    if not cleaned:
-        return query
-    return query.where(ExecutionHistory.executed_by_instance_id == cleaned)
-
-
 @router.get("/{workflow_id}/history", response_model=HistoryListResponse)
 async def get_execution_history(
     workflow_id: uuid.UUID,
@@ -4169,7 +4035,7 @@ async def execute_workflow_stream(
             workflow_id=workflow.id,
             node=upload_node,
             created_by_user_id=minter_id,
-            mint_source="canvas",
+            mint_source=file_intake_service.mint_source_for(trigger_source, "canvas"),
         )
         await file_intake_service.write_audit(
             db,
@@ -4581,6 +4447,48 @@ async def execute_workflow_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/{workflow_id}/pending-review", response_model=PendingReviewSeedResponse)
+async def seed_workflow_pending_review(
+    workflow_id: uuid.UUID,
+    body: PendingReviewSeedRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PendingReviewSeedResponse:
+    """Leave one review waiting on this workflow, without running it.
+
+    A second call while that review still waits returns the same run.
+    """
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, workflow, current_user.id)
+    review, created = await seed_pending_workflow_review(
+        db,
+        workflow,
+        owner_id=current_user.id,
+        summary=body.summary,
+        draft_text=body.draft_text,
+        trigger_source=body.trigger_source,
+        inputs=body.inputs,
+    )
+    await db.commit()
+    if created:
+        audit(
+            action="workflow.seed_pending_review",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=str(review.execution_history_id),
+            owner_id=str(workflow.owner_id),
+        )
+    return PendingReviewSeedResponse(
+        request_id=review.id,
+        execution_history_id=review.execution_history_id,
+        status="pending",
     )
 
 

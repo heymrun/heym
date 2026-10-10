@@ -259,3 +259,47 @@ class TestBuildChartPayload(unittest.TestCase):
         config = {"chartType": "hitl", "title": "Reviews"}
         payload = build_chart_payload(config, [{"secret": "do-not-copy"}])
         self.assertEqual(payload, {"type": "hitl", "title": "Reviews"})
+
+
+class DataTableRowTests(unittest.TestCase):
+    ROWS = {
+        "rows": [
+            {"id": "r1", "data": {"vendor": "Acme", "amount": 120}, "created_at": "2026-10-01"},
+            {"id": "r2", "data": {"vendor": "Globex", "amount": 80}, "created_at": "2026-10-02"},
+        ],
+        "count": 2,
+    }
+
+    def test_a_table_of_data_table_rows_shows_their_columns(self) -> None:
+        payload = build_chart_payload(
+            {"chartType": "table", "dataPath": "rows", "columns": ["vendor", "amount"]}, self.ROWS
+        )
+
+        self.assertEqual(payload["rows"], [["Acme", 120], ["Globex", 80]])
+
+    def test_without_columns_the_table_shows_the_id_and_every_column(self) -> None:
+        payload = build_chart_payload({"chartType": "table", "dataPath": "rows"}, self.ROWS)
+
+        self.assertEqual(payload["columns"], ["id", "vendor", "amount"])
+        self.assertEqual(payload["rows"][0], ["r1", "Acme", 120])
+
+    def test_a_bar_chart_names_data_table_columns(self) -> None:
+        payload = build_chart_payload(
+            {
+                "chartType": "bar",
+                "dataPath": "rows",
+                "labelField": "vendor",
+                "valueField": "amount",
+            },
+            self.ROWS,
+        )
+
+        self.assertEqual(payload["labels"], ["Acme", "Globex"])
+
+    def test_other_rows_with_a_data_key_are_left_as_they_are(self) -> None:
+        rows = [{"name": "a", "data": {"x": 1}}, {"id": "b", "data": [1, 2]}]
+
+        payload = build_chart_payload({"chartType": "table"}, rows)
+
+        self.assertEqual(payload["columns"], ["name", "data"])
+        self.assertEqual(payload["rows"][0], ["a", {"x": 1}])

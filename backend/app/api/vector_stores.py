@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 
@@ -29,6 +30,9 @@ from app.models.schemas import (
     VectorStoreItemsResponse,
     VectorStoreListResponse,
     VectorStoreResponse,
+    VectorStoreSearchRequest,
+    VectorStoreSearchResponse,
+    VectorStoreSearchResult,
     VectorStoreShareRequest,
     VectorStoreShareResponse,
     VectorStoreSourceGroup,
@@ -45,6 +49,7 @@ from app.services.vector_store import (
     create_vector_store_service_for_credential,
     rag_credential_backend,
 )
+from app.services.vector_store_access import get_vector_store_with_grant
 from app.services.vector_store_pg import VectorStoreBackendUnavailableError
 
 router = APIRouter()
@@ -1033,6 +1038,52 @@ async def list_vector_store_items(
     )
 
 
+@router.post("/{vector_store_id}/search", response_model=VectorStoreSearchResponse)
+async def search_vector_store(
+    vector_store_id: uuid.UUID,
+    body: VectorStoreSearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VectorStoreSearchResponse:
+    """The chunks a RAG node's search returns for a query, to test a store's retrieval."""
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+
+    cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
+    credential = cred_result.scalar_one_or_none()
+    if not credential:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+
+    config = decrypt_config(credential.encrypted_config)
+    service = get_vector_store_service_from_config(config, credential.type)
+    try:
+        # Embedding the query calls the provider; keep the event loop free meanwhile.
+        results = await asyncio.to_thread(
+            service.search, store.collection_name, body.query, limit=body.limit
+        )
+    except Exception as exc:
+        logger.warning("Vector store search failed for %s: %s", vector_store_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The vector store could not be searched. Check its credential and try again.",
+        ) from exc
+
+    return VectorStoreSearchResponse(
+        results=[
+            VectorStoreSearchResult(
+                id=result.id,
+                text=result.text,
+                score=result.score,
+                source=result.metadata.get("source"),
+                metadata=result.metadata,
+            )
+            for result in results
+        ]
+    )
+
+
 @router.delete(
     "/{vector_store_id}/items/by-source",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -1128,44 +1179,10 @@ async def _get_accessible_store(
     user_id: uuid.UUID,
     db: AsyncSession,
 ) -> VectorStore:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == user_id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        shared_result = await db.execute(
-            select(VectorStore)
-            .join(VectorStoreShare, VectorStoreShare.vector_store_id == VectorStore.id)
-            .where(
-                VectorStore.id == vector_store_id,
-                VectorStoreShare.user_id == user_id,
-            )
-        )
-        store = shared_result.scalar_one_or_none()
-
-    if store is None:
-        team_result = await db.execute(
-            select(VectorStore).where(
-                VectorStore.id == vector_store_id,
-                VectorStore.id.in_(
-                    select(VectorStoreTeamShare.vector_store_id).where(
-                        VectorStoreTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-                        )
-                    )
-                ),
-            )
-        )
-        store = team_result.scalar_one_or_none()
-
-    if store is None:
+    reached = await get_vector_store_with_grant(db, vector_store_id, user_id)
+    if reached is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vector store not found",
         )
-
-    return store
+    return reached[0]

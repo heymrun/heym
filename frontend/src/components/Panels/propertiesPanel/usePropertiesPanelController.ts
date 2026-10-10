@@ -24,6 +24,11 @@ import {
 import { sortSkillFiles } from "@/lib/skillFilePreview";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
+import {
+  getChartOutputExpressionFields,
+  type ChartOutputExpressionField,
+  type ChartOutputExpressionFieldKey,
+} from "@/lib/chartOutputExpressionFields";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
 import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jiraExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
@@ -866,24 +871,6 @@ export function usePropertiesPanelController() {
   const mcpCallArgumentInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const mcpCallConnectionEnvInputRef = ref<ExpandableFieldRef | null>(null);
   const currentMCPCallExpressionFieldIndex = ref(0);
-  type ChartOutputExpressionFieldKey =
-    | "text"
-    | "valueField"
-    | "dataPath"
-    | "labelField"
-    | "xField"
-    | "yField"
-    | "min"
-    | "max"
-    | "unit"
-    | "title"
-    | "url";
-
-  interface ChartOutputExpressionField {
-    key: ChartOutputExpressionFieldKey;
-    label: string;
-  }
-
   const chartOutputExpressionInputRefs = ref<
     Map<ChartOutputExpressionFieldKey, ExpandableFieldRef>
   >(new Map());
@@ -5746,51 +5733,7 @@ export function usePropertiesPanelController() {
     if (!n || n.type !== "chartOutput") {
       return [];
     }
-    const chartType = n.data.chartType || "bar";
-    const fields: ChartOutputExpressionField[] = [];
-
-    if (chartType === "text") {
-      fields.push(
-        { key: "text", label: "Text (markdown)" },
-        { key: "valueField", label: "Value field" },
-      );
-    }
-
-    fields.push({ key: "dataPath", label: "Data path" });
-
-    if (["bar", "line", "area", "pie", "proportion", "barGauge"].includes(chartType)) {
-      fields.push({ key: "labelField", label: "Label field" });
-    }
-
-    if (["bar", "line", "area", "pie", "numeric", "gauge", "proportion", "barGauge"].includes(chartType)) {
-      fields.push({ key: "valueField", label: "Value field" });
-    }
-
-    if (chartType === "scatter") {
-      fields.push(
-        { key: "xField", label: "X field" },
-        { key: "yField", label: "Y field" },
-      );
-    }
-
-    if (chartType === "gauge") {
-      fields.push(
-        { key: "min", label: "Min" },
-        { key: "max", label: "Max" },
-      );
-    }
-
-    if (chartType === "barGauge") {
-      fields.push({ key: "max", label: "Max" });
-    }
-
-    if (["numeric", "gauge", "barGauge"].includes(chartType)) {
-      fields.push({ key: "unit", label: "Unit" });
-    }
-
-    fields.push({ key: "title", label: "Title" });
-    fields.push({ key: "url", label: "Website URL" });
-    return fields;
+    return getChartOutputExpressionFields(n.data.chartType);
   });
 
   const chartOutputExpressionFieldCount = computed((): number => {

@@ -35,6 +35,7 @@ Select a workflow to open its input form.
 - Click **Run Workflow** to execute the selected workflow
 - Click **Stop Workflow** to cancel a running execution from the drawer
 - Workflows without Input fields can still be run directly
+- A workflow that starts with a [File Upload Trigger](../nodes/file-upload-trigger-node.md) shows a drop zone instead: drop a file on it or click to pick one. The zone lists the file types and size the trigger accepts and refuses other files before uploading. **Run Workflow** stays disabled until a file is chosen.
 
 The drawer uses the same workflow execution API as other Heym run surfaces, so outputs and runtime behavior stay consistent.
 
@@ -51,6 +52,8 @@ After starting a run, the drawer shows:
 
 `pending` means the workflow is waiting for a later action such as human review.
 
+A file run goes through the trigger's single-use upload link: the drawer asks the workflow for a link, uploads the file to it, and shows the result when the upload returns. File runs show the final status and outputs but no step-by-step progress, and are also tagged `Quick Drawer` in history. The chosen file is cleared after each run, because a link takes one file.
+
 ## Browser Storage
 
 The Quick Drawer stores personal preferences in `localStorage`:
@@ -64,7 +67,7 @@ The drawer does **not** persist input values in this version.
 
 The Quick Drawer is intentionally a lightweight execution surface.
 
-- Included: search, pinning, select, input, run, progress, result
+- Included: search, pinning, select, input (including a file), run, progress, result
 - Excluded: workflow creation, editing, folder management, and canvas actions
 
 ## Related

@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any, AsyncGenerator, Literal
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Iterator, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -54,7 +54,6 @@ from app.db.models import (
     User,
     Workflow,
     WorkflowTeamShare,
-    WorkflowVersion,
 )
 from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
@@ -144,6 +143,10 @@ from app.services.workflow_executor import (
     execute_workflow,
 )
 from app.services.workflow_run_history_tool import get_workflow_run_history
+from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
+
+if TYPE_CHECKING:
+    from app.api.chat_build import ChatBuildSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -203,8 +206,8 @@ class AnalyzeWorkflowRequest(BaseModel):
 
 class FileAttachment(BaseModel):
     name: str
-    kind: Literal["text", "image", "pdf"]
-    content: str  # plain text for text/pdf, base64 data URL for images
+    kind: Literal["text", "image", "pdf", "zip"]
+    content: str  # plain text for text/pdf, base64 data URL for images and zips
 
 
 class DashboardChatRequest(BaseModel):
@@ -407,6 +410,15 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
     """
     if attachment is None:
         return {"role": "user", "content": message}
+    if attachment.kind == "zip":
+        from app.services.skill_archive import decode_zip_payload, prompt_for_zip, read_zip
+
+        raw = decode_zip_payload(attachment.content)
+        if raw is None:
+            body = f"{message}\n\n[ATTACHED ZIP: {attachment.name}]\nThe zip could not be read."
+        else:
+            body = f"{message}\n\n{prompt_for_zip(attachment.name, read_zip(raw))}"
+        return {"role": "user", "content": body}
     if attachment.kind == "image":
         embedded = (
             f"{message}\n\n"
@@ -1777,15 +1789,36 @@ def _fallback_generated_workflow_name(goal: str) -> str:
     return cleaned.rstrip(".,:;!?") or "Generated Workflow"
 
 
+_MAX_EMBEDDED_JSON_ATTEMPTS = 200
+
+
+def _embedded_json_objects(content: str) -> Iterator[dict[str, Any]]:
+    """JSON objects inside prose, for answers that explain around an unfenced workflow."""
+    decoder = json.JSONDecoder()
+    start = content.find("{")
+    attempts = 0
+    while start != -1 and attempts < _MAX_EMBEDDED_JSON_ATTEMPTS:
+        attempts += 1
+        try:
+            parsed, end = decoder.raw_decode(content, start)
+        except json.JSONDecodeError:
+            start = content.find("{", start + 1)
+            continue
+        if isinstance(parsed, dict):
+            yield parsed
+        start = content.find("{", end)
+
+
 def _extract_generated_workflow_config(content: str, goal: str) -> dict[str, Any]:
     """Extract a generated workflow JSON object with name, description, nodes, and edges."""
-    candidates = [
+    candidates: list[str | dict[str, Any]] = [
         match.group(1).strip() for match in _WORKFLOW_JSON_BLOCK_PATTERN.finditer(content)
     ]
     candidates.append(content.strip())
+    candidates.extend(_embedded_json_objects(content))
 
     for candidate in candidates:
-        parsed = _parse_json_object(candidate)
+        parsed = candidate if isinstance(candidate, dict) else _parse_json_object(candidate)
         if parsed is None:
             continue
         workflow_obj = (
@@ -2399,30 +2432,12 @@ async def _record_chat_workflow_edit_version(
     old_edges: list[dict[str, Any]],
 ) -> None:
     """Store the pre-edit workflow snapshot so Chat edits appear in Edit History."""
-    max_version_result = await db.execute(
-        select(func.max(WorkflowVersion.version_number)).where(
-            WorkflowVersion.workflow_id == workflow.id
-        )
+    before = replace(
+        WorkflowSnapshot.capture(workflow),
+        nodes=copy.deepcopy(old_nodes),
+        edges=copy.deepcopy(old_edges),
     )
-    max_version = max_version_result.scalar() or 0
-    db.add(
-        WorkflowVersion(
-            workflow_id=workflow.id,
-            version_number=max_version + 1,
-            name=workflow.name,
-            description=workflow.description,
-            nodes=copy.deepcopy(old_nodes),
-            edges=copy.deepcopy(old_edges),
-            auth_type=workflow.auth_type,
-            auth_header_key=workflow.auth_header_key,
-            auth_header_value=workflow.auth_header_value,
-            webhook_body_mode=workflow.webhook_body_mode,
-            cache_ttl_seconds=workflow.cache_ttl_seconds,
-            rate_limit_requests=workflow.rate_limit_requests,
-            rate_limit_window_seconds=workflow.rate_limit_window_seconds,
-            created_by_id=user_id,
-        )
-    )
+    await add_workflow_version(db, workflow, before, user_id)
 
 
 async def run_execute_workflow_tool(
@@ -3586,8 +3601,12 @@ async def stream_dashboard_chat(
     *,
     system_prompt_parts: Any | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
+    build: "ChatBuildSession | None" = None,
 ) -> AsyncGenerator[str, None]:
-    """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content."""
+    """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content.
+
+    With `build`, the turn may save, test-run and finish workflows (chat build mode).
+    """
     user_id = user.id
     is_reasoning = is_reasoning_model(model)
     base_kwargs: dict[str, Any] = {
@@ -3637,7 +3656,8 @@ async def stream_dashboard_chat(
         else:
             breakdown = _context_breakdown(
                 base_system_prompt=system_prompt_parts.base_system_prompt
-                + getattr(system_prompt_parts, "credentials_block", ""),
+                + getattr(system_prompt_parts, "credentials_block", "")
+                + getattr(system_prompt_parts, "build_block", ""),
                 agents_md=system_prompt_parts.agents_md,
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,
@@ -3674,6 +3694,15 @@ async def stream_dashboard_chat(
 
     def _offset_ms(moment: float) -> float:
         return round(trace_offset_ms + (moment - start_time) * 1000, 2)
+
+    def _call_kwargs() -> dict[str, Any]:
+        # Build mode's tools change during the turn: the test budget can run out.
+        tools = build.tools(DASHBOARD_CHAT_TOOLS) if build is not None else DASHBOARD_CHAT_TOOLS
+        return {
+            **base_kwargs,
+            "tools": tools,
+            "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
+        }
 
     def _record_llm_turn(
         started: float,
@@ -3775,6 +3804,7 @@ async def stream_dashboard_chat(
             steps=run_steps,
         )
 
+    finished_summary: str | None = None
     try:
         while rounds < MAX_DASHBOARD_CHAT_TOOL_ROUNDS:
             if cancel_event is not None and cancel_event.is_set():
@@ -3810,10 +3840,7 @@ async def stream_dashboard_chat(
                     messages_to_use = [m for m in compressed if m.get("role") != "system"]
                     yield _emit_compressed(comp_info)
 
-            kwargs = {
-                **base_kwargs,
-                "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
-            }
+            kwargs = _call_kwargs()
             round_start = time.time()
             llm_call_started = round_start
             try:
@@ -3839,10 +3866,7 @@ async def stream_dashboard_chat(
                     raise
                 messages_to_use = [m for m in compressed if m.get("role") != "system"]
                 yield _emit_compressed(comp_info)
-                kwargs = {
-                    **base_kwargs,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages_to_use,
-                }
+                kwargs = _call_kwargs()
                 round_start = time.time()
                 llm_call_started = round_start
                 response = await _await_chat_completions(client, cancel_event, **kwargs)
@@ -3932,7 +3956,60 @@ async def stream_dashboard_chat(
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except json.JSONDecodeError:
                     args = {}
-                if name == "list_workflows":
+                if build is not None and build.handles(name):
+                    step_label = build.step_label(name)
+                    display_args = build.display_args(name, args)
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": display_args,
+                            },
+                            default=str,
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    outcome = await build.call(name, args)
+                    result = outcome.result
+                    args = display_args
+                    if cancel_event is not None and cancel_event.is_set():
+                        yield _cancelled_tool_end_yield(
+                            tc.id,
+                            name=name,
+                            step_label=step_label,
+                            request=args,
+                            result=result,
+                            step_start=step_start,
+                            run_steps=run_steps,
+                        )
+                        elapsed_ms = (time.time() - start_time) * 1000
+                        _record_dashboard_run("cancelled", round(elapsed_ms, 2))
+                        return
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": outcome.summary,
+                            "execution_time_ms": round((time.time() - step_start) * 1000, 2),
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        outcome.summary,
+                        run_steps[-1]["execution_time_ms"],
+                        status=outcome.status,
+                    )
+                    for event in outcome.events:
+                        yield "data: " + json.dumps(event, default=str) + "\n\n"
+                    if outcome.finished_summary is not None:
+                        finished_summary = outcome.finished_summary
+                elif name == "list_workflows":
                     step_label = "Listing workflows..."
                     yield (
                         "data: "
@@ -5257,6 +5334,14 @@ async def stream_dashboard_chat(
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )
+            if finished_summary is not None:
+                # finish ends the turn: its summary is the reply, the Verified card shows it.
+                response_parts.append(finished_summary)
+                yield f"data: {json.dumps({'type': 'content', 'text': finished_summary})}\n\n"
+                elapsed_ms = (time.time() - start_time) * 1000
+                _record_dashboard_run("success", round(elapsed_ms, 2))
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
 
         elapsed_ms = (time.time() - start_time) * 1000
         _record_dashboard_run("error", round(elapsed_ms, 2), trace_error="Too many tool rounds")

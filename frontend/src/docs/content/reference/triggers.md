@@ -98,11 +98,12 @@ Execution history records `trigger_source` for every entry point:
 |-------|------|
 | `"API"` | Webhook / API call with no explicit header (default) |
 | `"Canvas"` | Run from the workflow editor canvas |
-| `"Quick Drawer"` | Run from the editor quick-drawer panel |
+| `"Quick Drawer"` | Run from the editor quick-drawer panel, including file runs uploaded from its drop zone |
 | `"cron"` | Cron scheduler |
 | `"imap"` | IMAP trigger manager |
 | `"websocket"` | Outbound WebSocket trigger manager |
-| `"file_upload"` | File Upload Trigger upload endpoint |
+| `"file_upload"` | File Upload Trigger upload endpoint (links minted over HTTP, MCP, or the canvas) |
+| `"dashboard"` | Dashboard widget runs, and uploads from a file drop widget |
 | `"telegram"` | Telegram bot webhook |
 | `"Discord"` | Discord interactions webhook |
 | `"MCP"` | MCP tool call |

@@ -22,6 +22,22 @@ export interface ToolCall {
   status: ToolCallStatus
 }
 
+/** A tool step starting in a streamed assistant turn. */
+export interface AssistantToolStartEvent {
+  id: string
+  name: string
+  label: string
+  args: Record<string, unknown>
+}
+
+/** A tool step finishing in a streamed assistant turn. */
+export interface AssistantToolEndEvent {
+  id: string
+  response_summary: string
+  elapsed_ms: number
+  status: ToolCallTerminalStatus
+}
+
 export interface ContextBreakdown {
   system: number
   agents_md: number

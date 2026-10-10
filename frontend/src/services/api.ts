@@ -143,10 +143,14 @@ import type {
   DashboardSummary,
   DashboardTeamShare,
   DashboardWidget,
+  FileRunSlot,
+  RecordFormat,
+  WidgetRunResult,
   WidgetCreateRequest,
   WidgetDataResponse,
   WidgetUpdateRequest,
 } from "@/types/dashboard";
+import type { FileRunResult } from "@/types/quickDrawer";
 import type {
   BoardCard,
   BoardColumn,
@@ -164,6 +168,8 @@ import type {
   ColumnUpdatePayload,
 } from "@/types/board";
 import type {
+  AssistantToolEndEvent,
+  AssistantToolStartEvent,
   Conversation,
   ConversationCreate,
   ConversationDetail,
@@ -201,7 +207,8 @@ const api = axios.create({
   withCredentials: true,
 });
 
-function getErrorDetail(error: unknown, fallback: string): string {
+/** The server's `detail` for a failed request, else the error's message, else `fallback`. */
+export function getErrorDetail(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === "string" && detail.trim()) {
@@ -1703,6 +1710,16 @@ export const dashboardApi = {
     return response.data;
   },
 
+  setRecordFormat: async (
+    dashboardId: string,
+    recordFormat: RecordFormat,
+  ): Promise<DashboardSummary> => {
+    const response = await api.patch<DashboardSummary>(`/dashboards/${dashboardId}`, {
+      record_format: recordFormat,
+    });
+    return response.data;
+  },
+
   remove: async (dashboardId: string): Promise<void> => {
     await api.delete(`/dashboards/${dashboardId}`);
   },
@@ -1729,10 +1746,35 @@ export const dashboardApi = {
     await api.delete(`/dashboards/widgets/${id}`);
   },
 
-  getWidgetData: async (id: string, force = false): Promise<WidgetDataResponse> => {
+  /** `record` is the detail page's ?record= value; the server checks it. */
+  getWidgetData: async (
+    id: string,
+    force = false,
+    record: string | null = null,
+  ): Promise<WidgetDataResponse> => {
     const response = await api.get<WidgetDataResponse>(`/dashboards/widgets/${id}/data`, {
-      params: { force },
+      params: record === null ? { force } : { force, record },
     });
+    return response.data;
+  },
+
+  /**
+   * A single-use upload link for one drop on a file-run widget. `inputs` are the values of
+   * the workflow's text input fields; the link carries them to the run.
+   */
+  createFileRunSlot: async (
+    id: string,
+    inputs: Record<string, string> = {},
+  ): Promise<FileRunSlot> => {
+    const response = await api.post<FileRunSlot>(`/dashboards/widgets/${id}/file-slot`, {
+      inputs,
+    });
+    return response.data;
+  },
+
+  /** Runs a run widget's workflow with its start fields, as the dashboard owner. */
+  runWidget: async (id: string, inputs: Record<string, string>): Promise<WidgetRunResult> => {
+    const response = await api.post<WidgetRunResult>(`/dashboards/widgets/${id}/run`, { inputs });
     return response.data;
   },
 
@@ -2091,15 +2133,40 @@ export interface OutputNodeInfo {
   output_expression: string | null;
 }
 
+/** The file a workflow's File Upload trigger takes. */
+export interface WorkflowFileInput {
+  label: string;
+  max_size_mb: number;
+  allowed_types: string[];
+}
+
 export interface WorkflowWithInputs {
   id: string;
   name: string;
   description: string | null;
   input_fields: WorkflowInputField[];
+  file_input?: WorkflowFileInput | null;
   output_node: OutputNodeInfo | null;
   created_at: string;
   updated_at: string;
 }
+
+export const fileIntakeApi = {
+  /**
+   * Upload a file to a single-use slot from a mint (`upload_url`). The run happens
+   * during the request and the response carries its result. Only the path of the
+   * link is used, so the request stays on this origin behind any proxy.
+   */
+  upload: async (uploadUrl: string, file: File): Promise<FileRunResult> => {
+    const path = new URL(uploadUrl, window.location.origin).pathname.replace(/^\/api/, "");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await api.post<FileRunResult>(path, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
+};
 
 export interface AnalysisNoteEditor {
   id: string;
@@ -2165,19 +2232,8 @@ export interface AIAssistantRequest {
   } | null;
 }
 
-export interface AssistantToolStartEvent {
-  id: string;
-  name: string;
-  label: string;
-  args: Record<string, unknown>;
-}
-
-export interface AssistantToolEndEvent {
-  id: string;
-  response_summary: string;
-  elapsed_ms: number;
-  status: ToolCallTerminalStatus;
-}
+// Defined with the chat types, so components can use them without this module.
+export type { AssistantToolEndEvent, AssistantToolStartEvent } from "@/types/chat";
 
 /** Handlers for the tool steps a YOLO-mode assistant turn streams. */
 export interface AssistantStreamHandlers {
@@ -2197,7 +2253,7 @@ export interface FixTranscriptionResponse {
 
 export interface FileAttachmentPayload {
   name: string;
-  kind: "text" | "image" | "pdf";
+  kind: "text" | "image" | "pdf" | "zip";
   content: string;
 }
 
@@ -3686,6 +3742,7 @@ export const chatApi = {
       content,
       credential_id: credentialId,
       model,
+      allow_skill_write: true,
       ...(attachment ? { attachment } : {}),
     });
     return response.data;

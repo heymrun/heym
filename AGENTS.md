@@ -100,6 +100,15 @@ Every model request to OpenCode must include a nonempty `x-opencode-session` hea
 - Chat and assistant surfaces must preserve their conversation ID across requests. Kanban uses the card ID across reruns and column moves. Standalone workflow runs can use the execution ID. If no ID is available, generate a UUID and retain it for that conversation; never send an empty header.
 - When adding a new LLM call path or changing a coding-agent SDK/CLI integration, verify that the outgoing OpenCode model requests carry this header with the correct session scope. Add regression coverage for stable follow-ups, distinct new conversations, and the nonempty fallback. Preserve the shared client's Heym User-Agent and SSRF protection.
 
+### Chat build mode
+A dashboard chat turn that carries `allow_build` (Heym Work's Chat, MCP `heym_chat`) may save, test-run and finish workflows. Heym's own Chat tab does not set it. Heym's own Chat does set `allow_skill_write`, which offers only `apply_skill`: a skill zip or a file edit can create or update an agent skill, and the other build tools stay off.
+
+- `backend/app/services/chat_build_mode.py` holds the rules (test budget, finish, run report, instructions); `backend/app/api/chat_build.py` runs `save_workflow`, `run_workflow_test` and `finish` for one turn.
+- `MAX_BUILD_TEST_RUNS` equals the editor's `MAX_YOLO_ATTEMPTS` (`yoloProtocol.ts`); change both together.
+- Saves go through `backend/app/services/workflow_save.py`, like the editor's update endpoint, so Edit History, trigger resync and platform events stay identical. Do not write workflow versions anywhere else.
+- `finish` is refused until a test run of the latest save has passed. The Verified card depends on that; keep it.
+- Every model request and test run in a build turn carries the conversation id as its OpenCode session (`ChatBuildSession.llm_session_id`); see the OpenCode section above.
+
 ### Node and operation integration
 When adding a new node type, operation, or operation-specific field, keep the canvas affordances in sync with the schema:
 
@@ -134,15 +143,24 @@ When placement depends on configuration rather than node type — `agent` with a
 skill tool attached — express it as a predicate over the node's own data in the
 same module. Never branch on node type in the scheduler.
 
+### Modules Heym Work imports
+Heym Work reads Heym's database with a role that holds column-level SELECT only, and it imports a fixed set of heymrun modules without Heym's settings. `backend/tests/test_models_importable.py` lists them and fails when one of them starts importing `app.config`.
+
+- Access helpers (`*_access.py`) expose query fragments (`*_access_rows(user_id)`, clauses) that Work joins to explicit columns, plus single-item checks the routers use. Keep access rules there, not inline in routers.
+- Read services (`analytics_metrics.py`, `trace_metrics.py`, `schedule_events.py`, `run_history_list.py`) select explicit columns, never whole ORM rows, and return their own dataclasses: `app.models.schemas` imports settings. Routers map the dataclasses to their response models.
+- Instance administration is a parameter, not a settings read. `workflow_access_clause`, `get_workflow_permission` and the helpers built on them take `is_admin`: Heym leaves it unset and reads `HEYM_ADMIN_EMAILS`, Work passes its own answer. `tests/test_workflow_access_admin.py` calls them without settings. A new helper that needs to know who administers the instance takes the same parameter.
+- Writes stay in routers and their services; Work never writes Heym's tables.
+
 ### Audit logging stays on the main instance
 `audit()` writes a line to stdout and nothing to the database — see
 `backend/app/services/audit_log.py`. In a cluster that line lands on the stdout
 of whichever instance ran the code, so where it is called from decides whether
 the audit trail stays in one place.
 
-Call `audit()` from `backend/app/api/` routers only. Ingress points at the main
-instance, so a router call keeps the whole trail on one machine, where a log
-shipper can collect it. All 128 call sites are routers today; keep it that way.
+Call `audit()` from `backend/app/api/` only: routers, and the chat build tools in
+`chat_build.py`, which run inside the chat turn of the request that started them.
+Ingress points at the main instance, so these calls keep the whole trail on one
+machine, where a log shipper can collect it. Keep it that way.
 
 Never call `audit()` from `workflow_executor.py`, a node handler, or anything
 else reachable from the run queue. Those run on whichever instance claimed the
@@ -153,6 +171,14 @@ run's own history instead. `execution_history` already carries
 `executed_by_instance_id` and `executed_by_instance_name`, so it answers "who
 did what, where" from one query. `file_intake_service.write_audit` is the
 pattern: a helper that writes to a table, called from a router.
+
+### Components Heym Work imports
+Heym Work renders some of Heym's frontend components inside its own app, where `@/services/api`, the Pinia stores and the router are Work's. `frontend/src/ports/presentationalImports.test.ts` lists those components and fails when anything they import, directly or through other modules (type imports included), reaches `@/services/`, `@/stores/`, `axios`, `pinia` or `vue-router`.
+
+- Data goes in through props; everything else comes from a port in `frontend/src/ports/` through `usePort()`. Heym provides its implementations in `installHeymPorts.ts`; Work provides its own.
+- A port has the shape of what the component used to import, so the code below the injection line does not change. Logic both apps need lives in an API-free core (`createTextToSpeechPlayer`, `createInteractiveVoice`, `createClarifyDataTables`) that Heym's composable binds to Heym's API.
+- Where a store supplies the props, Heym keeps a thin wrapper (`ChartRenderer` over `ChartView`, `QuickWorkflowRunPanel` over `QuickWorkflowRunView`). Put UI changes in the presentational component so both apps get them.
+- Types these components need belong in `frontend/src/types/`, not in `services/api.ts`.
 
 ### PropertiesPanel modularity
 `frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
@@ -198,7 +224,7 @@ OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstr
 
 - Do not add `alert_type` branches to the evaluator. A new alert type is one handler module, one registry entry, one config model in `backend/app/models/alert_schemas.py`, and focused tests.
 - Handlers compute a metric over a window and return an `AlertObservation`. They must not write events, dispatch notifications, mutate alert state, or re-derive scope — `workflow_ids` arrives already resolved on the `AlertEvaluationContext`.
-- Cost metrics must resolve USD through `app/services/llm_pricing.py`, and duration percentiles through `app/api/analytics.py::calculate_percentile`. An alert that disagrees with the Traces or Analytics tab about the same window is worse than no alert.
+- Cost metrics must resolve USD through `app/services/llm_pricing.py`, and duration percentiles through `app/services/analytics_metrics.py::calculate_percentile`. An alert that disagrees with the Traces or Analytics tab about the same window is worse than no alert.
 - Evaluation runs inside the leader-gated `CronScheduler` loop and claims rows with `FOR UPDATE SKIP LOCKED` while advancing `next_check_at` in the same statement. Preserve that claim when touching the loop; without it a leader handoff mid-pass double-fires.
 - The frontend mirrors this: `StepCondition.vue` selects per-type field components from a lookup map, not a `v-if` chain, and node-type-style branching does not belong in `AlertsTab.vue`.
 - When adding a new alert type, also update `frontend/src/docs/content/tabs/alerts-tab.md`, `reference/features.md`, and the alert tool descriptions in `backend/app/api/ai_assistant.py`.

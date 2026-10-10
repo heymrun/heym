@@ -27,6 +27,7 @@ from app.models.schemas import (
     GeneratedFileResponse,
 )
 from app.services.audit_log import audit
+from app.services.drive_file_access import get_accessible_file
 from app.services.file_storage import (
     build_download_url,
     create_access_token,
@@ -122,24 +123,10 @@ async def _get_accessible_file(
     file_id: uuid.UUID,
     user: User,
 ) -> tuple[GeneratedFile, bool, str | None, str | None] | None:
-    owned = await _get_owned_file(db, file_id, user.id)
-    if owned is not None:
-        return owned, False, None, None
-
-    shared_result = await db.execute(
-        select(GeneratedFile, User.email, Team.name)
-        .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
-        .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
-        .join(Team, Team.id == FileTeamShare.team_id)
-        .join(User, User.id == GeneratedFile.owner_id)
-        .where(GeneratedFile.id == file_id, TeamMember.user_id == user.id)
-        .order_by(Team.name.asc())
-    )
-    shared = shared_result.first()
-    if shared is None:
+    reached = await get_accessible_file(db, file_id, user.id)
+    if reached is None:
         return None
-    row, owner_email, team_name = shared
-    return row, True, owner_email, team_name
+    return reached.file, reached.is_shared, reached.shared_by, reached.shared_by_team
 
 
 async def _current_user_team_ids(db: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:

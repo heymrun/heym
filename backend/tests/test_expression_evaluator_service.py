@@ -1534,6 +1534,15 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertEqual(vars_response.result, "Ada")
         self.assertEqual(global_response.result, "https://api.example.com")
 
+    def test_page_context_on_a_dashboard_page(self) -> None:
+        service = self._service(page_params={"record": "ACME-1"})
+
+        self.assertEqual(service.evaluate("$page.record", {}).result, "ACME-1")
+        self.assertEqual(service.evaluate("Customer $page.record", {}).result, "Customer ACME-1")
+        # A node labelled `page` keeps its name, as in a run.
+        node_wins = service.evaluate("$page.record", {"page": {"record": "from the node"}})
+        self.assertEqual(node_wins.result, "from the node")
+
     def test_add_object_with_items_key_to_array_variable(self) -> None:
         service = self._service(vars_context={"evaluationResults": []})
         response = service.evaluate(

@@ -7,10 +7,34 @@ Keep this side-effect free so it stays trivially unit-testable.
 from typing import Any
 
 from app.services.markdown_task_list import has_task_items
+from app.services.status_tones import resolve_status_tones
+
+# A dataTable node's row: its columns are under ``data``.
+_DATA_TABLE_ROW_KEYS = frozenset({"id", "data", "created_at", "updated_at"})
+
+
+def _flatten_data_table_row(row: Any) -> Any:
+    """A data table row with its columns at the top level, next to its ``id``.
+
+    Charts name a table's columns (labelField, valueField, columns); a dataTable node's
+    rows hold them under ``data``, so without this a table widget shows one JSON cell.
+    """
+    if (
+        isinstance(row, dict)
+        and isinstance(row.get("data"), dict)
+        and "id" in row
+        and set(row) <= _DATA_TABLE_ROW_KEYS
+    ):
+        return {"id": row["id"], **row["data"]}
+    return row
 
 
 def _resolve_rows(data: Any, data_path: str | None) -> list:
     """Resolve a list of row dicts (or scalars) from arbitrary upstream output."""
+    return [_flatten_data_table_row(row) for row in _resolve_list(data, data_path)]
+
+
+def _resolve_list(data: Any, data_path: str | None) -> list:
     if data_path:
         node: Any = data
         for part in data_path.split("."):
@@ -119,6 +143,13 @@ def build_chart_payload(config: dict, data: Any) -> dict:
         payload["rows"] = [
             [row.get(col) if isinstance(row, dict) else row for col in columns] for row in rows
         ]
+        status_column = config.get("statusColumn")
+        if isinstance(status_column, str) and status_column.strip() in columns:
+            index = columns.index(status_column.strip())
+            payload["statusColumn"] = status_column.strip()
+            payload["statusTones"] = resolve_status_tones(
+                (row[index] for row in payload["rows"]), config.get("statusTones")
+            )
         return payload
 
     if chart_type in ("numeric", "gauge"):

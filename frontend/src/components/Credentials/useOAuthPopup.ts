@@ -2,7 +2,7 @@ import { onBeforeUnmount, ref, type Ref } from "vue";
 
 import type { Credential } from "@/types/credential";
 
-import { credentialsApi } from "@/services/api";
+import { credentialsPortKey, usePort } from "@/ports";
 
 const STATUS_POLL_MS = 2000;
 const STATUS_POLL_LIMIT_MS = 10 * 60 * 1000;
@@ -46,6 +46,7 @@ export function isConnectedMaskedValue(maskedValue: string | null | undefined): 
  * opened without one (blocked popup, copied link) the credential is polled instead.
  */
 export function useOAuthPopup(state: OAuthPopupState, config: OAuthPopupConfig): OAuthPopup {
+  const credentialsApi = usePort(credentialsPortKey);
   const authUrl = ref("");
   const sessionCredentialId = ref<string | null>(null);
   let popup: Window | null = null;

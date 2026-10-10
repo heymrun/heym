@@ -3743,10 +3743,20 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"text"` | `"hitl"` (required)
   - `orientation`: `"horizontal"` | `"vertical"` (bar only, default `"vertical"`)
   - `dataPath`: optional dot path to the rows array inside the upstream output (e.g. `"data"` or `"result.items"`)
+  - Rows straight from a `dataTable` node (`{id, data, created_at}`) are read with their columns at
+    the top level next to `id`, so `labelField`, `valueField` and `columns` name the table's own
+    columns (e.g. a `dataTable` node into a `table` chart with `"dataPath": "rows"` and
+    `"columns": ["vendor", "amount"]`). In a `set` node the columns are still under `row.data`.
   - `labelField`: row key used as the category label (pie/bar/line)
   - `valueField`: row key used as the single-series numeric value (pie/bar/line/numeric/gauge)
   - `series`: optional array `[{"name": "Sent", "field": "sent"}, ...]` for multi-series bar/line (overrides `valueField`)
   - `columns`: optional array of column names for `table` (default: keys of the first row)
+  - `statusColumn`: optional column of a `table` rendered as colored status chips (it must be one
+    of the shown columns)
+  - `statusTones`: optional map from a status value to a tone, `"success"` | `"attention"` |
+    `"failure"` | `"waiting"` | `"neutral"`, for values the defaults do not cover. Common words
+    already have a tone (paid, done, approved: success; overdue, needs review: attention; failed,
+    rejected: failure; pending, running, queued: waiting); anything else is neutral
   - `xField` / `yField`: row keys for the X and Y numeric axes (scatter)
   - `min` / `max`: numeric range for `gauge` (default `0` / `100`)
   - `unit`: optional unit string for `numeric`/`gauge`
@@ -3768,6 +3778,21 @@ node using `$array(dict(...), dict(...))`.
 
 `set` node keys: `dict(...)` uses `key=value` keyword args (identifier keys, no quotes on the key).
 String values use double quotes: `dict(status="success", count=150)`.
+
+#### Detail pages: `$page.record`
+
+A dashboard opened with `?record=<value>` (a row link from another dashboard's table opens one)
+runs every widget workflow with that value as `$page.record`; on a dashboard opened without it,
+`$page.record` is null. Use it to fetch the one record the page is about, for example an `http`
+node URL `https://crm.example.com/api/customers/$page.record`. The value comes from a URL: pass it
+as a value the node escapes (an HTTP query parameter, a `dataTable` or ClickHouse filter value),
+never build query text from it. Widget workflows still have no trigger or input node.
+
+`$page.record` is the clicked row's value itself, one plain string such as `V-1002`, never an
+object: it has no fields, so `$page.record.id` or `$page.record.vendor_id` resolve to nothing and
+the widget shows no rows. Compare the column that holds the record with `$page.record` itself, for
+example a `dataTable` node with `dataTableOperation` `find` and `dataTableFilter`
+`{"vendor_id": "$page.record"}`.
 
 **Full example — Bar chart with example data (set → chartOutput):**
 ```json
@@ -3806,6 +3831,12 @@ Pie (upstream rows `[{status, count}]`; build with `$array(dict(status="success"
 Table (upstream rows `[{name, total}]`):
 ```json
 {"type": "chartOutput", "data": {"label": "topCustomers", "chartType": "table", "dataPath": "rows", "columns": ["name", "total"]}}
+```
+
+Table with status chips (upstream rows `[{invoice, customer, state}]`; `Disputed` is not a default
+word, so it gets a tone in `statusTones`):
+```json
+{"type": "chartOutput", "data": {"label": "invoices", "chartType": "table", "dataPath": "rows", "columns": ["invoice", "customer", "state"], "statusColumn": "state", "statusTones": {"Disputed": "failure"}}}
 ```
 
 Numeric / KPI (upstream rows `[{total}]`, first row used):

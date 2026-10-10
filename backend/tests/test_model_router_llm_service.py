@@ -660,8 +660,9 @@ class TestTraceApiSurface(unittest.TestCase):
         import inspect
 
         from app.api import traces
+        from app.services import trace_metrics
 
-        source = inspect.getsource(traces)
+        source = inspect.getsource(traces) + inspect.getsource(trace_metrics)
         self.assertIn("LLMTrace.router_label.ilike(pattern)", source)
         self.assertIn("router_label=trace.router_label", source)
         # by_model must keep grouping on the real model.

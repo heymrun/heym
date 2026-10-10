@@ -39,6 +39,60 @@ class DotDictTest(unittest.TestCase):
         self.assertIsNone(params.get("missing"))
         self.assertIn("name", params)
 
+    def test_nested_values_are_real_dicts(self) -> None:
+        params = DotDict({"rows": [{"data": {"category": "Cloud"}}]})
+
+        self.assertIsInstance(params, dict)
+        self.assertIsInstance(params.rows[0], dict)
+        self.assertIsInstance(params.rows[0].get("data"), dict)
+        self.assertEqual(
+            json.loads(json.dumps(params)), {"rows": [{"data": {"category": "Cloud"}}]}
+        )
+
+    def test_a_key_wins_over_a_dict_method_of_the_same_name(self) -> None:
+        params = DotDict({"items": [1, 2], "get": "column"})
+
+        self.assertEqual(params.items, [1, 2])
+        self.assertEqual(params.get("items"), [1, 2])
+        self.assertEqual(sorted(DotDict({"a": 1}).items()), [("a", 1)])
+
+
+# What a dashboard widget's code node looked like when every row was skipped and it
+# returned []: `isinstance(row, dict)` was False for the wrapped rows.
+GROUP_SPEND = """
+def main(params):
+    rows = params.rows or []
+    totals = {}
+    for row in rows:
+        data = row.get("data") if isinstance(row, dict) and "data" in row else row
+        if not isinstance(data, dict):
+            continue
+        category = data.get("category") or "Unknown"
+        totals[category] = totals.get(category, 0.0) + float(data.get("annual_spend_usd") or 0)
+    out = [{"category": k, "totalSpend": round(v, 2)} for k, v in totals.items()]
+    out.sort(key=lambda x: x["totalSpend"], reverse=True)
+    return out
+"""
+
+
+class DataTableRowsTest(unittest.TestCase):
+    def test_code_that_checks_for_dicts_reads_data_table_rows(self) -> None:
+        rows = [
+            {"id": "1", "data": {"category": "Cloud", "annual_spend_usd": 120}},
+            {"id": "2", "data": {"category": "SaaS", "annual_spend_usd": 80.5}},
+            {"id": "3", "data": {"category": "Cloud", "annual_spend_usd": "40"}},
+        ]
+
+        envelope = execute_payload({"code": GROUP_SPEND, "params": {"rows": rows}})
+
+        self.assertEqual(
+            envelope["result"],
+            [
+                {"category": "Cloud", "totalSpend": 160.0},
+                {"category": "SaaS", "totalSpend": 80.5},
+            ],
+        )
+
 
 class UnwrapTest(unittest.TestCase):
     def test_unwrap_converts_dotdicts_and_tuples(self) -> None:

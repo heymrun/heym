@@ -18,6 +18,11 @@ MAX_TTL_MINUTES = 10080  # 7 days
 HARD_MAX_SIZE_MB = 100
 DEFAULT_MAX_SIZE_MB = 100
 
+QUICK_DRAWER_TRIGGER_SOURCE = "Quick Drawer"
+# The run an upload starts is recorded under its slot's origin, so a file run from the
+# Quick Drawer is listed as a Quick Drawer run, like that drawer's other runs.
+_UPLOAD_TRIGGER_SOURCES = {"quick_drawer": QUICK_DRAWER_TRIGGER_SOURCE, "dashboard": "dashboard"}
+
 
 @dataclass
 class SlotConfig:
@@ -41,6 +46,16 @@ def find_file_upload_trigger(nodes: list[dict]) -> dict | None:
         if node.get("type") == "fileUploadTrigger":
             return node
     return None
+
+
+def mint_source_for(trigger_source: str | None, default: str) -> str:
+    """The slot origin for an execute request: the Quick Drawer, or ``default``."""
+    return "quick_drawer" if trigger_source == QUICK_DRAWER_TRIGGER_SOURCE else default
+
+
+def upload_trigger_source(mint_source: str | None) -> str:
+    """The ``trigger_source`` recorded for the run an upload to such a slot starts."""
+    return _UPLOAD_TRIGGER_SOURCES.get(mint_source or "", "file_upload")
 
 
 def resolve_slot_config(node: dict) -> SlotConfig:
@@ -89,8 +104,13 @@ async def mint_slot(
     node: dict,
     created_by_user_id: uuid.UUID,
     mint_source: str,
+    initial_inputs: dict[str, str] | None = None,
 ) -> tuple[FileUploadSlot, str]:
-    """Create a pending slot. Returns (slot, raw_token). Only the hash is stored."""
+    """Create a pending slot. Returns (slot, raw_token). Only the hash is stored.
+
+    ``initial_inputs`` are start field values the run gets with the file, set by the
+    signed-in minter only.
+    """
     cfg = resolve_slot_config(node)
     token = generate_token()
     slot = FileUploadSlot(
@@ -104,6 +124,7 @@ async def mint_slot(
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=cfg.ttl_minutes),
         created_by_user_id=created_by_user_id,
         mint_source=mint_source,
+        initial_inputs=initial_inputs or None,
     )
     db.add(slot)
     await db.flush()

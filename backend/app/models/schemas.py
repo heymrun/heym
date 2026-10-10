@@ -381,6 +381,14 @@ class InputFieldSchema(BaseModel):
     default_value: str | None = Field(None, serialization_alias="defaultValue")
 
 
+class FileInputSchema(BaseModel):
+    """The file a workflow's File Upload trigger takes, for run forms with a drop zone."""
+
+    label: str
+    max_size_mb: int
+    allowed_types: list[str] = []
+
+
 class OutputNodeSchema(BaseModel):
     label: str
     node_type: str
@@ -411,6 +419,7 @@ class WorkflowListWithInputsResponse(BaseModel):
     name: str
     description: str | None
     input_fields: list[InputFieldSchema] = []
+    file_input: FileInputSchema | None = None
     output_node: OutputNodeSchema | None = None
     created_at: datetime
     updated_at: datetime
@@ -1133,6 +1142,23 @@ class VectorStoreItemsResponse(BaseModel):
     total_items: int
 
 
+class VectorStoreSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(5, ge=1, le=20)
+
+
+class VectorStoreSearchResult(BaseModel):
+    id: str
+    text: str
+    score: float
+    source: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class VectorStoreSearchResponse(BaseModel):
+    results: list[VectorStoreSearchResult]
+
+
 class MCPToolInputProperty(BaseModel):
     type: str = "string"
     description: str | None = None
@@ -1392,6 +1418,21 @@ class HITLInboxResponse(BaseModel):
 
 class HITLInboxLinkResponse(BaseModel):
     url: str
+
+
+class PendingReviewSeedRequest(BaseModel):
+    """A review planted on a workflow without running it."""
+
+    summary: str = Field(min_length=1, max_length=2000)
+    draft_text: str = Field(min_length=1)
+    trigger_source: str | None = Field(default=None, max_length=50)
+    inputs: dict = Field(default_factory=dict)
+
+
+class PendingReviewSeedResponse(BaseModel):
+    request_id: uuid.UUID
+    execution_history_id: uuid.UUID
+    status: str
 
 
 class CodexFollowupPublicResponse(BaseModel):

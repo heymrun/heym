@@ -35,7 +35,12 @@ class _User:
 
 
 def _dashboard(owner_id: uuid.UUID, name: str = "Sales") -> MagicMock:
-    dashboard = MagicMock(id=uuid.uuid4(), owner_id=owner_id, updated_at=datetime.datetime.now())
+    dashboard = MagicMock(
+        id=uuid.uuid4(),
+        owner_id=owner_id,
+        record_format="id",
+        updated_at=datetime.datetime.now(),
+    )
     # ``name`` is a MagicMock constructor argument, so it has to be set afterwards.
     dashboard.name = name
     return dashboard
@@ -97,6 +102,9 @@ def _widget(**attrs: object) -> MagicMock:
         "layout": {"x": 0, "y": 0, "w": 4, "h": 4},
         "cache_ttl_seconds": 300,
         "position": 0,
+        "link_dashboard_id": None,
+        "link_record_field": None,
+        "link_label_field": None,
     }
     defaults.update(attrs)
     return MagicMock(**defaults)
@@ -224,10 +232,10 @@ class TestWidgetDataRunsAsOwner(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(dash_api, "compute_widget_data", compute):
             response = await dash_api.get_widget_data(
-                widget_id=widget.id, force=True, current_user=_User("Viewer"), db=db
+                widget_id=widget.id, force=True, record=None, current_user=_User("Viewer"), db=db
             )
 
-        compute.assert_awaited_once_with(db, widget, owner_id, force=True)
+        compute.assert_awaited_once_with(db, widget, owner_id, force=True, record=None)
         self.assertEqual(response.payload, {"type": "numeric", "value": 42})
         self.assertIsNone(response.highlight)
 
@@ -239,10 +247,10 @@ class TestWidgetDataRunsAsOwner(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(dash_api, "compute_widget_data", compute):
             response = await dash_api.get_widget_data(
-                widget_id=widget.id, force=False, current_user=_User("Editor"), db=db
+                widget_id=widget.id, force=False, record=None, current_user=_User("Editor"), db=db
             )
 
-        compute.assert_awaited_once_with(db, widget, dashboard.owner_id, force=False)
+        compute.assert_awaited_once_with(db, widget, dashboard.owner_id, force=False, record=None)
         self.assertIsNotNone(response.highlight)
 
 

@@ -1,6 +1,6 @@
 # MCP Tab
 
-The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI clients (Claude, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
+The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI clients (Claude, ChatGPT, Gemini, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
 
 Heym supports two modes: a **default server** that exposes all MCP-enabled workflows under a single endpoint, and **named servers** that give each logical group of workflows its own dedicated URL and API key.
 
@@ -24,6 +24,8 @@ The default server is always available at `{origin}/api/mcp/sse`. All workflows 
 
 - **API Key** – Use the MCP API key for programmatic connections. The tab can copy a ready-to-use JSON config and includes an **Add to Cursor** button for one-click Cursor setup.
 - **Claude** – The tab shows the MCP server URL and setup steps for Claude. Leave OAuth Client ID and Secret blank; Claude registers automatically and authenticates via Heym OAuth.
+- **ChatGPT** – The tab shows the MCP server URL and setup steps for a ChatGPT app. Turn on Developer mode, create an app with the URL and choose OAuth; ChatGPT registers automatically.
+- **Gemini** – The tab shows the MCP server URL and setup steps for a Gemini custom app: in gemini.google.com, **Settings → Connected Apps → Add a custom app**, paste the URL and leave **Advanced features** closed; Gemini registers automatically and authenticates via Heym OAuth. Once connected, Heym also works in the Gemini mobile app.
 
 ### Workflow MCP Toggle
 
@@ -40,7 +42,8 @@ The **Heym Capabilities** section turns the Chat tab engine into a single MCP to
 
 When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools. An MCP client sends one natural-language message and the Heym engine takes it from there, with the same abilities the Chat tab has:
 
-- Build, edit, inspect, and run workflows through the Workflow AI Builder
+- Build a workflow, test-run it with sample inputs, fix it, and finish when a run passes (see [Build mode](#build-mode))
+- Inspect and run your existing workflows
 - Report analytics, recent executions, and upcoming cron schedules
 - Report the run history of one workflow: how many times it ran, status counts, when it ran, and on request the inputs, outputs, and per-node errors of a single run
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
@@ -50,6 +53,15 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
+
+### Build mode
+
+`heym_chat` always runs the Chat engine in build mode. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
+
+- Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
+- Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.
+- To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
+- When the five test runs are used up, the assistant stops and explains what still fails.
 
 Credentials stay in the UI: `heym_chat` never lists, chooses or creates them. When it builds or edits a workflow, new nodes that need a credential are left empty and the reply names them, so you can set them in the editor.
 
@@ -110,7 +122,7 @@ Toggling a workflow moves it to the top of the assigned list, so the row you jus
 Named servers support the same authentication methods as the default server:
 
 - **X-MCP-Key header** – Pass the server's API key directly (API clients, Cursor). Header only: keys are not accepted as a `?key=` query parameter, because URLs end up in access logs, proxy logs and browser history.
-- **Claude OAuth** – Add the server URL to Claude integrations; leave credentials blank and Claude registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
+- **Claude, ChatGPT and Gemini OAuth** – Add the server URL to the client's connectors or custom apps; leave credentials blank and the client registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
 - **Session token** – Issued during the SSE handshake; scoped to the specific server so tokens from one named server cannot access another. This short-lived `?session=` parameter is unaffected.
 
 ### Deleting a Named Server
@@ -124,7 +136,7 @@ Click the **X** icon on a server card header. Deletion removes the server and al
 | Default | `{origin}/api/mcp/sse` |
 | Named | `{origin}/api/mcp/servers/{server-uuid}/sse` |
 
-Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamable HTTP transport (POST, MCP spec 2025-03-26). Claude uses OAuth 2.1 / PKCE for secure sign-in on both.
+Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamable HTTP transport (POST, MCP spec 2025-03-26). Claude, ChatGPT and Gemini use OAuth 2.1 / PKCE for secure sign-in on both.
 
 ## Related
 

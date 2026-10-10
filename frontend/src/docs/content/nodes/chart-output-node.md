@@ -33,6 +33,8 @@ When you only have example/sample data (no real source), produce these rows with
 | `valueField` | string | Row key used as the numeric value (pie/bar/line/numeric/gauge) |
 | `series` | array | Optional multi-series definition `[{ "name": "Sent", "field": "sent" }]` for bar/line (overrides `valueField`) |
 | `columns` | array | Optional column list for `table` (defaults to the keys of the first row) |
+| `statusColumn` | string | Optional `table` column rendered as colored [status chips](#status-chips). It must be one of the shown columns. |
+| `statusTones` | object | Optional map from a status value to a tone (`success`, `attention`, `failure`, `waiting`, `neutral`) for values the defaults do not cover |
 | `xField` / `yField` | string | Row keys for the X and Y numeric axes (scatter) |
 | `min` / `max` | number | Numeric range for `gauge` (default `0` / `100`) |
 | `unit` | string | Optional unit shown next to a `numeric` or `gauge` value |
@@ -42,7 +44,7 @@ When you only have example/sample data (no real source), produce these rows with
 ## Chart types
 
 - **bar / line / area / pie** — categorical charts driven by `labelField` + `valueField` (or `series` for multi-series bar/line/area). `area` is a filled trend chart.
-- **table** — raw rows rendered as a scrollable table using `columns`.
+- **table** — raw rows rendered as a scrollable table using `columns`. One column can render as [status chips](#status-chips), and rows can open a [detail page](../tabs/dashboard-tab.md#detail-pages).
 - **numeric** — a single KPI value from the first row, with an optional `unit`.
 - **gauge** — a single value shown against a `min`–`max` range (e.g. a percentage). Uses `valueField`.
 - **scatter** — X/Y points from `xField` and `yField` for correlation plots.
@@ -104,14 +106,59 @@ Resulting markdown:
 
 For a simple ascending list starting at 1, either prefix each line (`1.`, `2.`, `3.`) or use a loop with `$loop.index + 1`. Use [bullet lists](#interactive-task-lists) (`- item`) when you do not need numbers.
 
+## Status chips
+
+A `table` can show one column as colored chips. Set **Status column** in the node's properties (or `statusColumn` in the DSL) to a column name. Each value gets one of five tones, and common words get one without configuration:
+
+| Tone | Default words |
+|------|---------------|
+| `success` | success, successful, succeeded, done, complete, completed, approved, active, ok, paid, passed, healthy, resolved, won, delivered, published |
+| `attention` | warning, attention, review, needs review, at risk, partial, degraded, overdue, unpaid, expiring |
+| `failure` | failed, failure, error, errored, rejected, declined, blocked, lost, expired |
+| `waiting` | pending, waiting, queued, running, in progress, processing, scheduled, draft, new, open |
+| `neutral` | anything else |
+
+Matching ignores case, `_` and `-`, so `IN_PROGRESS` and `in-progress` are both `waiting`. Add **Status tones** for other values; an entry overrides the default for that value:
+
+```json
+{
+  "type": "chartOutput",
+  "data": {
+    "label": "invoices",
+    "chartType": "table",
+    "dataPath": "rows",
+    "columns": ["invoice", "customer", "state"],
+    "statusColumn": "state",
+    "statusTones": { "Disputed": "failure" }
+  }
+}
+```
+
+The server resolves each value to its tone, so Heym and Heym Work show the same colors.
+
+## Detail pages: `$page.record`
+
+A dashboard opened with `?record=<value>` runs every widget workflow with that value as `$page.record`. A table row link opens such a page; see [Detail pages](../tabs/dashboard-tab.md#detail-pages). On the dashboard opened without a record, and in the expression dialog, `$page.record` is null. A node labelled `page` takes precedence over it.
+
+Use it to fetch the one record the page is about, for example in an [HTTP](./http-node.md) node:
+
+```
+https://crm.example.com/api/customers?id=$page.record
+```
+
+`$page.record` is the clicked row's value itself, such as `V-1002`, not an object with fields. To find that record in a [DataTable](./datatable-node.md), filter its record column by the value: operation `find` with the filter `{"vendor_id": "$page.record"}`. A path such as `$page.record.id` resolves to nothing, so a widget the AI builds or fine-tunes has those fields dropped and reads `$page.record` instead.
+
+The value comes from a URL that anyone can edit. The dashboard only accepts values in its record format (letters, digits, `-`, `_` and `.` by default), but treat it as untrusted input all the same: pass it where the node escapes values, such as an HTTP query parameter or a [DataTable](./datatable-node.md) or ClickHouse filter value, and never build query text by joining strings with it. Widgets still run as the dashboard owner, whoever opens the page.
+
 ## How data is resolved
 
 1. If `dataPath` is set, the node follows that dot path into the upstream output.
 2. Otherwise it looks for an array: a top-level list, a `data` array, or the first list-valued field.
-3. For `table`, each row becomes a table row using `columns` (or the first row's keys).
-4. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
-5. For `scatter`, each row becomes an `[xField, yField]` point.
-6. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
+3. Rows straight from a [Data Table](./datatable-node.md) node (`{id, data, created_at}`) are read with their columns at the top level next to `id`, so `labelField`, `valueField` and `columns` name the table's own columns.
+4. For `table`, each row becomes a table row using `columns` (or the first row's keys). With `statusColumn`, the payload also carries the tone of each value in that column.
+5. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
+6. For `scatter`, each row becomes an `[xField, yField]` point.
+7. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
 
 ## Example
 

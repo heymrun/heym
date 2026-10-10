@@ -11,8 +11,18 @@ _MODULES = (
     "app.db.models",
     "app.services.workflow_access",
     "app.services.credential_access",
+    "app.services.credential_catalog",
     "app.services.dashboard_access",
     "app.services.alert_access",
+    "app.services.data_table_access",
+    "app.services.data_table_catalog",
+    "app.services.vector_store_access",
+    "app.services.drive_file_access",
+    "app.services.global_variable_access",
+    "app.services.analytics_metrics",
+    "app.services.trace_metrics",
+    "app.services.schedule_events",
+    "app.services.run_history_list",
 )
 _PROBE = (
     "import importlib, sys\n"

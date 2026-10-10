@@ -31,6 +31,7 @@ from app.services.hitl_service import build_public_base_url
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import build_router_for_credential
+from app.services.page_params import preview_page_params
 from app.services.workflow_dsl_prompt import (
     DASHBOARD_WIDGET_PROMPT_HINT,
     WORKFLOW_DSL_SYSTEM_PROMPT,
@@ -389,6 +390,7 @@ async def build_evaluation_setup(
         workflow_name=workflow.name or "",
         workflow_description=workflow.description or "",
         public_base_url=build_public_base_url(http_request),
+        page_params=preview_page_params(workflow.kind),
     )
     return EvaluationSetup(
         service=service,

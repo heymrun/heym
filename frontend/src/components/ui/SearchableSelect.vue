@@ -146,9 +146,16 @@ const anchorClass = computed(() =>
   )
 );
 
+// A narrow field still opens a menu up to 32rem, so a long option stays readable.
+// A wider field keeps the menu at its own width; rows fill that, with no empty strip.
+const contentStyle: Record<string, string> = {
+  minWidth: "var(--radix-combobox-trigger-width)",
+  maxWidth: "max(var(--radix-combobox-trigger-width), min(32rem, calc(100vw - 1rem)))",
+};
+
 const contentClass = computed(() =>
   cn(
-    "z-50 mt-1 max-h-72 w-max max-w-[calc(100vw-1rem)] min-w-[var(--radix-combobox-trigger-width)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
+    "z-50 mt-1 max-h-72 w-max overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
     "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
     props.contentClass
   )
@@ -298,6 +305,7 @@ function clearValue(): void {
         align="start"
         :side-offset="4"
         :class="contentClass"
+        :style="contentStyle"
       >
         <ComboboxViewport class="max-h-72 overflow-y-auto p-1">
           <ComboboxEmpty class="px-3 py-6 text-center text-sm text-muted-foreground">
@@ -318,7 +326,7 @@ function clearValue(): void {
               v-for="option in group.options"
               :key="option.key"
               :value="option.key"
-              class="relative flex min-h-9 max-w-[min(32rem,calc(100vw-1rem))] cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+              class="relative flex min-h-9 w-full cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
               @select="handleItemSelect($event, option)"
             >
               <ComboboxItemIndicator class="absolute left-2 flex h-4 w-4 items-center justify-center">

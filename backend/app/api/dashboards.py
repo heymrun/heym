@@ -5,10 +5,11 @@ dashboard owner, and always runs as that owner, whoever is looking.
 """
 
 import copy
+import json
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -19,7 +20,8 @@ from app.api.ai_assistant import (
     _record_chat_workflow_edit_version,
     get_credential_for_user,
 )
-from app.api.deps import get_current_user
+from app.api.deps import get_client_ip, get_current_user
+from app.api.workflows import get_workflow_for_user
 from app.db.models import (
     LLM_CREDENTIAL_TYPES,
     Dashboard,
@@ -33,6 +35,8 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.models.dashboard_schemas import (
+    AiPlanRequest,
+    AiPlanResponse,
     AiRefineRequest,
     AiWidgetRequest,
     DashboardCreateRequest,
@@ -44,23 +48,42 @@ from app.models.dashboard_schemas import (
     DashboardTeamShareResponse,
     DashboardUpdateRequest,
     DashboardWidgetResponse,
+    DetailPageProposalResponse,
+    FileRunSlotRequest,
+    FileRunSlotResponse,
     MarkdownTaskToggleRequest,
     MarkdownTaskUpdateRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
+    WidgetExampleResponse,
+    WidgetProposalResponse,
+    WidgetRunRequest,
+    WidgetRunResponse,
     WidgetUpdateRequest,
 )
+from app.services import file_intake_service
 from app.services.audit_log import audit
 from app.services.dashboard_access import (
     PERMISSION_OWNER,
     PERMISSION_READ,
     PERMISSION_WRITE,
     dashboard_permission,
+    reachable_dashboard_ids,
     shared_dashboard_permissions,
 )
-from app.services.dashboard_data import compute_widget_data
+from app.services.dashboard_data import compute_widget_data, run_widget_workflow
+from app.services.dashboard_data_context import (
+    TableContext,
+    TableUnavailableError,
+    describe_tables,
+    load_table_contexts,
+)
+from app.services.dashboard_widget_plan import WidgetProposal, plan_dashboard_widgets
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.data_table_access import get_data_table_with_permission
 from app.services.encryption import decrypt_config
+from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
+from app.services.hitl_service import build_public_base_url
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
@@ -70,12 +93,24 @@ from app.services.markdown_task_list import (
     update_or_remove_task_item,
 )
 from app.services.model_router import build_router_for_credential
+from app.services.page_params import (
+    DEFAULT_RECORD_FORMAT,
+    MAX_RECORD_LENGTH,
+    is_valid_record,
+)
+from app.services.widget_page_record import (
+    detail_page_context,
+    example_record,
+    repair_page_record_paths,
+)
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
+from app.services.workflow_inputs import start_input_fields
 
 router = APIRouter()
 
 DEFAULT_DASHBOARD_NAME = "Dashboard"
+TABLE_WIDGET_ROW_LIMIT = 500
 
 _AI_WIDGET_SUFFIX = (
     " The workflow MUST end with a single chartOutput node that produces the chart. "
@@ -93,7 +128,21 @@ _AI_WIDGET_SUFFIX = (
     "to count down and join lines before chartOutput valueField. "
     "When the user wants pending human reviews on the dashboard, use chartType hitl and no "
     "upstream data nodes. Do not include trigger, "
-    "input, error-handler, or RabbitMQ nodes in dashboard widget workflows."
+    "input, error-handler, or RabbitMQ nodes in dashboard widget workflows. "
+    "On a detail dashboard, $page.record is the record the page is about: one plain text "
+    "value such as V-1002, never an object, so compare a column with $page.record itself "
+    "(never $page.record.id). "
+    "A dataTable node returns {rows, count}; each row is {id, data, created_at} with the "
+    "columns under data, so in a set node group and sum row.data values, not the row itself. "
+    "A chartOutput reading those rows directly sees each row's columns at the top level next "
+    "to its id: for a table of the rows, connect the dataTable node to a table chartOutput "
+    "with dataPath rows and columns set to the table's column names. "
+    "Answer with the workflow JSON object only, from its opening { to its closing }: no "
+    "explanation, no plan, no questions and no markdown fences before or after it."
+)
+_JSON_ONLY_RETRY = (
+    "\n\nYour previous answer had no workflow JSON object in it. Answer again with the "
+    "workflow JSON object only: nothing before or after it."
 )
 
 
@@ -106,6 +155,7 @@ async def generate_widget_dsl(
     current_workflow: dict[str, Any] | None = None,
     workflow_id: uuid.UUID | None = None,
     node_label: str | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Generate a widget workflow DSL (nodes + edges) ending in a chartOutput node.
 
@@ -130,20 +180,57 @@ async def generate_widget_dsl(
         source="dashboard_widget_ai",
         node_label=node_label
         or ("AI Widget Fine-tune" if current_workflow else "AI Widget Create"),
+        session_id=str(session_id) if session_id else None,
     )
-    result = await execute_llm(
-        credential_type=credential.type.value,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        system_instruction=system_prompt,
-        user_message=prompt + _AI_WIDGET_SUFFIX,
-        temperature=None if is_reasoning_model(model) else WORKFLOW_BUILDER_TEMPERATURE,
-        trace_context=trace_context,
-        router=router,
+    user_message = prompt + _AI_WIDGET_SUFFIX
+    # Some models explain around the JSON or answer with prose only; one retry asks for JSON alone.
+    for attempt in range(2):
+        result = await execute_llm(
+            credential_type=credential.type.value,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            system_instruction=system_prompt,
+            user_message=user_message + (_JSON_ONLY_RETRY if attempt else ""),
+            temperature=None if is_reasoning_model(model) else WORKFLOW_BUILDER_TEMPERATURE,
+            trace_context=trace_context,
+            router=router,
+        )
+        try:
+            dsl = _extract_generated_workflow_config(str(result.get("text") or ""), prompt)
+        except ValueError:
+            continue
+        if isinstance(dsl.get("nodes"), list):
+            dsl["nodes"] = repair_page_record_paths(dsl["nodes"])
+        return dsl
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="The model did not answer with a widget workflow. Try again or pick another model.",
     )
-    content = str(result.get("text") or "")
-    return _extract_generated_workflow_config(content, prompt)
+
+
+async def _detail_page_context(db: AsyncSession, dashboard: Dashboard, user: User) -> str:
+    """How table rows open ``dashboard`` as a detail page, told to the model; empty if none do."""
+    rows = (
+        await db.execute(
+            select(
+                DashboardWidget.dashboard_id,
+                DashboardWidget.link_record_field,
+                DashboardWidget.cached_payload,
+            ).where(
+                DashboardWidget.link_dashboard_id == dashboard.id,
+                DashboardWidget.link_record_field.is_not(None),
+            )
+        )
+    ).all()
+    readable = await reachable_dashboard_ids(db, {row.dashboard_id for row in rows}, user.id)
+    links = [row for row in rows if row.dashboard_id in readable]
+    examples = (example_record(row.cached_payload, row.link_record_field) for row in links)
+    example = next(
+        (value for value in examples if value and is_valid_record(value, dashboard.record_format)),
+        None,
+    )
+    return detail_page_context(list(dict.fromkeys(row.link_record_field for row in links)), example)
 
 
 async def _ensure_own_dashboard(db: AsyncSession, user: User) -> None:
@@ -192,6 +279,8 @@ def _dashboard_summary(
         permission=permission,
         owner_name=owner.name if shared else None,
         shared_by=owner.email if shared else None,
+        # A dashboard created in this request has no server default loaded yet.
+        record_format=dashboard.record_format or DEFAULT_RECORD_FORMAT,
         updated_at=dashboard.updated_at,
     )
 
@@ -263,6 +352,93 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
     return nodes, edges
 
 
+def _data_table_widget_nodes(
+    table_id: uuid.UUID, columns: list[str], page_record_column: str | None = None
+) -> tuple[list, list]:
+    """A table widget's graph: a data table's rows, oldest first, shown in ``columns``.
+
+    With ``page_record_column`` it keeps only the rows whose column equals the detail page's
+    ``$page.record``.
+    """
+    src_id = str(uuid.uuid4())
+    chart_id = str(uuid.uuid4())
+    source: dict[str, Any] = {
+        "label": "tableRows",
+        "dataTableId": str(table_id),
+        "dataTableOperation": "getAll",
+        "dataTableSort": "created_at",
+        "dataTableLimit": TABLE_WIDGET_ROW_LIMIT,
+    }
+    if page_record_column:
+        source["dataTableOperation"] = "find"
+        source["dataTableFilter"] = json.dumps({page_record_column: "$page.record"})
+    nodes = [
+        {
+            "id": src_id,
+            "type": "dataTable",
+            "position": {"x": 0, "y": 0},
+            "data": source,
+        },
+        {
+            "id": chart_id,
+            "type": "chartOutput",
+            "position": {"x": 320, "y": 0},
+            "data": {
+                "label": "chart",
+                "chartType": "table",
+                "dataPath": "rows",
+                "columns": columns,
+            },
+        },
+    ]
+    edges = [{"id": str(uuid.uuid4()), "source": src_id, "target": chart_id}]
+    return nodes, edges
+
+
+async def _table_widget_graph(
+    db: AsyncSession,
+    table_id: uuid.UUID,
+    body: WidgetCreateRequest,
+    dashboard: Dashboard,
+    user: User,
+) -> tuple[list, list]:
+    """The graph of a table on a data table's rows, once the table and its columns check out."""
+    if body.chart_type != "table":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Only a table widget can show a data table's rows directly",
+        )
+    found = await get_data_table_with_permission(db, table_id, user.id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
+    if dashboard.owner_id != user.id and (
+        await get_data_table_with_permission(db, table_id, dashboard.owner_id) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The dashboard's owner cannot read this data table. Share it with them first.",
+        )
+    table, _ = found
+    known = {"id"} | {
+        str(column.get("name")) for column in table.columns or [] if isinstance(column, dict)
+    }
+    columns = list(dict.fromkeys(name for name in body.columns if name))
+    if not columns:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose at least one column for the table",
+        )
+    record_column = body.page_record_column or None
+    unknown = [name for name in [*columns, record_column] if name and name not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"The data table has no column named {', '.join(unknown)}",
+        )
+    return _data_table_widget_nodes(table.id, columns, record_column)
+
+
 def _clone_workflow_graph(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -295,7 +471,9 @@ def _clone_workflow_graph(
     return cloned_nodes, cloned_edges
 
 
-def _widget_to_response(widget: DashboardWidget) -> DashboardWidgetResponse:
+def _widget_to_response(
+    widget: DashboardWidget, reachable_links: set[uuid.UUID] | None = None
+) -> DashboardWidgetResponse:
     return DashboardWidgetResponse(
         id=widget.id,
         workflow_id=widget.workflow_id,
@@ -305,8 +483,50 @@ def _widget_to_response(widget: DashboardWidget) -> DashboardWidgetResponse:
         layout=widget.layout,
         cache_ttl_seconds=widget.cache_ttl_seconds,
         position=widget.position,
+        link_dashboard_id=widget.link_dashboard_id,
+        link_record_field=widget.link_record_field,
+        link_label_field=widget.link_label_field,
+        link_accessible=widget.link_dashboard_id is not None
+        and widget.link_dashboard_id in (reachable_links or set()),
         updated_at=widget.updated_at,
     )
+
+
+async def _reachable_links(
+    db: AsyncSession, widgets: list[DashboardWidget], user: User
+) -> set[uuid.UUID]:
+    """The row-link targets among ``widgets`` the caller can open."""
+    targets = {w.link_dashboard_id for w in widgets if w.link_dashboard_id is not None}
+    return await reachable_dashboard_ids(db, targets, user.id)
+
+
+async def _apply_row_link(
+    db: AsyncSession, widget: DashboardWidget, body: WidgetUpdateRequest, user: User
+) -> None:
+    """Set or clear a widget's row link; the editor must be able to open the target."""
+    if "link_dashboard_id" not in body.model_fields_set:
+        return
+    if body.link_dashboard_id is None:
+        widget.link_dashboard_id = None
+        widget.link_record_field = None
+        widget.link_label_field = None
+        return
+    record_field = (body.link_record_field or "").strip()
+    if not record_field:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A row link needs the column that holds the record",
+        )
+    target = (
+        await db.execute(select(Dashboard).where(Dashboard.id == body.link_dashboard_id))
+    ).scalar_one_or_none()
+    if target is None or await dashboard_permission(db, target, user.id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Linked dashboard not found"
+        )
+    widget.link_dashboard_id = target.id
+    widget.link_record_field = record_field
+    widget.link_label_field = (body.link_label_field or "").strip() or None
 
 
 async def _load_widget_for_user(
@@ -405,6 +625,44 @@ async def _apply_markdown_text_to_widget(
     return await compute_widget_data(db, widget, run_as_user_id, force=True)
 
 
+async def _file_run_workflow(
+    db: AsyncSession, workflow_id: uuid.UUID | None, dashboard: Dashboard, user: User
+) -> Workflow:
+    """The workflow a new run widget runs: one the creator and the owner can both run."""
+    if workflow_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A run widget needs a workflow",
+        )
+    workflow = await get_workflow_for_user(db, workflow_id, user.id)
+    if workflow is None or workflow.kind != "workflow":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    # Runs and drops happen with the dashboard owner's access, so the owner must reach it too.
+    if dashboard.owner_id != user.id and (
+        await get_workflow_for_user(db, workflow_id, dashboard.owner_id) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The dashboard owner cannot run this workflow",
+        )
+    return workflow
+
+
+async def _file_run_widget_data(
+    db: AsyncSession, widget: DashboardWidget, dashboard: Dashboard
+) -> WidgetDataResponse:
+    """A run widget never runs on load: it describes what the workflow takes."""
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    payload = run_widget_payload(workflow.nodes, workflow.edges) if workflow is not None else None
+    return WidgetDataResponse(
+        widget_id=widget.id,
+        payload=payload,
+        cached=False,
+        computed_at=None,
+        error=None if payload is not None else "This workflow is no longer available",
+    )
+
+
 def _widget_data_for(response: WidgetDataResponse, permission: str) -> WidgetDataResponse:
     # Highlights carry every node's raw output; a viewer was shared the chart, not those.
     if permission == PERMISSION_READ and response.highlight is not None:
@@ -483,11 +741,12 @@ async def get_dashboard(
         .where(DashboardWidget.dashboard_id == dashboard.id)
         .order_by(DashboardWidget.position)
     )
-    widgets = result.scalars().all()
+    widgets = list(result.scalars().all())
     summary = _dashboard_summary(dashboard, owner, permission)
+    reachable = await _reachable_links(db, widgets, current_user)
     return DashboardResponse(
         **summary.model_dump(),
-        widgets=[_widget_to_response(w) for w in widgets],
+        widgets=[_widget_to_response(w, reachable) for w in widgets],
     )
 
 
@@ -499,7 +758,10 @@ async def update_dashboard(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardSummaryResponse:
     dashboard = await _get_owned_dashboard(db, dashboard_id, current_user)
-    dashboard.name = body.name
+    if body.name is not None:
+        dashboard.name = body.name
+    if body.record_format is not None:
+        dashboard.record_format = body.record_format
     await db.commit()
     await db.refresh(dashboard)
     audit(
@@ -508,6 +770,7 @@ async def update_dashboard(
         target_type="dashboard",
         target_id=dashboard.id,
         target_name=dashboard.name,
+        record_format=dashboard.record_format,
     )
     return _dashboard_summary(dashboard, current_user, PERMISSION_OWNER)
 
@@ -570,17 +833,25 @@ async def create_widget(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
     dashboard, _ = await _get_dashboard_for_user(db, dashboard_id, current_user, write=True)
-    nodes, edges = _seed_widget_nodes(body.chart_type)
-    workflow = Workflow(
-        name=body.title,
-        description=body.description,
-        owner_id=dashboard.owner_id,
-        kind="dashboard_widget",
-        nodes=nodes,
-        edges=edges,
-    )
-    db.add(workflow)
-    await db.flush()
+    if body.chart_type == FILE_RUN_WIDGET_TYPE:
+        workflow = await _file_run_workflow(db, body.workflow_id, dashboard, current_user)
+    else:
+        if body.data_table_id is not None:
+            nodes, edges = await _table_widget_graph(
+                db, body.data_table_id, body, dashboard, current_user
+            )
+        else:
+            nodes, edges = _seed_widget_nodes(body.chart_type)
+        workflow = Workflow(
+            name=body.title,
+            description=body.description,
+            owner_id=dashboard.owner_id,
+            kind="dashboard_widget",
+            nodes=nodes,
+            edges=edges,
+        )
+        db.add(workflow)
+        await db.flush()
     widget = DashboardWidget(
         dashboard_id=dashboard.id,
         workflow_id=workflow.id,
@@ -618,20 +889,24 @@ async def clone_widget(
     """Clone a dashboard widget and its private workflow graph."""
     widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
     workflow = await _load_widget_workflow(db, widget)
-    cloned_nodes, cloned_edges = _clone_workflow_graph(
-        list(workflow.nodes or []), list(workflow.edges or [])
-    )
     clone_title = f"{widget.title[:248]} (Copy)"
-    cloned_workflow = Workflow(
-        name=clone_title,
-        description=workflow.description,
-        owner_id=dashboard.owner_id,
-        kind="dashboard_widget",
-        nodes=cloned_nodes,
-        edges=cloned_edges,
-    )
-    db.add(cloned_workflow)
-    await db.flush()
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        # The copy runs the same workflow; there is no widget graph to copy.
+        cloned_workflow = workflow
+    else:
+        cloned_nodes, cloned_edges = _clone_workflow_graph(
+            list(workflow.nodes or []), list(workflow.edges or [])
+        )
+        cloned_workflow = Workflow(
+            name=clone_title,
+            description=workflow.description,
+            owner_id=dashboard.owner_id,
+            kind="dashboard_widget",
+            nodes=cloned_nodes,
+            edges=cloned_edges,
+        )
+        db.add(cloned_workflow)
+        await db.flush()
 
     layout = copy.deepcopy(widget.layout or {"x": 0, "y": 0, "w": 4, "h": 4})
     layout["y"] = int(layout.get("y", 0)) + int(layout.get("h", 4))
@@ -644,6 +919,9 @@ async def clone_widget(
         layout=layout,
         cache_ttl_seconds=widget.cache_ttl_seconds,
         position=widget.position + 1,
+        link_dashboard_id=widget.link_dashboard_id,
+        link_record_field=widget.link_record_field,
+        link_label_field=widget.link_label_field,
     )
     db.add(cloned_widget)
     await db.commit()
@@ -658,7 +936,9 @@ async def clone_widget(
         widget_title=cloned_widget.title,
         cloned_from=widget.id,
     )
-    return _widget_to_response(cloned_widget)
+    return _widget_to_response(
+        cloned_widget, await _reachable_links(db, [cloned_widget], current_user)
+    )
 
 
 @router.patch("/widgets/{widget_id}", response_model=DashboardWidgetResponse)
@@ -681,6 +961,7 @@ async def update_widget(
         widget.layout = body.layout.model_dump()
     if body.cache_ttl_seconds is not None:
         widget.cache_ttl_seconds = body.cache_ttl_seconds
+    await _apply_row_link(db, widget, body, current_user)
 
     # Propagate title/description onto the widget's hidden workflow so the canvas reflects them.
     if sync_title or sync_description:
@@ -694,7 +975,7 @@ async def update_widget(
 
     await db.commit()
     await db.refresh(widget)
-    return _widget_to_response(widget)
+    return _widget_to_response(widget, await _reachable_links(db, [widget], current_user))
 
 
 @router.delete("/widgets/{widget_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -726,14 +1007,129 @@ async def delete_widget(
 async def get_widget_data(
     widget_id: uuid.UUID,
     force: bool = Query(default=False),
+    record: str | None = Query(default=None, max_length=MAX_RECORD_LENGTH),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WidgetDataResponse:
+    """The widget's chart; ``record`` is the detail page's ``?record=`` value."""
     widget, dashboard, permission = await _load_widget_for_user(
         db, widget_id, current_user, write=False
     )
-    response = await compute_widget_data(db, widget, dashboard.owner_id, force=force)
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        return await _file_run_widget_data(db, widget, dashboard)
+    # The record comes from a URL: check it before any workflow sees it.
+    if record is not None and not is_valid_record(record, dashboard.record_format):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="This page does not accept that record",
+        )
+    response = await compute_widget_data(db, widget, dashboard.owner_id, force=force, record=record)
     return _widget_data_for(response, permission)
+
+
+@router.post("/widgets/{widget_id}/run", response_model=WidgetRunResponse)
+async def run_widget(
+    widget_id: uuid.UUID,
+    body: WidgetRunRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WidgetRunResponse:
+    """Run a run widget's workflow with the values of its start fields, or with none.
+
+    Anyone who can open the dashboard may run it, as anyone may drop a file on a file
+    widget: access to the workflow is the dashboard owner's, and the run is the owner's.
+    Values for fields the workflow does not have are dropped.
+    """
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
+    if widget.chart_type != FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget does not run a workflow"
+        )
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This workflow is no longer available"
+        )
+    if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget takes a file"
+        )
+    fields = {field["key"] for field in start_input_fields(workflow.nodes, workflow.edges)}
+    values = {key: value for key, value in body.inputs.items() if key in fields}
+    result, history_entry = await run_widget_workflow(
+        db, workflow, dashboard.owner_id, {"headers": {}, "query": {}, "body": values}
+    )
+    return WidgetRunResponse(
+        run_id=history_entry.id if history_entry is not None else None,
+        status=str(result.status),
+        output=result.outputs if isinstance(result.outputs, dict) else {"result": result.outputs},
+    )
+
+
+@router.post("/widgets/{widget_id}/file-slot", response_model=FileRunSlotResponse)
+async def create_file_run_slot(
+    widget_id: uuid.UUID,
+    request: Request,
+    body: Annotated[FileRunSlotRequest | None, Body()] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileRunSlotResponse:
+    """Mint a single-use upload link for one drop on a file-run widget.
+
+    Anyone who can open the dashboard may drop a file, as anyone may refresh a chart:
+    access to the workflow is the dashboard owner's. The upload itself goes to the
+    file intake path in the link, which runs the workflow on the main instance. Values for
+    the workflow's text input fields travel on the slot, so the public upload cannot set them.
+    """
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
+    if widget.chart_type != FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This widget does not take files"
+        )
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    node = (
+        file_intake_service.find_file_upload_trigger(workflow.nodes or [])
+        if workflow is not None
+        else None
+    )
+    if workflow is None or node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This workflow no longer takes a file"
+        )
+    fields = {field["key"] for field in start_input_fields(workflow.nodes, workflow.edges)}
+    values = {key: value for key, value in (body.inputs if body else {}).items() if key in fields}
+    slot, token = await file_intake_service.mint_slot(
+        db,
+        workflow_id=workflow.id,
+        node=node,
+        created_by_user_id=current_user.id,
+        mint_source="dashboard",
+        initial_inputs=values,
+    )
+    await file_intake_service.write_audit(
+        db,
+        event="minted",
+        slot_id=slot.id,
+        workflow_id=workflow.id,
+        client_ip=get_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await db.commit()
+    payload = file_intake_service.build_mint_payload(
+        base_url=build_public_base_url(request),
+        token=token,
+        expires_at_iso=slot.expires_at.isoformat(),
+        max_size_bytes=slot.max_size_bytes,
+        allowed_mime=slot.allowed_mime,
+        slot_id=str(slot.id),
+    )
+    return FileRunSlotResponse(
+        upload_url=payload["upload_url"],
+        expires_at=payload["expires_at"],
+        max_size_mb=payload["max_size_mb"],
+        allowed_types=payload["allowed_types"],
+        slot_id=payload["slot_id"],
+    )
 
 
 @router.patch("/widgets/{widget_id}/markdown-task-toggle", response_model=WidgetDataResponse)
@@ -784,6 +1180,85 @@ async def update_markdown_task(
     )
 
 
+async def _table_contexts(
+    db: AsyncSession, table_ids: list[uuid.UUID], user_id: uuid.UUID, *, for_owner: bool = False
+) -> list[TableContext]:
+    """The data tables an AI widget request names, as `user_id` reads them."""
+    if not table_ids:
+        return []
+    try:
+        return await load_table_contexts(db, table_ids, user_id)
+    except TableUnavailableError as exc:
+        if for_owner:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The dashboard's owner cannot read this data table. Share it with them first.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found"
+        ) from exc
+
+
+@router.post("/ai-plan", response_model=AiPlanResponse)
+async def ai_plan_widgets(
+    body: AiPlanRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AiPlanResponse:
+    """Propose the widgets for a page described in a sentence or two.
+
+    Nothing is saved: the client shows the proposals, and builds the chosen ones with
+    ``ai-generate``, passing the same ``session_id``.
+    """
+    credential = await get_credential_for_user(body.credential_id, current_user, db)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    if credential.type not in LLM_CREDENTIAL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
+        )
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
+    proposals = await plan_dashboard_widgets(
+        body.description,
+        credential=credential,
+        model=body.model,
+        user=current_user,
+        session_id=body.session_id,
+        data_context=describe_tables(tables, with_data=True),
+    )
+    if not proposals:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The model proposed no widgets. Describe the page in other words.",
+        )
+    return AiPlanResponse(widgets=[_proposal_response(p) for p in proposals])
+
+
+def _proposal_response(proposal: WidgetProposal) -> WidgetProposalResponse:
+    """A planned widget as the API returns it, with its detail page's widgets."""
+    example = proposal.example
+    detail = proposal.detail
+    return WidgetProposalResponse(
+        title=proposal.title,
+        chart_type=proposal.chart_type,
+        prompt=proposal.prompt,
+        example=(
+            WidgetExampleResponse(labels=example.labels, values=example.values) if example else None
+        ),
+        detail=(
+            DetailPageProposalResponse(
+                title=detail.title,
+                record_field=detail.record_field,
+                label_field=detail.label_field,
+                widgets=[_proposal_response(widget) for widget in detail.widgets],
+            )
+            if detail
+            else None
+        ),
+    )
+
+
 @router.post(
     "/{dashboard_id}/widgets/ai-generate",
     response_model=DashboardWidgetResponse,
@@ -805,12 +1280,19 @@ async def ai_generate_widget(
             detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
         )
 
+    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
+    if dashboard.owner_id != current_user.id:
+        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=False)
+    detail = await _detail_page_context(db, dashboard, current_user)
     dsl = await generate_widget_dsl(
-        body.prompt,
+        "\n\n".join(part for part in (body.prompt, detail, context) if part),
         credential=credential,
         model=body.model,
         user=current_user,
         node_label="AI Widget Create",
+        session_id=body.session_id,
     )
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
@@ -870,7 +1352,12 @@ async def ai_refine_widget(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
-    widget, _, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A file-run widget runs an existing workflow; change it in the editor",
+        )
     credential = await get_credential_for_user(body.credential_id, current_user, db)
     if credential is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
@@ -893,8 +1380,13 @@ async def ai_refine_widget(
         "nodes": workflow.nodes,
         "edges": workflow.edges,
     }
+    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
+    if dashboard.owner_id != current_user.id:
+        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=True)
+    detail = await _detail_page_context(db, dashboard, current_user)
     dsl = await generate_widget_dsl(
-        body.prompt,
+        "\n\n".join(part for part in (body.prompt, detail, context) if part),
         credential=credential,
         model=body.model,
         user=current_user,
