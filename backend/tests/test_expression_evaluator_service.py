@@ -252,6 +252,32 @@ class TestIsTopLevelTernaryExpression(unittest.TestCase):
         self.assertFalse(is_top_level_ternary_expression("$a.n > 0 ? or : maybe", ex))
 
 
+class TestNestedTernaryExpression(unittest.TestCase):
+    """Nested ternaries in the true branch and parenthesised ternaries must be evaluated."""
+
+    CASES = [
+        ('$a.n > 1 ? $a.n > 5 ? "big" : "mid" : "small"', {"n": 10}, "big"),
+        ('$a.n > 1 ? $a.n > 5 ? "big" : "mid" : "small"', {"n": 3}, "mid"),
+        ('$a.n > 1 ? $a.n > 5 ? "big" : "mid" : "small"', {"n": 0}, "small"),
+        ('$a.x > 1 ? ($a.x > 10 ? "big" : "mid") : "small"', {"x": 5}, "mid"),
+        ('$a.n > 50 ? "x" : $a.n > 5 ? "big" : "mid"', {"n": 10}, "big"),
+    ]
+
+    def test_evaluator_service_resolves_nested_ternaries(self) -> None:
+        for expression, data, expected in self.CASES:
+            with self.subTest(expression=expression, data=data):
+                response = ExpressionEvaluatorService().evaluate(expression, {"a": data})
+                self.assertIsNone(response.error)
+                self.assertEqual(response.result, expected)
+
+    def test_executor_message_template_resolves_nested_ternaries(self) -> None:
+        for expression, data, expected in self.CASES:
+            with self.subTest(expression=expression, data=data):
+                executor = WorkflowExecutor(nodes=[], edges=[])
+                inputs = {"a": data}
+                self.assertEqual(executor.evaluate_message_template(expression, inputs), expected)
+
+
 class TestTernaryDialogExecutorParity(unittest.TestCase):
     """The evaluate dialog and the executor must return the same value for `$cond ? a : b`.
 

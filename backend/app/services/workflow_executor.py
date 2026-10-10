@@ -56,6 +56,7 @@ from app.services.execution_cancellation import (
 from app.services.expression_evaluator import (
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
+    strip_outer_parentheses,
 )
 from app.services.expression_evaluator import (
     is_top_level_ternary_expression as _is_top_level_ternary_expression,
@@ -6343,6 +6344,7 @@ class WorkflowExecutor:
         in_string = False
         string_char = ""
         colon_index = -1
+        nested_ternaries = 0
 
         for index in range(question_index + 1, len(expression)):
             char = expression[index]
@@ -6364,7 +6366,14 @@ class WorkflowExecutor:
                 depth -= 1
                 continue
 
+            if char == "?" and depth == 0:
+                nested_ternaries += 1
+                continue
+
             if char == ":" and depth == 0:
+                if nested_ternaries:
+                    nested_ternaries -= 1
+                    continue
                 colon_index = index
                 break
 
@@ -6380,6 +6389,9 @@ class WorkflowExecutor:
     def _transform_ternary_expression(self, expression: str) -> str:
         split = self._split_ternary_expression(expression)
         if not split:
+            inner = strip_outer_parentheses(expression)
+            if inner is not None:
+                return f"({self._transform_ternary_expression(inner)})"
             return expression
 
         condition, truthy, falsy = split
