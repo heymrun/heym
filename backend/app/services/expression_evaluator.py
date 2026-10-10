@@ -162,7 +162,7 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
 
         if char == "?" and depth == 0:
             next_char = expression[index + 1] if index + 1 < len(expression) else ""
-            if next_char in {".", "["}:
+            if next_char in {".", "[", "?"} or expression[index - 1 : index] == "?":
                 continue
             question_index = index
             break
@@ -174,6 +174,7 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
     in_string = False
     string_char = ""
     colon_index = -1
+    nested_ternaries = 0
 
     for index in range(question_index + 1, len(expression)):
         char = expression[index]
@@ -195,7 +196,16 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
             depth -= 1
             continue
 
+        if char == "?" and depth == 0:
+            next_char = expression[index + 1] if index + 1 < len(expression) else ""
+            if next_char not in {".", "[", "?"} and expression[index - 1] != "?":
+                nested_ternaries += 1
+            continue
+
         if char == ":" and depth == 0:
+            if nested_ternaries:
+                nested_ternaries -= 1
+                continue
             colon_index = index
             break
 
@@ -209,10 +219,39 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
     )
 
 
+def strip_outer_parentheses(expression: str) -> str | None:
+    """Return the inside of ``(...)`` when one pair of parentheses wraps the whole value."""
+    trimmed = expression.strip()
+    if not (trimmed.startswith("(") and trimmed.endswith(")")):
+        return None
+    depth = 0
+    in_string = False
+    string_char = ""
+    for index, char in enumerate(trimmed):
+        if in_string:
+            if char == string_char and trimmed[index - 1] != "\\":
+                in_string = False
+            continue
+        if char in ("'", '"'):
+            in_string = True
+            string_char = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0 and index != len(trimmed) - 1:
+                return None
+    return trimmed[1:-1]
+
+
 def _fallback_transform_ternary_expression(expression: str) -> str:
     """Convert JS-like ternary syntax into a Python expression for syntax validation."""
     split = _split_ternary_expression(expression)
     if not split:
+        inner = strip_outer_parentheses(expression)
+        if inner is not None:
+            transformed = _fallback_transform_ternary_expression(inner)
+            return f"({transformed})" if transformed != inner else expression
         return expression
 
     condition, truthy, falsy = split
