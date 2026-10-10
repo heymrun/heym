@@ -945,6 +945,32 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertEqual(response.result_type, "string")
         self.assertFalse(response.preserved_type)
 
+    def test_trailing_punctuation_after_reference_is_kept(self) -> None:
+        context = {"Order": {"name": "Bob", "total": 42, "items": ["x"]}}
+        cases = [
+            ("Your total is $Order.total.", "Your total is 42."),
+            ("Hello $Order.name, ok. Bye $Order.name.", "Hello Bob, ok. Bye Bob."),
+            ("Total ($Order.total).", "Total (42)."),
+            ("Total $Order.total, thanks", "Total 42, thanks"),
+            ("Got $Order.items[0].", "Got x."),
+            ("Done $Order.name.upper().", "Done BOB."),
+            ("Wait $Order.name...", "Wait Bob..."),
+            ("Bare $Order.", 'Bare {"name": "Bob", "total": 42, "items": ["x"]}.'),
+        ]
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        for template, expected in cases:
+            with self.subTest(template=template):
+                self.assertEqual(self._service().evaluate(template, context).result, expected)
+                self.assertEqual(
+                    executor.evaluate_message_template(template, context, "n"), expected
+                )
+
+    def test_has_arithmetic_ignores_sentence_period_before_operator_line(self) -> None:
+        ex = WorkflowExecutor(nodes=[], edges=[])
+        self.assertFalse(ex._has_arithmetic("Total: $Order.total.\n- item one"))
+        self.assertFalse(ex._has_arithmetic("Your total is $Order.total. - thanks"))
+        self.assertTrue(ex._has_arithmetic("$Order.total - 1"))
+
     def test_single_expr_array_preserved(self) -> None:
         response = self._service().evaluate("$data.items", {"data": {"items": [1, 2, 3]}})
         self.assertEqual(response.result, [1, 2, 3])
