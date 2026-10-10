@@ -55,6 +55,7 @@ from app.services.execution_cancellation import (
 )
 from app.services.expression_evaluator import (
     _is_single_dollar_expression,
+    _split_ternary_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
     strip_outer_parentheses,
 )
@@ -6309,89 +6310,15 @@ class WorkflowExecutor:
         return self._evaluator_functions_cache
 
     def _split_ternary_expression(self, expression: str) -> tuple[str, str, str] | None:
-        depth = 0
-        in_string = False
-        string_char = ""
-        question_index = -1
-
-        for index, char in enumerate(expression):
-            if in_string:
-                if char == string_char and expression[index - 1] != "\\":
-                    in_string = False
-                continue
-
-            if char in ("'", '"'):
-                in_string = True
-                string_char = char
-                continue
-
-            if char in "([{":
-                depth += 1
-                continue
-
-            if char in ")]}":
-                depth -= 1
-                continue
-
-            if char == "?" and depth == 0:
-                question_index = index
-                break
-
-        if question_index == -1:
-            return None
-
-        depth = 0
-        in_string = False
-        string_char = ""
-        colon_index = -1
-        nested_ternaries = 0
-
-        for index in range(question_index + 1, len(expression)):
-            char = expression[index]
-            if in_string:
-                if char == string_char and expression[index - 1] != "\\":
-                    in_string = False
-                continue
-
-            if char in ("'", '"'):
-                in_string = True
-                string_char = char
-                continue
-
-            if char in "([{":
-                depth += 1
-                continue
-
-            if char in ")]}":
-                depth -= 1
-                continue
-
-            if char == "?" and depth == 0:
-                nested_ternaries += 1
-                continue
-
-            if char == ":" and depth == 0:
-                if nested_ternaries:
-                    nested_ternaries -= 1
-                    continue
-                colon_index = index
-                break
-
-        if colon_index == -1:
-            return None
-
-        condition = expression[:question_index].strip()
-        truthy = expression[question_index + 1 : colon_index].strip()
-        falsy = expression[colon_index + 1 :].strip()
-
-        return condition, truthy, falsy
+        return _split_ternary_expression(expression)
 
     def _transform_ternary_expression(self, expression: str) -> str:
         split = self._split_ternary_expression(expression)
         if not split:
             inner = strip_outer_parentheses(expression)
             if inner is not None:
-                return f"({self._transform_ternary_expression(inner)})"
+                transformed = self._transform_ternary_expression(inner)
+                return f"({transformed})" if transformed != inner else expression
             return expression
 
         condition, truthy, falsy = split

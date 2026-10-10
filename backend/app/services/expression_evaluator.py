@@ -162,7 +162,7 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
 
         if char == "?" and depth == 0:
             next_char = expression[index + 1] if index + 1 < len(expression) else ""
-            if next_char in {".", "["}:
+            if next_char in {".", "[", "?"} or expression[index - 1 : index] == "?":
                 continue
             question_index = index
             break
@@ -198,7 +198,7 @@ def _split_ternary_expression(expression: str) -> tuple[str, str, str] | None:
 
         if char == "?" and depth == 0:
             next_char = expression[index + 1] if index + 1 < len(expression) else ""
-            if next_char not in {".", "["}:
+            if next_char not in {".", "[", "?"} and expression[index - 1] != "?":
                 nested_ternaries += 1
             continue
 
@@ -250,7 +250,8 @@ def _fallback_transform_ternary_expression(expression: str) -> str:
     if not split:
         inner = strip_outer_parentheses(expression)
         if inner is not None:
-            return f"({_fallback_transform_ternary_expression(inner)})"
+            transformed = _fallback_transform_ternary_expression(inner)
+            return f"({transformed})" if transformed != inner else expression
         return expression
 
     condition, truthy, falsy = split

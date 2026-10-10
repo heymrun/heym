@@ -12,6 +12,7 @@ from app.services.expression_evaluator import (
     ExpressionEvaluateResponse,
     ExpressionEvaluatorService,
     ExpressionTooLongError,
+    _split_ternary_expression,
     build_eval_context,
     build_vars_context,
     classify_type,
@@ -22,6 +23,7 @@ from app.services.expression_evaluator import (
     should_evaluate_as_multi_span_comparison_condition,
     should_evaluate_as_single_span_condition_tail,
     should_resolve_embedded_dollar_refs_arithmetically,
+    strip_outer_parentheses,
 )
 from app.services.expression_syntax import alias_reserved_context_names
 from app.services.workflow_executor import (
@@ -261,7 +263,34 @@ class TestNestedTernaryExpression(unittest.TestCase):
         ('$a.n > 1 ? $a.n > 5 ? "big" : "mid" : "small"', {"n": 0}, "small"),
         ('$a.x > 1 ? ($a.x > 10 ? "big" : "mid") : "small"', {"x": 5}, "mid"),
         ('$a.n > 50 ? "x" : $a.n > 5 ? "big" : "mid"', {"n": 10}, "big"),
+        ('$a.n > 1 ? "a?b:c" : "d"', {"n": 3}, "a?b:c"),
+        ('$a.n > 1 ? $a.n > 5 ? "big" : $a.n > 3 ? "m" : "mid" : "small"', {"n": 4}, "m"),
     ]
+
+    SPLIT_CASES = [
+        '$a.n > 1 ? $a.o?.p : "no"',
+        '$a.n > 1 ? $a.o?[0] : "no"',
+        '$a.n > 1 ? $a.o ?? "d" : "no"',
+        '$a.n > 1 ? "a?b:c" : "d"',
+    ]
+
+    def test_executor_split_matches_evaluator_split(self) -> None:
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        for expression in self.SPLIT_CASES:
+            with self.subTest(expression=expression):
+                split = executor._split_ternary_expression(expression)
+                self.assertIsNotNone(split)
+                self.assertEqual(split[0], "$a.n > 1")
+                self.assertEqual(split, _split_ternary_expression(expression))
+
+    def test_strip_outer_parentheses(self) -> None:
+        self.assertIsNone(strip_outer_parentheses("(a) + (b)"))
+        self.assertEqual(strip_outer_parentheses("((a))"), "(a)")
+        self.assertEqual(strip_outer_parentheses('("a)")'), '"a)"')
+
+    def test_non_ternary_parenthesised_expression_unchanged(self) -> None:
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        self.assertEqual(executor._transform_ternary_expression("(1+2)"), "(1+2)")
 
     def test_evaluator_service_resolves_nested_ternaries(self) -> None:
         for expression, data, expected in self.CASES:
