@@ -12,6 +12,7 @@ from app.services.expression_evaluator import (
     ExpressionEvaluateResponse,
     ExpressionEvaluatorService,
     ExpressionTooLongError,
+    _fallback_find_expressions,
     build_eval_context,
     build_vars_context,
     classify_type,
@@ -944,6 +945,25 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertEqual(response.result, "execute.outputs\nmore")
         self.assertEqual(response.result_type, "string")
         self.assertFalse(response.preserved_type)
+
+    def test_trailing_punctuation_after_reference_is_kept(self) -> None:
+        context = {"Order": {"name": "Bob", "total": 42}}
+        cases = [
+            ("Your total is $Order.total.", "Your total is 42."),
+            ("Hello $Order.name, ok. Bye $Order.name.", "Hello Bob, ok. Bye Bob."),
+            ("Total ($Order.total).", "Total (42)."),
+            ("Total $Order.total, thanks", "Total 42, thanks"),
+        ]
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        for template, expected in cases:
+            with self.subTest(template=template):
+                self.assertEqual(self._service().evaluate(template, context).result, expected)
+                self.assertEqual(
+                    executor.evaluate_message_template(template, context, "n"), expected
+                )
+                self.assertEqual(
+                    _fallback_find_expressions(template), executor._find_expressions(template)
+                )
 
     def test_single_expr_array_preserved(self) -> None:
         response = self._service().evaluate("$data.items", {"data": {"items": [1, 2, 3]}})

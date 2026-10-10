@@ -6991,7 +6991,15 @@ class WorkflowExecutor:
             if text[i] == "$" and (i + 1 < len(text)) and text[i + 1].isalpha():
                 start = i
                 i += 1
-                while i < len(text) and (text[i].isalnum() or text[i] in "_."):
+                while i < len(text) and (
+                    text[i].isalnum()
+                    or text[i] == "_"
+                    or (
+                        text[i] == "."
+                        and i + 1 < len(text)
+                        and (text[i + 1].isalnum() or text[i + 1] == "_")
+                    )
+                ):
                     i += 1
                 while i < len(text):
                     while i < len(text) and text[i] in "([":
@@ -7012,7 +7020,11 @@ class WorkflowExecutor:
                                         i += 1
                                     i += 1
                             i += 1
-                    if i < len(text) and text[i] == ".":
+                    if (
+                        i + 1 < len(text)
+                        and text[i] == "."
+                        and (text[i + 1].isalnum() or text[i + 1] == "_")
+                    ):
                         i += 1
                         while i < len(text) and (text[i].isalnum() or text[i] == "_"):
                             i += 1
