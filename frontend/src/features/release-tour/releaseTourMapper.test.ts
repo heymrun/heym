@@ -356,7 +356,6 @@ describe("shipped release registry", () => {
       "dashboard-hitl",
       "assistant-data-tables",
       "assistant-yolo-mode",
-      "dashboard-sharing",
     ]);
   });
 

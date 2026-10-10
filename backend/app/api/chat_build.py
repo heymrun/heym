@@ -66,6 +66,13 @@ from app.services.generated_data_tables import (
     parse_data_table_choices,
     requires_data_table_payload,
 )
+from app.services.skill_apply import (
+    FileEdit,
+    new_skill_workflow,
+    place_skill,
+    skill_write_instructions,
+)
+from app.services.skill_archive import SkillBundle, decode_zip_payload, read_zip
 from app.services.workflow_access import user_can_write_workflow
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 from app.services.workflow_save import (
@@ -132,6 +139,54 @@ RUN_WORKFLOW_TEST_TOOL_SCHEMA: dict[str, Any] = {
                 },
             },
             "required": ["inputs", "expect"],
+        },
+    },
+}
+
+APPLY_SKILL_TOOL = "apply_skill"
+
+APPLY_SKILL_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": APPLY_SKILL_TOOL,
+        "description": (
+            "Create or update an agent skill from the attached skill zip, or from file_edits. "
+            "The server keeps the files. Do not paste skill files into save_workflow."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {
+                    "type": "string",
+                    "description": "Workflow to update. Omit it to use this turn's target, or to create one.",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent that should receive a new skill when the workflow has several.",
+                },
+                "skill_name": {
+                    "type": "string",
+                    "description": (
+                        "Which skill in a zip of several, or the existing skill to patch when "
+                        "there is no zip."
+                    ),
+                },
+                "file_edits": {
+                    "type": "array",
+                    "description": (
+                        "Files to change. Path SKILL.md replaces the skill text. Other .md and "
+                        ".py paths replace or add that file. Omitted files stay."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["path", "content"],
+                    },
+                },
+            },
         },
     },
 }
@@ -214,6 +269,12 @@ class ChatBuildSession:
     async def prompt(self) -> str:
         """The build mode instructions and the Workflow DSL reference for this user."""
         target = await self._target_workflow()
+        skill_block = skill_write_instructions(
+            target.name if target is not None else None,
+            target.id if target is not None else None,
+        )
+        if self.request.skill_only:
+            return skill_block
         current_workflow = (
             {
                 "id": str(target.id),
@@ -253,26 +314,40 @@ class ChatBuildSession:
             target.name if target is not None else None,
             target.id if target is not None else None,
         )
-        return f"{instructions}\n## Workflow DSL reference\n\n{reference}"
+        return f"{instructions}\n{skill_block}\n## Workflow DSL reference\n\n{reference}"
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
         tools = [t for t in base_tools if t["function"]["name"] not in AI_BUILDER_TOOL_NAMES]
+        if self.request.skill_only:
+            return tools + [APPLY_SKILL_TOOL_SCHEMA]
         if not self.progress.budget_spent:
             return tools + [
+                APPLY_SKILL_TOOL_SCHEMA,
                 SAVE_WORKFLOW_TOOL_SCHEMA,
                 RUN_WORKFLOW_TEST_TOOL_SCHEMA,
                 FINISH_TOOL_SCHEMA,
             ]
         if self.progress.finish_refusal() is None:
-            return tools + [FINISH_TOOL_SCHEMA]
-        return tools
+            return tools + [APPLY_SKILL_TOOL_SCHEMA, FINISH_TOOL_SCHEMA]
+        return tools + [APPLY_SKILL_TOOL_SCHEMA]
 
     def handles(self, name: str) -> bool:
-        return name in BUILD_TOOL_NAMES
+        if self.request.skill_only:
+            return name == APPLY_SKILL_TOOL
+        return name in BUILD_TOOL_NAMES or name == APPLY_SKILL_TOOL
 
     def display_args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Arguments for the step row, the stored message and the trace, without the whole DSL."""
+        if name == APPLY_SKILL_TOOL:
+            edits = args.get("file_edits") if isinstance(args.get("file_edits"), list) else []
+            paths = [item.get("path") for item in edits if isinstance(item, dict)]
+            return {
+                "workflow_id": args.get("workflow_id"),
+                "agent_id": args.get("agent_id"),
+                "skill_name": args.get("skill_name"),
+                "files": paths,
+            }
         if name != SAVE_WORKFLOW_TOOL:
             return args
         workflow = args.get("workflow") if isinstance(args.get("workflow"), dict) else {}
@@ -285,6 +360,8 @@ class ChatBuildSession:
         }
 
     def step_label(self, name: str) -> str:
+        if name == APPLY_SKILL_TOOL:
+            return "Saving the skill..."
         if name == SAVE_WORKFLOW_TOOL:
             return "Saving the workflow..."
         if name == RUN_WORKFLOW_TEST_TOOL:
@@ -293,6 +370,10 @@ class ChatBuildSession:
         return "Finishing..."
 
     async def call(self, name: str, args: dict[str, Any]) -> BuildToolOutcome:
+        if name == APPLY_SKILL_TOOL:
+            return await self._apply_skill(args)
+        if self.request.skill_only:
+            return _error("This chat writes skills. It does not build other workflows.")
         if name == SAVE_WORKFLOW_TOOL:
             return await self._save(args)
         if name == RUN_WORKFLOW_TEST_TOOL:
@@ -435,6 +516,184 @@ class ChatBuildSession:
         }
         return BuildToolOutcome(result=result, summary=summary, status="success", events=[event])
 
+    def _attached_bundle(self, skill_name: str | None) -> SkillBundle | BuildToolOutcome | None:
+        """The skill in this turn's zip, or None when the zip is ordinary context."""
+        if self.attachment is None or self.attachment.kind != "zip":
+            return None
+        raw = decode_zip_payload(self.attachment.content)
+        if raw is None:
+            return _error("The zip could not be read.")
+        reading = read_zip(raw)
+        if not reading.skills:
+            return None
+        if len(reading.skills) == 1:
+            return reading.skills[0]
+        if skill_name:
+            matches = [
+                skill for skill in reading.skills if skill.name.casefold() == skill_name.casefold()
+            ]
+            if len(matches) == 1:
+                return matches[0]
+        names = ", ".join(skill.name for skill in reading.skills)
+        return BuildToolOutcome(
+            result=json.dumps(
+                {
+                    "status": "needs_choice",
+                    "message": f"The zip has several skills ({names}). Pass skill_name.",
+                    "skills": [skill.name for skill in reading.skills],
+                }
+            ),
+            summary="Needs a choice of skill",
+            status="pending",
+        )
+
+    def _file_edits(self, raw: object) -> list[FileEdit]:
+        if not isinstance(raw, list):
+            return []
+        edits: list[FileEdit] = []
+        for item in raw:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                edits.append(FileEdit(item["path"], str(item.get("content") or "")))
+        return edits
+
+    async def _apply_skill(self, args: dict[str, Any]) -> BuildToolOutcome:
+        skill_name = args.get("skill_name")
+        skill_name = (
+            skill_name.strip() if isinstance(skill_name, str) and skill_name.strip() else None
+        )
+        agent_raw = args.get("agent_id")
+        agent_id = agent_raw.strip() if isinstance(agent_raw, str) and agent_raw.strip() else None
+        bundle = self._attached_bundle(skill_name)
+        if isinstance(bundle, BuildToolOutcome):
+            return bundle
+        edits = self._file_edits(args.get("file_edits"))
+
+        requested = self._requested_workflow_id(args.get("workflow_id"))
+        if isinstance(requested, BuildToolOutcome):
+            return requested
+        workflow_id = requested or self.progress.workflow_id
+        existing: Workflow | None = None
+        if workflow_id is not None:
+            existing = await get_workflow_for_user(self.db, workflow_id, self.user.id)
+            if existing is None:
+                return _error("Workflow not found or no access")
+            if not await user_can_write_workflow(self.db, existing, self.user.id):
+                return _error("You have read-only access to this workflow")
+
+        if existing is None:
+            if bundle is None:
+                return _error(
+                    "Attach a skill zip to create a workflow, or name the workflow to update."
+                )
+            title, nodes, edges = new_skill_workflow(
+                bundle, str(self.selected_credential.id), self.model
+            )
+            if edits:
+                placed = place_skill(nodes, bundle, skill_name=bundle.name, edits=edits)
+                if placed.status != "saved" or placed.nodes is None:
+                    return _error(placed.message)
+                nodes = placed.nodes
+            return await self._persist_skill(None, title, nodes, edges)
+
+        placed = place_skill(
+            list(existing.nodes or []),
+            bundle,
+            agent_id=agent_id,
+            skill_name=bundle.name if bundle is not None else skill_name,
+            edits=edits,
+        )
+        if placed.status == "needs_choice":
+            return BuildToolOutcome(
+                result=json.dumps(
+                    {
+                        "status": "needs_choice",
+                        "message": placed.message,
+                        "agents": list(placed.agents),
+                    }
+                ),
+                summary="Needs a choice of agent",
+                status="pending",
+            )
+        if placed.status != "saved" or placed.nodes is None:
+            return _error(placed.message)
+        return await self._persist_skill(
+            existing, existing.name, placed.nodes, list(existing.edges or [])
+        )
+
+    async def _persist_skill(
+        self,
+        existing: Workflow | None,
+        name: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> BuildToolOutcome:
+        """Store a skill change through the same versioned save as the editor."""
+        if existing is not None and getattr(existing, "kind", "workflow") == "dashboard_widget":
+            blocked = dashboard_widget_blocked_nodes_error(nodes)
+            if blocked is not None:
+                return _error(blocked)
+        version_number: int | None = None
+        if existing is not None:
+            before = WorkflowSnapshot.capture(existing)
+            existing.nodes = nodes
+            existing.edges = edges
+            if before.nodes != nodes or before.edges != edges:
+                version_number = await add_workflow_version(self.db, existing, before, self.user.id)
+            workflow = existing
+        else:
+            workflow = Workflow(
+                id=uuid.uuid4(),
+                name=name,
+                description=f"Agent skill {name}.",
+                owner_id=self.user.id,
+                nodes=nodes,
+                edges=edges,
+            )
+            self.db.add(workflow)
+        await self.db.commit()
+        await self.db.refresh(workflow)
+        await announce_workflow_saved(workflow, self.user.id, created=existing is None)
+        audit(
+            action="workflow.update" if existing is not None else "workflow.create",
+            actor=self.user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            source="chat_skill",
+            versioned=version_number is not None,
+            nodes=len(workflow.nodes or []),
+        )
+        self.progress.record_save(workflow.id)
+        extra: dict[str, Any] = {}
+        if existing is None:
+            extra["version"] = 1
+        elif version_number is not None:
+            extra["version"] = version_number + 1
+        result = _build_saved_workflow_payload(
+            workflow,
+            nodes,
+            edges,
+            extract_input_fields_from_workflow(workflow),
+            {},
+            status_value="created" if existing is None else "saved",
+            extra=extra,
+        )
+        summary = (
+            f'Created "{workflow.name}"'
+            if existing is None
+            else f'Saved skill on "{workflow.name}"'
+        )
+        event = {
+            "type": "workflow_created",
+            "workflow_id": str(workflow.id),
+            "workflow_name": workflow.name,
+            "workflow_description": workflow.description,
+            "workflow_url": f"/workflows/{workflow.id}",
+            "nodes": nodes,
+            "edges": edges,
+        }
+        return BuildToolOutcome(result=result, summary=summary, status="success", events=[event])
+
     def _requested_workflow_id(self, raw: object) -> "uuid.UUID | BuildToolOutcome | None":
         """The workflow save_workflow should change, when the model names one."""
         if raw in (None, ""):
@@ -461,7 +720,7 @@ class ChatBuildSession:
         inputs = dict(args.get("inputs") or {}) if isinstance(args.get("inputs"), dict) else {}
         expect = str(args.get("expect") or "").strip()
         run_inputs = dict(inputs)
-        if self.attachment is not None:
+        if self.attachment is not None and self.attachment.kind != "zip":
             field_keys = [f.key for f in extract_input_fields_from_workflow(workflow)]
             inject_key = _find_injection_field(field_keys, self.attachment.kind)
             if inject_key:

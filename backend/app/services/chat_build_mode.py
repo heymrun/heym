@@ -36,9 +36,13 @@ BUDGET_SPENT_MESSAGE = (
 
 @dataclass(frozen=True)
 class BuildRequest:
-    """A turn that may build. `target_workflow_id` is the workflow an AI edit changes."""
+    """A turn that may build. `target_workflow_id` is the workflow an AI edit changes.
+
+    `skill_only` may create or update an agent skill and does not offer the other build tools.
+    """
 
     target_workflow_id: uuid.UUID | None = None
+    skill_only: bool = False
 
 
 @dataclass
@@ -177,6 +181,8 @@ def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None
         "turn resumes after the answers.",
         "- When the test budget is spent, stop and tell the user what still fails and what you "
         "would change.",
+        "- A skill zip or a change to an existing skill goes through apply_skill. That tool "
+        "keeps the skill files. Do not paste them into save_workflow.",
     ]
     if target_id is not None:
         lines += [

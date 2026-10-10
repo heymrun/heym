@@ -2,7 +2,7 @@ import { ref } from "vue";
 
 export interface AttachedFile {
   name: string;
-  kind: "text" | "image" | "pdf";
+  kind: "text" | "image" | "pdf" | "zip";
   mimeType: string;
   content: string;
   sizeKb: number;
@@ -26,12 +26,16 @@ const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image
 const MAX_TEXT_BYTES = 500 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
+const MAX_ZIP_BYTES = 8 * 1024 * 1024;
 const MAX_CONTENT_CHARS = 100_000;
 
-function detectKind(file: File): "text" | "image" | "pdf" | null {
+function detectKind(file: File): "text" | "image" | "pdf" | "zip" | null {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "zip" || file.type === "application/zip" || file.type === "application/x-zip-compressed") {
+    return "zip";
+  }
   if (file.type === "application/pdf") return "pdf";
   if (IMAGE_MIME_TYPES.has(file.type)) return "image";
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (TEXT_EXTENSIONS.has(ext)) return "text";
   return null;
 }
@@ -90,7 +94,13 @@ export function useFileAttachment() {
       return;
     }
     const maxBytes =
-      kind === "image" ? MAX_IMAGE_BYTES : kind === "pdf" ? MAX_PDF_BYTES : MAX_TEXT_BYTES;
+      kind === "image"
+        ? MAX_IMAGE_BYTES
+        : kind === "pdf"
+          ? MAX_PDF_BYTES
+          : kind === "zip"
+            ? MAX_ZIP_BYTES
+            : MAX_TEXT_BYTES;
     if (file.size > maxBytes) {
       const maxMb = maxBytes / (1024 * 1024);
       attachmentError.value = `File too large (max ${maxMb} MB)`;
@@ -100,7 +110,7 @@ export function useFileAttachment() {
     attachmentLoading.value = true;
     try {
       let content: string;
-      if (kind === "image") {
+      if (kind === "image" || kind === "zip") {
         content = await readFileAsDataURL(file);
       } else if (kind === "pdf") {
         content = await extractPdfText(file);

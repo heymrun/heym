@@ -98,7 +98,7 @@ class ConversationDetailResponse(BaseModel):
 
 class ChatFileAttachment(BaseModel):
     name: str
-    kind: Literal["text", "image", "pdf"]
+    kind: Literal["text", "image", "pdf", "zip"]
     content: str
 
 
@@ -111,9 +111,16 @@ class MessageCreate(BaseModel):
         default=False,
         description="Chat build mode: the turn may save, test-run and finish workflows.",
     )
+    allow_skill_write: bool = Field(
+        default=False,
+        description=(
+            "The turn may create or update an agent skill. It does not enable the rest of "
+            "build mode."
+        ),
+    )
     target_workflow_id: uuid.UUID | None = Field(
         default=None,
-        description="The workflow an AI edit changes. Needs allow_build and write access.",
+        description="The workflow an AI edit changes. Needs allow_build or allow_skill_write.",
     )
 
 

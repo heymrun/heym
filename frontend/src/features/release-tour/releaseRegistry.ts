@@ -17,6 +17,47 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.19",
+    publishedAt: new Date("2026-10-10T18:00:00Z"),
+    headline: "Drop a skill zip in Chat",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["skill-zip"],
+    },
+    sections: [
+      {
+        id: "skill-zip",
+        title: "Drop a skill zip in Chat",
+        publishedAt: new Date("2026-10-10T18:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Chat accepts a **zip**. When the archive contains a **SKILL.md**, and any Python files beside it, Chat can put that skill on an agent. A zip without a skill file stays in the conversation as context.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Ask Chat to change a skill it already saved. It updates the named files and leaves the rest, including Python it did not rewrite, where it is. With a workflow selected, the skill lands there. Otherwise Chat starts a workflow with one agent that carries the skill.",
+          },
+        ],
+        tour: {
+          description: "Attach a skill zip in Chat and Heym puts it on an agent.",
+          useCases: [
+            "Drop a skill folder zipped with SKILL.md and a Python file",
+            "Ask Chat to rewrite the skill text without losing the Python",
+            "Start a new workflow whose agent carries the skill",
+          ],
+          tourVisual: "skill-zip",
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.18",
     publishedAt: new Date("2026-10-03T12:00:00Z"),
     headline: "Switch a node back on from inside a workflow",
@@ -179,58 +220,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "ai-assistant",
             title: "AI Assistant",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.15",
-    publishedAt: new Date("2026-09-23T00:00:00Z"),
-    headline: "Keep several dashboards and share them with your team",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["dashboard-sharing"],
-    },
-    sections: [
-      {
-        id: "dashboard-sharing",
-        title: "Keep several dashboards and share them with your team",
-        publishedAt: new Date("2026-09-24T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The **Dashboard** tab now holds as many dashboards as you need. Switch between them from the selector at the top of the tab, or create one with **+**. The tab reopens the dashboard you used last, and the address bar links to the exact dashboard on screen.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Share a dashboard with people or teams from its **settings**. **Read** lets them view and refresh the charts. **Write** also lets them add, change and delete widgets and open a widget's workflow. Widgets always run with the owner's credentials, so teammates see the same data without needing access to the accounts behind it.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "**Add widget** now draws an example of the chart type you pick, with sample data, so you can see how a proportion or bar gauge chart will look before you build it.",
-          },
-        ],
-        tour: {
-          description:
-            "Keep several dashboards, switch between them, and share each one read-only or editable.",
-          useCases: [
-            "Keep a separate dashboard per team, product or customer",
-            "Give stakeholders a read-only view that runs with your credentials",
-            "Preview how a chart type looks before adding the widget",
-          ],
-          tourVisual: "dashboard-sharing",
-          docTarget: {
-            categoryId: "tabs",
-            slug: "dashboard-tab",
-            title: "Dashboard",
           },
         },
       },

@@ -101,7 +101,7 @@ Every model request to OpenCode must include a nonempty `x-opencode-session` hea
 - When adding a new LLM call path or changing a coding-agent SDK/CLI integration, verify that the outgoing OpenCode model requests carry this header with the correct session scope. Add regression coverage for stable follow-ups, distinct new conversations, and the nonempty fallback. Preserve the shared client's Heym User-Agent and SSRF protection.
 
 ### Chat build mode
-A dashboard chat turn that carries `allow_build` (Heym Work's Chat, MCP `heym_chat`) may save, test-run and finish workflows. Heym's own Chat tab does not set it.
+A dashboard chat turn that carries `allow_build` (Heym Work's Chat, MCP `heym_chat`) may save, test-run and finish workflows. Heym's own Chat tab does not set it. Heym's own Chat does set `allow_skill_write`, which offers only `apply_skill`: a skill zip or a file edit can create or update an agent skill, and the other build tools stay off.
 
 - `backend/app/services/chat_build_mode.py` holds the rules (test budget, finish, run report, instructions); `backend/app/api/chat_build.py` runs `save_workflow`, `run_workflow_test` and `finish` for one turn.
 - `MAX_BUILD_TEST_RUNS` equals the editor's `MAX_YOLO_ATTEMPTS` (`yoloProtocol.ts`); change both together.

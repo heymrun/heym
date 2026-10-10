@@ -2096,6 +2096,10 @@ class DashboardChatQueueItem(Base):
     allow_build: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # A queued skill turn can write an agent skill without the rest of build mode.
+    allow_skill_write: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     build_target_workflow_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, default=None
     )

@@ -206,8 +206,8 @@ class AnalyzeWorkflowRequest(BaseModel):
 
 class FileAttachment(BaseModel):
     name: str
-    kind: Literal["text", "image", "pdf"]
-    content: str  # plain text for text/pdf, base64 data URL for images
+    kind: Literal["text", "image", "pdf", "zip"]
+    content: str  # plain text for text/pdf, base64 data URL for images and zips
 
 
 class DashboardChatRequest(BaseModel):
@@ -410,6 +410,15 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
     """
     if attachment is None:
         return {"role": "user", "content": message}
+    if attachment.kind == "zip":
+        from app.services.skill_archive import decode_zip_payload, prompt_for_zip, read_zip
+
+        raw = decode_zip_payload(attachment.content)
+        if raw is None:
+            body = f"{message}\n\n[ATTACHED ZIP: {attachment.name}]\nThe zip could not be read."
+        else:
+            body = f"{message}\n\n{prompt_for_zip(attachment.name, read_zip(raw))}"
+        return {"role": "user", "content": body}
     if attachment.kind == "image":
         embedded = (
             f"{message}\n\n"

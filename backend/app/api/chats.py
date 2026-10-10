@@ -582,15 +582,23 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
         )
         db.add(user_message)
         await db.flush()
+        if item.allow_build:
+            queued_build: BuildRequest | None = BuildRequest(
+                target_workflow_id=item.build_target_workflow_id
+            )
+        elif item.allow_skill_write:
+            queued_build = BuildRequest(
+                target_workflow_id=item.build_target_workflow_id, skill_only=True
+            )
+        else:
+            queued_build = None
         turn = ChatTurn(
             content=item.content,
             credential_id=item.credential_id,
             model=item.model,
             attachment_data=dict(item.attachment) if isinstance(item.attachment, dict) else None,
             should_generate_title=False,
-            build=BuildRequest(target_workflow_id=item.build_target_workflow_id)
-            if item.allow_build
-            else None,
+            build=queued_build,
         )
         queued_item_id = item.id
         await db.delete(item)
@@ -1120,12 +1128,13 @@ async def _resolve_build_request(
     db: AsyncSession, user_id: uuid.UUID, body: MessageCreate
 ) -> BuildRequest | None:
     """The turn's build mode, after checking that an AI edit target is writable."""
-    if body.target_workflow_id is not None and not body.allow_build:
+    skill_only = body.allow_skill_write and not body.allow_build
+    if body.target_workflow_id is not None and not body.allow_build and not body.allow_skill_write:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="target_workflow_id needs allow_build",
+            detail="target_workflow_id needs allow_build or allow_skill_write",
         )
-    if not body.allow_build:
+    if not body.allow_build and not body.allow_skill_write:
         return None
     if body.target_workflow_id is not None:
         workflow = await get_workflow_for_user(db, body.target_workflow_id, user_id)
@@ -1136,7 +1145,7 @@ async def _resolve_build_request(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You have read-only access to this workflow",
             )
-    return BuildRequest(target_workflow_id=body.target_workflow_id)
+    return BuildRequest(target_workflow_id=body.target_workflow_id, skill_only=skill_only)
 
 
 @router.post(
@@ -1184,7 +1193,8 @@ async def send_message(
             credential_id=credential.id,
             model=body.model,
             attachment=attachment_data,
-            allow_build=build is not None,
+            allow_build=build is not None and not build.skill_only,
+            allow_skill_write=build is not None and build.skill_only,
             build_target_workflow_id=build.target_workflow_id if build is not None else None,
             created_at=queued_at,
             updated_at=queued_at,

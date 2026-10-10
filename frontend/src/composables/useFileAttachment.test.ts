@@ -65,6 +65,21 @@ function mockPdf(pagesText: string[]) {
   });
 }
 
+describe("processFile - zip", () => {
+  it("keeps a zip as a data URL so the server can unpack it", async () => {
+    const { processFile, attachedFile, attachmentError } = useFileAttachment();
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "skill.zip", {
+      type: "application/zip",
+    });
+
+    await processFile(file);
+
+    expect(attachmentError.value).toBeNull();
+    expect(attachedFile.value?.kind).toBe("zip");
+    expect(attachedFile.value?.content.startsWith("data:")).toBe(true);
+  });
+});
+
 describe("processFile - unsupported/oversized files", () => {
   it("sets an error for an unsupported file type, without reading it", async () => {
     const FileReaderSpy = vi.fn();

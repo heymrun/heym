@@ -1240,7 +1240,7 @@ onUnmounted(() => {
       <input
         ref="fileInputRef"
         type="file"
-        accept=".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf"
+        accept=".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf,.zip"
         class="hidden"
         @change="handleFileInputChange"
       >

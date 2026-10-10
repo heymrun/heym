@@ -2253,7 +2253,7 @@ export interface FixTranscriptionResponse {
 
 export interface FileAttachmentPayload {
   name: string;
-  kind: "text" | "image" | "pdf";
+  kind: "text" | "image" | "pdf" | "zip";
   content: string;
 }
 
@@ -3742,6 +3742,7 @@ export const chatApi = {
       content,
       credential_id: credentialId,
       model,
+      allow_skill_write: true,
       ...(attachment ? { attachment } : {}),
     });
     return response.data;
