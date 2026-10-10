@@ -54,6 +54,8 @@ from app.models.schemas import (
     HistoryListResponse,
     InputFieldSchema,
     OutputNodeSchema,
+    PendingReviewSeedRequest,
+    PendingReviewSeedResponse,
     RevertVersionRequest,
     WorkflowCreate,
     WorkflowExecuteResponse,
@@ -112,6 +114,7 @@ from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
+    seed_pending_workflow_review,
 )
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
@@ -4444,6 +4447,48 @@ async def execute_workflow_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/{workflow_id}/pending-review", response_model=PendingReviewSeedResponse)
+async def seed_workflow_pending_review(
+    workflow_id: uuid.UUID,
+    body: PendingReviewSeedRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PendingReviewSeedResponse:
+    """Leave one review waiting on this workflow, without running it.
+
+    A second call while that review still waits returns the same run.
+    """
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await require_workflow_write(db, workflow, current_user.id)
+    review, created = await seed_pending_workflow_review(
+        db,
+        workflow,
+        owner_id=current_user.id,
+        summary=body.summary,
+        draft_text=body.draft_text,
+        trigger_source=body.trigger_source,
+        inputs=body.inputs,
+    )
+    await db.commit()
+    if created:
+        audit(
+            action="workflow.seed_pending_review",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=str(review.execution_history_id),
+            owner_id=str(workflow.owner_id),
+        )
+    return PendingReviewSeedResponse(
+        request_id=review.id,
+        execution_history_id=review.execution_history_id,
+        status="pending",
     )
 
 

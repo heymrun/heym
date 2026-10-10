@@ -450,6 +450,137 @@ async def get_hitl_request_by_token(db: AsyncSession, token: str) -> HITLRequest
     return hitl_request
 
 
+def _hitl_agent_node(workflow: Workflow) -> tuple[str, str]:
+    """The id and label of the agent step that waits for a person."""
+    nodes = workflow.nodes if isinstance(workflow.nodes, list) else []
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("type") != "agent":
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if not data.get("hitlEnabled"):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if node_id:
+            return node_id, str(data.get("label") or "Review")
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="This workflow has no step waiting for a person",
+    )
+
+
+def _close_seeded_review(
+    history_entry: ExecutionHistory, hitl_request: HITLRequest, snapshot: dict
+) -> None:
+    """Finish a planted review from its decision. There is no agent left to resume."""
+    if hitl_request.decision == "refuse":
+        history_entry.status = "error"
+        history_entry.outputs = {"error": hitl_request.refusal_reason or "Refused"}
+    else:
+        label = str(snapshot.get("paused_node_label") or hitl_request.agent_label)
+        text = (hitl_request.edited_text or hitl_request.original_draft_text or "").strip()
+        history_entry.status = "success"
+        history_entry.outputs = {label: {"text": text}}
+    flag_modified(history_entry, "outputs")
+
+
+async def seed_pending_workflow_review(
+    db: AsyncSession,
+    workflow: Workflow,
+    *,
+    owner_id: uuid.UUID,
+    summary: str,
+    draft_text: str,
+    trigger_source: str | None,
+    inputs: dict,
+) -> tuple[HITLRequest, bool]:
+    """Leave one review waiting on `workflow`, without running it.
+
+    A review already waiting is returned as it is, so a second call does not add another.
+    The history row is pending, which is what the inbox, the active-run list and a menu
+    badge count. `created` is false when an existing review was returned.
+    """
+    now = datetime.now(timezone.utc)
+    existing = (
+        await db.execute(
+            select(HITLRequest)
+            .where(
+                HITLRequest.workflow_id == workflow.id,
+                HITLRequest.status == "pending",
+                HITLRequest.expires_at > now,
+            )
+            .order_by(HITLRequest.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing, False
+
+    node_id, label = _hitl_agent_node(workflow)
+    expires_at = now + timedelta(hours=HITL_TTL_HOURS)
+    history_entry = ExecutionHistory(
+        workflow_id=workflow.id,
+        inputs=inputs,
+        outputs={},
+        node_results=[],
+        status="pending",
+        execution_time_ms=0,
+        trigger_source=trigger_source,
+        started_at=now,
+    )
+    db.add(history_entry)
+    await db.flush()
+
+    hitl_request = HITLRequest(
+        workflow_id=workflow.id,
+        execution_history_id=history_entry.id,
+        public_token=secrets.token_urlsafe(32),
+        workflow_name=workflow.name,
+        agent_node_id=node_id,
+        agent_label=label,
+        summary=summary,
+        original_draft_text=draft_text,
+        original_agent_output={"text": draft_text},
+        resolved_output={},
+        execution_snapshot={
+            "seeded_review": True,
+            "credentials_owner_id": str(owner_id),
+            "actor_user_id": str(owner_id),
+            "trace_user_id": str(owner_id),
+            "trigger_source": trigger_source,
+            "paused_node_id": node_id,
+            "paused_node_label": label,
+        },
+        status="pending",
+        expires_at=expires_at,
+    )
+    db.add(hitl_request)
+    await db.flush()
+
+    review_url = build_review_url(build_default_public_base_url(), hitl_request.public_token)
+    pending_payload = {
+        "decision": None,
+        "summary": summary,
+        "draftText": draft_text,
+        "reviewUrl": review_url,
+        "requestId": str(hitl_request.id),
+        "expiresAt": expires_at.isoformat(),
+    }
+    history_entry.outputs = {label: pending_payload}
+    history_entry.node_results = [
+        {
+            "node_id": node_id,
+            "node_label": label,
+            "node_type": "agent",
+            "status": "pending",
+            "output": pending_payload,
+            "execution_time_ms": 0,
+        }
+    ]
+    flag_modified(history_entry, "outputs")
+    flag_modified(history_entry, "node_results")
+    return hitl_request, True
+
+
 async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
     async with async_session_maker() as db:
         result = await db.execute(select(HITLRequest).where(HITLRequest.id == request_id))
@@ -465,6 +596,11 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
             return
 
         snapshot = copy.deepcopy(hitl_request.execution_snapshot or {})
+        if snapshot.get("seeded_review"):
+            # Planted for a demo: there is no paused agent to resume.
+            _close_seeded_review(history_entry, hitl_request, snapshot)
+            await db.commit()
+            return
         credentials_owner_value = snapshot.get("credentials_owner_id")
         trigger_source = snapshot.get("trigger_source")
         effective_trigger_source = trigger_source or history_entry.trigger_source

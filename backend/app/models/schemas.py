@@ -1420,6 +1420,21 @@ class HITLInboxLinkResponse(BaseModel):
     url: str
 
 
+class PendingReviewSeedRequest(BaseModel):
+    """A review planted on a workflow without running it."""
+
+    summary: str = Field(min_length=1, max_length=2000)
+    draft_text: str = Field(min_length=1)
+    trigger_source: str | None = Field(default=None, max_length=50)
+    inputs: dict = Field(default_factory=dict)
+
+
+class PendingReviewSeedResponse(BaseModel):
+    request_id: uuid.UUID
+    execution_history_id: uuid.UUID
+    status: str
+
+
 class CodexFollowupPublicResponse(BaseModel):
     request_id: uuid.UUID
     workflow_name: str
