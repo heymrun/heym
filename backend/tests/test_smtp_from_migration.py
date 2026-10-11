@@ -6,7 +6,11 @@ from pathlib import Path
 from types import ModuleType
 
 import sqlalchemy as sa
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
+from app.config import settings
 from app.services.encryption import decrypt_config, encrypt_config
 
 _MIGRATION_PATH = (
@@ -116,6 +120,63 @@ class SmtpFromMigrationTests(unittest.TestCase):
 
         self.assertEqual(decrypt_config(self._ciphertext("a")), self._smtp_config())
         self.assertEqual(decrypt_config(self._ciphertext("b")), self._smtp_config())
+
+
+class SmtpFromMigrationFreshDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    """A fresh database runs the whole migration chain in one transaction.
+
+    Migration 009 adds 'smtp' to credential_type inside that transaction, and PostgreSQL
+    rejects any use of a new enum value until the transaction that added it has committed.
+    An existing database has 009 committed long ago, so only a fresh one (CI, a new install)
+    hits this. The SQLite tests above cannot see it, so this one adds the value and runs the
+    data step in one PostgreSQL transaction, then rolls the transaction back.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self.engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        try:
+            async with self.engine.connect() as conn:
+                await conn.execute(sa.text("SELECT 1"))
+        except Exception:
+            await self.engine.dispose()
+            self.skipTest("PostgreSQL database is not reachable")
+        self.migration = _load_migration()
+
+    async def asyncTearDown(self) -> None:
+        await self.engine.dispose()
+
+    async def test_data_step_runs_in_the_transaction_that_added_the_enum_value(self) -> None:
+        openai_cipher = encrypt_config({"api_key": "sk-test"})
+
+        def add_value_then_rewrite(conn: Connection) -> str:
+            conn.execute(sa.text("CREATE TYPE smtp_from_probe_type AS ENUM ('openai')"))
+            conn.execute(
+                sa.text(
+                    "CREATE TEMP TABLE credentials (id text PRIMARY KEY, "
+                    "type smtp_from_probe_type NOT NULL, encrypted_config text NOT NULL) "
+                    "ON COMMIT DROP"
+                )
+            )
+            conn.execute(
+                sa.text("INSERT INTO credentials VALUES ('o', 'openai', :config)"),
+                {"config": openai_cipher},
+            )
+            conn.execute(sa.text("ALTER TYPE smtp_from_probe_type ADD VALUE 'smtp'"))
+
+            self.migration.rewrite_smtp_configs(conn, self.migration.add_smtp_from)
+
+            return conn.execute(
+                sa.text("SELECT encrypted_config FROM credentials WHERE id = 'o'")
+            ).scalar_one()
+
+        async with self.engine.connect() as conn:
+            transaction = await conn.begin()
+            try:
+                untouched = await conn.run_sync(add_value_then_rewrite)
+            finally:
+                await transaction.rollback()
+
+        self.assertEqual(untouched, openai_cipher)
 
 
 if __name__ == "__main__":

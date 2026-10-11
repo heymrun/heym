@@ -32,9 +32,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def rewrite_smtp_configs(conn: Connection, transform: Callable[[dict], bool]) -> None:
-    """Apply ``transform`` to every SMTP config; write back the ones it reports changed."""
+    """Apply ``transform`` to every SMTP config; write back the ones it reports changed.
+
+    The type is compared as text on purpose. A fresh database runs every migration in one
+    transaction, and 009 adds 'smtp' to the credential_type enum inside it; PostgreSQL
+    rejects the bare 'smtp' literal (an enum input) until the transaction that added the
+    value has committed.
+    """
     rows = conn.execute(
-        sa.text("SELECT id, encrypted_config FROM credentials WHERE type = 'smtp'")
+        sa.text("SELECT id, encrypted_config FROM credentials WHERE CAST(type AS TEXT) = 'smtp'")
     ).fetchall()
     for row_id, ciphertext in rows:
         try:

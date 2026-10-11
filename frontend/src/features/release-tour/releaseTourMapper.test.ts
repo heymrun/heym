@@ -352,6 +352,8 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "heym-work",
+      "skill-zip",
       "enable-node",
       "dashboard-hitl",
       "assistant-data-tables",
