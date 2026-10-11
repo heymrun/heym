@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { ExternalLink, Globe, X } from "lucide-vue-next";
 
+import { heymWebBase } from "@/lib/heymWeb";
 import { useThemeStore } from "@/stores/theme";
 
 interface Props {
@@ -15,18 +16,7 @@ const themeStore = useThemeStore();
 
 const iframeLoaded = ref(false);
 
-const fallback = "https://heym.run";
-const raw = import.meta.env.VITE_HEYM_WEB_URL?.trim() ?? "";
-let base = raw || fallback;
-if (import.meta.env.PROD && raw) {
-  try {
-    const { hostname } = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    if (hostname === "localhost" || hostname === "127.0.0.1") base = fallback;
-  } catch {
-    base = fallback;
-  }
-}
-const baseUrl = base.replace(/\/$/, "");
+const baseUrl = heymWebBase();
 const templatesPageUrl = `${baseUrl}/templates`;
 const templatesBrowseIframeSrc = computed(() => {
   const params = new URLSearchParams({ theme: themeStore.isDark ? "dark" : "light" });

@@ -4,7 +4,7 @@ The Settings dialog lets you manage your profile, set persistent AI instructions
 
 ## Opening the Dialog
 
-Click **your avatar and name** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**. Instance administrators also see an **SSO** tab.
+Click **your avatar and name** in the top-right of the header. The dialog opens with these tabs: **Profile**, **Security**, **Voice**, **AI Defaults**, and **Observability**. Instance administrators also see the **SSO**, **Heym Work** and **Instances** tabs.
 
 ## Profile Tab
 
@@ -101,6 +101,10 @@ The Observability tab shows the read-only status of [OpenTelemetry Tracing](./op
 ## SSO Tab
 
 Visible only to instance administrators — the accounts listed in `HEYM_ADMIN_EMAILS`. This tab connects Heym to an external OpenID Connect provider so people sign in with the accounts they already have. Enter an issuer URL and client credentials, copy the read-only redirect URI into your provider, and run **Test connection** before enabling it. Password sign-in can be switched off from here once the test passes. See [Single Sign-On](./sso.md) for the full setup.
+
+## Heym Work Tab
+
+Instance administrators connect [Heym Work](./heym-work.md), the interface for business teams, here: its address, an integration key shown once, and the **Enable Heym Work** switch. The tab also shows when Heym Work last checked in, its version and its license status. See [Connecting Heym Work](./heym-work.md#connecting-heym-work).
 
 ## Instances Tab
 

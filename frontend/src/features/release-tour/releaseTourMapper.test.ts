@@ -355,7 +355,6 @@ describe("shipped release registry", () => {
       "enable-node",
       "dashboard-hitl",
       "assistant-data-tables",
-      "assistant-yolo-mode",
     ]);
   });
 
@@ -368,13 +367,23 @@ describe("shipped release registry", () => {
       section.tour ? [section.tour] : [],
     );
 
-    expect(tours.map((tour) => tour.tourVisual)).toContain("assistant-yolo-mode");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("heym-work");
     expect(tours.map((tour) => tour.tourVisual)).toContain("assistant-data-tables");
     expect(tours.map((tour) => tour.tourVisual)).toContain("enable-node");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();
     }
+  });
+
+  it("carries the Heym Work slide's link to heym.run", () => {
+    const entry = RELEASE_REGISTRY.find((release) =>
+      release.sections.some((section) => section.id === "heym-work"),
+    );
+    if (!entry) throw new Error("the Heym Work section is missing from the registry");
+    const slide = buildTourSlides(entry).find((item) => item.id === "heym-work");
+    expect(slide?.externalLink).toEqual({ url: "/enterprise", title: "Learn more on heym.run" });
+    expect(slide?.docTarget).toMatchObject({ categoryId: "reference", slug: "heym-work" });
   });
 
   it("resolves every registry slide to a registered visual", () => {

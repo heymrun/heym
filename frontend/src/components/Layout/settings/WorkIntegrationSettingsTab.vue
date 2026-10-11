@@ -14,6 +14,9 @@ import {
   rotateWorkIntegrationKey,
   saveWorkIntegrationConfig,
 } from "@/services/workIntegration";
+import { heymWebUrl } from "@/lib/heymWeb";
+
+const enterpriseUrl = heymWebUrl("/enterprise");
 
 const config = ref<WorkIntegrationConfig | null>(null);
 const workUrl = ref("");
@@ -104,6 +107,12 @@ onMounted(load);
     <p class="text-sm text-muted-foreground">
       Heym Work is a second interface for business teams. People sign in through Heym, and every
       job runs here.
+      <a
+        :href="enterpriseUrl"
+        target="_blank"
+        rel="noopener"
+        class="font-medium text-primary hover:underline dark:text-brand-primary-soft"
+      >Learn more about Heym Work</a>
     </p>
 
     <p

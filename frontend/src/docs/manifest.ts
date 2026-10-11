@@ -144,6 +144,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "integrations", title: "Third-Party Integrations" },
       { slug: "guardrails", title: "Guardrails" },
       { slug: "enterprise", title: "Enterprise" },
+      { slug: "heym-work", title: "Heym Work" },
     ],
   },
   tabs: {

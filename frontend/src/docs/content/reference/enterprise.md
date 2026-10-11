@@ -16,6 +16,10 @@ Heym is free to use and self-host under its source-available license. For organi
 | **Priority Support & SLA** | Guaranteed response times and priority issue resolution |
 | **Custom Development** | Feature development and modifications tailored to your organization's requirements |
 
+## Heym Work
+
+[Heym Work](./heym-work.md) is the interface for business teams that runs on top of Heym. People describe a job, answer a few questions and get a tested workflow, work from pages built for them, and answer reviews, with single sign-on, Owner, Editor and Viewer roles, and a name on every run. It runs next to your Heym with its own license; connect it in **Settings → Heym Work**. Learn more and request a trial at [heym.run/enterprise](https://heym.run/enterprise).
+
 ## Production Agent Support
 
 The Heym team helps you design, build, and harden agents and workflows for your business processes. This includes reviewing your requirements, recommending node configurations, and making sure your workflows follow best practices for reliability, observability, and governance.
@@ -68,3 +72,4 @@ Reach the enterprise team at **enterprise@heym.run** for licensing inquiries, pr
 - [Parallel Execution](./parallel-execution.md) — Multi-worker execution model
 - [Teams](./teams.md) — Team collaboration and resource sharing
 - [Full Feature Set](./features.md) — Complete overview of Heym capabilities
+- [Heym Work](./heym-work.md): the interface for business teams, and how to connect it

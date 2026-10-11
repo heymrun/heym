@@ -37,6 +37,7 @@ function toSlide(section: ReleaseSection, releasePublishedAt: Date): ReleaseTour
     tourVisual: section.tour.tourVisual,
     publishedAt: section.publishedAt ?? releasePublishedAt,
     docTarget: section.tour.docTarget,
+    externalLink: section.tour.externalLink,
   };
 }
 

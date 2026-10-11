@@ -701,6 +701,12 @@ Enterprise covers commercial licensing, professional support, and deployment ser
 
 See also [Running & Deployment](../getting-started/running-and-deployment.md), [Security](./security.md), and [Teams](./teams.md).
 
+### [Heym Work](./heym-work.md)
+
+Heym Work is a second interface for business teams on top of Heym. People describe a job, answer a few questions and get a tested workflow, then work from pages, approvals and an Activity list where every run carries a name. Instance administrators connect it in **Settings → Heym Work** with its address and an integration key; it has its own license from the Heym team.
+
+See also [Enterprise](./enterprise.md), [Single Sign-On](./sso.md), and [Human-in-the-Loop](./human-in-the-loop.md).
+
 ---
 
 ## Dashboard Tabs

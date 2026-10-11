@@ -5,6 +5,7 @@ import {
   BarChart3,
   BellRing,
   BookOpen,
+  Briefcase,
   CalendarDays,
   Database,
   FlaskConical,
@@ -29,6 +30,7 @@ import {
 
 import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
 import type { WorkflowListItem } from "@/types/workflow";
+import { heymWebUrl } from "@/lib/heymWeb";
 
 import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
 import { getAllDocItems } from "@/docs/manifest";
@@ -59,6 +61,9 @@ const TABS = [
   { id: "logs", label: "Logs", icon: Terminal },
 ] as const;
 
+/** Words that bring up the Heym Work item, which opens heym.run/enterprise. */
+const ENTERPRISE_KEYWORDS = ["heym work", "work", "enterprise", "business", "license"];
+
 type PaletteItemType =
   | "history"
   | "tab"
@@ -68,6 +73,7 @@ type PaletteItemType =
   | "node-template"
   | "documentation"
   | "support"
+  | "enterprise"
   | "runbook";
 
 interface PaletteItem {
@@ -81,6 +87,7 @@ interface PaletteItem {
     | typeof Trash2
     | typeof LayoutTemplate
     | typeof LifeBuoy
+    | typeof Briefcase
     | typeof Play;
   /** True only when `icon` is a brand tile that should take the whole icon box. */
   iconFillsTile?: boolean;
@@ -383,6 +390,21 @@ const categoryGroups = computed((): CategoryGroup[] => {
     });
   }
 
+  if (!q || ENTERPRISE_KEYWORDS.some((keyword) => keyword.includes(q))) {
+    groups.push({
+      id: "enterprise",
+      label: "Heym Work",
+      items: [
+        {
+          type: "enterprise" as const,
+          id: "enterprise",
+          label: "Heym Work (Enterprise)",
+          icon: Briefcase,
+        },
+      ],
+    });
+  }
+
   return groups;
 });
 
@@ -508,6 +530,9 @@ function handleSelectItem(
   } else if (item.type === "support") {
     window.location.href = "mailto:support@heym.run";
     emit("close");
+  } else if (item.type === "enterprise") {
+    window.open(heymWebUrl("/enterprise"), "_blank", "noopener");
+    emit("close");
   } else {
     emit("select", item.id, event);
   }
@@ -625,11 +650,13 @@ onUnmounted(() => {
                                   ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
                                   : item.type === 'support'
                                     ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                                    : item.type === 'runbook'
-                                      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
-                                      : item.workflow?.scheduled_for_deletion
-                                        ? 'bg-destructive/10 text-destructive'
-                                        : 'bg-primary/10 text-primary'
+                                    : item.type === 'enterprise'
+                                      ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                                      : item.type === 'runbook'
+                                        ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                                        : item.workflow?.scheduled_for_deletion
+                                          ? 'bg-destructive/10 text-destructive'
+                                          : 'bg-primary/10 text-primary'
                     )"
                   >
                     <div
@@ -712,6 +739,12 @@ onUnmounted(() => {
                       class="text-xs text-muted-foreground mt-0.5"
                     >
                       Get help from the Heym team
+                    </div>
+                    <div
+                      v-else-if="item.type === 'enterprise'"
+                      class="text-xs text-muted-foreground mt-0.5"
+                    >
+                      Heym Work for business teams, on heym.run
                     </div>
                   </div>
                 </div>

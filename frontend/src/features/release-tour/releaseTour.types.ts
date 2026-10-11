@@ -5,11 +5,18 @@ export interface ReleaseSectionBlock {
   markdown: string;
 }
 
+/** A page outside the app; a path such as "/enterprise" is resolved against heym.run. */
+export interface ReleaseExternalLink {
+  url: string;
+  title: string;
+}
+
 export interface ReleaseSectionTour {
   description: string;
   useCases: string[];
   tourVisual: string;
   docTarget?: ShowcaseDocTarget;
+  externalLink?: ReleaseExternalLink;
 }
 
 export interface ReleaseSection {
@@ -47,6 +54,7 @@ export interface ReleaseTourSlide {
   tourVisual: string;
   publishedAt: Date;
   docTarget?: ShowcaseDocTarget;
+  externalLink?: ReleaseExternalLink;
 }
 
 /** Runtime shape the popup consumes; built from a `ReleaseEntry` by the mapper. */
