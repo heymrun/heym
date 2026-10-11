@@ -92,8 +92,45 @@ class TestSmtpCredentialMerge(unittest.TestCase):
         )
         self.assertEqual(merged["smtp_password"], "new-password")
 
+    def test_blank_smtp_from_clears_the_stored_sender(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.smtp,
+            {**self._full_config(), "smtp_from": "team@corp.example.com"},
+            {"smtp_from": "  "},
+        )
+        self.assertEqual(merged["smtp_from"], "")
+        self.assertEqual(merged["smtp_email"], "alerts@corp.example.com")
+
+    def test_omitted_smtp_from_keeps_the_stored_sender(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.smtp,
+            {**self._full_config(), "smtp_from": "team@corp.example.com"},
+            {"smtp_server": "smtp2.corp.example.com", "smtp_password": ""},
+        )
+        self.assertEqual(merged["smtp_from"], "team@corp.example.com")
+
+    def test_sent_smtp_from_is_stored_stripped(self) -> None:
+        merged = merge_credential_config_for_update(
+            CredentialType.smtp,
+            self._full_config(),
+            {"smtp_from": " team@corp.example.com "},
+        )
+        self.assertEqual(merged["smtp_from"], "team@corp.example.com")
+        self.assertEqual(merged["smtp_email"], "alerts@corp.example.com")
+
 
 class TestSmtpCredentialValidation(unittest.TestCase):
+    def test_accepts_config_without_smtp_from(self) -> None:
+        validate_credential_config(
+            CredentialType.smtp,
+            {
+                "smtp_server": "smtp.corp.example.com",
+                "smtp_port": "587",
+                "smtp_email": "alerts@corp.example.com",
+                "smtp_password": "secret",
+            },
+        )
+
     def test_rejects_missing_required_field(self) -> None:
         for missing in ("smtp_server", "smtp_port", "smtp_email", "smtp_password"):
             config = {
@@ -116,6 +153,7 @@ class TestSmtpCredentialPublicFields(unittest.TestCase):
                 "smtp_port": "587",
                 "smtp_email": "alerts@corp.example.com",
                 "smtp_password": "secret",
+                "smtp_from": "team@corp.example.com",
             },
         )
         self.assertEqual(
@@ -124,9 +162,23 @@ class TestSmtpCredentialPublicFields(unittest.TestCase):
                 "smtp_server": "smtp.corp.example.com",
                 "smtp_port": "587",
                 "smtp_email": "alerts@corp.example.com",
+                "smtp_from": "team@corp.example.com",
             },
         )
         self.assertNotIn("smtp_password", fields)
+
+    def test_missing_smtp_from_is_returned_as_none(self) -> None:
+        fields = get_public_credential_fields(
+            CredentialType.smtp,
+            {
+                "smtp_server": "smtp.corp.example.com",
+                "smtp_port": "587",
+                "smtp_email": "alerts@corp.example.com",
+                "smtp_password": "secret",
+            },
+        )
+        self.assertIn("smtp_from", fields)
+        self.assertIsNone(fields["smtp_from"])
 
 
 class TestRedisCredentialMerge(unittest.TestCase):

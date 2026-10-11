@@ -228,6 +228,9 @@ def merge_credential_config_for_update(
         incoming_password = str(incoming_config.get("smtp_password", "") or "").strip()
         if incoming_password:
             merged_config["smtp_password"] = incoming_password
+        # Blank clears the visible sender; an absent key (older clients) keeps it.
+        if "smtp_from" in incoming_config:
+            merged_config["smtp_from"] = str(incoming_config.get("smtp_from") or "").strip()
         return merged_config
 
     if credential_type == CredentialType.redis:
@@ -603,6 +606,7 @@ def get_public_credential_fields(
             "smtp_server": str(config.get("smtp_server", "")).strip() or None,
             "smtp_port": str(config.get("smtp_port", "")).strip() or None,
             "smtp_email": str(config.get("smtp_email", "")).strip() or None,
+            "smtp_from": str(config.get("smtp_from") or "").strip() or None,
         }
     if credential_type == CredentialType.redis:
         return {

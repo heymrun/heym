@@ -39,6 +39,7 @@ def _run_send_email(
     owner_id: uuid.UUID,
     db_mock: MagicMock,
     file_bytes: bytes = b"PDFDATA",
+    extra_smtp_config: dict | None = None,
 ) -> tuple[dict, MagicMock]:
     """Run the workflow; return (sendEmail node_result, captured SMTP server mock).
 
@@ -75,6 +76,7 @@ def _run_send_email(
                 "smtp_port": 587,
                 "smtp_email": "sender@test.com",
                 "smtp_password": "pw",
+                **(extra_smtp_config or {}),
             },
         ),
         patch("smtplib.SMTP", return_value=smtp_cm),
@@ -100,6 +102,49 @@ def _sent_message(smtp_server: MagicMock):
     args = smtp_server.sendmail.call_args
     from_addr, to_addrs, raw = args.args
     return to_addrs, message_from_string(raw)
+
+
+class SendEmailFromHeaderTests(unittest.TestCase):
+    """smtp_from sets the visible From header; login and envelope stay smtp_email."""
+
+    def _send(self, extra_smtp_config: dict) -> tuple[MagicMock, object]:
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "to": "a@x.com",
+                "subject": "Hi",
+                "emailBody": "Body text",
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+            extra_smtp_config=extra_smtp_config,
+        )
+        self.assertEqual(nr["status"], "success")
+        self.assertNotIn("from", nr["output"])
+        _, msg = _sent_message(server)
+        return server, msg
+
+    def _assert_signs_in_as_username(self, server: MagicMock) -> None:
+        server.login.assert_called_once_with("sender@test.com", "pw")
+        self.assertEqual(server.sendmail.call_args.args[0], "sender@test.com")
+
+    def test_blank_smtp_from_uses_smtp_email(self) -> None:
+        for label, extra in (
+            ("missing", {}),
+            ("empty", {"smtp_from": ""}),
+            ("whitespace", {"smtp_from": "   "}),
+            ("null", {"smtp_from": None}),
+        ):
+            with self.subTest(smtp_from=label):
+                server, msg = self._send(extra)
+                self.assertEqual(msg["From"], "sender@test.com")
+                self._assert_signs_in_as_username(server)
+
+    def test_set_smtp_from_becomes_the_from_header(self) -> None:
+        server, msg = self._send({"smtp_from": " team@test.com "})
+        self.assertEqual(msg["From"], "team@test.com")
+        self._assert_signs_in_as_username(server)
 
 
 class SendEmailCcBccTests(unittest.TestCase):

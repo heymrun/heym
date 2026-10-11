@@ -626,8 +626,14 @@ The SMTP credential stores email server connection details for sending outgoing 
 |-------|-------------|
 | `host` | SMTP server hostname (e.g. `smtp.gmail.com`) |
 | `port` | SMTP port (typically `587` for STARTTLS, `465` for SSL) |
-| `email` | Sender email address |
+| `email` | Username the SMTP server signs in with; also the visible sender when `from` is blank |
 | `password` | SMTP password or App Password |
+
+### Optional Fields
+
+| Field | Description |
+|-------|-------------|
+| `from` (`smtp_from`) | Visible From address. Leave blank to send as `email`. The server still signs in as `email`, so that account must be allowed to send as this address (in Gmail, a verified **Send mail as** alias). |
 
 ### Common SMTP Providers
 

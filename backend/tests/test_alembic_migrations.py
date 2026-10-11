@@ -15,7 +15,19 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["135_add_file_upload_slot_inputs"])
+        self.assertEqual(self.script.get_heads(), ["137_add_smtp_from_key"])
+
+    def test_smtp_from_key_follows_chat_skill_write(self) -> None:
+        revision = self.script.get_revision("137_add_smtp_from_key")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "136_add_chat_skill_write")
+
+    def test_chat_skill_write_follows_file_upload_slot_inputs(self) -> None:
+        revision = self.script.get_revision("136_add_chat_skill_write")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "135_add_file_upload_slot_inputs")
 
     def test_file_upload_slot_inputs_follow_dashboard_widget_links(self) -> None:
         revision = self.script.get_revision("135_add_file_upload_slot_inputs")

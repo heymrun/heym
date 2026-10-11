@@ -244,6 +244,7 @@ export interface CredentialConfigSmtp {
   smtp_port: string;
   smtp_email: string;
   smtp_password: string;
+  smtp_from?: string;
 }
 
 export interface CredentialConfigRedis {

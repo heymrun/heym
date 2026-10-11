@@ -31,7 +31,7 @@ inaccessible ID fails the node rather than sending a partial email.
 
 ## Setup
 
-Add an SMTP credential with server, port, email, and password. Common SMTP servers:
+Add an SMTP credential with server, port, email, and password. The visible sender is the credential's optional **From**; a blank From sends as the username. Common SMTP servers:
 
 - Gmail: `smtp.gmail.com`, port 587 (App Password required)
 - Outlook: `smtp.office365.com`, port 587

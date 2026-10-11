@@ -54,6 +54,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     smtp_port = int(smtp_config.get("smtp_port", 587))
     smtp_email = smtp_config.get("smtp_email", "")
     smtp_password = smtp_config.get("smtp_password", "")
+    smtp_from = str(smtp_config.get("smtp_from") or "").strip()
 
     missing_fields = [
         name
@@ -71,7 +72,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Email recipient (to) is required")
 
     msg = MIMEMultipart("mixed")
-    msg["From"] = smtp_email
+    msg["From"] = smtp_from or smtp_email
     msg["To"] = to_address
     if cc_address:
         msg["Cc"] = cc_address

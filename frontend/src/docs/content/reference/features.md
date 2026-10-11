@@ -260,7 +260,7 @@ Pairs with [Discord Trigger](../nodes/discord-trigger-node.md), [Output](../node
 
 #### [Send Email](../nodes/send-email-node.md)
 
-The Send Email node sends emails via SMTP. Configure an SMTP [credential](./credentials.md) and [Expression DSL](./expression-dsl.md) expressions for recipient(s), subject, and body. Use it for notifications, alerts, and transactional emails. Output includes status, to, and subject.
+The Send Email node sends emails via SMTP. Configure an SMTP [credential](./credentials.md) and [Expression DSL](./expression-dsl.md) expressions for recipient(s), subject, and body. The credential's optional **From** (`smtp_from`) sets the visible sender; when blank, mail is sent as the credential's username, which is always the account that signs in. Use it for notifications, alerts, and transactional emails. Output includes status, to, and subject.
 
 The [IMAP Trigger](../nodes/imap-trigger-node.md) complements Send Email by handling inbound mail. Together they let a workflow read incoming email from a shared inbox, summarize or classify it with AI nodes, and send a follow-up or escalation message. The [Telegram Trigger](../nodes/telegram-trigger-node.md) and [Telegram node](../nodes/telegram-node.md) provide the same inbound/outbound pattern for bot-driven chat workflows.
 
