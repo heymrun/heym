@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import delete, exists, select, text, update
+from sqlalchemy.exc import StatementError
 
 from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ClusterDispatchState, WorkflowRunQueue
@@ -45,6 +46,7 @@ class QueuedRun:
     test_run: bool
     timeout_seconds: float | None
     return_on_chart_output: bool
+    trace_context: dict[str, str] | None = None
 
 
 def next_status(*, target_instance_id: str | None) -> str:
@@ -68,6 +70,7 @@ def build_queue_values(
         "target_instance_id": target_instance_id,
         "status": next_status(target_instance_id=target_instance_id),
         "inputs": run.inputs,
+        "trace_context": run.trace_context,
         "trigger_source": run.trigger_source,
         "actor_user_id": run.actor_user_id,
         "credentials_owner_id": run.credentials_owner_id,
@@ -123,9 +126,14 @@ async def enqueue(run: QueuedRun) -> str | None:
     values = build_queue_values(
         run, target_instance_id=target, grace_seconds=settings.cron_misfire_grace_seconds
     )
-    async with async_session_maker() as db:
-        await db.execute(WorkflowRunQueue.__table__.insert().values(**values))
-        await db.commit()
+    try:
+        async with async_session_maker() as db:
+            await db.execute(WorkflowRunQueue.__table__.insert().values(**values))
+            await db.commit()
+    except StatementError as error:
+        # Hide the carrier from SQLAlchemy's exception parameter display.
+        error.hide_parameters = True
+        raise
     return target
 
 

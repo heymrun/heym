@@ -92,8 +92,13 @@ Heym follows the [W3C Trace Context](https://www.w3.org/TR/trace-context/) stand
 - **Inbound webhooks:** when an incoming request carries a `traceparent` header, the workflow run is recorded as a child of that trace. This links Heym runs to the upstream system that triggered them.
 - **Outbound HTTP:** the HTTP node injects `traceparent` into requests it makes, so downstream services can continue the same trace.
 - **Sub-workflows:** a sub-workflow run is parented to the node that invoked it, preserving the call hierarchy in one trace.
+- **Cluster run queue:** when a run is offloaded to another instance, its workflow span continues the active parent trace across the PostgreSQL queue. Enable tracing on both the dispatching and executing instances. Valid unsampled parents keep their sampling decision.
 
 Triggers without an inbound context (such as Cron, IMAP, RabbitMQ, and WebSocket) start a fresh trace per run.
+
+Queue rows store only bounded `traceparent` and optional `tracestate` fields in a separate nullable column, never in workflow inputs. Baggage and other request headers are not copied. An old row or invalid parent starts a fresh trace; invalid or oversized `tracestate` is discarded without losing a valid parent. Each field is limited to 512 characters. Propagation helpers do not log carrier contents, and enqueue failures hide SQL parameter values.
+
+Apply the database migration before starting the updated instances, following the [cluster upgrade procedure](./cluster.md). Existing queue rows need no backfill. Propagation covers the initial queued execution; it does not add continuity across recovery or human-approval resume, or extend the existing spans around background `allowDownstream` work.
 
 ## Reliability
 

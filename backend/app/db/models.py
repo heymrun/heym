@@ -2595,6 +2595,9 @@ class WorkflowRunQueue(Base):
     target_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     inputs: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    trace_context: Mapped[dict[str, str] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
     trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     credentials_owner_id: Mapped[uuid.UUID | None] = mapped_column(

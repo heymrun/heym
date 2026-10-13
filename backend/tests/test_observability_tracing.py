@@ -10,7 +10,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
-from opentelemetry import trace
+from opentelemetry import baggage, trace
+from opentelemetry import context as otel_context
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -79,6 +80,198 @@ class _EnabledTracingTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         tracing._provider = None
         trace._TRACER_PROVIDER = self._saved_global
+
+
+class QueueTraceContextTest(_EnabledTracingTestBase):
+    def test_round_trip_preserves_sampled_and_unsampled_parents_without_baggage(self) -> None:
+        for flags in (0, 1):
+            with self.subTest(flags=flags):
+                parent = trace.SpanContext(
+                    trace_id=0x1234,
+                    span_id=0x5678,
+                    is_remote=False,
+                    trace_flags=trace.TraceFlags(flags),
+                    trace_state=trace.TraceState([("vendor", "value")]),
+                )
+                producer = trace.set_span_in_context(trace.NonRecordingSpan(parent))
+                producer = baggage.set_baggage("private", "do-not-propagate", context=producer)
+                token = otel_context.attach(producer)
+                try:
+                    carrier = tracing.capture_queue_context()
+                finally:
+                    otel_context.detach(token)
+                self.assertEqual(
+                    carrier,
+                    {
+                        "traceparent": f"00-{parent.trace_id:032x}-{parent.span_id:016x}-{flags:02x}",
+                        "tracestate": "vendor=value",
+                    },
+                )
+                consumer = baggage.set_baggage("worker", "also-private")
+                token = otel_context.attach(consumer)
+                try:
+                    attached = tracing.attach_queue_context(carrier)
+                    try:
+                        restored = trace.get_current_span().get_span_context()
+                        self.assertEqual(restored.trace_id, parent.trace_id)
+                        self.assertEqual(restored.span_id, parent.span_id)
+                        self.assertEqual(restored.trace_flags, parent.trace_flags)
+                        self.assertEqual(restored.trace_state, parent.trace_state)
+                        self.assertTrue(restored.is_remote)
+                        self.assertEqual(dict(baggage.get_all()), {})
+                    finally:
+                        tracing.detach_queue_context(attached)
+                    self.assertIs(otel_context.get_current(), consumer)
+                finally:
+                    otel_context.detach(token)
+
+    def test_disabled_capture_and_attach_do_not_consult_propagator(self) -> None:
+        current = otel_context.get_current()
+        with (
+            patch.object(tracing, "_provider", None),
+            patch.object(tracing, "TraceContextTextMapPropagator") as propagator,
+        ):
+            self.assertIsNone(tracing.capture_queue_context())
+            self.assertIsNone(tracing.attach_queue_context({"traceparent": "invalid"}))
+            tracing.detach_queue_context(None)
+            propagator.assert_not_called()
+        self.assertIs(otel_context.get_current(), current)
+
+    def test_no_active_parent_produces_no_carrier(self) -> None:
+        token = otel_context.attach(otel_context.Context())
+        try:
+            self.assertIsNone(tracing.capture_queue_context())
+        finally:
+            otel_context.detach(token)
+
+    def test_absent_or_malformed_parent_never_inherits_worker_context(self) -> None:
+        invalid = [
+            None,
+            [],
+            "invalid",
+            {},
+            {"traceparent": None},
+            {"traceparent": ["invalid"]},
+            {"traceparent": "00-" + "0" * 32 + "-0000000000000001-01"},
+            {"traceparent": "00-" + "1" * 32 + "-0000000000000000-01"},
+            {"traceparent": "ff-" + "1" * 32 + "-0000000000000001-01"},
+            {"traceparent": "00-" + "1" * 32 + "-0000000000000001-01-extra"},
+            {"traceparent": "x" * 513},
+        ]
+        with tracing.get_tracer().start_as_current_span("worker"):
+            worker = otel_context.get_current()
+            for carrier in invalid:
+                with self.subTest(carrier=carrier):
+                    token = tracing.attach_queue_context(carrier)
+                    try:
+                        self.assertFalse(trace.get_current_span().get_span_context().is_valid)
+                    finally:
+                        tracing.detach_queue_context(token)
+                    self.assertIs(otel_context.get_current(), worker)
+
+    def test_invalid_tracestate_keeps_parent_and_never_logs_untrusted_content(self) -> None:
+        parent = "00-00000000000000000000000000001234-0000000000005678-01"
+        invalid = [
+            "PRIVATE_SENTINEL",
+            "vendor=PRIVATE_SENTINEL=secret",
+            "vendor=value\nPRIVATE_SENTINEL",
+            "vendor=one,vendor=PRIVATE_SENTINEL",
+            "vendor=" + "x" * 257,
+            "k" * 257 + "=x",
+            ",".join(f"k{i}=x" for i in range(33)),
+            "x" * 513,
+            ["PRIVATE_SENTINEL"],
+            {"private": "PRIVATE_SENTINEL"},
+        ]
+        for state in invalid:
+            with self.subTest(state=state), self.assertNoLogs(level="WARNING"):
+                token = tracing.attach_queue_context(
+                    {"traceparent": parent, "tracestate": state, "baggage": "PRIVATE_SENTINEL"}
+                )
+                try:
+                    context = trace.get_current_span().get_span_context()
+                    self.assertEqual(context.trace_id, 0x1234)
+                    self.assertEqual(context.span_id, 0x5678)
+                    self.assertEqual(len(context.trace_state), 0)
+                    self.assertEqual(dict(baggage.get_all()), {})
+                finally:
+                    tracing.detach_queue_context(token)
+
+    def test_valid_tracestate_and_size_boundaries(self) -> None:
+        parent = "00-00000000000000000000000000001234-0000000000005678-00"
+        at_limit = "a=" + "x" * 256 + ",b=" + "y" * 251
+        self.assertEqual(len(at_limit), 512)
+        for raw, expected in (
+            ("vendor=value, 1tenant@vendor=opaque\t", "vendor=value,1tenant@vendor=opaque"),
+            (at_limit, at_limit),
+            (at_limit + "y", ""),
+        ):
+            with self.subTest(raw=raw):
+                token = tracing.attach_queue_context({"traceparent": parent, "tracestate": raw})
+                try:
+                    context = trace.get_current_span().get_span_context()
+                    self.assertEqual(context.trace_id, 0x1234)
+                    self.assertEqual(context.trace_state.to_header(), expected)
+                    self.assertFalse(context.trace_flags.sampled)
+                finally:
+                    tracing.detach_queue_context(token)
+        # Future W3C versions may extend traceparent; let the SDK interpret them.
+        future = "01" + parent[2:] + "-" + "x" * 456
+        self.assertEqual(len(future), 512)
+        for raw, valid in ((future, True), (future + "x", False)):
+            token = tracing.attach_queue_context({"traceparent": raw})
+            try:
+                self.assertEqual(trace.get_current_span().get_span_context().is_valid, valid)
+            finally:
+                tracing.detach_queue_context(token)
+
+    def test_capture_discards_oversized_state_without_losing_parent(self) -> None:
+        parent = trace.SpanContext(
+            trace_id=1,
+            span_id=2,
+            is_remote=False,
+            trace_flags=trace.TraceFlags(1),
+            trace_state=trace.TraceState([("a", "x" * 256), ("b", "y" * 256)]),
+        )
+        with trace.use_span(trace.NonRecordingSpan(parent)):
+            self.assertEqual(
+                tracing.capture_queue_context(),
+                {"traceparent": "00-00000000000000000000000000000001-0000000000000002-01"},
+            )
+
+    def test_tracing_failures_are_contained_without_logging_carriers(self) -> None:
+        with tracing.get_tracer().start_as_current_span("producer"), self.assertNoLogs():
+            with patch.object(tracing, "is_enabled", side_effect=RuntimeError("PRIVATE_SENTINEL")):
+                self.assertIsNone(tracing.capture_queue_context())
+                self.assertIsNone(tracing.attach_queue_context(None))
+            with patch.object(
+                tracing.TraceContextTextMapPropagator,
+                "inject",
+                side_effect=RuntimeError("PRIVATE_SENTINEL"),
+            ):
+                self.assertIsNone(tracing.capture_queue_context())
+            worker = otel_context.get_current()
+            with patch.object(
+                tracing.TraceContextTextMapPropagator,
+                "extract",
+                side_effect=RuntimeError("PRIVATE_SENTINEL"),
+            ):
+                token = tracing.attach_queue_context({"traceparent": "invalid"})
+                try:
+                    self.assertFalse(trace.get_current_span().get_span_context().is_valid)
+                finally:
+                    tracing.detach_queue_context(token)
+            self.assertIs(otel_context.get_current(), worker)
+            with patch.object(otel_context, "attach", side_effect=RuntimeError("PRIVATE_SENTINEL")):
+                self.assertIsNone(tracing.attach_queue_context(None))
+            token = tracing.attach_queue_context(None)
+            try:
+                with patch.object(
+                    otel_context, "detach", side_effect=RuntimeError("PRIVATE_SENTINEL")
+                ):
+                    tracing.detach_queue_context(token)
+            finally:
+                otel_context.detach(token)
 
 
 class NodeSpanTest(_EnabledTracingTestBase):

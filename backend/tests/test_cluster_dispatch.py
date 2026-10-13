@@ -2,11 +2,23 @@
 
 import asyncio
 import logging
+import threading
 import unittest
 import uuid
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from opentelemetry import context as otel_context
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, TraceState
+
+from app.observability import tracing
 from app.services.cluster import run_result_bus as bus_module
 from app.services.cluster.dispatch import (
     resolve_placement,
@@ -950,3 +962,461 @@ class OffloadDispatchEnqueueFailureCleanupTests(unittest.IsolatedAsyncioTestCase
         # Verify handle was cleaned up and not leaked
         self.assertNotIn(run_id, _ACTIVE_EXECUTIONS)
         self.assertEqual(len(_ACTIVE_EXECUTIONS), 0)
+
+
+class QueueTraceContextTests(unittest.IsolatedAsyncioTestCase):
+    """Exercise the producer and real async-to-thread handoff, including its scope."""
+
+    def setUp(self) -> None:
+        self.exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(self.exporter))
+        self.addCleanup(provider.shutdown)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(patch.object(trace, "_TRACER_PROVIDER", provider))
+        stack.enter_context(patch.object(tracing, "_provider", provider))
+        self.tracer = provider.get_tracer("queue-context-test")
+        self.workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Queue trace context",
+            nodes=[
+                {
+                    "id": "seed",
+                    "type": "set",
+                    "data": {"label": "seed", "mappings": [{"key": "answer", "value": "42"}]},
+                }
+            ],
+            edges=[],
+        )
+        self.phases: list[tuple[str, SpanContext]] = []
+        self.persist = AsyncMock(side_effect=lambda **_kwargs: self._record("history"))
+        self.complete = AsyncMock(side_effect=lambda *_args, **_kwargs: self._record("complete"))
+        self.notify = AsyncMock(side_effect=lambda *_args: self._record("notify"))
+
+    def _record(self, phase: str) -> dict:
+        self.phases.append((phase, trace.get_current_span().get_span_context()))
+        return {}
+
+    def _carrier(self) -> tuple[dict[str, str], SpanContext]:
+        with self.tracer.start_as_current_span("producer", context=otel_context.Context()) as span:
+            carrier = tracing.capture_queue_context()
+            self.assertIsNotNone(carrier)
+            return carrier, span.get_span_context()
+
+    def _row(self, carrier: object = None) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=None,
+            execution_id=uuid.uuid4(),
+            workflow_id=self.workflow.id,
+            inputs={},
+            trigger_source="api",
+            actor_user_id=None,
+            credentials_owner_id=self.workflow.owner_id,
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=False,
+            trace_context=carrier,
+        )
+
+    @contextmanager
+    def _worker(self) -> Iterator[Any]:
+        from app.services.cluster.dispatch import RunQueueWorker
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=None)
+        query_result = SimpleNamespace(scalar_one_or_none=lambda: self.workflow, first=lambda: None)
+
+        def query(*_args: object) -> SimpleNamespace:
+            self._record("database")
+            return query_result
+
+        db.execute = AsyncMock(side_effect=query)
+        db.commit = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=db)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.db.session.async_session_maker", factory))
+            for target in (
+                "app.api.workflows.get_credentials_context",
+                "app.api.workflows.collect_referenced_workflows",
+                "app.services.global_variables_service.get_global_variables_context",
+            ):
+                stack.enter_context(patch(target, new=AsyncMock(return_value={})))
+            stack.enter_context(
+                patch(
+                    "app.api.workflows._persist_global_variables_from_execution",
+                    new=AsyncMock(side_effect=lambda *_args: self._record("globals")),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "app.services.cluster.dispatch.register_execution",
+                    side_effect=lambda **_kwargs: threading.Event(),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "app.services.cluster.dispatch.complete_execution",
+                    side_effect=lambda *_args, **_kwargs: self._record("cleanup"),
+                )
+            )
+            stack.enter_context(
+                patch("app.services.hitl_service.build_default_public_base_url", return_value="")
+            )
+            for target, mock in (
+                ("persist_run_history", self.persist),
+                ("persist_pending_run_history", self.persist),
+                ("run_queue.complete", self.complete),
+                ("run_queue.notify_done", self.notify),
+            ):
+                stack.enter_context(patch(f"app.services.cluster.dispatch.{target}", mock))
+            yield RunQueueWorker()
+
+    async def _wait_event(self, event: threading.Event) -> None:
+        async with asyncio.timeout(5):
+            while not event.is_set():
+                await asyncio.sleep(0.01)
+
+    def _assert_phases(self, expected: SpanContext) -> None:
+        self.assertTrue(self.phases)
+        for phase, observed in self.phases:
+            self.assertEqual(observed, expected, phase)
+
+    async def _dispatch(self) -> Any:
+        from app.services.cluster.dispatch import dispatch_workflow
+
+        enqueue = AsyncMock(return_value="worker-a")
+        with (
+            patch("app.services.cluster.dispatch.settings.cluster_enabled", True),
+            patch("app.services.cluster.dispatch.identity.is_main", return_value=False),
+            patch(
+                "app.services.cluster.dispatch.register_execution", return_value=threading.Event()
+            ),
+            patch("app.services.cluster.dispatch.get_active_execution_handle", return_value=None),
+            patch("app.services.cluster.dispatch.relinquish_execution"),
+            patch("app.services.cluster.dispatch.run_queue.enqueue", enqueue),
+            patch("app.services.cluster.dispatch.run_queue.notify_queue", new=AsyncMock()),
+        ):
+            await dispatch_workflow(
+                workflow_id=self.workflow.id,
+                nodes=self.workflow.nodes,
+                edges=self.workflow.edges,
+                inputs={"business": "unchanged"},
+                wait_for_completion=False,
+            )
+        enqueue.assert_awaited_once()
+        return enqueue.await_args.args[0]
+
+    async def test_dispatch_captures_active_parent_without_changing_business_inputs(self) -> None:
+        from opentelemetry import baggage
+
+        from app.services.cluster.run_queue import build_queue_values
+
+        with self.tracer.start_as_current_span("request", context=otel_context.Context()) as parent:
+            token = otel_context.attach(baggage.set_baggage("private", "do-not-persist"))
+            try:
+                queued = await self._dispatch()
+            finally:
+                otel_context.detach(token)
+        context = parent.get_span_context()
+        self.assertEqual(
+            queued.trace_context,
+            {
+                "traceparent": f"00-{context.trace_id:032x}-{context.span_id:016x}-{context.trace_flags:02x}"
+            },
+        )
+        values = build_queue_values(queued, target_instance_id="worker-a", grace_seconds=60)
+        self.assertEqual(values["trace_context"], queued.trace_context)
+        self.assertEqual(values["inputs"], {"business": "unchanged"})
+
+    async def test_disabled_tracing_preserves_dispatch_and_legacy_row_execution(self) -> None:
+        with patch.object(tracing, "_provider", None):
+            queued = await self._dispatch()
+            self.assertIsNone(queued.trace_context)
+            row = self._row()
+            row.inputs = queued.inputs
+            del row.trace_context
+            with self._worker() as worker:
+                await worker._execute_claimed(row)
+        self.persist.assert_awaited_once()
+        result = self.persist.await_args.kwargs["result"]
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.node_results[0]["output"], {"answer": "42"})
+        self.assertEqual(self.persist.await_args.kwargs["inputs"], queued.inputs)
+        self.complete.assert_awaited_once()
+        self.assertEqual(self.exporter.get_finished_spans(), ())
+
+    async def test_capture_failure_does_not_prevent_enqueue(self) -> None:
+        with patch.object(trace, "get_current_span", side_effect=RuntimeError("unavailable")):
+            queued = await self._dispatch()
+        self.assertIsNone(queued.trace_context)
+        self.assertEqual(queued.inputs, {"business": "unchanged"})
+
+    async def test_real_executor_continues_parent_and_restores_context_before_persistence(
+        self,
+    ) -> None:
+        carrier, producer = self._carrier()
+        with self.tracer.start_as_current_span(
+            "consumer", context=otel_context.Context()
+        ) as sentinel:
+            with self._worker() as worker:
+                await worker._execute_claimed(self._row(carrier))
+            self.assertEqual(
+                trace.get_current_span().get_span_context(), sentinel.get_span_context()
+            )
+            self._assert_phases(sentinel.get_span_context())
+        self.persist.assert_awaited_once()
+        result = self.persist.await_args.kwargs["result"]
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.node_results[0]["output"], {"answer": "42"})
+        spans = self.exporter.get_finished_spans()
+        workflow = next(span for span in spans if span.name == "heym.workflow.execute")
+        node = next(span for span in spans if span.name == "heym.node.execute")
+        self.assertEqual(workflow.context.trace_id, producer.trace_id)
+        self.assertEqual(workflow.parent.span_id, producer.span_id)
+        self.assertTrue(workflow.parent.is_remote)
+        self.assertEqual(node.parent.span_id, workflow.context.span_id)
+
+    async def test_unsampled_parent_survives_real_executor_without_exporting_children(self) -> None:
+        from app.services.node_execution import registry
+        from app.services.node_execution.nodes.set_node import execute as execute_set
+
+        parent = SpanContext(
+            trace_id=0x1234,
+            span_id=0x5678,
+            is_remote=False,
+            trace_flags=TraceFlags(0),
+            trace_state=TraceState([("vendor", "sample")]),
+        )
+        with trace.use_span(NonRecordingSpan(parent)):
+            carrier = tracing.capture_queue_context()
+        observed = []
+
+        def record_node(ctx: Any) -> object:
+            observed.append(trace.get_current_span().get_span_context())
+            return execute_set(ctx)
+
+        with (
+            self._worker() as worker,
+            patch.dict(registry._HANDLER_CACHE, {"set": record_node}),
+        ):
+            await worker._execute_claimed(self._row(carrier))
+        self.assertEqual(self.persist.await_args.kwargs["result"].status, "success")
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0].trace_id, parent.trace_id)
+        self.assertEqual(observed[0].trace_flags, parent.trace_flags)
+        self.assertEqual(observed[0].trace_state, parent.trace_state)
+        self.assertEqual(self.exporter.get_finished_spans(), ())
+
+    async def test_overlapping_runs_and_parentless_run_do_not_share_context(self) -> None:
+        from app.services.workflow_executor import ExecutionResult
+
+        first, first_parent = self._carrier()
+        second, second_parent = self._carrier()
+        rows = [self._row(first), self._row(second)]
+        ready = threading.Event()
+        release = threading.Event()
+        barrier = threading.Barrier(2, action=ready.set)
+        observed = {}
+        after_release = {}
+
+        def execute(**kwargs: Any) -> ExecutionResult:
+            run_id = kwargs["execution_id"]
+            observed[run_id] = trace.get_current_span().get_span_context()
+            if run_id in {str(row.execution_id) for row in rows}:
+                barrier.wait(timeout=5)
+                if not release.wait(timeout=5):
+                    raise AssertionError("concurrent runs were not released")
+                after_release[run_id] = trace.get_current_span().get_span_context()
+            return ExecutionResult(
+                workflow_id=self.workflow.id, status="success", outputs={}, execution_time_ms=0.0
+            )
+
+        with (
+            self.tracer.start_as_current_span(
+                "consumer", context=otel_context.Context()
+            ) as sentinel,
+            self._worker() as worker,
+            patch(
+                "app.services.cluster.dispatch.execute_workflow", side_effect=execute
+            ) as executor,
+        ):
+            tasks = [asyncio.create_task(worker._execute_claimed(row)) for row in rows]
+            try:
+                await self._wait_event(ready)
+            finally:
+                release.set()
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+            for row, parent in zip(rows, (first_parent, second_parent), strict=True):
+                actual = observed[str(row.execution_id)]
+                self.assertEqual(
+                    (actual.trace_id, actual.span_id), (parent.trace_id, parent.span_id)
+                )
+                self.assertEqual(after_release[str(row.execution_id)], actual)
+            for carrier in (None, {"traceparent": "invalid"}):
+                row = self._row(carrier)
+                await worker._execute_claimed(row)
+                self.assertFalse(observed[str(row.execution_id)].is_valid)
+            self.assertEqual(executor.call_count, 4)
+            self.assertEqual(self.complete.await_count, 4)
+            for call in self.complete.await_args_list:
+                self.assertEqual(call.kwargs["result"]["status"], "success")
+            self._assert_phases(sentinel.get_span_context())
+
+    async def test_business_failure_and_cooperative_cancel_restore_context_without_retry(
+        self,
+    ) -> None:
+        from app.services.workflow_executor import WorkflowCancelledError
+
+        carrier, _ = self._carrier()
+        for error in (RuntimeError("execution failed"), WorkflowCancelledError("cancelled")):
+            with self.subTest(error=type(error).__name__):
+                self.phases.clear()
+                self.complete.reset_mock()
+                with (
+                    self.tracer.start_as_current_span(
+                        "consumer", context=otel_context.Context()
+                    ) as sentinel,
+                    self._worker() as worker,
+                    patch(
+                        "app.services.cluster.dispatch.execute_workflow", side_effect=error
+                    ) as execute,
+                ):
+                    await worker._execute_claimed(self._row(carrier))
+                    self._assert_phases(sentinel.get_span_context())
+                    self.assertEqual(
+                        trace.get_current_span().get_span_context(), sentinel.get_span_context()
+                    )
+                execute.assert_called_once()
+                self.complete.assert_awaited_once()
+                if isinstance(error, WorkflowCancelledError):
+                    self.assertEqual(
+                        self.complete.await_args.kwargs["result"]["status"], "cancelled"
+                    )
+                else:
+                    self.assertEqual(self.complete.await_args.kwargs["error"], str(error))
+
+    async def test_task_cancellation_detaches_before_the_running_thread_finishes(self) -> None:
+        from app.services.workflow_executor import ExecutionResult
+
+        carrier, producer = self._carrier()
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        observed = []
+
+        def execute(**_kwargs: Any) -> ExecutionResult:
+            observed.append(trace.get_current_span().get_span_context())
+            started.set()
+            try:
+                if not release.wait(timeout=5):
+                    raise AssertionError("cancelled thread was not released")
+                observed.append(trace.get_current_span().get_span_context())
+                return ExecutionResult(
+                    workflow_id=self.workflow.id,
+                    status="success",
+                    outputs={},
+                    execution_time_ms=0.0,
+                )
+            finally:
+                finished.set()
+
+        with (
+            self.tracer.start_as_current_span(
+                "consumer", context=otel_context.Context()
+            ) as sentinel,
+            self._worker() as worker,
+            patch(
+                "app.services.cluster.dispatch.execute_workflow", side_effect=execute
+            ) as executor,
+        ):
+
+            async def run() -> None:
+                try:
+                    await worker._execute_claimed(self._row(carrier))
+                finally:
+                    self._record("cancelled_task")
+
+            task = asyncio.create_task(run())
+            try:
+                await self._wait_event(started)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertFalse(finished.is_set())
+                self._assert_phases(sentinel.get_span_context())
+                self.notify.assert_awaited_once()
+            finally:
+                release.set()
+                await self._wait_event(finished)
+                await asyncio.wait_for(
+                    asyncio.get_running_loop().shutdown_default_executor(), timeout=5
+                )
+                if not task.done():
+                    await task
+        executor.assert_called_once()
+        self.persist.assert_not_awaited()
+        self.assertEqual(len(observed), 2)
+        for context in observed:
+            self.assertEqual(
+                (context.trace_id, context.span_id), (producer.trace_id, producer.span_id)
+            )
+
+    async def test_allow_downstream_finalizer_is_created_after_context_is_restored(self) -> None:
+        from app.services.node_execution import registry
+        from app.services.workflow_executor import ExecutionResult
+
+        carrier, _ = self._carrier()
+        started = threading.Event()
+        release = threading.Event()
+        self.workflow.nodes.extend(
+            [
+                {
+                    "id": "output",
+                    "type": "output",
+                    "data": {"message": "done", "allowDownstream": True},
+                },
+                {"id": "wait", "type": "wait", "data": {}},
+            ]
+        )
+        self.workflow.edges = [
+            {"id": "first", "source": "seed", "target": "output"},
+            {"id": "last", "source": "output", "target": "wait"},
+        ]
+        original_join = ExecutionResult.join_allow_downstream
+
+        def downstream(_ctx: Any) -> dict:
+            started.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("downstream was not released")
+            return {"done": True}
+
+        def join(result: ExecutionResult) -> None:
+            self._record("finalizer_join")
+            original_join(result)
+
+        with (
+            self.tracer.start_as_current_span(
+                "consumer", context=otel_context.Context()
+            ) as sentinel,
+            self._worker() as worker,
+            patch.dict(registry._HANDLER_CACHE, {"wait": downstream}),
+            patch.object(ExecutionResult, "join_allow_downstream", join),
+        ):
+            try:
+                await worker._execute_claimed(self._row(carrier))
+                await self._wait_event(started)
+                self.assertTrue(worker._active_finalizers)
+                self.complete.assert_awaited_once()
+                self.persist.assert_not_awaited()
+            finally:
+                release.set()
+                await asyncio.wait_for(asyncio.gather(*tuple(worker._active_finalizers)), timeout=5)
+            self.assertEqual(self.complete.await_count, 2)
+            self.persist.assert_awaited_once()
+            self.assertEqual(self.persist.await_args.kwargs["result"].status, "success")
+            self.assertIn("finalizer_join", [phase for phase, _ in self.phases])
+            self._assert_phases(sentinel.get_span_context())

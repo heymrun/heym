@@ -15,14 +15,17 @@ Design rules:
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 from collections.abc import Callable
 from contextlib import contextmanager
+from contextvars import Token
 from typing import Any, TypeVar
 
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.trace import Tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from app.config import settings
 
@@ -259,3 +262,96 @@ def run_with_context(ctx: object, fn: Callable[[], T]) -> T:
         return fn()
     finally:
         otel_context.detach(token)
+
+
+# Queue metadata is bounded independently of workflow inputs. Allow future
+# traceparent versions, but do not persist arbitrarily large request metadata.
+_QUEUE_TRACEPARENT_MAX_CHARS = 512
+_QUEUE_TRACESTATE_MAX_CHARS = 512
+_TRACESTATE_KEY = re.compile(
+    r"(?:[a-z][a-z0-9_*/-]{0,255}|[a-z0-9][a-z0-9_*/-]{0,240}@[a-z][a-z0-9_*/-]{0,13})"
+)
+
+
+def _queue_tracestate(value: object) -> str | None:
+    """Validate without logging: the SDK logs malformed tracestate members."""
+    if not isinstance(value, str) or len(value) > _QUEUE_TRACESTATE_MAX_CHARS:
+        return None
+    members: list[str] = []
+    keys: set[str] = set()
+    for member in value.split(","):
+        member = member.strip(" \t")
+        if not member:
+            continue
+        key, separator, entry = member.partition("=")
+        if (
+            not separator
+            or not _TRACESTATE_KEY.fullmatch(key)
+            or key in keys
+            or not 1 <= len(entry) <= 256
+            or entry.endswith(" ")
+            or any(not 32 <= ord(char) <= 126 or char in ",=" for char in entry)
+        ):
+            return None
+        keys.add(key)
+        if len(keys) > 32:
+            return None
+        members.append(member)
+    return ",".join(members) or None
+
+
+def _queue_carrier(carrier: object) -> dict[str, str]:
+    """Keep only bounded W3C fields; malformed state must not discard a parent."""
+    if not isinstance(carrier, dict):
+        return {}
+    parent = carrier.get("traceparent")
+    if not isinstance(parent, str) or not 1 <= len(parent) <= _QUEUE_TRACEPARENT_MAX_CHARS:
+        return {}
+    result = {"traceparent": parent}
+    state = _queue_tracestate(carrier.get("tracestate"))
+    if state is not None:
+        result["tracestate"] = state
+    return result
+
+
+def capture_queue_context() -> dict[str, str] | None:
+    """Capture a bounded W3C parent for a queued run, including unsampled spans."""
+    try:
+        if not is_enabled() or not trace.get_current_span().get_span_context().is_valid:
+            return None
+        carrier: dict[str, str] = {}
+        # Never use the global propagator: it may also inject baggage.
+        TraceContextTextMapPropagator().inject(carrier)
+        return _queue_carrier(carrier) or None
+    except Exception:  # noqa: BLE001 - tracing must never prevent enqueueing
+        return None
+
+
+def attach_queue_context(carrier: object) -> Token[otel_context.Context] | None:
+    """Attach a queued parent in the calling task, or a fresh context for old rows.
+
+    The caller must detach in the same task, directly after the to_thread await.
+    The execution thread inherits its own copy of this context.
+    """
+    try:
+        if not is_enabled():
+            return None
+        context = otel_context.Context()
+        try:
+            context = TraceContextTextMapPropagator().extract(
+                _queue_carrier(carrier), context=context
+            )
+        except Exception:  # noqa: BLE001 - start independently if extraction fails
+            pass
+        return otel_context.attach(context)
+    except Exception:  # noqa: BLE001 - tracing must never prevent execution
+        return None
+
+
+def detach_queue_context(token: Token[otel_context.Context] | None) -> None:
+    """Restore the calling task's context without masking an execution error."""
+    if token is not None:
+        try:
+            otel_context.detach(token)
+        except Exception:  # noqa: BLE001 - tracing cleanup must never fail the run
+            pass

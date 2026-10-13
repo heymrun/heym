@@ -1,6 +1,7 @@
 """Enqueue shape, expiry, and the guarantee that no credential is stored."""
 
 import contextlib
+import logging
 import unittest
 import uuid
 from dataclasses import replace
@@ -8,6 +9,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.exc import IntegrityError
+
+from app.services.cluster import run_queue
 from app.services.cluster.run_queue import (
     STATUS_QUEUED,
     STATUS_SKIPPED_LATE,
@@ -300,3 +304,60 @@ class ExpireLateRowsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 0)
         session.execute.assert_awaited_once()
         session.commit.assert_awaited_once()
+
+
+class QueueTraceLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_enqueue_errors_preserve_failure_without_logging_trace_parameters(self) -> None:
+        run = QueuedRun(
+            workflow_id=uuid.uuid4(),
+            execution_id=uuid.uuid4(),
+            placement="anywhere",
+            inputs={"business": "unchanged"},
+            trigger_source="api",
+            actor_user_id=None,
+            credentials_owner_id=None,
+            test_run=False,
+            timeout_seconds=None,
+            return_on_chart_output=False,
+            trace_context={
+                "traceparent": "00-00000000000000000000000000001234-0000000000005678-01",
+                "tracestate": "vendor=PRIVATE_SENTINEL",
+            },
+        )
+        for phase in ("execute", "commit"):
+            with self.subTest(phase=phase):
+                failure = IntegrityError(
+                    "INSERT INTO workflow_run_queue",
+                    run.trace_context,
+                    Exception("duplicate execution"),
+                )
+                db = MagicMock()
+                db.execute = AsyncMock()
+                db.commit = AsyncMock()
+                getattr(db, phase).side_effect = failure
+                factory = MagicMock()
+                factory.return_value.__aenter__ = AsyncMock(return_value=db)
+                factory.return_value.__aexit__ = AsyncMock(return_value=False)
+                with (
+                    patch.object(
+                        run_queue, "choose_target", new=AsyncMock(return_value="worker-a")
+                    ),
+                    patch.object(run_queue, "async_session_maker", factory),
+                    self.assertLogs("queue-test", level="ERROR") as logged,
+                ):
+                    try:
+                        await run_queue.enqueue(run)
+                    except IntegrityError as error:
+                        self.assertIs(error, failure)
+                        logging.getLogger("queue-test").exception("enqueue failed")
+                    else:
+                        self.fail("The database failure must still reach the caller")
+                rendered = "\n".join(logged.output)
+                self.assertNotIn("PRIVATE_SENTINEL", rendered)
+                self.assertNotIn(run.trace_context["traceparent"], rendered)
+                self.assertIn("duplicate execution", rendered)
+                db.execute.assert_awaited_once()
+                if phase == "execute":
+                    db.commit.assert_not_awaited()
+                else:
+                    db.commit.assert_awaited_once()

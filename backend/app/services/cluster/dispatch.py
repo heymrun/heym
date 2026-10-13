@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ExecutionHistory, Workflow, WorkflowRunQueue
+from app.observability import tracing
 from app.services.cluster import identity, run_queue
 from app.services.cluster.attribution import attribution_fields
 from app.services.cluster.node_placement import Placement, workflow_placement
@@ -290,6 +291,7 @@ async def dispatch_workflow(
         test_run=test_run,
         timeout_seconds=timeout_seconds,
         return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
+        trace_context=tracing.capture_queue_context(),
     )
     try:
         target = await run_queue.enqueue(queued)
@@ -647,24 +649,28 @@ class RunQueueWorker:
                 owner_id = workflow.owner_id
                 workflow_name = workflow.name
 
-            result = await asyncio.to_thread(
-                execute_workflow,
-                workflow_id=row.workflow_id,
-                nodes=nodes,
-                edges=edges,
-                inputs=row.inputs,
-                workflow_cache=workflow_cache,
-                credentials_context=credentials_context,
-                global_variables_context=global_variables_context,
-                public_base_url=build_default_public_base_url(),
-                test_run=row.test_run,
-                trace_user_id=owner_id,
-                actor_user_id=row.actor_user_id,
-                cancel_event=cancel_event,
-                timeout_seconds=row.timeout_seconds,
-                return_on_chart_output=row.return_on_chart_output,
-                execution_id=str(row.execution_id),
-            )
+            token = tracing.attach_queue_context(getattr(row, "trace_context", None))
+            try:
+                result = await asyncio.to_thread(
+                    execute_workflow,
+                    workflow_id=row.workflow_id,
+                    nodes=nodes,
+                    edges=edges,
+                    inputs=row.inputs,
+                    workflow_cache=workflow_cache,
+                    credentials_context=credentials_context,
+                    global_variables_context=global_variables_context,
+                    public_base_url=build_default_public_base_url(),
+                    test_run=row.test_run,
+                    trace_user_id=owner_id,
+                    actor_user_id=row.actor_user_id,
+                    cancel_event=cancel_event,
+                    timeout_seconds=row.timeout_seconds,
+                    return_on_chart_output=row.return_on_chart_output,
+                    execution_id=str(row.execution_id),
+                )
+            finally:
+                tracing.detach_queue_context(token)
             # A pending allowDownstream result is intentionally returned before its
             # background branch finishes. Publish the early result now, then retain
             # execution ownership until the worker has persisted the final state.

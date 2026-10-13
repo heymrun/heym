@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["137_add_smtp_from_key"])
+        self.assertEqual(self.script.get_heads(), ["138_add_queue_trace_context"])
 
     def test_smtp_from_key_follows_chat_skill_write(self) -> None:
         revision = self.script.get_revision("137_add_smtp_from_key")
