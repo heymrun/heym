@@ -21,6 +21,8 @@ export interface Workflow {
   name: string;
   description: string | null;
   kind?: string;
+  /** The signed-in user's folder for this workflow; null at the top level. */
+  folder_id?: string | null;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   auth_type: WorkflowAuthType;

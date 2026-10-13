@@ -976,6 +976,8 @@ async function copyWorkflow(id: string, event: Event, scheduleAfterCopy = false)
     });
     if (scheduleAfterCopy) {
       await workflowApi.scheduleForDeletion(newWorkflow.id);
+    } else if (sourceWorkflow.folder_id) {
+      await folderStore.moveWorkflowToFolder(sourceWorkflow.folder_id, newWorkflow.id);
     }
     await loadWorkflows();
     await folderStore.fetchFolderTree();
