@@ -35,6 +35,7 @@ from app.services.sso_settings import (
     email_domain_allowed,
     get_sso_settings,
 )
+from app.services.user_lookup import find_user_by_email
 from app.services.work_integration import (
     WORK_CLIENT,
     create_sso_code,
@@ -220,8 +221,7 @@ async def resolve_sso_user(db: AsyncSession, row: SsoSettings, issuer: str, clai
     if not email_domain_allowed(email, row.allowed_email_domains):
         raise SsoLoginError("domain_not_allowed")
 
-    result = await db.execute(select(User).where(User.email == email))
-    existing = result.scalar_one_or_none()
+    existing = await find_user_by_email(db, email)
     if existing is not None:
         existing.sso_issuer = issuer
         existing.sso_subject = subject

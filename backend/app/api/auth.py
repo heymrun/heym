@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_client_ip, get_current_user
@@ -32,6 +32,7 @@ from app.services.auth import (
 from app.services.auth_rate_limiter import login_limiter, register_limiter
 from app.services.credential_access import get_accessible_credential
 from app.services.sso_settings import get_sso_settings, password_login_blocked
+from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -136,11 +137,7 @@ async def register_account(
         )
 
     # Addresses compare case-insensitively everywhere else, so a case variant is not a new account.
-    normalized_email = user_data.email.strip().lower()
-    result = await db.execute(
-        select(User.id).where(func.lower(func.trim(User.email)) == normalized_email).limit(1)
-    )
-    if result.scalar_one_or_none() is not None:
+    if await find_user_by_email(db, user_data.email) is not None:
         audit(
             action="auth.register",
             outcome=OUTCOME_FAILURE,
@@ -190,8 +187,7 @@ async def password_sign_in(
             detail="Password sign-in is disabled on this instance. Use SSO.",
         )
 
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    user = result.scalar_one_or_none()
+    user = await find_user_by_email(db, user_data.email)
     if user is None or not verify_password(user_data.password, user.hashed_password):
         audit(
             action="auth.login",

@@ -14,12 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_client_ip
 from app.config import settings
-from app.db.models import OAuthAccessToken, OAuthAuthorizationCode, OAuthClient, User
+from app.db.models import OAuthAccessToken, OAuthAuthorizationCode, OAuthClient
 from app.db.session import get_db
 from app.services.auth import verify_password
 from app.services.auth_rate_limiter import oauth_register_limiter
 from app.services.oauth_tokens import hash_oauth_token
 from app.services.sso_settings import get_sso_settings, password_login_blocked
+from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -538,8 +539,7 @@ async def authorize_post(
         )
 
     # Authenticate user
-    user_result = await db.execute(select(User).where(User.email == email))
-    user = user_result.scalar_one_or_none()
+    user = await find_user_by_email(db, email)
 
     # The same gate as /api/auth/login. Closing only that one would make the setting a lie.
     sso_row = await get_sso_settings(db)
