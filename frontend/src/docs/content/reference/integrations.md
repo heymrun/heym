@@ -221,8 +221,8 @@ The Jira credential stores Jira Basic auth credentials or a Data Center personal
 1. Select **Jira Data Center / Server** as the deployment.
 2. Choose an authentication method. **Username and password** uses Basic auth. **Personal Access Token** uses `Authorization: Bearer <token>` and requires Jira Data Center / Server 8.14 or later. Create the token under **Profile → Personal Access Tokens** in Jira.
 3. Enter the Jira username and password, or paste the personal access token (no username is needed).
-3. Enter the Jira site URL, for example `https://jira.example.com`.
-4. Use **Test Connection** to verify the credential.
+4. Enter the Jira site URL, for example `https://jira.example.com`.
+5. Use **Test Connection** to verify the credential.
 
 ### Fields
 
@@ -239,12 +239,11 @@ The Jira credential stores Jira Basic auth credentials or a Data Center personal
 
 - The Jira node sends issue descriptions and comments as Atlassian Document Format text
   documents for Jira Cloud REST API v3. Data Center / Server credentials send plain text.
-- Data Center / Server currently supports username/password Basic auth only. Personal access
-  tokens and Bearer auth are not supported yet.
+- Data Center / Server supports username/password Basic auth and personal access token (PAT) authentication using the Bearer scheme. PAT authentication requires Jira Data Center / Server 8.14 or later.
 - Attachment upload accepts base64 or data URL content and is subject to the platform file size limit (default 99 MB). Attachment download can return base64 content when enabled.
 - User creation, deletion, and issue notification require the authenticated Jira account to have the relevant Jira site or organization permissions.
 - Use List Projects, Search Issues, and List Transitions to discover project keys, issue keys, and transition IDs.
-- For custom endpoints not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token` for Cloud or `username:password` for Data Center / Server) in the cURL command, or a Header credential with the matching `Authorization: Basic <base64(user:secret)>` value.
+- For custom endpoints not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token` for Cloud or `username:password` for Data Center / Server), or PAT Bearer auth (`Authorization: Bearer <token>` for Data Center / Server). Alternatively, use a Header credential with the appropriate `Authorization` header.
 
 See also:
 
