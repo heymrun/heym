@@ -15,7 +15,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenCode Go** | [OpenCode Go](../nodes/opencode-go-node.md) | `api_key`, optional `base_url` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [OpenCode Go](../nodes/opencode-go-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
-| **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, `deployment`, optional `api_version` |
+| **Jira** | [Jira node](../nodes/jira-node.md) | `api_token`, `base_url`, `deployment`, `auth_mode`, `email` (Basic auth only), optional `api_version` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
@@ -205,7 +205,7 @@ OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and re
 
 ## Jira
 
-The Jira credential stores Jira Basic auth credentials, Jira site base URL, deployment mode, and optional REST API version for the [Jira node](../nodes/jira-node.md). Use `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server.
+The Jira credential stores Jira Basic auth credentials or a Data Center personal access token, Jira site base URL, deployment mode, and optional REST API version for the [Jira node](../nodes/jira-node.md). Use `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server.
 
 ### Setup
 
@@ -219,7 +219,8 @@ The Jira credential stores Jira Basic auth credentials, Jira site base URL, depl
 **Jira Data Center / Server**
 
 1. Select **Jira Data Center / Server** as the deployment.
-2. Enter the Jira username and password used for Basic auth.
+2. Choose an authentication method. **Username and password** uses Basic auth. **Personal Access Token** uses `Authorization: Bearer <token>` and requires Jira Data Center / Server 8.14 or later. Create the token under **Profile → Personal Access Tokens** in Jira.
+3. Enter the Jira username and password, or paste the personal access token (no username is needed).
 3. Enter the Jira site URL, for example `https://jira.example.com`.
 4. Use **Test Connection** to verify the credential.
 
@@ -227,8 +228,9 @@ The Jira credential stores Jira Basic auth credentials, Jira site base URL, depl
 
 | Field | Description |
 | --- | --- |
-| `email` | Jira Cloud Atlassian account email, or Jira Data Center / Server username |
-| `api_token` | Jira Cloud Atlassian API token, or Jira Data Center / Server password for Basic auth |
+| `auth_mode` | `basic` (default when missing) or `pat`. `pat` is only valid with `data_center` |
+| `email` | Jira Cloud Atlassian account email, or Jira Data Center / Server username. Not used in `pat` mode |
+| `api_token` | Jira Cloud Atlassian API token, Jira Data Center / Server password for Basic auth, or the Data Center personal access token in `pat` mode |
 | `base_url` | Jira site base URL |
 | `deployment` | `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server |
 | `api_version` | REST API version; defaults to `3` for Jira Cloud. Data Center / Server uses v2 |

@@ -20,6 +20,15 @@ import {
   validateModelRouterForm,
   type ModelRouterForm,
 } from "@/components/Credentials/modelRouter/modelRouterConfig";
+import JiraCredentialFields from "@/components/Credentials/jira/JiraCredentialFields.vue";
+import {
+  buildJiraCredentialConfig,
+  isJiraCredentialComplete,
+  jiraIncompleteMessage,
+  normalizeJiraAuthMode,
+  type JiraAuthMode,
+  type JiraCredentialForm,
+} from "@/components/Credentials/jira/jiraCredentialConfig";
 import OAuthAuthorizeLink from "@/components/Credentials/OAuthAuthorizeLink.vue";
 import SlackBotCredentialFields from "@/components/Credentials/SlackBotCredentialFields.vue";
 import { useOAuthPopup } from "@/components/Credentials/useOAuthPopup";
@@ -70,25 +79,17 @@ const jiraApiVersion = ref("3");
 const jiraTesting = ref(false);
 const jiraTestSuccess = ref<boolean | null>(null);
 const jiraTestMessage = ref("");
-const jiraUserLabel = computed((): string =>
-  jiraDeployment.value === "data_center" ? "Jira Username" : "Jira Email",
-);
-const jiraUserPlaceholder = computed((): string =>
-  jiraDeployment.value === "data_center" ? "jira-user" : "you@example.com",
-);
-const jiraSecretLabel = computed((): string =>
-  jiraDeployment.value === "data_center" ? "Password" : "API Token",
-);
-const jiraSecretPlaceholder = computed((): string => {
-  if (isEditing.value) {
-    return "••••••• (re-enter to update)";
-  }
-  return jiraDeployment.value === "data_center" ? "Jira password" : "Atlassian API token";
-});
-const jiraAuthHelpText = computed((): string =>
-  jiraDeployment.value === "data_center"
-    ? "Data Center / Server currently supports Basic auth with username and password. Personal access tokens and Bearer auth are not supported yet."
-    : "Jira Cloud uses an Atlassian account email and API token.",
+const jiraAuthMode = ref<JiraAuthMode>("basic");
+const jiraOriginalAuthMode = ref<JiraAuthMode | undefined>(undefined);
+const jiraForm = computed(
+  (): JiraCredentialForm => ({
+    email: jiraEmail.value,
+    secret: apiKey.value,
+    baseUrl: baseUrl.value,
+    deployment: jiraDeployment.value,
+    apiVersion: jiraApiVersion.value,
+    authMode: jiraAuthMode.value,
+  }),
 );
 const bearerToken = ref("");
 const headerKey = ref("");
@@ -485,6 +486,12 @@ watch(
           props.credential.type === "jira"
             ? props.credential.public_fields?.api_version ?? "3"
             : "3";
+        jiraAuthMode.value =
+          props.credential.type === "jira"
+            ? normalizeJiraAuthMode(props.credential.public_fields?.auth_mode)
+            : "basic";
+        jiraOriginalAuthMode.value =
+          props.credential.type === "jira" ? jiraAuthMode.value : undefined;
         bearerToken.value = "";
         headerKey.value =
           props.credential.public_fields?.header_key ?? props.credential.header_key ?? "";
@@ -675,6 +682,8 @@ watch(
         jiraEmail.value = "";
         jiraDeployment.value = "cloud";
         jiraApiVersion.value = "3";
+        jiraAuthMode.value = "basic";
+        jiraOriginalAuthMode.value = undefined;
         bearerToken.value = "";
         headerKey.value = "";
         headerValue.value = "";
@@ -805,10 +814,11 @@ const isValid = computed(() => {
   ) {
     return !!apiKey.value.trim() || isEditing.value;
   } else if (type.value === "jira") {
-    if (isEditing.value) {
-      return !!jiraEmail.value.trim() && !!baseUrl.value.trim();
-    }
-    return !!jiraEmail.value.trim() && !!apiKey.value.trim() && !!baseUrl.value.trim();
+    return isJiraCredentialComplete({
+      ...jiraForm.value,
+      isEditing: isEditing.value,
+      originalAuthMode: jiraOriginalAuthMode.value,
+    });
   } else if (type.value === "codex") {
     if (codexAuthMode.value === "chatgpt") {
       return !!codexOAuthConfig.value || isEditing.value;
@@ -959,10 +969,11 @@ const canTestJiraConnection = computed((): boolean => {
   if (type.value !== "jira") {
     return false;
   }
-  if (jiraEmail.value.trim() && baseUrl.value.trim() && apiKey.value.trim()) {
-    return true;
-  }
-  return isEditing.value && !!props.credential?.id && !!jiraEmail.value.trim() && !!baseUrl.value.trim();
+  return isJiraCredentialComplete({
+    ...jiraForm.value,
+    isEditing: isEditing.value && !!props.credential?.id,
+    originalAuthMode: jiraOriginalAuthMode.value,
+  });
 });
 
 function resetCodexOAuthState(): void {
@@ -997,17 +1008,7 @@ function buildConfig(): CredentialConfig {
       ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
     };
   } else if (type.value === "jira") {
-    const config: Record<string, string> = {
-      email: jiraEmail.value.trim(),
-      api_token: apiKey.value.trim(),
-      base_url: baseUrl.value.trim(),
-      deployment: jiraDeployment.value,
-    };
-    const apiVersion = jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim();
-    if (apiVersion) {
-      config.api_version = apiVersion;
-    }
-    return config;
+    return buildJiraCredentialConfig(jiraForm.value);
   } else if (type.value === "sentry") {
     const trimmedBaseUrl = baseUrl.value.trim();
     return {
@@ -1297,10 +1298,7 @@ async function testLinearConnection(): Promise<void> {
 
 async function testJiraConnection(): Promise<void> {
   if (!canTestJiraConnection.value) {
-    error.value =
-      jiraDeployment.value === "data_center"
-        ? "Enter Jira username, password, and base URL to test the connection."
-        : "Enter Jira email, API token, and base URL to test the connection.";
+    error.value = jiraIncompleteMessage(jiraForm.value);
     return;
   }
 
@@ -1312,13 +1310,7 @@ async function testJiraConnection(): Promise<void> {
   try {
     const result = await credentialsApi.testConnection({
       type: "jira",
-      config: {
-        email: jiraEmail.value.trim(),
-        api_token: apiKey.value.trim(),
-        base_url: baseUrl.value.trim(),
-        deployment: jiraDeployment.value,
-        api_version: jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim(),
-      },
+      config: buildJiraCredentialConfig(jiraForm.value),
       credential_id: isEditing.value ? props.credential?.id : undefined,
     });
     jiraTestSuccess.value = result.success;
@@ -1861,99 +1853,22 @@ async function handleSave(): Promise<void> {
         </div>
       </template>
 
-      <template v-if="type === 'jira'">
-        <div class="space-y-2">
-          <Label for="cred-jira-email">{{ jiraUserLabel }}</Label>
-          <Input
-            id="cred-jira-email"
-            v-model="jiraEmail"
-            :placeholder="jiraUserPlaceholder"
-            :disabled="saving"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="cred-jira-api-token">{{ jiraSecretLabel }}</Label>
-          <div class="relative">
-            <Input
-              id="cred-jira-api-token"
-              v-model="apiKey"
-              :type="showApiKey ? 'text' : 'password'"
-              :placeholder="jiraSecretPlaceholder"
-              :disabled="saving"
-              class="pr-10"
-            />
-            <button
-              type="button"
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              @click="showApiKey = !showApiKey"
-            >
-              <EyeOff
-                v-if="showApiKey"
-                class="w-4 h-4"
-              />
-              <Eye
-                v-else
-                class="w-4 h-4"
-              />
-            </button>
-          </div>
-        </div>
-        <div class="space-y-2">
-          <Label for="cred-jira-base-url">Jira Base URL</Label>
-          <Input
-            id="cred-jira-base-url"
-            v-model="baseUrl"
-            placeholder="https://your-domain.atlassian.net"
-            :disabled="saving"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="cred-jira-deployment">Deployment</Label>
-          <Select
-            id="cred-jira-deployment"
-            v-model="jiraDeployment"
-            :options="[
-              { value: 'cloud', label: 'Jira Cloud' },
-              { value: 'data_center', label: 'Jira Data Center / Server' },
-            ]"
-            :disabled="saving"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="cred-jira-api-version">REST API Version</Label>
-          <Input
-            id="cred-jira-api-version"
-            :model-value="jiraDeployment === 'data_center' ? '2' : jiraApiVersion"
-            placeholder="3"
-            :disabled="saving || jiraDeployment === 'data_center'"
-            @update:model-value="jiraApiVersion = String($event)"
-          />
-          <p class="text-xs text-muted-foreground">
-            {{ jiraAuthHelpText }} Use the Jira site URL, not a REST path. Jira Cloud defaults to
-            v3; Data Center and Server use REST API v2.
-          </p>
-        </div>
-        <div class="flex items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="jira-test-connection-button"
-            :loading="jiraTesting"
-            :disabled="saving || jiraTesting || !canTestJiraConnection"
-            @click="testJiraConnection"
-          >
-            Test Connection
-          </Button>
-          <p
-            v-if="jiraTestMessage"
-            class="text-xs"
-            :class="jiraTestSuccess ? 'text-emerald-600' : 'text-destructive'"
-          >
-            {{ jiraTestMessage }}
-          </p>
-        </div>
-      </template>
+      <JiraCredentialFields
+        v-if="type === 'jira'"
+        v-model:email="jiraEmail"
+        v-model:secret="apiKey"
+        v-model:base-url="baseUrl"
+        v-model:deployment="jiraDeployment"
+        v-model:api-version="jiraApiVersion"
+        v-model:auth-mode="jiraAuthMode"
+        :saving="saving"
+        :is-editing="isEditing"
+        :testing="jiraTesting"
+        :can-test="canTestJiraConnection"
+        :test-success="jiraTestSuccess"
+        :test-message="jiraTestMessage"
+        @test="testJiraConnection"
+      />
 
       <template v-if="type === 'linear'">
         <div class="space-y-2">
