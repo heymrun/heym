@@ -965,6 +965,17 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
                     executor.evaluate_message_template(template, context, "n"), expected
                 )
 
+    def test_whole_field_reference_with_trailing_dots_keeps_type(self) -> None:
+        context = {"Order": {"name": "Bob", "total": 42}}
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        for template, expected in [("$Order.total.", 42), ("$Order.", context["Order"])]:
+            with self.subTest(template=template):
+                self.assertEqual(self._service().evaluate(template, context).result, expected)
+                self.assertEqual(
+                    executor.resolve_expression(template, context, "n", preserve_type=True),
+                    expected,
+                )
+
     def test_has_arithmetic_ignores_sentence_period_before_operator_line(self) -> None:
         ex = WorkflowExecutor(nodes=[], edges=[])
         self.assertFalse(ex._has_arithmetic("Total: $Order.total.\n- item one"))

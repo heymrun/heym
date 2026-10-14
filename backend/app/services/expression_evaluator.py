@@ -256,7 +256,7 @@ def is_single_dollar_expression(
     found = find(trimmed)
     if len(found) == 1:
         start, end, _expr = found[0]
-        if start == 0 and end == len(trimmed):
+        if start == 0 and not trimmed[end:].strip("."):
             return True
 
     transformed = alias_reserved_context_names(transform(expr_body))
