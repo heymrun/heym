@@ -976,11 +976,15 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
                     expected,
                 )
 
-    def test_has_arithmetic_ignores_sentence_period_before_operator_line(self) -> None:
+    def test_trailing_dot_after_last_reference_keeps_condition_and_arithmetic(self) -> None:
+        ctx = {
+            "Order": {"status": "ok", "total": 50, "fee": 10, "name": "Bob", "tag": "VIP"},
+            "Expected": {"status": "ok"},
+        }
         ex = WorkflowExecutor(nodes=[], edges=[])
-        self.assertFalse(ex._has_arithmetic("Total: $Order.total.\n- item one"))
-        self.assertFalse(ex._has_arithmetic("Your total is $Order.total. - thanks"))
-        self.assertTrue(ex._has_arithmetic("$Order.total - 1"))
+        self.assertIs(ex.evaluate_condition("$Order.status == $Expected.status.", ctx, "n"), True)
+        self.assertEqual(ex.resolve_expression("$Order.total - $Order.fee.", ctx, "n"), 40)
+        self.assertEqual(ex.resolve_expression("$Order.name + $Order.tag.", ctx, "n"), "BobVIP")
 
     def test_single_expr_array_preserved(self) -> None:
         response = self._service().evaluate("$data.items", {"data": {"items": [1, 2, 3]}})

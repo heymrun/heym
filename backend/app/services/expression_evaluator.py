@@ -87,15 +87,7 @@ def _fallback_find_expressions(text: str) -> list[tuple[int, int, str]]:
         if text[index] == "$" and index + 1 < len(text) and text[index + 1].isalpha():
             start = index
             index += 1
-            while index < len(text) and (
-                text[index].isalnum()
-                or text[index] == "_"
-                or (
-                    text[index] == "."
-                    and index + 1 < len(text)
-                    and (text[index + 1].isalnum() or text[index + 1] == "_")
-                )
-            ):
+            while index < len(text) and (text[index].isalnum() or text[index] in "._"):
                 index += 1
             while index < len(text):
                 while index < len(text) and (text[index] == "(" or text[index] == "["):
@@ -116,11 +108,7 @@ def _fallback_find_expressions(text: str) -> list[tuple[int, int, str]]:
                                     index += 1
                                 index += 1
                         index += 1
-                if (
-                    index + 1 < len(text)
-                    and text[index] == "."
-                    and (text[index + 1].isalnum() or text[index + 1] == "_")
-                ):
+                if index < len(text) and text[index] == ".":
                     index += 1
                     while index < len(text) and (text[index].isalnum() or text[index] == "_"):
                         index += 1
@@ -256,7 +244,7 @@ def is_single_dollar_expression(
     found = find(trimmed)
     if len(found) == 1:
         start, end, _expr = found[0]
-        if start == 0 and not trimmed[end:].strip("."):
+        if start == 0 and end == len(trimmed):
             return True
 
     transformed = alias_reserved_context_names(transform(expr_body))

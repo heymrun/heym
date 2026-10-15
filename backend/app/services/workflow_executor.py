@@ -3460,8 +3460,9 @@ class WorkflowExecutor:
             return str(result) if result is not None else ""
 
         def replace_expr(expr: str) -> str:
-            result = self.resolve_expression(expr, inputs, node_id)
-            return str(result) if result is not None else expr
+            core = expr.rstrip(".")
+            result = self.resolve_expression(core, inputs, node_id)
+            return (str(result) if result is not None else core) + expr[len(core) :]
 
         return self._replace_expressions(template, replace_expr)
 
@@ -6192,7 +6193,7 @@ class WorkflowExecutor:
         if "$" not in expression:
             return False
         arithmetic_pattern = (
-            r"\$[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*(?:\([^)]*\)|\[[^\]]*\])*"
+            r"\$[a-zA-Z_][a-zA-Z0-9_.]*(?:\([^)]*\)|\[[^\]]*\])*"
             r"(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\([^)]*\)|\[[^\]]*\])*)*\s*[+\-*/%]"
         )
         return bool(re.search(arithmetic_pattern, expression))
@@ -7217,12 +7218,14 @@ class WorkflowExecutor:
             return str(ternary_result) if ternary_result is not None else template
 
         def replace_expr(expr: str) -> str:
+            core = expr.rstrip(".")
             result = self.resolve_expression(
-                expr, inputs, current_node_id, preserve_type=preserve_type
+                core, inputs, current_node_id, preserve_type=preserve_type
             )
+            tail = expr[len(core) :]
             if preserve_type and isinstance(result, str):
-                return result
-            return str(result) if result is not None else expr
+                return result + tail
+            return (str(result) if result is not None else core) + tail
 
         return self._replace_expressions(template, replace_expr)
 
