@@ -788,7 +788,7 @@ onUnmounted(() => {
       </div>
     </Transition>
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 sm:p-4 border-b border-border/50 shrink-0">
-      <div class="flex items-center gap-2 min-w-0 shrink-0">
+      <div class="flex items-center gap-2 min-w-0 sm:flex-1">
         <button
           v-if="!chatStore.isSidebarOpen"
           class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -808,6 +808,7 @@ onUnmounted(() => {
           <h2
             v-else
             class="text-base sm:text-lg font-semibold truncate"
+            :title="conversationTitle || undefined"
           >
             {{ conversationTitle || 'Chat' }}
           </h2>
@@ -824,7 +825,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="flex flex-col sm:flex-row gap-2 sm:gap-2 sm:flex-nowrap sm:items-end">
+      <div class="flex flex-col sm:flex-row gap-2 sm:gap-2 sm:flex-nowrap sm:items-end sm:shrink-0">
         <div class="grid grid-cols-2 gap-2 sm:flex sm:items-end sm:gap-2 flex-1 min-w-0">
           <div
             class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[200px]"
