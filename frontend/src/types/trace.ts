@@ -9,6 +9,38 @@ export interface TraceSpan {
   traceId?: string | null;
   /** When there is no separate trace, the row jumps to this step instead. */
   stepId?: string | null;
+  /** Tokens one model call used; set on per-turn model rows so a hover can show them. */
+  usage?: TraceSpanUsage;
+  /** What a tool's output added to the next turn's prompt; set on tool rows. */
+  toolTokens?: ToolTokenEstimate;
+}
+
+/**
+ * A tool spends no tokens itself; its output is read by the next turn. This is how
+ * much that turn's prompt grew because of it, so it is an estimate, not a meter.
+ */
+export interface ToolTokenEstimate {
+  tokens: number;
+  /** The turn that read the output. */
+  readByTurn: number;
+  /** Tools asked for by the same turn, this one included; they share the growth. */
+  sharedBy: number;
+}
+
+export interface TraceSpanTokens {
+  promptTokens: number | null;
+  completionTokens: number | null;
+}
+
+export interface TraceSpanUsage extends TraceSpanTokens {
+  /** On the invocation row: what routing decisions spent, kept apart from the model calls. */
+  router?: TraceSpanTokens;
+  /** On the invocation row of a multi-turn request: what each turn used. */
+  turns?: TraceSpanTurnUsage[];
+}
+
+export interface TraceSpanTurnUsage extends TraceSpanTokens {
+  turn: number;
 }
 
 export interface LLMTraceListItem {

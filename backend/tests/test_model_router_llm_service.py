@@ -751,6 +751,30 @@ class TestRoutingReachesTheRoutedTrace(unittest.TestCase):
         self.assertFalse(summary["calls"][0]["reused"])
         self.assertEqual(summary["calls"][1]["turn"], 2)
 
+    def test_the_summary_carries_the_decision_tokens_when_reported(self) -> None:
+        from app.services.model_router import RouteDecision
+
+        service, bound = self._routed_service()
+        service.router.route.return_value = RouteDecision(
+            option=service.router.route.return_value.option,
+            decision_ms=41.5,
+            prompt_tokens=412,
+            completion_tokens=9,
+        )
+        self._resolve(service, bound)
+
+        call = service.model_routing_summary()["calls"][0]
+        self.assertEqual(call["decisionPromptTokens"], 412)
+        self.assertEqual(call["decisionCompletionTokens"], 9)
+
+    def test_the_summary_leaves_out_decision_tokens_the_model_did_not_report(self) -> None:
+        service, bound = self._routed_service()
+        self._resolve(service, bound)
+
+        call = service.model_routing_summary()["calls"][0]
+        self.assertNotIn("decisionPromptTokens", call)
+        self.assertNotIn("decisionCompletionTokens", call)
+
     def test_the_routed_trace_response_carries_the_routing(self) -> None:
         from app.services import llm_service as llm_service_module
 

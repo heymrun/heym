@@ -288,6 +288,13 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def read_decision_usage(payload: object) -> tuple[int | None, int | None]:
+    """Prompt and completion tokens a decision response reports, None where it gave none."""
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    return _int_or_none(usage.get("input_tokens")), _int_or_none(usage.get("output_tokens"))
+
+
 def call_decision_model(
     *,
     base_url: str,
@@ -333,10 +340,7 @@ def call_decision_model(
         error = f"Decision model request failed: {exc}"
     finally:
         if trace_context is not None:
-            usage = payload.get("usage") if isinstance(payload, dict) else None
-            usage = usage if isinstance(usage, dict) else {}
-            prompt_tokens = _int_or_none(usage.get("input_tokens"))
-            completion_tokens = _int_or_none(usage.get("output_tokens"))
+            prompt_tokens, completion_tokens = read_decision_usage(payload)
             record_llm_trace(
                 trace_context,
                 request_type="decision.systemone",

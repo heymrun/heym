@@ -757,6 +757,7 @@ class LLMService:
                 "decisionMs": decision.decision_ms,
                 "decisionTraceId": decision.trace_id,
                 "reused": decision.reused,
+                **decision.token_fields(),
             }
         )
         return binding

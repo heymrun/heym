@@ -25,6 +25,7 @@ import {
   buildTraceSpans,
   getToolCallsFromResponse,
   hasToolCallArguments,
+  summarizeTraceTokens,
   type ToolCallEntry,
 } from "@/lib/traceSpans";
 import { buildTraceSteps, type TraceStep } from "@/lib/traceSteps";
@@ -176,6 +177,10 @@ function traceListSubtitle(trace: LLMTraceListItem): string {
 
 const spans = computed(() =>
   selectedTrace.value ? buildTraceSpans(selectedTrace.value) : []
+);
+
+const tokenSummary = computed(() =>
+  selectedTrace.value ? summarizeTraceTokens(selectedTrace.value) : null
 );
 
 const stepsTimelineRef = ref<{ focusStep: (id: string) => Promise<void> } | null>(null);
@@ -944,15 +949,21 @@ onMounted(async () => {
             <div class="text-xs text-muted-foreground">
               Tokens
             </div>
-            <div class="mt-1 text-sm font-medium">
-              {{ selectedTrace.total_tokens ?? "-" }}
-            </div>
             <div
-              v-if="selectedTrace.prompt_tokens != null && selectedTrace.completion_tokens != null"
-              class="mt-0.5 whitespace-nowrap text-xs text-muted-foreground"
-              data-testid="trace-token-split"
+              v-if="tokenSummary"
+              class="mt-1 flex items-baseline gap-1.5 whitespace-nowrap"
+              :title="tokenSummary.routerPromptTokens > 0 ? `Includes ${tokenSummary.routerPromptTokens.toLocaleString()} model router input tokens` : undefined"
             >
-              {{ selectedTrace.prompt_tokens.toLocaleString() }} in / {{ selectedTrace.completion_tokens.toLocaleString() }} out
+              <span class="text-sm font-medium">
+                {{ tokenSummary.total ?? "-" }}
+              </span>
+              <span
+                v-if="tokenSummary.promptTokens !== null && tokenSummary.completionTokens !== null"
+                class="text-xs text-muted-foreground"
+                data-testid="trace-token-split"
+              >
+                ({{ tokenSummary.promptTokens.toLocaleString() }} in / {{ tokenSummary.completionTokens.toLocaleString() }} out)
+              </span>
             </div>
           </Card>
         </div>

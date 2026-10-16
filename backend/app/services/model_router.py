@@ -25,6 +25,7 @@ from app.services.decision_models import (
     DecisionRequestError,
     call_decision_model,
     load_decision_credential,
+    read_decision_usage,
 )
 from app.services.encryption import decrypt_config
 from app.services.llm_trace import LLMTraceContext
@@ -318,6 +319,17 @@ class RouteDecision:
     decision_ms: float = 0.0
     trace_id: str | None = None
     reused: bool = False
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+    def token_fields(self) -> dict[str, int]:
+        """The decision call's tokens as routing-trace keys, leaving out what it did not report."""
+        fields: dict[str, int] = {}
+        if self.prompt_tokens is not None:
+            fields["decisionPromptTokens"] = self.prompt_tokens
+        if self.completion_tokens is not None:
+            fields["decisionCompletionTokens"] = self.completion_tokens
+        return fields
 
 
 class ModelRouter:
@@ -363,7 +375,13 @@ class ModelRouter:
         if self._cached_key == key and self._cached_decision is not None:
             # Reused, so this turn spent no decision time; saying so keeps the routed
             # trace honest about which turns actually paid for a decision.
-            return replace(self._cached_decision, decision_ms=0.0, reused=True)
+            return replace(
+                self._cached_decision,
+                decision_ms=0.0,
+                reused=True,
+                prompt_tokens=None,
+                completion_tokens=None,
+            )
 
         decision = self._decide(state)
         if not decision.fallback:
@@ -408,17 +426,32 @@ class ModelRouter:
 
         elapsed_ms = self._elapsed_ms(started)
         trace_id = self._trace_id(context)
+        prompt_tokens, completion_tokens = read_decision_usage(payload)
         label = read_route_answer(payload)
         if label is None:
-            return self._fallback("Decision model returned no routing answer", elapsed_ms, trace_id)
+            return self._fallback(
+                "Decision model returned no routing answer",
+                elapsed_ms,
+                trace_id,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
         option = self.config.option_by_label(label)
         if option is None:
             return self._fallback(
                 f"Decision model chose '{label}', which is not a model option",
                 elapsed_ms,
                 trace_id,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
             )
-        return RouteDecision(option=option, decision_ms=elapsed_ms, trace_id=trace_id)
+        return RouteDecision(
+            option=option,
+            decision_ms=elapsed_ms,
+            trace_id=trace_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
     @staticmethod
     def _elapsed_ms(started: float) -> float:
@@ -436,6 +469,9 @@ class ModelRouter:
         reason: str,
         decision_ms: float = 0.0,
         trace_id: str | None = None,
+        *,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> RouteDecision:
         default = self.config.default_option
         if default is None:
@@ -448,6 +484,8 @@ class ModelRouter:
             error=reason,
             decision_ms=decision_ms,
             trace_id=trace_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
 
 

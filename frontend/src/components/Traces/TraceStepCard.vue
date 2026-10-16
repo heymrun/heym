@@ -87,8 +87,10 @@ const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
       <span
         v-if="step.tokens != null"
         class="shrink-0 text-[11px] text-muted-foreground tabular-nums"
+        :title="step.tokensNote"
+        :data-testid="step.tokensEstimated ? 'step-tool-tokens' : undefined"
       >
-        {{ step.tokens }} tok
+        {{ step.tokensEstimated ? "~" : "" }}{{ step.tokens }} tok
       </span>
       <span
         v-if="step.durationMs != null"

@@ -38,7 +38,9 @@ withDefaults(defineProps<Props>(), {
           :side-offset="6"
           :class="cn('z-[200] select-none rounded-md border border-border/60 bg-popover px-2 py-1 text-xs font-medium text-popover-foreground shadow-md', contentClass)"
         >
-          {{ label }}
+          <slot name="content">
+            {{ label }}
+          </slot>
           <TooltipArrow class="fill-popover" />
         </TooltipContent>
       </TooltipPortal>

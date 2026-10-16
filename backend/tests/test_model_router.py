@@ -528,6 +528,57 @@ class TestDecisionTiming(unittest.TestCase):
         self.assertGreater(decision.decision_ms, 0)
         self.assertFalse(decision.reused)
 
+    def test_a_decision_carries_the_tokens_the_decision_model_reported(self) -> None:
+        payload = {
+            "answers": {"route": {"type": "choice", "choice": "Fast"}},
+            "usage": {"input_tokens": 412, "output_tokens": 9},
+        }
+        with (
+            mock.patch.object(model_router, "call_decision_model", return_value=payload),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            decision = self._router().route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertEqual(decision.prompt_tokens, 412)
+        self.assertEqual(decision.completion_tokens, 9)
+        self.assertEqual(
+            decision.token_fields(),
+            {"decisionPromptTokens": 412, "decisionCompletionTokens": 9},
+        )
+
+    def test_a_decision_without_usage_reports_no_token_fields(self) -> None:
+        payload = {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
+        with (
+            mock.patch.object(model_router, "call_decision_model", return_value=payload),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            decision = self._router().route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertIsNone(decision.prompt_tokens)
+        self.assertEqual(decision.token_fields(), {})
+
+    def test_a_reused_decision_spent_no_tokens(self) -> None:
+        payload = {
+            "answers": {"route": {"type": "choice", "choice": "Fast"}},
+            "usage": {"input_tokens": 412, "output_tokens": 9},
+        }
+        router = self._router()
+        with (
+            mock.patch.object(model_router, "call_decision_model", return_value=payload),
+            mock.patch.object(
+                model_router, "load_decision_credential", return_value=self._credential()
+            ),
+        ):
+            router.route(system_instruction=None, message="m", tool_names=None)
+            second = router.route(system_instruction=None, message="m", tool_names=None)
+
+        self.assertTrue(second.reused)
+        self.assertEqual(second.token_fields(), {})
+
     def test_a_reused_decision_costs_nothing_and_says_so(self) -> None:
         payload = {"answers": {"route": {"type": "choice", "choice": "Fast"}}}
         router = self._router()

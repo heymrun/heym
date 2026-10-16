@@ -121,6 +121,9 @@ class DashboardChatTurnTraceTests(IsolatedAsyncioTestCase):
         self.assertEqual(tool["arguments"], {"limit": 5})
         self.assertEqual(tool["status"], "success")
         self.assertIsInstance(tool["elapsed_ms"], float)
+        # The size of what the model read, not the result itself.
+        self.assertIsInstance(tool["result_chars"], int)
+        self.assertNotIn("result", tool)
         self.assertGreaterEqual(tool["start_ms"], turns[0]["startMs"])
         self.assertLessEqual(tool["start_ms"], turns[1]["startMs"])
         self.assertEqual(response["tool_metrics"]["count"], 1)

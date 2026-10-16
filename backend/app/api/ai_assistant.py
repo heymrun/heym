@@ -1677,6 +1677,7 @@ def resolve_model_binding(
                         "decisionMs": decision.decision_ms,
                         "decisionTraceId": decision.trace_id,
                         "reused": decision.reused,
+                        **decision.token_fields(),
                     }
                 ],
             },
@@ -5318,6 +5319,7 @@ async def stream_dashboard_chat(
                         status=_chat_tool_lifecycle_status(name, result),
                     )
                 tool_steps = run_steps[steps_before_tool:]
+                content_for_llm = _sanitize_tool_result_for_llm(result, name)
                 trace_tools.append(
                     {
                         "tool_call_id": tc.id,
@@ -5328,9 +5330,11 @@ async def stream_dashboard_chat(
                         "elapsed_ms": float(tool_steps[-1]["execution_time_ms"])
                         if tool_steps
                         else round((time.time() - tool_started) * 1000, 2),
+                        # Size only: the Traces view splits the next prompt's growth between
+                        # tools by how much each returned, without keeping the result itself.
+                        "result_chars": len(content_for_llm),
                     }
                 )
-                content_for_llm = _sanitize_tool_result_for_llm(result, name)
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )

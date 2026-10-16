@@ -3,6 +3,11 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowRight, MessageSquare, Split, User, Wrench } from "lucide-vue-next";
 
+import TraceTokenUsage from "@/components/Traces/TraceTokenUsage.vue";
+import TraceToolTokenCost from "@/components/Traces/TraceToolTokenCost.vue";
+import Tooltip from "@/components/ui/Tooltip.vue";
+import { formatTokenCount } from "@/lib/traceSpans";
+
 import type { TraceSpan } from "@/types/trace";
 
 const props = defineProps<{
@@ -55,8 +60,21 @@ function activateSpan(span: TraceSpan, event: MouseEvent): void {
   if (span.stepId) emit("focusStep", span.stepId);
 }
 
+function linkHint(span: TraceSpan): string {
+  return span.traceId ? "Open this trace in a new tab" : "Jump to this step";
+}
+
 function formatDuration(ms: number): string {
   return `${ms.toFixed(2)}ms`;
+}
+
+/** A row with something to say about tokens swaps the native title for the tooltip. */
+function hasTokenTooltip(span: TraceSpan): boolean {
+  return Boolean(span.usage || span.toolTokens);
+}
+
+function usageLabel(span: TraceSpan): string {
+  return `Prompt ${formatTokenCount(span.usage?.promptTokens)} · Completion ${formatTokenCount(span.usage?.completionTokens)}`;
 }
 
 const iconComponent = (icon: TraceSpan["icon"]) => {
@@ -92,28 +110,51 @@ const iconComponent = (icon: TraceSpan["icon"]) => {
       >
         <!-- No nesting indent: every row's icon starts at the same edge, which is
              what makes the column scannable top to bottom. -->
-        <div class="flex min-w-0 max-w-[14rem] items-center gap-2 md:max-w-[24rem]">
-          <component
-            :is="iconComponent(span.icon)"
-            class="w-4 h-4 shrink-0 text-muted-foreground"
-          />
-          <button
-            v-if="isLinked(span)"
-            type="button"
-            class="min-w-0 truncate text-left text-muted-foreground hover:text-foreground hover:underline"
-            :title="span.traceId ? 'Open this trace in a new tab' : 'Jump to this step'"
-            :data-testid="`duration-span-link-${span.id}`"
-            @click="activateSpan(span, $event)"
+        <!-- A model call row carries the tokens that call used; hovering it shows them. -->
+        <Tooltip
+          :label="usageLabel(span)"
+          :disabled="!hasTokenTooltip(span)"
+          side="top"
+          content-class="px-3 py-2.5 shadow-lg"
+        >
+          <div
+            class="flex min-w-0 max-w-[14rem] items-center gap-2 md:max-w-[24rem]"
+            :data-testid="`duration-span-row-${span.id}`"
           >
-            {{ span.label }}
-          </button><span
-            v-else
-            class="min-w-0 truncate text-muted-foreground"
-            :title="span.label"
-          >
-            {{ span.label }}
-          </span>
-        </div>
+            <component
+              :is="iconComponent(span.icon)"
+              class="w-4 h-4 shrink-0 text-muted-foreground"
+            />
+            <button
+              v-if="isLinked(span)"
+              type="button"
+              class="min-w-0 truncate text-left text-muted-foreground hover:text-foreground hover:underline"
+              :title="hasTokenTooltip(span) ? undefined : linkHint(span)"
+              :data-testid="`duration-span-link-${span.id}`"
+              @click="activateSpan(span, $event)"
+            >
+              {{ span.label }}
+            </button><span
+              v-else
+              class="min-w-0 truncate text-muted-foreground"
+              :title="hasTokenTooltip(span) ? undefined : span.label"
+            >
+              {{ span.label }}
+            </span>
+          </div>
+          <template #content>
+            <TraceToolTokenCost
+              v-if="span.toolTokens"
+              :estimate="span.toolTokens"
+              :hint="isLinked(span) ? linkHint(span) : null"
+            />
+            <TraceTokenUsage
+              v-else
+              :span="span"
+              :hint="isLinked(span) ? linkHint(span) : null"
+            />
+          </template>
+        </Tooltip>
         <span class="text-right text-muted-foreground tabular-nums">
           {{ formatDuration(span.durationMs) }}
         </span>

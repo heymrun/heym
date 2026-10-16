@@ -15,6 +15,9 @@ export interface ModelRoutingTraceCall {
   error: string | null;
   decisionMs: number;
   decisionTraceId: string | null;
+  /** Tokens the decision model reported for this call; null when it reported none. */
+  decisionPromptTokens: number | null;
+  decisionCompletionTokens: number | null;
   reused: boolean;
   /** Offset from the start of the request, for the waterfall layout. */
   startMs: number;
@@ -71,6 +74,8 @@ function readCall(raw: unknown, index: number): ModelRoutingTraceCall | null {
     startMs: asNumber(value.startMs),
     decisionMs: asNumber(value.decisionMs),
     decisionTraceId: asNullableText(value.decisionTraceId),
+    decisionPromptTokens: asNullableNumber(value.decisionPromptTokens),
+    decisionCompletionTokens: asNullableNumber(value.decisionCompletionTokens),
     reused: value.reused === true,
   };
 }

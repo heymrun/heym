@@ -1,5 +1,11 @@
-import type { LLMTraceDetail, TraceSpan } from "@/types/trace";
+import type {
+  LLMTraceDetail,
+  TraceSpan,
+  TraceSpanTurnUsage,
+  TraceSpanUsage,
+} from "@/types/trace";
 
+import { estimateToolTokens } from "@/lib/traceToolTokens";
 import {
   formatRoutingCallLabel,
   readTraceModelRouting,
@@ -38,6 +44,80 @@ export function hasToolCallArguments(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === "object") return Object.keys(value).length > 0;
   return true;
+}
+
+/** Usage for a row, or undefined when neither side was reported so nothing is shown. */
+function toUsage(
+  promptTokens: number | null | undefined,
+  completionTokens: number | null | undefined,
+): TraceSpanUsage | undefined {
+  const prompt = promptTokens ?? null;
+  const completion = completionTokens ?? null;
+  return prompt !== null || completion !== null
+    ? { promptTokens: prompt, completionTokens: completion }
+    : undefined;
+}
+
+function addTokens(a: number | null, b: number | null): number | null {
+  return a === null && b === null ? null : (a ?? 0) + (b ?? 0);
+}
+
+/** What every routing decision of the request spent; undefined when none reported tokens. */
+function sumRoutingUsage(routing: ModelRoutingTrace): TraceSpanUsage | undefined {
+  return routing.calls.reduce<TraceSpanUsage | undefined>((total, call) => {
+    const usage = toUsage(call.decisionPromptTokens, call.decisionCompletionTokens);
+    if (!usage || !total) return usage ?? total;
+    return {
+      promptTokens: addTokens(total.promptTokens, usage.promptTokens),
+      completionTokens: addTokens(total.completionTokens, usage.completionTokens),
+    };
+  }, undefined);
+}
+
+/**
+ * What each model call took in and gave back, for the invocation row: the same
+ * figures the `call_llm` row shows, with routing kept out. One turn is the whole
+ * request, so a breakdown only appears once there are at least two to compare.
+ */
+function readTurnUsage(timings: ModelRoutingTurnTiming[]): TraceSpanTurnUsage[] | undefined {
+  const turns = timings
+    .filter((timing) => timing.promptTokens !== null || timing.completionTokens !== null)
+    .map((timing) => ({
+      turn: timing.turn,
+      promptTokens: timing.promptTokens,
+      completionTokens: timing.completionTokens,
+    }));
+  return turns.length > 1 ? turns : undefined;
+}
+
+export interface TraceTokenSummary {
+  total: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** Input tokens the routing decisions spent, already counted in the figures above. */
+  routerPromptTokens: number;
+}
+
+/**
+ * The trace's tokens with its routing decisions counted in. Only their input is
+ * counted: a decision model answers in a word, so its output costs next to nothing,
+ * and this matches the Model router line of the Duration Breakdown.
+ */
+export function summarizeTraceTokens(trace: LLMTraceDetail): TraceTokenSummary {
+  const routing = readTraceModelRouting(trace.response ?? null);
+  const routerPromptTokens = (routing ? sumRoutingUsage(routing)?.promptTokens : null) ?? 0;
+  return {
+    total: trace.total_tokens === null ? null : trace.total_tokens + routerPromptTokens,
+    promptTokens:
+      trace.prompt_tokens === null ? null : trace.prompt_tokens + routerPromptTokens,
+    completionTokens: trace.completion_tokens,
+    routerPromptTokens,
+  };
+}
+
+/** `20593` as `20,593`, and a count the provider never reported as `n/a`. */
+export function formatTokenCount(count: number | null | undefined): string {
+  return typeof count === "number" ? count.toLocaleString("en-US") : "n/a";
 }
 
 function computeInvocationTotalMs(children: TraceSpan[]): number {
@@ -82,6 +162,7 @@ function buildTurnSpans(
       icon: "router",
       // The decision wrote its own trace row; the label opens it.
       traceId: call.decisionTraceId,
+      usage: toUsage(call.decisionPromptTokens, call.decisionCompletionTokens),
     });
   }
 
@@ -95,6 +176,7 @@ function buildTurnSpans(
       icon: "llm",
       // Part of this trace, so there is nothing to open; the row opens its step.
       stepId: `call_llm_turn_${timing.turn}`,
+      usage: toUsage(timing.promptTokens, timing.completionTokens),
     });
   }
 
@@ -109,6 +191,7 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
     | undefined;
 
   const children: TraceSpan[] = [];
+  const toolTokens = estimateToolTokens(trace);
 
   if (timingBreakdown && typeof timingBreakdown === "object") {
     if (timingBreakdown.llm_ms != null && timingBreakdown.llm_ms > 0) {
@@ -167,6 +250,8 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
             traceId: typeof tc.trace_id === "string" ? tc.trace_id : null,
             // Otherwise the row jumps to the tool's own step in this trace.
             stepId: typeof tc.tool_call_id === "string" ? `tool-${tc.tool_call_id}` : null,
+            toolTokens:
+              typeof tc.tool_call_id === "string" ? toolTokens.get(tc.tool_call_id) : undefined,
           });
         }
       }
@@ -177,6 +262,20 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
   // Real offsets exist only when the backend recorded turn timings; otherwise keep
   // the aggregate view rather than inventing a layout.
   const timings = readTraceTurnTimings(response ?? null);
+  // The whole request: the model calls the trace itself counts, and beside them
+  // what the routing decisions that picked those models spent.
+  const modelUsage = toUsage(trace.prompt_tokens, trace.completion_tokens);
+  const routerUsage = routing ? sumRoutingUsage(routing) : undefined;
+  const turnUsage = readTurnUsage(timings);
+  const invocationUsage: TraceSpanUsage | undefined =
+    modelUsage || routerUsage
+      ? {
+          promptTokens: modelUsage?.promptTokens ?? null,
+          completionTokens: modelUsage?.completionTokens ?? null,
+          ...(routerUsage ? { router: routerUsage } : {}),
+          ...(turnUsage ? { turns: turnUsage } : {}),
+        }
+      : undefined;
   const turnSpans = timings.length > 0 ? buildTurnSpans(routing, timings) : [];
 
   if (turnSpans.length > 0) {
@@ -198,6 +297,7 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
         durationMs: totalMs,
         startMs: 0,
         icon: "invocation",
+        usage: invocationUsage,
       },
       ...laidOut,
     ];
@@ -220,6 +320,7 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
             durationMs: routingTotalMs,
             icon: "router",
             traceId: routing.calls.length === 1 ? routing.calls[0].decisionTraceId : null,
+            usage: sumRoutingUsage(routing),
           },
         ]
       : [];
@@ -230,6 +331,7 @@ export function buildTraceSpans(trace: LLMTraceDetail): TraceSpan[] {
       label: "invocation",
       durationMs: totalMs,
       icon: "invocation",
+      usage: invocationUsage,
     },
     // Routing happens before the model call, so it leads the children.
     ...routingSpan,

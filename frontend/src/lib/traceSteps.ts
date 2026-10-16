@@ -1,6 +1,7 @@
-import type { LLMTraceDetail } from "@/types/trace";
+import type { LLMTraceDetail, ToolTokenEstimate } from "@/types/trace";
 
 import { readRequestMessages, type RawMessage, type RawToolCall } from "@/lib/traceRequestMessages";
+import { estimateToolTokens } from "@/lib/traceToolTokens";
 import {
   formatRoutingCallLabel,
   readTraceModelRouting,
@@ -36,6 +37,9 @@ export interface TraceStep {
   json: unknown;
   durationMs?: number;
   tokens?: number;
+  /** True when `tokens` is worked out from prompt growth rather than reported. */
+  tokensEstimated?: boolean;
+  tokensNote?: string;
   isError?: boolean;
   badges?: TraceStepBadge[];
 }
@@ -134,6 +138,7 @@ function buildToolStep(
   enriched: RawResponseToolCall | undefined,
   toolResultById: Map<string, RawMessage>,
   workflowNames: Record<string, string>,
+  toolTokens: Map<string, ToolTokenEstimate>,
 ): TraceStep {
   const name = rawCall.function?.name ?? "tool";
   const argsRaw = rawCall.function?.arguments;
@@ -205,6 +210,9 @@ function buildToolStep(
         ? resultValue
         : safeStringify(resultValue);
 
+  const callId = id ?? enriched?.tool_call_id;
+  const tokenEstimate = callId ? toolTokens.get(callId) : undefined;
+
   return {
     id: id ? `tool-${id}` : `tool-${msgIndex}-${tcIndex}`,
     kind: "tool",
@@ -219,9 +227,23 @@ function buildToolStep(
       ...(resultValue !== undefined ? { result: resultValue } : {}),
     },
     durationMs: typeof enriched?.elapsed_ms === "number" ? enriched.elapsed_ms : undefined,
+    ...(tokenEstimate
+      ? {
+          tokens: tokenEstimate.tokens,
+          tokensEstimated: true,
+          tokensNote: describeToolTokens(tokenEstimate),
+        }
+      : {}),
     isError: enriched?.status === "error" || enriched?.status === "timeout",
     badges: badges.length > 0 ? badges : undefined,
   };
+}
+
+function describeToolTokens(estimate: ToolTokenEstimate): string {
+  const base = `Estimated from how much turn ${estimate.readByTurn}'s prompt grew after this result`;
+  if (estimate.sharedBy <= 1) return base;
+  const others = estimate.sharedBy - 1;
+  return `${base}, split with ${others} other tool${others === 1 ? "" : "s"} by result size`;
 }
 
 /**
@@ -279,6 +301,7 @@ function buildConversationSteps(
 ): TraceStep[] {
   const steps: TraceStep[] = [];
   const placement = placeTurnBlocks(messages, turnBlocks);
+  const toolTokens = estimateToolTokens(trace);
 
   const toolResultById = new Map<string, RawMessage>();
   for (const msg of messages) {
@@ -359,7 +382,9 @@ function buildConversationSteps(
       const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       toolCalls.forEach((tc, tcIndex) => {
         const enriched = matchResponseToolCall(tc.function?.name ?? "tool", tc.id);
-        steps.push(buildToolStep(index, tcIndex, tc, enriched, toolResultById, workflowNames));
+        steps.push(
+          buildToolStep(index, tcIndex, tc, enriched, toolResultById, workflowNames, toolTokens),
+        );
       });
     }
     // msg.role === "tool" is consumed as a tool step's result above.
